@@ -117,7 +117,8 @@
   const STEP = 12;
   const PIN_LIFT = 10;
   const SR_ONLY = 'position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;';
-  const PHONE = '(max-width: 620px), (hover: none) and (pointer: coarse)';
+  // The drawer's own phone (agent-ui.js PHONE): where the sidebar is a sheet.
+  const PHONE = '(max-width: 719px)';
 
   const KIND = {
     note: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M3 2.5h10v7.5L9.5 13.5H3z"/><path d="M9.5 13.5V10H13"/></svg>',
@@ -136,15 +137,12 @@
 
   const STYLE = `
     /* ---- the margin: paper beside the app, docked where the chat docks. */
+    /* A view of the chat's sidebar (agent-ui.js addView): it fills it, and
+       the sidebar brings the edge, the width, the resize and the motion. */
     .marble-margin {
-      position: fixed; top: var(--marble-shell-top, 0px); right: 0; bottom: 0; width: ${W}px;
+      position: relative; flex: 1; min-height: 0;
       pointer-events: auto; box-sizing: border-box; overflow: hidden;
-      background: var(--b-paper); border-left: 1px solid var(--b-line);
-      translate: 100% 0; transition: translate 340ms ${EASE};
     }
-    /* It slides in from the edge as the app gives way (build-mode.js docks
-       the side in the same motion), and out the same way. */
-    .marble-margin[data-in] { translate: 0 0; }
     .marble-margin * { box-sizing: border-box; }
     .marble-margin button { all: unset; box-sizing: border-box; cursor: pointer; }
     .marble-margin button:focus-visible { outline: 2px solid var(--b-mark); outline-offset: 1px; }
@@ -192,7 +190,7 @@
     .marble-margin-old .icon { width: 24px; height: 24px; }
     .marble-margin-old .icon:hover { background: var(--b-paper-3); }
     .marble-margin .arch .empty { margin: 14px 0 0; text-align: center; font-size: 13px; color: var(--b-muted); }
-    .marble-margin .shut { display: none; width: 30px; height: 30px; border-radius: 8px; place-items: center; color: var(--b-muted); }
+    .marble-margin .shut { display: inline-grid; width: 30px; height: 30px; border-radius: 8px; place-items: center; color: var(--b-muted); }
     .marble-margin .shut:hover { background: var(--b-paper-2); color: var(--b-ink); }
     .marble-margin .shut svg { width: 15px; height: 15px; }
 
@@ -203,7 +201,7 @@
 
     /* ---- a card */
     .marble-margin-card {
-      position: absolute; left: 18px; width: ${CARD}px; padding: 9px 12px 10px;
+      position: absolute; left: 18px; right: 18px; padding: 9px 12px 10px;
       background: var(--b-card); border: 1px solid var(--b-line); border-radius: 12px;
       box-shadow: var(--shadow, 0 1px 2px rgba(74,66,52,.05), 0 2px 4px rgba(74,66,52,.03));
       font-size: 12.5px; line-height: 1.4; color: var(--b-ink); cursor: pointer; outline: none;
@@ -215,10 +213,10 @@
     /* Picked: stepped toward the app and shaded in the accent, as its pin is
        on the app. */
     .marble-margin-card[aria-expanded="true"] {
-      left: ${18 - STEP}px; cursor: default; box-shadow: var(--b-shadow);
+      left: ${18 - STEP}px; right: ${18 + STEP}px; cursor: default; box-shadow: var(--b-shadow);
       background: color-mix(in srgb, var(--b-accent) 20%, var(--b-card)); border-color: color-mix(in srgb, var(--b-mark) 40%, var(--b-line));
     }
-    .marble-margin-card { transition: top 340ms ${EASE}, left 200ms ${EASE}, box-shadow 200ms ${EASE}, opacity 200ms ${EASE}, background 200ms ${EASE}, border-color 200ms ${EASE}; }
+    .marble-margin-card { transition: top 340ms ${EASE}, left 200ms ${EASE}, right 200ms ${EASE}, box-shadow 200ms ${EASE}, opacity 200ms ${EASE}, background 200ms ${EASE}, border-color 200ms ${EASE}; }
     /* In the build: tinted, the meter under it says how far its change is. */
     .marble-margin-card[data-show="build"] { border-color: color-mix(in srgb, var(--b-mark) 26%, var(--b-line)); }
     .marble-margin-card[data-show="build"]:not([aria-expanded="true"]) { background: color-mix(in srgb, var(--b-accent) 9%, var(--b-card)); }
@@ -276,18 +274,9 @@
     .marble-margin-card .reply button[aria-disabled="true"] { opacity: .3; cursor: default; }
     .marble-margin-card .reply svg { width: 13px; height: 13px; }
 
-    /* ---- the build's own card, heading Building. */
-    .marble-margin-build { position: absolute; left: 18px; width: ${CARD}px; padding: 10px 12px 11px; background: var(--b-card); border: 1px solid var(--b-line); border-radius: 12px; box-shadow: var(--shadow, 0 1px 2px rgba(74,66,52,.05)); font-size: 12.5px; line-height: 1.4; }
-    .marble-margin-build .bh { display: flex; align-items: baseline; gap: 8px; }
-    .marble-margin-build .bh b { flex: 1; font-weight: 600; overflow-wrap: anywhere; }
-    .marble-margin-build .bh time { color: var(--b-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
-    .marble-margin-build .bs { margin: 2px 0 0; color: var(--b-muted); }
-    .marble-margin-build[data-status="paused"] .bs { color: var(--b-caution); }
-    .marble-margin-build .parts { margin: 8px 0 0; color: var(--b-muted); }
-    .marble-margin-build .parts b { font-weight: 500; color: var(--b-ink); }
-    .marble-margin-build .drawn { margin: 8px -4px -3px; border-radius: 8px; overflow: hidden; }
-    .marble-margin-build .drawn:empty { display: none; }
-    .marble-margin-build .drawn iframe { display: block; width: 100%; border: 0; }
+    /* ---- the build's status (build-mode.js statusCard), heading the list
+       while a build is in hand. */
+    .marble-margin .marble-bst { position: absolute; left: 18px; right: 18px; z-index: 1; }
 
     /* ---- the pins: each mark's number on the app, and how it is going. */
     .marble-margin-pins { position: fixed; inset: 0; pointer-events: none; }
@@ -324,19 +313,12 @@
     .marble-margin-pin[hidden] { display: none; }
 
 
-    /* ---- on a phone: a sheet from the foot, the cards in page order. */
-    .marble-margin[data-sheet] {
-      top: auto; left: 0; width: auto; height: min(62vh, 520px); border-left: 0; border-top: 1px solid var(--b-line);
-      border-radius: 16px 16px 0 0; box-shadow: var(--b-shadow); translate: 0 100%; transition: height 340ms ${EASE}, translate 340ms ${EASE};
-    }
-    .marble-margin[data-sheet][data-in] { translate: 0 0; }
-    .marble-margin[data-sheet][data-low] { height: 34vh; }
-    html:has(.marble-margin[data-sheet][data-low]:not([hidden])) { --marble-build-sheet: 34vh; }
-    .marble-margin[data-sheet] .shut { display: inline-grid; }
+    /* ---- on a phone the sidebar is a sheet from the foot: the cards in page
+       order, scrolled on their own. */
     .marble-margin[data-sheet] .ground { overflow: auto; overscroll-behavior: contain; }
     .marble-margin[data-sheet] .cards { position: static; transform: none !important; display: flex; flex-direction: column; gap: ${GAP}px; padding: 4px 12px 16px; }
-    .marble-margin[data-sheet] :is(.marble-margin-card, .marble-margin-build) { position: relative; top: auto !important; left: auto; width: auto; }
-    .marble-margin[data-sheet] .marble-margin-card[aria-expanded="true"] { left: auto; }
+    .marble-margin[data-sheet] :is(.marble-margin-card, .marble-bst) { position: relative; top: auto !important; left: auto; right: auto; }
+    .marble-margin[data-sheet] .marble-margin-card[aria-expanded="true"] { left: auto; right: auto; }
     .marble-margin[data-sheet] .none { position: static; padding: 12px 18px; }
 
     @media (prefers-reduced-motion: reduce) {
@@ -389,21 +371,22 @@
     // The margin goes first in Build mode's layer, so its tips, the floating
     // thread and the bar on a pick all paint over it.
     const pins = h('div', 'marble-margin-pins');
-    const panel = h('aside', 'marble-margin');
+    const panel = h('section', 'marble-margin');
     panel.setAttribute('aria-label', 'Marks');
-    panel.hidden = true;
     pins.hidden = true;
-    layer.prepend(panel);
-    panel.before(pins);
+    layer.prepend(pins);
+    B.addView('marks', panel, STYLE);
+    // What has the caret, inside the sidebar's shadow root as well.
+    const active = () => panel.getRootNode()?.activeElement ?? document.activeElement;
 
     // Every mark in one list, in the order they stand on the app; how far
     // each has got is in how its card is drawn. The head counts them.
     const head = h('div', 'mh');
     const sum = h('span', 'sum');
     sum.setAttribute('role', 'status');
-    const add = button('add', 'Comment', KIND.plus);
-    B.tip(add, 'Press a part of the app to pin a comment to it');
-    add.addEventListener('click', () => { unpick(); M.setMode('comment'); });
+    const add = button('add', 'Note', KIND.plus);
+    B.tip(add, 'Press a part of the app to write on it: keep it as a note, or send it with ⌘↵');
+    add.addEventListener('click', () => { unpick(); M.setMode('text'); });
     const shut = button('shut', '', KIND.close);
     shut.setAttribute('aria-label', 'Close');
     shut.addEventListener('click', () => B.setSide('none'));
@@ -654,71 +637,17 @@
     };
 
     const drawBuild = () => {
-      // The build in hand heads the list while it runs or waits paused. Once
-      // it has ended its marks say how (Done in Build n), and the cards are
-      // free to stand level with their pins from the top.
+      // The build in hand heads the list while it runs or waits paused, as
+      // its status in three layers (build-mode.js statusCard). Once it has
+      // ended its marks say how, and History keeps it.
       const b = B.current();
       if (!b) { buildCard?.node.remove(); buildCard = null; return; }
-      if (!buildCard || buildCard.id !== b.id) {
+      if (!buildCard || buildCard.id() !== b.id) {
         buildCard?.node.remove();
-        const node = h('section', 'marble-margin-build');
-        node.setAttribute('aria-label', `Build ${b.n}`);
-        const bh = h('div', 'bh');
-        const title = h('b');
-        const time = h('time');
-        bh.append(title, time);
-        const said = h('p', 'bs');
-        said.setAttribute('role', 'status');
-        const parts = h('p', 'parts');
-        const drawn = h('div', 'drawn');
-        drawn.setAttribute('aria-hidden', 'true');
-        node.append(bh, said, parts, drawn);
-        cards.prepend(node);
-        buildCard = { id: b.id, node, title, time, said, parts, drawn, at: null };
+        buildCard = B.statusCard();
+        cards.prepend(buildCard.node);
       }
-      const card = buildCard;
-      card.node.dataset.status = b.status;
-      card.title.textContent = b.title || `Build ${b.n}`;
-      const all = b.plan?.parts ?? [];
-      const done = all.filter((p) => p.state === 'done').length;
-      const now = all.find((p) => p.state === 'now');
-      card.said.textContent = {
-        running: all.length ? `Build ${b.n} · ${done} of ${all.length} parts made` : `Build ${b.n} · working out the plan`,
-        paused: all.length ? `Build ${b.n} · paused at ${done} of ${all.length} parts` : `Build ${b.n} · paused`,
-        finished: all.length ? `Build ${b.n} is done · ${plural(all.length, 'part')} made` : `Build ${b.n} is done`,
-        stopped: `Build ${b.n} stopped. The app is back as the last finished build left it, and its marks wait again.`,
-        failed: `Build ${b.n} did not finish${b.error ? `: ${b.error}` : '.'} Its marks wait again.`,
-      }[b.status] ?? `Build ${b.n}`;
-      // The plan's parts, as words: the one quiet line before the first
-      // picture, and what a screen reader is told all along.
-      card.parts.textContent = '';
-      if (all.length && (b.status === 'running' || b.status === 'paused')) {
-        all.forEach((p, i) => {
-          if (i) card.parts.append(' · ');
-          card.parts.append(p === now ? h('b', '', p.title) : `${p.title}${p.state === 'done' ? ' (made)' : ''}`);
-        });
-      }
-      const drawing = b.drawn;
-      // Once the picture comes, the parts are said only to a screen reader.
-      card.parts.hidden = !card.parts.textContent;
-      card.parts.style.cssText = drawing?.html ? SR_ONLY : '';
-      if (drawing?.html && drawing.at !== card.at) {
-        card.at = drawing.at;
-        B.mountDrawn(card.drawn, drawing.html);
-      }
-      if (!drawing?.html) { card.drawn.textContent = ''; card.at = null; }
-      tick();
-    };
-    let ticker = 0;
-    const tick = () => {
-      clearInterval(ticker);
-      ticker = 0;
-      if (!buildCard) return;
-      const b = (B.state()?.builds ?? []).find((x) => x.id === buildCard.id);
-      if (!b) return;
-      const paint = () => { buildCard && (buildCard.time.textContent = clock((b.endedAt ?? Date.now()) - b.startedAt)); };
-      paint();
-      if (b.status === 'running') ticker = setInterval(paint, 1000);
+      buildCard.update(b);
     };
 
     // ------------------------------------------------------------ archive
@@ -783,10 +712,10 @@
         let entry = cardOf.get(mark.id);
         // The card whose words are being written is left as it is.
         const writing = entry?.node.querySelector('.words[contenteditable]');
-        if (entry && writing && document.activeElement === writing) entry.sig = sig;
+        if (entry && writing && active() === writing) entry.sig = sig;
         if (!entry || entry.sig !== sig) {
           const node = drawCard(mark, n, status);
-          const focused = entry?.node.contains(document.activeElement) ? document.activeElement : null;
+          const focused = entry?.node.contains(active()) ? active() : null;
           const draft = entry?.node.querySelector('.reply textarea')?.value ?? '';
           if (entry) entry.node.replaceWith(node); else cards.append(node);
           const pin = entry?.pin ?? drawPin(mark, n);
@@ -897,7 +826,6 @@
       if (!entry) return;
       if (panel.hasAttribute('data-sheet')) {
         // On a phone: the app goes to the pin, and the sheet lowers so it shows.
-        panel.setAttribute('data-low', '');
         byId(entry.mark.anchorId)?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
         entry.node.scrollIntoView({ block: 'nearest' });
       } else {
@@ -934,7 +862,7 @@
       if (keepFocus) return;
       if (entry.mark.type === 'comment') requestAnimationFrame(() => entry.node.querySelector('.reply textarea')?.focus({ preventScroll: true }));
     }
-    const unpick = () => { if (picked) pick(null); panel.removeAttribute('data-low'); };
+    const unpick = () => { if (picked) pick(null); };
 
     // ------------------------------------------------------------ open, shut
 
@@ -943,12 +871,9 @@
       panel.toggleAttribute('data-sheet', sheet.matches);
       if (want === open) { if (open) draw(); return; }
       open = want;
-      B.slide(panel, open);
       pins.hidden = !open;
       if (!open) {
         picked = null;
-        clearInterval(ticker);
-        panel.removeAttribute('data-low');
         return;
       }
       panel.setAttribute('data-still', '');
@@ -1012,7 +937,7 @@
       const path = event.composedPath();
       // Build mode's own (the margin, its pins, a tip, the thread) and
       // Describe's toolbar keep it.
-      if (path.includes(layer) || path.some((node) => node?.classList?.contains?.('marble-marks-layer'))) return;
+      if (path.includes(layer) || path.includes(panel) || path.some((node) => node?.classList?.contains?.('marble-marks-layer'))) return;
       unpick();
     }, true);
 

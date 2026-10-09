@@ -171,6 +171,8 @@
     talk: '<path d="M2.75 4.75c0-.97.78-1.75 1.75-1.75h7c.97 0 1.75.78 1.75 1.75v4.5c0 .97-.78 1.75-1.75 1.75H7.25l-2.75 2.25V11c-.97 0-1.75-.78-1.75-1.75z"/><path d="M5.75 7h4.5"/>',
     // Build mode's Comments: the margin with every mark on the app.
     comments: '<path d="M8 2.75a5.25 5.25 0 1 1-2.45 9.9L2.75 13.25l.6-2.7A5.25 5.25 0 0 1 8 2.75z"/>',
+    // Build mode's History: a clock with the hand going back.
+    history: '<path d="M2.9 6.1A5.5 5.5 0 1 1 2.5 8"/><path d="M2.5 3.25V6.1h2.85"/><path d="M8 5.25V8l2 1.25"/>',
     // Build mode's Pieces: four parts, one of them being added.
     pieces: '<rect x="2.5" y="2.5" width="4.75" height="4.75" rx="1.2"/><rect x="8.75" y="2.5" width="4.75" height="4.75" rx="1.2"/><rect x="2.5" y="8.75" width="4.75" height="4.75" rx="1.2"/><path d="M11.1 9v4.25M9 11.1h4.25"/>',
     move: '<path d="M2 11.25v-6.5c0-.83.67-1.5 1.5-1.5h2.88c.4 0 .78.16 1.06.44l.62.62c.28.28.66.44 1.06.44h3.38c.83 0 1.5.67 1.5 1.5v4.99c0 .83-.67 1.5-1.5 1.5H3.5c-.83 0-1.5-.67-1.5-1.5z"/><path d="M6 9.25h4.25M8.75 7.5 10.5 9.25 8.75 11"/>',
@@ -283,6 +285,19 @@
     .ib { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--muted); flex: none; }
     .ib:hover, .ib[aria-pressed="true"] { background: var(--paper-2); color: var(--ink); }
     .ib[hidden] { display: none; }
+    /* Marks' status mark (STATUS_GLYPH). */
+    .ib .g-box { width: 18px; height: 18px; position: relative; display: grid; place-items: center; }
+    .ib .g { position: absolute; inset: 0; width: 18px; height: 18px; opacity: 0; transition: opacity 200ms var(--settle, ease);
+      fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .ib:not([data-run]) .g-idle, .ib[data-run="idle"] .g-idle, .ib[data-run="pending"] .g-pend, .ib[data-run="building"] .g-work,
+    .ib[data-run="paused"] .g-pause, .ib[data-run="done"] .g-done { opacity: 1; }
+    .ib .g-pend, .ib .g-work, .ib .g-done { color: var(--accent-ink); }
+    .ib .g-pend .n { fill: currentColor; stroke: none; font: 600 9px/1 var(--ui, system-ui, sans-serif); font-variant-numeric: tabular-nums; text-anchor: middle; dominant-baseline: central; }
+    .ib .g .tr { opacity: .22; }
+    .ib .g .arc { stroke-dasharray: var(--ring, 4) 100; transform: rotate(-90deg); transform-origin: 9px 9px; transition: stroke-dasharray 340ms var(--settle, ease); }
+    .ib .g-pause { color: var(--caution); }
+    .ib .g-done .d { fill: currentColor; stroke: none; }
+    .ib .g-done path { stroke: var(--paper); stroke-width: 1.8; }
     /* The chat's button in Build mode carries the launcher's one mark: an
        agent working, one needing you, one failed, one finished unread. */
     .ib { position: relative; }
@@ -781,6 +796,16 @@
     return `${n} ${n === 1 ? 'day' : 'days'}`;
   };
 
+  // Build mode's status mark, on Marks in the bar (the toolbar has the same,
+  // build-mode.js GLYPH): each state drawn once and shown by data-run.
+  const STATUS_GLYPH = `<span class="g-box" aria-hidden="true">
+    <svg class="g g-idle" viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5"/></svg>
+    <svg class="g g-pend" viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5"/><text class="n" x="9" y="9.4"></text></svg>
+    <svg class="g g-work" viewBox="0 0 18 18"><circle class="tr" cx="9" cy="9" r="6.5"/><circle class="arc" cx="9" cy="9" r="6.5" pathLength="100"/></svg>
+    <svg class="g g-pause" viewBox="0 0 18 18"><circle class="tr" cx="9" cy="9" r="6.5"/><circle class="arc" cx="9" cy="9" r="6.5" pathLength="100"/><path d="M7.6 7v4M10.4 7v4"/></svg>
+    <svg class="g g-done" viewBox="0 0 18 18"><circle class="d" cx="9" cy="9" r="7.5"/><path d="M6 9.3 8 11.2l4-4.4"/></svg>
+  </span>`;
+
   class MarbleShell extends HTMLElement {
     constructor() {
       super();
@@ -803,7 +828,8 @@
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
           <span class="vr" data-build-vr hidden></span>
           <button type="button" class="ib" data-act="pieces" aria-pressed="false" aria-label="Pieces" title="Pieces" hidden>${icon('pieces')}</button>
-          <button type="button" class="ib" data-act="comments" aria-pressed="false" aria-label="Comments" title="Comments" hidden>${icon('comments')}</button>
+          <button type="button" class="ib" data-act="comments" aria-pressed="false" aria-label="Marks" title="Marks" hidden>${icon('comments')}</button>
+          <button type="button" class="ib" data-act="history" aria-pressed="false" aria-label="History" title="History · builds and your edits" hidden>${icon('history')}</button>
           <span class="vr" data-build-vr hidden></span>
           <button type="button" class="share git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
@@ -1059,6 +1085,9 @@
       this.bar.addEventListener('click', (event) => {
         const act = event.target.closest('[data-act]')?.dataset.act;
         if (act === 'nav') this.pin('nav', !this.state.pinNav);
+        // In Build mode the chat is one of the sidebar's views, beside Marks,
+        // Pieces and History: its button shows it there, or puts it away.
+        else if (act === 'chat' && this.chatInBar && this.drawer?.toggleView) this.drawer.toggleView('chat');
         else if (act === 'chat') this.pin('chat', !this.state.pinChat);
         else if (act === 'close') this.setOpen(false);
         else if (act === 'share') this.toggleSharing();
@@ -1068,6 +1097,7 @@
         else if (act === 'describe') dispatchEvent(new CustomEvent('marble-marks:toggle'));
         else if (act === 'pieces') dispatchEvent(new CustomEvent('marble-build:toggle-pieces'));
         else if (act === 'comments') dispatchEvent(new CustomEvent('marble-build:toggle-comments'));
+        else if (act === 'history') dispatchEvent(new CustomEvent('marble-build:toggle-history'));
         else if (act === 'doc') this.toggleMenu(event.target.closest('[data-act]'));
       });
       this.sharing.querySelector('.own-copy').addEventListener('click', () => this.copyLink());
@@ -1201,7 +1231,11 @@
       // say which has it. Three buttons, never one switch: Describe is a
       // mode, and the other two are things that can take the side.
       this.onBuild = () => {
-        for (const node of this.$$('[data-act="pieces"], [data-act="comments"], [data-build-vr]')) node.hidden = false;
+        for (const node of this.$$('[data-act="pieces"], [data-act="comments"], [data-act="history"], [data-build-vr]')) node.hidden = false;
+        // Marks wears the build's status mark, as the toolbar does: what
+        // waits, the build's ring filling, paused, up to date.
+        const marks = this.$('[data-act="comments"]');
+        if (!marks.querySelector('.g')) marks.innerHTML = STATUS_GLYPH;
         // The chat joins them: the right side's button is the chat's, drawn as
         // the chat, and the launcher in the corner goes. It still pins and
         // puts away the chat beside the app, which Pieces and the margin give
@@ -1218,9 +1252,29 @@
         const side = event.detail?.side ?? 'none';
         this.$('[data-act="pieces"]').setAttribute('aria-pressed', String(side === 'pieces'));
         this.$('[data-act="comments"]').setAttribute('aria-pressed', String(side === 'comments'));
+        this.$('[data-act="history"]').setAttribute('aria-pressed', String(side === 'history'));
+      };
+      // The sidebar's view (agent-ui.js): the chat's button is pressed while
+      // the chat is what it shows.
+      this.onView = (event) => {
+        if (!this.chatInBar) return;
+        const { view, shown } = event.detail ?? {};
+        this.$('[data-act="chat"]').setAttribute('aria-pressed', String(Boolean(shown) && view === 'chat'));
+      };
+      this.onStatus = (event) => {
+        const { run = 'idle', ring = 4, n = 0, label = 'Marks' } = event.detail ?? {};
+        const marks = this.$('[data-act="comments"]');
+        marks.dataset.run = run;
+        marks.style.setProperty('--ring', String(ring));
+        const count = marks.querySelector('.g-pend .n');
+        if (count) count.textContent = n > 9 ? '9+' : String(n);
+        marks.setAttribute('aria-label', `Marks · ${label}`);
+        marks.title = `Marks · ${label}`;
       };
       addEventListener('marble-build:ready', this.onBuild);
       addEventListener('marble-build:side', this.onSide);
+      addEventListener('marble-agent:view', this.onView);
+      addEventListener('marble-build:status', this.onStatus);
       if (window.marbleBuild) this.onBuild();
       this.onViewport = () => this.apply();
       this.phone.addEventListener('change', this.onViewport);
@@ -1486,8 +1540,10 @@
       chatButton.hidden = !this.drawer;
       chatButton.setAttribute('aria-pressed', String(pinChat));
       if (this.chatInBar) {
-        chatButton.setAttribute('aria-label', pinChat ? 'Put the chat away' : 'Chat');
-        chatButton.title = `${pinChat ? 'Put the chat away' : 'Chat beside the app'} (⌘⇧J)`;
+        const showing = Boolean(this.drawer?.isOpen && this.drawer?.viewName === 'chat');
+        chatButton.setAttribute('aria-pressed', String(showing));
+        chatButton.setAttribute('aria-label', 'Chat');
+        chatButton.title = 'Chat (⌘⇧J)';
       } else {
         chatButton.setAttribute('aria-label', pinChat ? 'Unpin the chat' : 'Pin the chat');
         chatButton.title = `${pinChat ? 'Unpin the chat: it waits at the edge' : 'Pin the chat'} (⌘⇧J)`;

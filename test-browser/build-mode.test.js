@@ -135,8 +135,15 @@ test('every app starts in Describe: the toolbar is up, no ring, no notice, full 
   assert.equal(await page.evaluate(() => window.marbleMarks.describing), true);
   await bar(page).waitFor();
   // The tools, then the build's own controls in place of Explore.
-  assert.equal(await tool(page, 'comment').count(), 1, 'Comment is a tool');
+  // One thing to write with: a note, kept or sent. No Comment tool, and the
+  // bar holds the build alone: no Builds, no Pieces (they are on the shell's).
+  assert.equal(await tool(page, 'comment').count(), 0, 'no Comment tool');
+  assert.equal(await tool(page, 'text').count(), 1, 'Note is a tool');
   assert.equal(await tool(page, 'explore').count(), 0, 'Explore is not on the bar');
+  assert.equal(await page.locator('.marble-marks-tool[aria-label^="Pieces"], .marble-marks-tool[aria-label^="Builds"]').count(), 0);
+  // Clear stays on the bar, dimmed with nothing to clear.
+  assert.equal(await tool(page, 'clear').isVisible(), true);
+  assert.equal(await tool(page, 'clear').isDisabled(), true);
   assert.equal(await page.locator('.marble-build-status').count(), 1);
   assert.equal(await go(page).textContent(), 'Build');
   assert.equal(await go(page).getAttribute('aria-disabled'), 'true', 'nothing to build yet');
@@ -177,45 +184,50 @@ test('turning Describe off is remembered for the app, and folds the toolbar into
   assert.equal(await page.evaluate(() => window.marbleMarks.describing), true);
 });
 
-test('Build hands the marks to one agent: the plan fills the status, what it reads is drawn, and the marks are built', async () => {
+test('Build hands the marks to one agent: its status is three layers, nothing floats over the app, and History keeps it', async () => {
   const { page, errors } = await open();
   await noteOn(page, 's1', 'script:build Group the overdue ones on top');
   await go(page).click();
   // The build is the toolbar's now: its words and meter, with Pause and Stop.
   await page.locator('.marble-build-run:not([hidden])').waitFor();
   await page.locator('.marble-build-status[data-run="building"]').waitFor();
-  // What it read, beside the part it works on.
-  await page.locator('.marble-build-found', { hasText: 'Read this app' }).waitFor();
-  // The status mark opens no card: it opens the margin on Building, headed
-  // by the build (its parts in words until a picture comes), and the note's
-  // card there says it is in the build.
+  // Nothing it reads floats over the app.
+  assert.equal(await page.locator('.marble-build-found').count(), 0);
+  // A rest on the status mark shows the build, not a chip.
+  await page.locator('.marble-build-status').hover();
+  await page.locator('.marble-build-peek:not([hidden])', { hasText: 'Build 1' }).waitFor();
+  // The status mark opens Marks in the sidebar, headed by the build's status:
+  // pressed, its stages; a stage pressed, its steps.
   await page.locator('.marble-build-status').click();
-  await page.locator('.marble-margin:not([hidden]) .marble-margin-build', { hasText: 'Invitations list' }).waitFor();
+  await margin(page).locator('.marble-bst').waitFor();
   assert.match(await page.locator('.marble-margin .sum').textContent(), /1 in the build/);
-  await page.locator('.marble-margin-card[data-show="build"]', { hasText: 'Group the overdue' }).waitFor();
-  assert.equal(await page.locator('.marble-build-pop').count(), 0, 'no plan popover');
   await page.locator('.marble-build-status[data-run="done"]').waitFor({ timeout: 15_000 });
-  // Done: the build's card goes, and the mark says it was made in it.
   // Built is done with: it leaves the list and the app for Archived.
-  await page.waitForFunction(() => !document.querySelector('.marble-margin-card'));
+  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.marble-margin-card'));
   await page.locator('.marble-margin .tray', { hasText: '1' }).waitFor();
-  // Pressed again with no build in hand, the status mark puts the margin away.
-  await page.locator('.marble-build-status').click();
-  await page.locator('.marble-margin').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('[data-marble-id="h"]').textContent(), 'CHI reviews');
   const s = await state();
   assert.equal(s.builds.at(-1).status, 'finished');
-  assert.equal(s.marks[0].state, 'built');
   assert.equal(s.marks[0].archived, true);
-  await page.locator('.marble-marks-note[data-state="built"][data-archived]').waitFor({ state: 'attached' });
+  assert.ok(s.builds.at(-1).log.some((step) => step.kind === 'change' && step.ids.includes('h')), 'its steps are kept, with what each changed');
   assert.equal(await page.locator('.marble-marks-note').isVisible(), false, 'off the app, no faint note left');
-  // Every build is kept: Builds lists it, showing, and the app before it.
-  await page.locator('.marble-marks-tool[aria-label^="Builds"]').click();
-  await page.locator('.marble-build-row[data-showing]', { hasText: 'Build' }).waitFor();
-  await page.locator('.marble-build-row', { hasText: 'Before build 1' }).locator('button.pick').click();
+  // History: the build and the app before it; a press lights what it changed
+  // and goes back to a version.
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble-build:toggle-history')));
+  const history = page.locator('.marble-history');
+  await history.locator('.ev[data-kind="build"]', { hasText: 'Build 1' }).waitFor();
+  await history.locator('.ev[data-kind="build"] .eh').click();
+  await page.locator('.marble-build-lit:not([hidden])').first().waitFor();
+  // Its status, in three layers: pressed, its stages; a stage pressed, its
+  // steps, kept with the build.
+  const bst = history.locator('.marble-bst');
+  await bst.locator('.bst-top').click();
+  await bst.locator('.bst-stage', { hasText: 'Invitations list' }).waitFor();
+  await bst.locator('.bst-stage', { hasText: 'Title' }).locator('button').click();
+  await bst.locator('.bst-step', { hasText: 'Read this app' }).waitFor();
+  await history.locator('.ev[data-kind="origin"] .eh').click();
+  await history.locator('.ev[data-kind="origin"] .btn', { hasText: 'Go back to this' }).click();
   await page.waitForFunction(() => document.querySelector('[data-marble-id="h"]')?.textContent === 'Reviews');
-  // The margin opened the shell's frame, whose tree asks for the drive's own
-  // page, which a test drive does not have: that one 404 is the frame's.
   assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
 });
 
@@ -235,7 +247,7 @@ test('pause holds the build where it got to; stop goes back and keeps it in Buil
   assert.equal(s.marks.find((m) => m.text === 'script:slow Make it').state, 'waiting', 'its marks wait again');
 });
 
-test('Select picks marks and builds only those; on parts of the app it saves a piece', async () => {
+test('Select picks marks to build, archive or delete; on a part of the app it opens the box to write in', async () => {
   const { page } = await open();
   await noteOn(page, 's1', 'One');
   await noteOn(page, 's2', 'Two');
@@ -252,43 +264,41 @@ test('Select picks marks and builds only those; on parts of the app it saves a p
   await page.locator('.marble-marks-note', { hasText: 'One' }).locator('.marble-marks-note-body').click();
   await page.locator('.marble-build-sel button', { hasText: 'Delete' }).click();
   await hostSays(page, (marks) => marks.length === 1, 'deleted from the bar');
-  // A click on a part of the app picks the part: Save as piece.
+  // A click on a part of the app picks the part, and the box to write in
+  // comes up under it, with Save as piece.
   const r = await box(page, 's2');
   await page.mouse.click(r.x + 300, r.y + 60);
-  await page.locator('.marble-build-sel:not([hidden])', { hasText: 'This part' }).waitFor();
-  await page.locator('.marble-build-sel button', { hasText: 'Save as piece' }).click();
+  await page.locator('.marble-marks-note[data-writing] .marble-marks-note-body:focus').waitFor();
+  assert.equal(await page.locator('.marble-build-sel').isVisible(), false, 'no bar of its own');
+  await page.keyboard.type('Bigger');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('and bolder');
+  assert.equal(await page.locator('.marble-marks-note[data-writing] .marble-marks-note-body').evaluate((n) => n.innerText.trim()), 'Bigger\nand bolder', 'Enter is a new line');
+  await page.locator('.marble-marks-note[data-writing] .piece').click();
   await page.waitForFunction(() => fetch('/agent/pieces?path=Reviews').then((r) => r.json()).then((p) => p.saved.length >= 1));
+  // Left, it is a note on that part.
+  await page.mouse.click(10, 10);
+  await hostSays(page, (marks) => marks.some((m) => m.text === 'Bigger\nand bolder' && m.ids?.some((id) => id.startsWith('s2'))), 'kept as a note on the part');
 });
 
-test('a comment is a pin with a thread; the agent answers in it', async () => {
+test('a note sent with ⌘↵ becomes a comment; a change is made at once, and the comment says so', async () => {
   const { page } = await open();
-  await page.keyboard.press('c');
+  await tool(page, 'text').click();
   const r = await box(page, 's2');
   await page.mouse.click(r.x + 60, r.y + 30);
-  await page.locator('.marble-build-thread textarea:focus').waitFor();
-  // The box is as wide and as tall as what is written in it.
-  const thin = await page.locator('.marble-build-thread').boundingBox();
-  await page.keyboard.type('Can this show two weeks? And when a week has more than five invitations in it, can it fold the rest under a count?');
-  await page.waitForTimeout(260);
-  const grown = await page.locator('.marble-build-thread').boundingBox();
-  assert.ok(grown.width > thin.width + 60 && grown.height > thin.height, `${JSON.stringify(thin)} → ${JSON.stringify(grown)}`);
-  await page.keyboard.press('Shift+Enter');
-  await page.keyboard.type('Thanks.');
-  assert.match(await page.locator('.marble-build-thread textarea').inputValue(), /count\?\nThanks\.$/);
-  await page.keyboard.press('Enter');
+  await page.locator('.marble-marks-note-body:focus').waitFor();
+  await page.locator('.marble-marks-note[data-writing] .send[aria-disabled="true"]').waitFor();
+  await page.keyboard.type('script:build Can this show two weeks?');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  // The note goes; its comment's thread opens where it was.
   await page.locator('.marble-build-line[data-who="you"]', { hasText: 'Can this show two weeks?' }).waitFor();
-  // No model on a test host: the thread says so rather than hanging.
-  await page.locator('.marble-build-line[data-who="agent"] p').waitFor();
-  assert.equal(await page.locator('.marble-marks-pin').textContent(), '1');
-  const s = await state();
-  assert.equal(s.marks.find((m) => m.type === 'comment').thread.length, 2);
-  // An empty pin is taken off when its card closes. (The caret is still in
-  // the thread, where C is a letter, so the tool is taken from the toolbar.)
-  await tool(page, 'comment').click();
-  await page.mouse.click(r.x + 200, r.y + 30);
-  await page.locator('.marble-build-thread textarea:focus').waitFor();
-  await page.mouse.click(10, 10);
-  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-pin').length === 1);
+  // No model on a test host to tell a question from a change: it is made.
+  const marks = await hostSays(page, (list) => list.some((m) => m.type === 'comment' && m.thread.some((l) => l.text === 'Making this now.')), 'answered: making it');
+  const sent = marks.find((m) => m.type === 'note');
+  assert.equal(sent.archived, true, 'the note is out of sight, kept as the build\'s brief');
+  await page.locator('.marble-build-status[data-run="done"]').waitFor({ timeout: 15_000 });
+  const done = await hostSays(page, (list) => list.find((m) => m.type === 'comment')?.resolved === true, 'the comment is settled');
+  assert.match(done.find((m) => m.type === 'comment').thread.at(-1).text, /^Done in Build \d+\.$/);
 });
 
 test('a note is one press: the app is the app again after it, its × deletes it, and Undo puts it back', async () => {
@@ -393,7 +403,7 @@ test('done marks leave the app for Archived; a build clears the comments it sett
   await page.waitForFunction(() => [...document.querySelectorAll('.marble-marks-note')].some((n) => n.checkVisibility()));
   // Archive on a card puts it away again, and Undo brings it back.
   await page.locator('.marble-margin-card .arc').click();
-  await page.waitForFunction(() => !document.querySelector('.marble-margin-card'));
+  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.marble-margin-card'));
   await hostSays(page, (list) => list.find((m) => m.type === 'note')?.archived === true, 'archived on the host');
   await page.locator('.marble-marks-undo button').click();
   await page.locator('.marble-margin-card', { hasText: 'Show two weeks' }).waitFor();
@@ -404,37 +414,42 @@ test('done marks leave the app for Archived; a build clears the comments it sett
   await hostSays(page, (list) => list.length === 1, 'the archived comment is deleted');
 });
 
+// Marks, Pieces and History are views of the chat's sidebar, in the
+// drawer's shadow root: locators reach in; page.evaluate reads it through
+// `side()`.
 const margin = (page) => page.locator('.marble-margin');
 const openMargin = async (page) => {
   await page.evaluate(() => dispatchEvent(new CustomEvent('marble-build:toggle-comments')));
   await margin(page).waitFor();
 };
 const dock = (page) => page.evaluate(() => getComputedStyle(document.documentElement).marginRight);
+const SIDE = `const side = () => document.querySelector('marble-agent-drawer').shadowRoot;`;
+void SIDE;
 
-test('the margin: a card beside each mark, level with its pin, the app narrowed to make room', async () => {
+test('Marks: a view of the chat\'s sidebar, a card beside each mark, level with its pin', async () => {
   const { page, errors } = await open();
   await noteOn(page, 's1', 'Group the overdue ones on top');
   await noteOn(page, 's2', 'Show two weeks');
-  assert.equal(await dock(page), '0px');
   await openMargin(page);
-  // Docked where the chat docks: the page narrows by the margin's width.
-  await page.waitForFunction(() => Math.round(Number.parseFloat(getComputedStyle(document.documentElement).marginRight)) === 312);
+  // In the chat's sidebar, in place of the chat, at its width.
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').viewName), 'marks');
+  assert.ok((await margin(page).boundingBox()).width >= 380, 'wider than the old margin');
   const cards = page.locator('.marble-margin-card:not([hidden])');
-  await page.waitForFunction(() => document.querySelectorAll('.marble-margin-card:not([hidden])').length === 2);
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelectorAll('.marble-margin-card:not([hidden])').length === 2);
   assert.match(await cards.first().textContent(), /Note · on Invitations/);
-  // With the margin open the notes' bodies leave the app; numbered pins stay.
+  // With the margin open the notes fold into their points; numbered pins stay.
+  await page.waitForTimeout(700);
   assert.equal(await page.locator('.marble-marks-note').first().evaluate((n) => getComputedStyle(n).visibility), 'hidden');
   assert.equal(await page.locator('.marble-margin-pin:not([hidden])').count(), 2);
-  // Each card's top is its pin's top less 10px, once the margin has slid in.
-  await page.waitForTimeout(900);
-  const level = await page.evaluate(() => [...document.querySelectorAll('.marble-margin-card')].map((card) => {
+  const level = await page.evaluate(() => [...document.querySelector('marble-agent-drawer').shadowRoot.querySelectorAll('.marble-margin-card')].map((card) => {
     const pin = document.querySelector(`.marble-margin-pin[data-id="${card.dataset.id}"]`);
     return Math.round(card.getBoundingClientRect().top - (pin.getBoundingClientRect().top - 10));
   }));
-  for (const off of level) assert.ok(Math.abs(off) <= 2, `level with its pin: ${level}`);
+  // Level, or pushed down only as far as the card above it needs.
+  for (const off of level) assert.ok(off >= -2 && off <= 8, `level with its pin: ${level}`);
 
-  // A press picks it: it steps 12px toward the app, and it and its pin are
-  // shaded in the accent; no line joins them. Esc lets go.
+  // A press picks it: it steps 12px toward the app, shaded in the accent as
+  // its pin is. Esc lets go.
   const second = cards.nth(1);
   const before = (await second.boundingBox()).x;
   await second.click();
@@ -442,7 +457,6 @@ test('the margin: a card beside each mark, level with its pin, the app narrowed 
   await page.waitForTimeout(450);
   assert.equal(Math.round(before - (await second.boundingBox()).x), 12);
   assert.equal(await page.locator('.marble-margin-pin[data-picked]').count(), 1);
-  assert.equal(await page.locator('.marble-margin-wire').count(), 0, 'no line');
   const shade = await second.evaluate((n) => getComputedStyle(n).backgroundColor);
   assert.notEqual(shade, await cards.first().evaluate((n) => getComputedStyle(n).backgroundColor), 'the picked card is shaded');
   await page.keyboard.press('Escape');
@@ -454,10 +468,6 @@ test('the margin: a card beside each mark, level with its pin, the app narrowed 
   await page.locator('.marble-margin-card[data-key="held"]', { hasText: 'Put back' }).waitFor();
   assert.equal(await page.locator('.marble-margin-pin[data-key="held"]').count(), 1);
   assert.equal((await state()).marks.find((m) => m.text === 'Show two weeks').held, true);
-  assert.match(await go(page).textContent(), /Build/);
-
-  // One list, no filter: the head counts what is in it.
-  assert.equal(await page.locator('.marble-margin .filt').count(), 0);
   assert.match(await page.locator('.marble-margin .sum').textContent(), /2 open/);
 
   // A note's words can be changed on its card, and are kept.
@@ -466,29 +476,23 @@ test('the margin: a card beside each mark, level with its pin, the app narrowed 
   await page.keyboard.press('End');
   await page.keyboard.type(', then the rest');
   await page.keyboard.press('Escape');
-  await page.waitForFunction(() => fetch('/agent/builds?path=Reviews').then((x) => x.json()).then((s) => s.marks.some((m) => m.text === 'Group the overdue ones on top, then the rest')));
-  await page.locator('.marble-marks-note-body', { hasText: 'then the rest' }).waitFor({ state: 'attached' });
+  await hostSays(page, (marks) => marks.some((m) => m.text === 'Group the overdue ones on top, then the rest'), 'edited on its card');
 
-  // The side survives a reload.
+  // The view survives a reload.
   await page.reload();
   await page.waitForFunction(() => Boolean(window.marbleBuild?.state()));
-  await margin(page).waitFor();
-  await page.waitForFunction(() => Math.round(Number.parseFloat(getComputedStyle(document.documentElement).marginRight)) === 312);
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.viewName === 'marks');
 
-  // Pieces takes the side from it, in the same place; closing gives the app
-  // its width back. Describe off puts the margin away.
-  await page.locator('.marble-marks-tool[aria-label^="Pieces"]').click();
+  // Pieces and the chat take the same sidebar, one at a time; Describe off
+  // puts Marks away for the chat.
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble-build:toggle-pieces')));
   await page.locator('.marble-build-pieces').waitFor();
   await margin(page).waitFor({ state: 'hidden' });
-  await page.waitForFunction(() => document.getElementById('marble-build-dock')?.textContent === 'html { margin-inline-end: 312px !important; --marble-dock-right: 312px; }');
-  await page.locator('.marble-build-pieces button[aria-label="Close Pieces"]').click();
-  await page.waitForFunction(() => getComputedStyle(document.documentElement).marginRight === '0px');
   await openMargin(page);
   await page.evaluate(() => window.marbleMarks.setDescribing(false));
   await margin(page).waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').viewName), 'chat');
   assert.equal(await page.evaluate(() => window.marbleBuild.side), 'none');
-  // The side opens the shell's frame, whose tree asks for the drive's own
-  // page, which a test drive does not have: that one 404 is the frame's.
   assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
 });
 
@@ -507,7 +511,7 @@ test('a picked card stands level with its mark after the page comes to it, with 
     await page.locator(`.marble-margin-card[data-id="${id}"]`).evaluate((card) => card.click());
     await page.waitForTimeout(1300);
     const off = await page.evaluate((mark) => {
-      const card = document.querySelector(`.marble-margin-card[data-id="${mark}"]`).getBoundingClientRect();
+      const card = document.querySelector('marble-agent-drawer').shadowRoot.querySelector(`.marble-margin-card[data-id="${mark}"]`).getBoundingClientRect();
       const pin = document.querySelector(`.marble-margin-pin[data-id="${mark}"]`).getBoundingClientRect();
       return { off: Math.round(card.top - (pin.top - 10)), pin: Math.round(pin.top), inView: pin.top > 44 && pin.bottom < innerHeight - 80 };
     }, id);
@@ -518,50 +522,41 @@ test('a picked card stands level with its mark after the page comes to it, with 
 
 test('in the margin a comment is a card: the app answers in its own name, and a reply goes on in the card', async () => {
   const { page } = await open();
+  await api('PUT', '/agent/builds/marks?path=Reviews', { mark: { id: 'mq', type: 'comment', anchorId: 's2', u: 0.3, v: 0.3, at: Date.now(), thread: [{ who: 'you', text: 'Can this show two weeks?' }] } });
   await openMargin(page);
-  await page.locator('.marble-margin .sum', { hasText: 'No marks yet' }).waitFor();
-  await page.locator('.marble-margin .add').click();
-  const r = await box(page, 's2');
-  await page.mouse.click(r.x + 60, r.y + 30);
-  await page.locator('.marble-build-thread textarea:focus').waitFor();
-  await page.keyboard.type('Can this show two weeks?');
-  await page.keyboard.press('Enter');
-  // Posted, it is read in the margin: the floating box goes, the card is picked.
-  const card = page.locator('.marble-margin-card[aria-expanded="true"]');
-  await card.waitFor();
-  await page.locator('.marble-build-thread').waitFor({ state: 'hidden' });
+  const card = page.locator('.marble-margin-card', { hasText: 'Can this show two weeks?' });
+  await card.click();
+  await card.locator('.reply textarea').fill('And next month?');
+  await card.locator('.reply textarea').press('Enter');
+  // No model on a test host: the thread says so rather than hanging.
   await card.locator('.marble-build-line[data-who="agent"] p').waitFor();
   assert.equal(await card.locator('.marble-build-line[data-who="agent"] b').textContent(), 'Reviews', 'signed with the app\'s name');
   assert.doesNotMatch(await margin(page).textContent(), /\bAgent\b/);
-  assert.match(await card.locator('.stl').textContent(), /Answered/);
-  await card.locator('.reply textarea').fill('And next month?');
-  await card.locator('.reply textarea').press('Enter');
-  await page.waitForFunction(() => fetch('/agent/builds?path=Reviews').then((x) => x.json()).then((s) => s.marks.find((m) => m.type === 'comment')?.thread.length === 4));
   // Resolved, it is put away under Archived; Put back there opens it again.
-  await card.locator('.sb', { hasText: 'Resolve' }).waitFor();
   await card.locator('.sb', { hasText: 'Resolve' }).click();
-  await page.waitForFunction(() => !document.querySelector('.marble-margin-card'));
+  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.marble-margin-card'));
   await page.locator('.marble-marks-undo:not([hidden])', { hasText: 'Comment resolved' }).waitFor();
   await page.locator('.marble-margin .tray').click();
   await page.locator('.marble-margin-old', { hasText: 'Resolved' }).locator('.sb', { hasText: 'Put back' }).click();
-  await page.waitForFunction(() => fetch('/agent/builds?path=Reviews').then((x) => x.json()).then((s) => s.marks.find((m) => m.type === 'comment')?.resolved === false));
+  await hostSays(page, (marks) => marks.find((m) => m.type === 'comment')?.resolved === false, 'opened again');
 });
 
-test('on a phone the margin is a sheet from the foot, and docks nothing', async () => {
+test('on a phone Marks is in the sidebar\'s sheet from the foot, in page order, and docks nothing', async () => {
   const { page } = await open({ width: 390, height: 800 });
   await noteOn(page, 's1', 'On a phone');
   await openMargin(page);
   assert.equal(await margin(page).getAttribute('data-sheet'), '');
   assert.equal(await dock(page), '0px');
+  await page.waitForTimeout(500);
   const sheet = await margin(page).boundingBox();
-  assert.ok(sheet.x >= 0 && sheet.x + sheet.width <= 391 && sheet.y > 200, JSON.stringify(sheet));
+  assert.ok(sheet.x >= 0 && sheet.x + sheet.width <= 391, JSON.stringify(sheet));
   await page.locator('.marble-margin-card').first().click();
-  assert.equal(await margin(page).getAttribute('data-low'), '');
+  assert.equal(await page.locator('.marble-margin-card').first().getAttribute('aria-expanded'), 'true');
 });
 
 test('Pieces: parts of other apps, incorporated onto this one as a card that waits for a build', async () => {
   const { page } = await open();
-  await page.locator('.marble-marks-tool[aria-label^="Pieces"]').click();
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble-build:toggle-pieces')));
   const card = page.locator('.marble-build-pc', { hasText: 'Weeks ahead' }).first();
   await card.waitFor();
   await card.hover();
@@ -624,8 +619,8 @@ test('both schemes, desk and phone: nothing runs off the side', async () => {
       return { left: r.left, right: r.right, vw: innerWidth };
     });
     assert.ok(wide.left >= 0 && wide.right <= wide.vw + 1, `the toolbar fits at ${width}: ${JSON.stringify(wide)}`);
-    await page.locator('.marble-marks-tool[aria-label^="Pieces"]').click();
-    await page.waitForTimeout(450);
+    await page.evaluate(() => dispatchEvent(new CustomEvent('marble-build:toggle-pieces')));
+    await page.waitForTimeout(600);
     const sheet = await page.locator('.marble-build-pieces').boundingBox();
     assert.ok(sheet.x >= 0 && sheet.x + sheet.width <= width + 1, `Pieces fits at ${width}`);
   }

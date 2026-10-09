@@ -29,7 +29,6 @@
 (() => {
   const TRANSIENT = 'data-marble-transient';
   const EASE = 'cubic-bezier(.22, 1, .36, 1)';
-  const READS = new Set(['read_document', 'list_documents', 'Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch']);
   // The right side's width: the chat's own docked width, give or take.
   const SIDE_W = 312;
   const KINDS = [['all', 'All'], ['widget', 'Widgets'], ['layout', 'Layouts'], ['pattern', 'Patterns'], ['interaction', 'Interactions'], ['automation', 'Automations']];
@@ -58,10 +57,10 @@
     <svg class="g g-pause" viewBox="0 0 18 18" aria-hidden="true"><circle class="tr" cx="9" cy="9" r="6.5"/><circle class="arc" cx="9" cy="9" r="6.5" pathLength="100"/><path d="M7.6 7v4M10.4 7v4"/></svg>
     <svg class="g g-done" viewBox="0 0 18 18" aria-hidden="true"><circle class="d" cx="9" cy="9" r="7.5"/><path d="M6 9.3 8 11.2l4-4.4"/></svg>`;
 
-  const STYLE = `
-    .marble-build-layer {
-      position: fixed; inset: 0; width: auto; height: auto; margin: 0; padding: 0; border: 0; background: none; overflow: visible;
-      pointer-events: none; z-index: 2147483003;
+  // Build mode's own names for the page's tokens: on its layer over the
+  // page, and on the chat sidebar's views (Marks, Pieces, History), which
+  // live in the drawer's shadow root (agent-ui.js addView).
+  const VARS = `
       --b-ink: var(--ink, #111); --b-muted: var(--muted, #5a5a5a); --b-faint: var(--faint, #8a8a8a);
       --b-paper: var(--paper, #fafaf7); --b-paper-2: var(--paper-2, #f3f1ea); --b-paper-3: var(--paper-3, #eceae1);
       --b-card: var(--card, #fff); --b-line: var(--line, #e6e2d8);
@@ -69,7 +68,13 @@
       --b-accent: var(--accent, #9bb6cf); --b-accent-soft: var(--accent-soft, #f1f5f8);
       --b-caution: var(--caution, light-dark(#a07a2c, #d9b25e));
       --b-shadow: var(--shadow-lift, 0 2px 6px rgba(74,66,52,.07), 0 8px 18px rgba(74,66,52,.08));
-      --b-ui: var(--ui, var(--ui-font, system-ui, -apple-system, "Segoe UI", sans-serif));
+      --b-ui: var(--ui, var(--ui-font, system-ui, -apple-system, "Segoe UI", sans-serif));`;
+
+  const STYLE = `
+    .marble-build-layer {
+      position: fixed; inset: 0; width: auto; height: auto; margin: 0; padding: 0; border: 0; background: none; overflow: visible;
+      pointer-events: none; z-index: 2147483003;
+      ${VARS}
       font: 400 13px/1.4 var(--b-ui); color: var(--b-ink);
     }
     .marble-build-layer:popover-open { position: fixed; inset: 0; }
@@ -79,6 +84,8 @@
     /* ---- in the toolbar (inside agent-marks.js's bar; its styles are
        Describe's own, these are the build's additions). */
     .marble-build-status { color: var(--muted, #5a5a5a); }
+    /* Its tip is the build's picture (the peek), not the bar's chip. */
+    .marble-build-status::after { display: none; }
     .marble-build-status .g-box { width: 18px; height: 18px; position: relative; display: grid; place-items: center; }
     .marble-build-status .g { position: absolute; inset: 0; width: 18px; height: 18px; opacity: 0; transition: opacity 200ms ${EASE};
       fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -237,26 +244,75 @@
     .marble-build-x svg { width: 15px; height: 15px; }
     .marble-build-thread .top { display: flex; justify-content: flex-end; padding: 2px 4px 0; gap: 2px; }
 
-    /* What the agent read, beside the part it feeds: the status card's shape
-       with a head in the tag's ink. Once its part has landed it is drawn as
-       what was there before: dashed, muted, its lines struck. */
-    .marble-build-found {
-      position: fixed; pointer-events: none; box-sizing: border-box; width: 250px; padding: 9px 11px 10px;
-      background: var(--b-card); border-radius: 10px; box-shadow: 0 0 0 1px var(--b-line), var(--b-shadow);
-      font: 400 12px/1.4 var(--b-ui);
-      transition: opacity 340ms ${EASE}, translate 340ms ${EASE}, box-shadow 200ms ${EASE}, top 340ms ${EASE}, left 340ms ${EASE};
-    }
-    @starting-style { .marble-build-found { opacity: 0; translate: 0 3px; } }
-    .marble-build-found .fh { display: flex; align-items: center; gap: 6px; color: color-mix(in srgb, var(--b-mark) 70%, var(--b-ink)); font: 500 11.5px/1.2 var(--b-ui); }
-    .marble-build-found .fh svg { flex: none; width: 13px; height: 13px; color: var(--b-mark); }
-    .marble-build-found .fh span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .marble-build-found .fp { font: 11px var(--mono, ui-monospace, monospace); color: var(--b-muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .marble-build-found ul { margin: 6px 0 0; padding: 0; list-style: none; }
-    .marble-build-found li { padding: 3px 0; border-top: 1px solid var(--b-line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .marble-build-found li:first-child { border-top: 0; }
-    .marble-build-found[data-used] { box-shadow: none; outline: 1px dashed color-mix(in srgb, var(--b-muted) 85%, transparent); outline-offset: -1px; background: color-mix(in srgb, var(--b-card) 82%, transparent); color: var(--b-muted); }
-    .marble-build-found[data-used] li { text-decoration: line-through; text-decoration-color: var(--b-faint); }
-    .marble-build-found[data-gone] { opacity: 0; translate: 0 3px; }
+    /* ---- a build's status, in three layers: its picture (the drawer's
+       drawing of the work); pressed, its stages; a stage pressed, what was
+       read, searched for and changed in it. Used at the head of Marks while
+       a build is in hand, and for every build in History. */
+    .marble-bst { display: flex; flex-direction: column; gap: 0; background: var(--b-card); border: 1px solid var(--b-line); border-radius: 12px;
+      box-shadow: var(--shadow, 0 1px 2px rgba(74,66,52,.05), 0 2px 4px rgba(74,66,52,.03)); font: 400 12.5px/1.4 var(--b-ui); color: var(--b-ink); overflow: hidden; }
+    .marble-bst .bst-top { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 10px 12px 10px; cursor: pointer; text-align: left; }
+    .marble-bst .bst-top:hover { background: color-mix(in srgb, var(--b-ink) 3%, transparent); }
+    .marble-bst .bst-top:focus-visible { outline: 2px solid var(--b-mark); outline-offset: -2px; }
+    .marble-bst .bst-head { display: flex; align-items: baseline; gap: 8px; }
+    .marble-bst .bst-head b { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-bst .bst-head time { flex: none; color: var(--b-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .marble-bst .bst-sub { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--b-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .marble-bst .bst-sub .chev { margin-left: auto; width: 14px; height: 14px; color: var(--b-faint); transition: rotate 200ms ${EASE}; }
+    .marble-bst[data-open] .bst-sub .chev { rotate: 90deg; }
+    .marble-bst[data-status="paused"] .bst-sub, .marble-bst[data-status="failed"] .bst-sub { color: var(--b-caution); }
+    .marble-bst .bst-pic { margin: 8px -4px 0; border-radius: 8px; overflow: hidden; pointer-events: none; }
+    .marble-bst .bst-pic:empty { display: none; }
+    .marble-bst .bst-pic iframe { display: block; width: 100%; border: 0; }
+    /* Its stages. */
+    .marble-bst .bst-stages { list-style: none; margin: 0; padding: 2px 6px 8px; border-top: 1px solid var(--b-line); }
+    .marble-bst:not([data-open]) .bst-stages { display: none; }
+    .marble-bst .bst-stage > button { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 16px 1fr auto; align-items: center; column-gap: 8px; width: 100%;
+      padding: 7px 6px; border-radius: 8px; cursor: pointer; }
+    .marble-bst .bst-stage > button:hover { background: var(--b-paper-2); }
+    .marble-bst .bst-stage > button:focus-visible { outline: 2px solid var(--b-mark); outline-offset: -2px; }
+    .marble-bst .bst-stage > button[aria-disabled="true"] { cursor: default; }
+    .marble-bst .bst-stage > button[aria-disabled="true"]:hover { background: none; }
+    .marble-bst .bst-dot { width: 10px; height: 10px; border-radius: 50%; justify-self: center; box-sizing: border-box; border: 1.5px solid var(--b-faint); }
+    .marble-bst .bst-stage[data-state="now"] .bst-dot { border-color: var(--b-mark); background: color-mix(in srgb, var(--b-mark) 25%, transparent); }
+    .marble-bst .bst-stage[data-state="done"] .bst-dot { border-color: var(--b-mark); background: var(--b-mark); }
+    .marble-bst .bst-st { min-width: 0; }
+    .marble-bst .bst-st span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-bst .bst-stage[data-state="ahead"] .bst-st span { color: var(--b-muted); }
+    .marble-bst .bst-stage[data-state="now"] .bst-st span { font-weight: 600; }
+    .marble-bst .bst-st small { display: block; color: var(--b-muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-bst .bst-n { color: var(--b-faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .marble-bst .bst-said { margin: 6px 6px 0; padding-top: 8px; border-top: 1px solid var(--b-line); color: var(--b-muted); font-size: 12px; }
+    /* A stage's steps. */
+    .marble-bst .bst-steps { list-style: none; margin: 0 0 4px 30px; padding: 0; border-left: 1px solid var(--b-line); }
+    .marble-bst .bst-stage:not([data-open]) .bst-steps { display: none; }
+    .marble-bst .bst-step { display: grid; grid-template-columns: 14px 1fr; column-gap: 8px; padding: 6px 6px 6px 10px; border-radius: 0 8px 8px 0; }
+    .marble-bst .bst-step[data-ids] { cursor: pointer; }
+    .marble-bst .bst-step[data-ids]:hover { background: color-mix(in srgb, var(--b-accent) 18%, transparent); }
+    .marble-bst .bst-step svg { width: 13px; height: 13px; margin-top: 2px; color: var(--b-mark); }
+    .marble-bst .bst-step[data-kind="change"] svg { color: var(--b-ink); }
+    .marble-bst .bst-step b { display: block; font-weight: 500; overflow-wrap: anywhere; }
+    .marble-bst .bst-step code { display: block; margin-top: 1px; font: 11px/1.4 var(--mono, ui-monospace, monospace); color: var(--b-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-bst .bst-step p { margin: 3px 0 0; color: var(--b-muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+    .marble-bst .bst-step[data-failed] b { color: var(--b-caution); }
+    .marble-bst .bst-none { padding: 4px 10px 6px; color: var(--b-faint); font-size: 12px; }
+
+    /* The status mark's own peek: the build's picture, on a rest over it. */
+    .marble-build-peek { position: fixed; pointer-events: none; box-sizing: border-box; width: 300px; max-width: calc(100vw - 16px);
+      padding: 10px 12px 11px; border-radius: 12px; background: var(--b-card); border: 1px solid var(--b-line); box-shadow: var(--b-shadow);
+      font: 400 12.5px/1.4 var(--b-ui); color: var(--b-ink); transition: opacity 140ms ${EASE}, translate 140ms ${EASE}; }
+    @starting-style { .marble-build-peek { opacity: 0; translate: 0 4px; } }
+    .marble-build-peek b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-build-peek span { display: block; color: var(--b-muted); font-size: 12px; margin-top: 1px; }
+    .marble-build-peek .pic { margin: 8px -4px 0; border-radius: 8px; overflow: hidden; }
+    .marble-build-peek .pic:empty { display: none; }
+    .marble-build-peek .pic iframe { display: block; width: 100%; border: 0; }
+
+    /* What changed, lit on the app from a hand over a step or a History
+       entry: the accent wash and a ring, never anything saved. */
+    .marble-build-lit { position: fixed; pointer-events: none; border-radius: 6px;
+      background: color-mix(in srgb, var(--b-accent) 22%, transparent); box-shadow: 0 0 0 1.5px var(--b-mark);
+      transition: opacity 160ms ${EASE}; }
+    @starting-style { .marble-build-lit { opacity: 0; } }
 
     /* Out of Describe: the toolbar folds into one button in the corner, with
        the build's state as its dot. Nothing comes up over the app under a
@@ -294,13 +350,9 @@
        nothing in the app is covered; it is paper, and the app's own edge is
        the line between them. */
     .marble-build-pieces {
-      position: fixed; top: var(--marble-shell-top, 0px); right: 0; bottom: 0; width: ${SIDE_W}px; max-width: 100vw;
-      pointer-events: auto; display: flex; flex-direction: column; box-sizing: border-box;
-      background: var(--b-paper); border-left: 1px solid var(--b-line);
-      translate: 100% 0; transition: translate 340ms ${EASE};
+      position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; box-sizing: border-box;
+      pointer-events: auto;
     }
-    /* In from the edge, and out the same way (slide(), below). */
-    .marble-build-pieces[data-in] { translate: 0 0; }
     .marble-build-pieces .head { height: 46px; padding: 0 8px 0 14px; display: flex; align-items: center; gap: 2px; flex: none; }
     .marble-build-pieces .head b { flex: 1; font-weight: 500; font-size: 14px; }
     .marble-build-find { margin: 0 12px 6px; display: flex; align-items: center; gap: .45rem; padding: 0 10px; height: 34px; border-radius: 17px; background: var(--b-card); border: 1px solid var(--b-line); flex: none; }
@@ -345,9 +397,6 @@
     /* On a phone there is no room beside the app: Pieces is a sheet from the
        foot, over the lower part of the page. */
     @media (max-width: 620px) {
-      .marble-build-pieces { top: auto; left: 0; right: 0; width: auto; height: min(62vh, 520px); border-left: 0; border-top: 1px solid var(--b-line); border-radius: 16px 16px 0 0; box-shadow: var(--b-shadow); }
-      .marble-build-pieces { translate: 0 100%; }
-      .marble-build-pieces[data-in] { translate: 0 0; }
       .marble-build-thread { width: calc(100vw - 24px); }
     }
     @media (max-width: 520px) {
@@ -458,6 +507,20 @@
     raise();
     window.marbleAgentUI?.keepKeys?.(layer);
 
+    // The chat's sidebar, whose views Marks, Pieces and History are. The
+    // first view brings this layer's styles and token names into its shadow
+    // root; each brings its own besides.
+    const drawer = document.querySelector('marble-agent-drawer');
+    let viewCss = `.views { ${VARS} font: 400 13px/1.4 var(--b-ui); color: var(--b-ink); }
+      .views [hidden] { display: none !important; }
+      .views button { font: inherit; color: inherit; }
+      ${STYLE}`;
+    const addView = (name, node, css = '') => {
+      if (!drawer?.addView) { layer.append(node); return; }
+      drawer.addView(name, { node, css: viewCss + css });
+      viewCss = '';
+    };
+
     // Out of Describe, the toolbar folds into this: one button in the corner,
     // with the build's state as its dot (wired below).
     const handle = h('button', 'marble-build-handle');
@@ -528,16 +591,6 @@
     const status = h('button', 'marble-marks-tool marble-build-status');
     status.type = 'button';
     status.innerHTML = `<span class="g-box" ${TRANSIENT}>${GLYPH}</span>`;
-    const buildsButton = h('button', 'marble-marks-tool');
-    buildsButton.type = 'button';
-    buildsButton.innerHTML = ICON.builds;
-    buildsButton.setAttribute('aria-label', 'Builds');
-    buildsButton.setAttribute('aria-haspopup', 'dialog');
-    const piecesButton = h('button', 'marble-marks-tool');
-    piecesButton.type = 'button';
-    piecesButton.innerHTML = ICON.pieces;
-    piecesButton.setAttribute('aria-label', 'Pieces');
-    piecesButton.setAttribute('aria-pressed', 'false');
     const go = h('button', 'marble-build-go', 'Build');
     go.type = 'button';
     const run = h('span', 'marble-build-run');
@@ -552,7 +605,9 @@
     stopButton.innerHTML = ICON.stop;
     stopButton.setAttribute('aria-label', 'Stop and go back to the last finished build');
     run.append(runWords, meter, pauseButton, stopButton);
-    M.slot.append(status, buildsButton, piecesButton, go, run);
+    // The bar holds the build alone: its status mark, and Build (or the build
+    // running). Builds, now History, and Pieces are on the shell's bar.
+    M.slot.append(status, go, run);
 
     // ------------------------------------------------------------ the tip
 
@@ -600,8 +655,6 @@
       node.addEventListener('blur', hideTip);
       node.addEventListener('pointerdown', hideTip);
     }
-    tipped(buildsButton, 'Builds · go back to any');
-    tipped(piecesButton, 'Pieces from your other apps');
     tipped(stopButton, 'Stop · go back to the last finished build');
 
     // ---------------------------------------------------------- the reading
@@ -642,6 +695,11 @@
         done: `Up to date · build ${builds().filter((b) => b.status === 'finished').at(-1)?.n ?? ''} · press for your marks`,
       }[r];
       tipped(status, words);
+      // The same mark on Marks in the shell's bar (shell.js).
+      dispatchEvent(new CustomEvent('marble-build:status', { detail: {
+        run: r, ring, n,
+        label: { idle: 'nothing waits', pending: `${plural(n, 'mark')} ${n === 1 ? 'waits' : 'wait'}`, building: of ? `building, ${done} of ${of}` : 'building', paused: 'paused', done: 'up to date' }[r],
+      } }));
       // Build: what it will take; while a build runs, the build itself.
       const picked = M.picked();
       const chosen = picked.filter((id) => waiting().some((m) => m.id === id));
@@ -712,76 +770,6 @@
       closePop();
     }, true);
 
-    const statusWord = (b) => {
-      const { done, of } = progressOf(b);
-      if (b.status === 'running') return of ? `Building ${done} of ${of}` : 'Building';
-      if (b.status === 'paused') return of ? `Paused, ${done} of ${of}` : 'Paused';
-      if (b.showing) return 'Showing';
-      if (b.status === 'finished') return 'Finished';
-      if (b.status === 'stopped') return of ? `Stopped at ${done} of ${of}` : 'Stopped';
-      return 'Did not finish';
-    };
-    const drawBuilds = (node) => {
-      node.setAttribute('aria-label', 'Builds');
-      const head = h('div', 'ph');
-      head.append(h('b', '', 'Builds'), h('span', '', builds().length ? 'Pick one to see the app as it was' : 'None yet'));
-      node.append(head);
-      const list = h('ol');
-      const busy = Boolean(runningBuild());
-      for (const b of [...builds()].reverse()) {
-        const row = h('li', 'marble-build-row');
-        row.dataset.status = b.status;
-        row.toggleAttribute('data-showing', Boolean(b.showing) && b.status !== 'running');
-        const pick = h('button', 'pick');
-        pick.type = 'button';
-        pick.append(h('span', 'n', `Build ${b.n}`), h('span', 's', statusWord(b)), h('span', 't', b.title));
-        const canView = !busy && b.hasEnd && !b.showing;
-        pick.setAttribute('aria-disabled', String(!canView));
-        if (canView) pick.addEventListener('click', () => view(b.id));
-        row.append(pick);
-        if (b.status === 'paused' && !busy) {
-          const acts = h('span', 'acts');
-          const resume = h('button', '', 'Resume');
-          resume.type = 'button';
-          resume.addEventListener('click', () => act(b.id, 'resume'));
-          const stop = h('button', '', 'Stop');
-          stop.type = 'button';
-          stop.addEventListener('click', () => act(b.id, 'stop'));
-          acts.append(resume, stop);
-          row.append(acts);
-        }
-        list.append(row);
-        // The build being shown: the picture of its work, as it was drawn.
-        if (row.hasAttribute('data-showing') && b.hasDrawn) {
-          const box = h('div', 'marble-build-drawn');
-          box.setAttribute('aria-hidden', 'true');
-          list.append(box);
-          (b.drawn ? Promise.resolve({ drawn: b.drawn }) : ask('GET', `/agent/builds/${enc(b.id)}/drawn?path=${enc(app)}`))
-            .then((got) => { if (got?.drawn?.html) mountDrawn(box, got.drawn.html).then(() => open && hangOver(open.node, open.button)); })
-            .catch(() => {});
-        }
-      }
-      if (state?.origin) {
-        const row = h('li', 'marble-build-row');
-        row.toggleAttribute('data-showing', Boolean(state.origin.showing));
-        const pick = h('button', 'pick');
-        pick.type = 'button';
-        const firstBuild = builds()[0];
-        pick.append(
-          h('span', 'n', firstBuild?.title === 'From your prompt' ? 'Your prompt' : 'Before build 1'),
-          h('span', 's', state.origin.showing ? 'Showing' : ''),
-          h('span', 't', firstBuild?.title === 'From your prompt' ? 'The empty app' : 'The app as it was'),
-        );
-        const canView = !busy && !state.origin.showing;
-        pick.setAttribute('aria-disabled', String(!canView));
-        if (canView) pick.addEventListener('click', () => view('origin'));
-        row.append(pick);
-        list.append(row);
-      }
-      node.append(list);
-      node.append(h('p', 'foot', busy ? 'Wait for the build to finish, or stop it, to look at another.' : 'Stop always goes back to the last finished build.'));
-    };
-
     // The status mark opens no card: it brings the margin out, headed by the
     // build while one is in hand, and puts it away when pressed again
     // (build-margin.js).
@@ -791,7 +779,6 @@
       if (!margin?.toggle) return;
       margin.toggle();
     });
-    buildsButton.addEventListener('click', () => openPop('builds', buildsButton, drawBuilds));
 
     // --------------------------------------------------------------- actions
 
@@ -864,9 +851,11 @@
     sel.append(selLabel, selA, selArchive, selB);
     layer.append(sel);
     let selNow = { marks: [], parts: [] };
+    let promptedFor = '';
     M.onPicked((detail) => {
       selNow = detail;
       paintBar();
+      if (!detail.parts.length) promptedFor = '';
       if (!detail.span || (!detail.marks.length && !detail.parts.length)) { sel.hidden = true; return; }
       if (detail.marks.length) {
         const n = detail.marks.length;
@@ -878,13 +867,15 @@
         selB.setAttribute('aria-disabled', String(built === n || Boolean(current())));
         sel.dataset.kind = 'marks';
       } else {
-        const n = detail.parts.length;
-        selLabel.textContent = n === 1 ? 'This part of the app' : `${n} parts of the app`;
-        selA.textContent = 'Note';
-        selArchive.hidden = true;
-        selB.textContent = 'Save as piece';
-        selB.setAttribute('aria-disabled', 'false');
-        sel.dataset.kind = 'parts';
+        // Parts of the app: no bar. The box to write in comes up under them
+        // (agent-marks.js prompt), once for each new selection.
+        sel.hidden = true;
+        const key = detail.parts.join(' ');
+        if (key !== promptedFor) {
+          promptedFor = key;
+          M.prompt(detail.parts, detail.span);
+        }
+        return;
       }
       sel.hidden = false;
       const s = sel.getBoundingClientRect();
@@ -897,11 +888,8 @@
       Object.assign(sel.style, { left: `${Math.round(left)}px`, top: `${Math.round(top)}px` });
     });
     selA.addEventListener('click', () => {
-      if (sel.dataset.kind === 'marks') { M.remove(selNow.marks); M.clearPicked(); return; }
-      const part = selNow.parts[0];
+      M.remove(selNow.marks);
       M.clearPicked();
-      M.setMode(null);
-      M.note({ anchorId: part, u: 1, v: 0 });
     });
     selArchive.addEventListener('click', () => {
       const ids = [...selNow.marks];
@@ -910,15 +898,16 @@
     });
     selB.addEventListener('click', async () => {
       if (selB.getAttribute('aria-disabled') === 'true') return;
-      if (sel.dataset.kind === 'marks') { start({ marks: selNow.marks }); return; }
-      const parts = selNow.parts;
-      selB.setAttribute('aria-disabled', 'true');
+      start({ marks: selNow.marks });
+    });
+    // Save as piece, from the box written on a selection.
+    addEventListener('marble-marks:save-piece', async (event) => {
+      const parts = event.detail?.ids ?? [];
       let saved = 0;
       for (const id of parts.slice(0, 6)) {
         const piece = await ask('POST', '/agent/pieces', { path: app, id }).catch(() => null);
         if (piece) saved += 1;
       }
-      M.clearPicked();
       say(saved ? `Saved as ${plural(saved, 'piece')}. Find ${saved === 1 ? 'it' : 'them'} in Pieces.` : 'That part could not be saved.');
       piecesCache = null;
       if (piecesOpen) drawPieces();
@@ -965,6 +954,16 @@
       }
     }
     const takeOffer = (id, take) => settled(ask('POST', route('/offer'), { id, take }));
+    /** A note sent (⌘↵): the host makes it a comment, answered or built, and
+     *  that comment's thread opens where the note was. */
+    M.onSend(async (mark) => {
+      await flushing;
+      flush();
+      await flushing;
+      const got = await settled(ask('POST', route('/send'), { id: mark.id }));
+      if (!got?.comment) { M.elementOf(mark.id)?.removeAttribute('data-sending'); M.load(state?.marks ?? []); return; }
+      requestAnimationFrame(() => dispatchEvent(new CustomEvent('marble-marks:comment', { detail: { id: got.comment } })));
+    });
     /** Put marks away, or bring them back: drawn at once, kept on the host,
      *  and undoable from the line over the toolbar. */
     const archive = (ids, on, { undo = true } = {}) => {
@@ -1120,131 +1119,268 @@
       closeThread();
     }, true);
 
-    // ---------------------------------------------------- what it read
+    // ------------------------------------------------- following a build
+    //
+    // The page attends the running build's conversation, so the change marks
+    // its turn draws are drawn here. What it reads and changes is kept with
+    // the build on the host (server/build/steps.js) and shown in its status,
+    // never floated over the app.
 
-    let following = null; // { conversation, turn, off }
-    const found = [];
-    let workingAt = null;
-    const docName = (p) => String(p ?? '').replace(/\.mrbl$/, '');
-    const readWords = (name, input = {}) => {
-      switch (name) {
-        case 'read_document': {
-          const p = docName(input.path);
-          return { head: p === app ? 'Read this app' : `Read ${p.split('/').pop()}`, path: p };
-        }
-        case 'list_documents': return { head: 'Looked through your drive', path: input.folder || '' };
-        case 'Read': return { head: `Read ${String(input.file_path ?? '').split('/').pop()}`, path: String(input.file_path ?? '') };
-        case 'Grep': return { head: `Searched for "${clip(input.pattern, 40)}"`, path: String(input.path ?? input.glob ?? '') };
-        case 'Glob': return { head: `Looked for ${clip(input.pattern, 40)}`, path: String(input.path ?? '') };
-        case 'WebSearch': return { head: `Searched the web for "${clip(input.query, 40)}"`, path: '' };
-        case 'WebFetch': {
-          let host = '';
-          try { host = new URL(input.url).host; } catch { host = clip(input.url, 40); }
-          return { head: `Read ${host}`, path: clip(input.url, 80) };
-        }
-        default: return null;
-      }
-    };
-    const linesOf = (summary) => {
-      const text = String(summary ?? '').trim();
-      if (!text || /^[[{]/.test(text)) return [];
-      return text.split('\n').map((line) => line.replace(/^\s*\d+[:→-]\s?/, '').replace(/^[^:]{1,80}\.mrbl:\d+:/, '').trim())
-        .filter((line) => line && line.length > 2).slice(0, 3).map((line) => clip(line, 80));
-    };
-    const anchorRect = () => {
-      const node = workingAt ? document.querySelector(`[data-marble-id="${CSS.escape(workingAt)}"]`) : null;
-      const r = node?.getBoundingClientRect();
-      if (r?.width) return r;
-      const main = document.querySelector('main, [role="main"]') ?? document.body;
-      return main.getBoundingClientRect();
-    };
-    const placeFound = () => {
-      if (!found.length) return;
-      const r = anchorRect();
-      const right = innerWidth - (Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--marble-dock-right')) || 0);
-      const besideRight = r.right + 14 + 250 <= right - 8;
-      const besideLeft = r.left - 14 - 250 >= 8;
-      let y = Math.max(12, Math.min(r.top, innerHeight - 200));
-      const x = besideRight ? r.right + 14 : besideLeft ? r.left - 264 : Math.max(8, right - 262);
-      // The marks on the app stay readable: a card that would land on one
-      // goes under it.
-      const marksThere = (state?.marks ?? []).map((m) => M.elementOf(m.id)?.getBoundingClientRect()).filter((b) => b?.width && b.right > x && b.left < x + 250);
-      for (const card of found.filter((c) => !c.gone).slice(-3)) {
-        const height = card.node.getBoundingClientRect().height || 60;
-        for (const b of marksThere) if (y < b.bottom + 8 && y + height > b.top - 8) y = b.bottom + 10;
-        card.node.style.left = `${Math.round(x)}px`;
-        card.node.style.top = `${Math.round(y)}px`;
-        y += height + 8;
-      }
-      for (const card of found.filter((c) => !c.gone).slice(0, -3)) card.node.dataset.gone = '';
-    };
-    const clearFound = (delay = 0) => {
-      const cards = found.splice(0);
-      setTimeout(() => {
-        for (const card of cards) card.node.dataset.gone = '';
-        setTimeout(() => { for (const card of cards) card.node.remove(); }, 400);
-      }, delay);
-    };
-    const onTurnEvent = (event) => {
-      if (!following || event.turn !== following.turn) return;
-      if (event.type === 'tool.call') {
-        const short = String(event.name ?? '').split('__').pop();
-        if (!READS.has(short)) return;
-        const words = readWords(short, event.input ?? {});
-        if (!words) return;
-        const node = h('div', 'marble-build-found');
-        node.setAttribute('aria-hidden', 'true');
-        const fh = h('div', 'fh');
-        fh.innerHTML = /Searched|Looked/.test(words.head) ? ICON.search : ICON.read;
-        fh.append(h('span', '', words.head));
-        node.append(fh);
-        if (words.path) node.append(h('div', 'fp', words.path));
-        layer.append(node);
-        found.push({ callId: event.callId, node, used: false, gone: false });
-        placeFound();
-        return;
-      }
-      if (event.type === 'tool.result') {
-        const card = found.find((c) => c.callId === event.callId);
-        if (!card) return;
-        const lines = linesOf(event.summary);
-        if (lines.length) {
-          const list = h('ul');
-          for (const line of lines) list.append(h('li', '', line));
-          card.node.append(list);
-          placeFound();
-        }
-        return;
-      }
-      if (event.type === 'ops.applied') {
-        // What was read has gone into the part that landed.
-        for (const card of found) if (!card.used) { card.used = true; card.node.dataset.used = ''; }
-        return;
-      }
-      if (/^turn\.(completed|failed|cancelled)$/.test(event.type)) clearFound(1500);
-    };
+    let following = null; // { conversation, turn }
     const follow = (build) => {
       const turn = build?.status === 'running' ? build.turn : null;
       if (following?.turn === turn) return;
-      following?.off?.();
       following = null;
       if (!turn || !build.conversation) return;
       agent.attend(build.conversation);
-      following = { conversation: build.conversation, turn, off: agent.on(build.conversation, onTurnEvent) };
+      following = { conversation: build.conversation, turn };
     };
-    document.addEventListener('marble:presence', ({ detail }) => {
-      if (!following || detail?.client !== `agent:${following.conversation}`) return;
-      const now = detail.marks?.draw?.find((d) => d.as === 'now' || d.key)?.at;
-      const at = now ?? detail.parts?.[0] ?? detail.ids?.[0] ?? null;
-      if (at && at !== workingAt) { workingAt = at; placeFound(); }
-    });
+
+    // -------------------------------------------------------------- lit
+    //
+    // What a step or a History entry changed, lit on the app while a hand is
+    // on it, or held by a press (and then brought into view).
+    const lit = [];
+    let litIds = [];
+    let litHeld = false;
+    const placeLit = () => {
+      let i = 0;
+      // Not over the sidebar: a part under it (a sheet on a phone, a floating
+      // card) is not lit through it.
+      const side = drawer?.isOpen ? drawer.shadowRoot?.querySelector('.panel')?.getBoundingClientRect() : null;
+      const under = (r) => side && r.left + r.width / 2 >= side.left && r.top + r.height / 2 >= side.top && r.top + r.height / 2 <= side.bottom;
+      for (const id of litIds) {
+        const node = document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`);
+        const r = node?.getBoundingClientRect();
+        if (!r?.width || !r.height || node === document.body || under(r)) continue;
+        let box = lit[i];
+        if (!box) { box = h('div', 'marble-build-lit'); lit.push(box); layer.append(box); }
+        box.hidden = false;
+        Object.assign(box.style, { left: `${Math.round(r.left - 3)}px`, top: `${Math.round(r.top - 3)}px`, width: `${Math.round(r.width + 6)}px`, height: `${Math.round(r.height + 6)}px` });
+        i += 1;
+      }
+      for (; i < lit.length; i += 1) lit[i].hidden = true;
+    };
+    /** Light these parts; `hold` keeps them lit past the hand leaving, and
+     *  brings the first into view. */
+    const light = (ids, { hold = false } = {}) => {
+      // The outermost of what changed is enough: a part and its words are one
+      // thing to the eye.
+      const nodes = (ids ?? []).map((id) => document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`)).filter(Boolean);
+      const outer = nodes.filter((node) => !nodes.some((other) => other !== node && other.contains(node)));
+      litIds = outer.slice(0, 40).map((node) => node.getAttribute('data-marble-id'));
+      litHeld = hold;
+      placeLit();
+      if (hold && outer[0]) {
+        const r = outer[0].getBoundingClientRect();
+        if (r.top < 60 || r.bottom > innerHeight - 90) outer[0].scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      }
+      return litIds.length;
+    };
+    const unlight = ({ held = false } = {}) => {
+      if (litHeld && !held) return;
+      litIds = [];
+      litHeld = false;
+      placeLit();
+    };
+    // A press anywhere else lets go of what a press lit.
+    addEventListener('pointerdown', (event) => {
+      if (!litHeld) return;
+      if (event.composedPath().some((node) => node?.dataset?.lights)) return;
+      unlight({ held: true });
+    }, true);
+
+    // ------------------------------------------------------------ status
+    //
+    // A build's status in three layers (spec: Notes and Sketches/Build Mode
+    // and Asking/Build Mode, section 12): its picture, the drawer's drawing of
+    // the work; pressed, its stages, the plan's parts; a stage pressed, what
+    // was read, searched for and changed in it, kept on the host with the
+    // build (server/build/steps.js). A changed step lights what it touched.
+    const STEP_ICON = {
+      read: ICON.read,
+      look: ICON.read,
+      search: ICON.search,
+      change: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 18.5 9.5 9 19H5v-4z"/><path d="M12.5 7.5l4 4"/></svg>',
+    };
+    const CHEV = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.25 4 10.25 8l-4 4"/></svg>';
+    const statusLine = (b) => {
+      const parts = b.plan?.parts ?? [];
+      const done = parts.filter((p) => p.state === 'done').length;
+      if (b.status === 'running') return parts.length ? `Build ${b.n} · ${done} of ${parts.length} parts made` : `Build ${b.n} · working out the plan`;
+      if (b.status === 'paused') return parts.length ? `Build ${b.n} · paused at ${done} of ${parts.length} parts` : `Build ${b.n} · paused`;
+      if (b.status === 'finished') return parts.length ? `Build ${b.n} · ${plural(parts.length, 'part')} made` : `Build ${b.n} · done`;
+      if (b.status === 'stopped') return `Build ${b.n} · stopped, the app went back`;
+      if (b.status === 'failed') return `Build ${b.n} · did not finish`;
+      return `Build ${b.n}`;
+    };
+    /** The status of one build: `card.update(build, log)` as it changes. What
+     *  is open stays open between updates. */
+    const statusCard = () => {
+      const node = h('section', 'marble-bst');
+      const top = h('button', 'bst-top');
+      top.type = 'button';
+      top.setAttribute('aria-expanded', 'false');
+      const head = h('div', 'bst-head');
+      const title = h('b');
+      const time = h('time');
+      head.append(title, time);
+      const sub = h('div', 'bst-sub');
+      const subWords = h('span');
+      sub.append(subWords);
+      sub.insertAdjacentHTML('beforeend', CHEV);
+      const pic = h('div', 'bst-pic');
+      pic.setAttribute('aria-hidden', 'true');
+      top.append(head, sub, pic);
+      const stages = h('ol', 'bst-stages');
+      stages.setAttribute('aria-label', 'Stages');
+      node.append(top, stages);
+      const openStages = new Set();
+      let build = null;
+      let log = [];
+      let picAt = null;
+      let ticker = 0;
+      top.addEventListener('click', () => {
+        const on = !node.hasAttribute('data-open');
+        node.toggleAttribute('data-open', on);
+        top.setAttribute('aria-expanded', String(on));
+        if (on) drawStages();
+      });
+      const tick = () => {
+        clearInterval(ticker);
+        if (!build) return;
+        const paint = () => { time.textContent = clock((build.endedAt ?? Date.now()) - build.startedAt); };
+        paint();
+        if (build.status === 'running') ticker = setInterval(() => { if (!node.isConnected) { clearInterval(ticker); return; } paint(); }, 1000);
+      };
+      function drawStages() {
+        if (!node.hasAttribute('data-open') || !build) return;
+        const parts = build.plan?.parts ?? [];
+        const groups = new Map();
+        const planning = log.filter((step) => !step.part || !parts.some((p) => p.title === step.part));
+        if (planning.length || !parts.length) groups.set('', { title: parts.length ? 'Working out the plan' : (build.status === 'running' ? 'Working out the plan' : 'Its work'), detail: '', state: parts.length ? 'done' : build.status === 'running' ? 'now' : 'done', steps: planning });
+        for (const part of parts) groups.set(part.title, { title: part.title, detail: part.detail ?? '', state: part.state, ids: part.ids ?? [], steps: log.filter((step) => step.part === part.title) });
+        const rows = [];
+        for (const [key, group] of groups) {
+          const li = h('li', 'bst-stage');
+          li.dataset.state = group.state;
+          const press = h('button');
+          press.type = 'button';
+          const st = h('span', 'bst-st');
+          st.append(h('span', '', group.title));
+          if (group.detail) st.append(h('small', '', group.detail));
+          press.append(h('i', 'bst-dot'), st, h('span', 'bst-n', group.steps.length ? String(group.steps.length) : ''));
+          const has = group.steps.length > 0;
+          press.setAttribute('aria-disabled', String(!has));
+          press.setAttribute('aria-expanded', String(openStages.has(key)));
+          li.toggleAttribute('data-open', has && openStages.has(key));
+          if (has) {
+            press.addEventListener('click', () => {
+              if (openStages.has(key)) openStages.delete(key); else openStages.add(key);
+              drawStages();
+            });
+          }
+          // The part's own place on the app, when the plan named it.
+          if (group.ids?.length) {
+            press.dataset.lights = '1';
+            press.addEventListener('pointerenter', () => light(group.ids));
+            press.addEventListener('pointerleave', () => unlight());
+          }
+          li.append(press);
+          if (has && openStages.has(key)) {
+            const steps = h('ul', 'bst-steps');
+            for (const step of group.steps) {
+              const row = h('li', 'bst-step');
+              row.dataset.kind = step.kind;
+              row.toggleAttribute('data-failed', Boolean(step.failed));
+              row.insertAdjacentHTML('afterbegin', STEP_ICON[step.kind] ?? ICON.read);
+              const body = h('div');
+              body.append(h('b', '', step.head));
+              if (step.path) body.append(h('code', '', step.path));
+              for (const line of (step.lines ?? []).slice(0, 2)) body.append(h('p', '', line));
+              row.append(body);
+              if (step.ids?.length) {
+                row.dataset.ids = '1';
+                row.dataset.lights = '1';
+                row.title = 'Light what this changed on the app';
+                row.addEventListener('pointerenter', () => light(step.ids));
+                row.addEventListener('pointerleave', () => unlight());
+                row.addEventListener('click', () => light(step.ids, { hold: true }));
+              }
+              steps.append(row);
+            }
+            li.append(steps);
+          }
+          rows.push(li);
+        }
+        if (build.said) rows.push(h('li', 'bst-said', build.said));
+        if (!rows.length) rows.push(h('li', 'bst-none', 'Nothing yet.'));
+        stages.replaceChildren(...rows);
+      }
+      return {
+        node,
+        id: () => build?.id ?? null,
+        update(next, nextLog = null) {
+          const changed = !build || build.id !== next.id;
+          build = next;
+          if (nextLog) log = nextLog;
+          else if (next.log) log = next.log;
+          else if (changed) log = [];
+          node.dataset.status = next.status;
+          node.setAttribute('aria-label', `Build ${next.n}`);
+          title.textContent = next.title || `Build ${next.n}`;
+          subWords.textContent = statusLine(next);
+          const drawing = next.drawn;
+          if (drawing?.html && drawing.at !== picAt) { picAt = drawing.at; mountDrawn(pic, drawing.html); }
+          if (!drawing?.html && changed) { pic.textContent = ''; picAt = null; }
+          tick();
+          drawStages();
+        },
+        open(on = true) { node.toggleAttribute('data-open', on); top.setAttribute('aria-expanded', String(on)); drawStages(); },
+      };
+    };
+
+    // The status mark's peek: on a rest over it, the latest build's picture,
+    // or what the mark says when no build has drawn one.
+    const peek = h('div', 'marble-build-peek');
+    peek.setAttribute('role', 'tooltip');
+    peek.hidden = true;
+    const peekHead = h('b');
+    const peekSub = h('span');
+    const peekPic = h('div', 'pic');
+    peek.append(peekHead, peekSub, peekPic);
+    layer.append(peek);
+    let peekAt = null;
+    let peekTimer = 0;
+    const showPeek = () => {
+      const now = current();
+      const b = now ?? builds().at(-1) ?? null;
+      peekHead.textContent = b ? (b.title || `Build ${b.n}`) : 'No build yet';
+      peekSub.textContent = now ? statusLine(now) : status.getAttribute('aria-label') ?? '';
+      const drawing = b?.drawn ?? null;
+      if (drawing?.html && drawing.at !== peekAt) { peekAt = drawing.at; mountDrawn(peekPic, drawing.html).then(placePeek); }
+      if (!drawing?.html) { peekPic.textContent = ''; peekAt = null; }
+      peek.hidden = false;
+      placePeek();
+    };
+    function placePeek() {
+      if (peek.hidden) return;
+      const r = status.getBoundingClientRect();
+      const t = peek.getBoundingClientRect();
+      const left = Math.min(Math.max(8, r.left + r.width / 2 - t.width / 2), innerWidth - t.width - 8);
+      Object.assign(peek.style, { left: `${Math.round(left)}px`, top: `${Math.round(Math.max(8, r.top - t.height - 10))}px` });
+    }
+    status.addEventListener('pointerenter', () => { if (matchMedia('(hover: hover)').matches) { clearTimeout(peekTimer); peekTimer = setTimeout(showPeek, 280); } });
+    status.addEventListener('pointerleave', () => { clearTimeout(peekTimer); peek.hidden = true; });
+    status.addEventListener('pointerdown', () => { clearTimeout(peekTimer); peek.hidden = true; });
+    status.addEventListener('focus', () => { if (status.matches(':focus-visible')) showPeek(); });
+    status.addEventListener('blur', () => { peek.hidden = true; });
 
     // ------------------------------------------------------------- Pieces
 
     const pieces = h('aside', 'marble-build-pieces');
     pieces.setAttribute('aria-label', 'Pieces');
     pieces.hidden = true;
-    layer.append(pieces);
     let piecesOpen = false;
     let piecesCache = null;
     let suggested = null;
@@ -1258,6 +1394,7 @@
     piecesClose.innerHTML = ICON.close;
     piecesClose.setAttribute('aria-label', 'Close Pieces');
     piecesClose.addEventListener('click', () => setSide('none'));
+    addView('pieces', pieces);
     piecesHead.append(piecesClose);
     const find = h('label', 'marble-build-find');
     find.innerHTML = ICON.search;
@@ -1383,120 +1520,53 @@
     };
     // ------------------------------------------------------- the right side
     //
-    // Pieces and the margin (build-margin.js) take the right side where the
-    // chat was, one at a time and never with the chat. Which has it is one
-    // value, pieces, comments or none, kept per app in this browser, so the
-    // rule that only one has it cannot be broken by what is stored. Docked,
-    // it narrows the page the way the docked chat does (agent-ui.js dock());
-    // on a phone it is a sheet from the foot and docks nothing.
+    // Marks (build-margin.js), Pieces and History are views of the chat's
+    // own sidebar (agent-ui.js addView): the same edge, width, resize, pinned
+    // or floating card, and motion as the chat, and one of them at a time,
+    // the chat among them. Which is showing is the drawer's; the side named
+    // here is read from it, and the last one shown is kept per app in this
+    // browser and shown again on the next visit.
+    const VIEW_OF = { comments: 'marks', pieces: 'pieces', history: 'history' };
+    const SIDE_OF = { marks: 'comments', pieces: 'pieces', history: 'history' };
     const SIDE_KEY = `marble-build:side:${app}`;
-    const SIDES = new Set(['pieces', 'comments']);
     let side = 'none';
-    // Whether the side took the place of the pinned chat, so putting the side
-    // away gives the chat its place back.
-    let tookChat = false;
-    // Hide everything (⌘\) takes the side away with the bar, and bringing the
-    // bar back brings it back.
-    const frameOff = () => window.marbleShell?.layout?.frame === false;
-    let frameHidden = frameOff();
-    const sheet = matchMedia('(max-width: 620px), (hover: none) and (pointer: coarse)');
-    // The side slides in from the edge and the app gives way beside it, in
-    // the one motion and the one time; and the same out. The motion is on
-    // the root only while it moves, as the shell's own docking does, so a
-    // margin never trails anything else.
-    let settling = 0;
-    let docked = false;
-    const dockSide = ({ animate = true } = {}) => {
-      const shown = side !== 'none' && !frameHidden;
-      const on = shown && !sheet.matches;
-      let style = document.getElementById('marble-build-dock');
-      const moving = animate && on !== docked && !matchMedia('(prefers-reduced-motion: reduce)').matches;
-      docked = on;
-      clearTimeout(settling);
-      if (!shown && !moving) { style?.remove(); return; }
-      if (!style) {
-        style = document.createElement('style');
-        style.id = 'marble-build-dock';
-        style.setAttribute(TRANSIENT, '');
-        document.head.append(style);
-      }
-      // Said as well as taken, so chrome that centres on the page (Describe's
-      // toolbar) centres on what is left of it.
-      // As a sheet it docks nothing, and says how tall it is so Describe's
-      // toolbar stands above it (the margin lowers it: --marble-build-sheet).
-      const write = (motion) => {
-        const ease = motion ? ` transition: margin 340ms ${EASE} !important;` : '';
-        style.textContent = on
-          ? `html { margin-inline-end: ${SIDE_W}px !important; --marble-dock-right: ${SIDE_W}px;${ease} }`
-          : shown ? 'html { --marble-dock-bottom: var(--marble-build-sheet, min(62vh, 520px)); }'
-          : `html { margin-inline-end: 0px !important;${ease} }`;
-      };
-      write(moving);
-      if (moving) settling = setTimeout(() => { if (shown) write(false); else style.remove(); }, 400);
-    };
-    function setSide(next, { remember = true, byChat = false, reveal = true, animate = true } = {}) {
-      const wanted = SIDES.has(next) ? next : 'none';
-      // The marks are read in the margin while Describe is on; asking for it
-      // turns Describe on first.
-      if (wanted === 'comments' && !M.describing) M.setDescribing(true);
-      // The side lives in the shell's frame: asking for it with the frame
-      // hidden brings the frame back, as reaching for the chat does.
-      if (wanted !== 'none' && frameHidden && reveal && window.marbleShell) {
-        frameHidden = false;
-        window.marbleShell.setOpen(true);
-      }
+    const frameHidden = false;
+    const readSide = () => (drawer?.isOpen ? SIDE_OF[drawer.viewName] ?? 'none' : 'none');
+    function syncSide() {
       const was = side;
-      side = wanted;
-      if (remember) { try { localStorage.setItem(SIDE_KEY, side); } catch { /* private mode */ } }
+      side = readSide();
       piecesOpen = side === 'pieces';
-      slide(pieces, piecesOpen && !frameHidden);
-      piecesButton.setAttribute('aria-pressed', String(piecesOpen));
-      M.setMargin?.(side === 'comments' && !frameHidden);
-      if (side !== 'none' && side !== was) {
-        raise();
-        // The chat gives the side up: unpinned in the shell, closed without.
-        const shell = window.marbleShell;
-        if (shell?.layout?.pinChat) { tookChat = true; shell.setChat(false); }
-        else if (!shell) document.querySelector('marble-agent-drawer')?.close?.();
-        if (piecesOpen) { piecesCache = null; drawPieces(); }
-      }
-      if (side === 'none' && was !== 'none') {
-        if (tookChat && !byChat && remember) window.marbleShell?.setChat(true);
-        tookChat = false;
-      }
-      dockSide({ animate: animate && remember });
-      dispatchEvent(new CustomEvent('marble-build:side', { detail: { side, hidden: frameHidden } }));
-      placeFound();
+      M.setMargin?.(side === 'comments');
+      if (drawer?.isOpen) { try { localStorage.setItem(SIDE_KEY, side); } catch { /* private mode */ } }
+      if (side === was) return;
+      // The marks are read beside the app while Describe is on.
+      if (side === 'comments' && !M.describing) M.setDescribing(true);
+      if (piecesOpen) { piecesCache = null; drawPieces(); }
+      dispatchEvent(new CustomEvent('marble-build:side', { detail: { side, hidden: false } }));
+    }
+    addEventListener('marble-agent:view', syncSide);
+    /** Show a side, or put the sidebar away ('none'). */
+    function setSide(next) {
+      const view = VIEW_OF[next];
+      if (!drawer) return;
+      if (!view) { if (side !== 'none') drawer.close(); return; }
+      drawer.showView(view);
+      if (!drawer.isOpen) drawer.open();
+      syncSide();
     }
     /** A button's press: shows its side, or puts it away when it is showing. */
-    const toggleSide = (which) => setSide(side === which && !frameHidden ? 'none' : which);
-    piecesButton.addEventListener('click', () => toggleSide('pieces'));
+    const toggleSide = (which) => { drawer?.toggleView(VIEW_OF[which]); syncSide(); };
     addEventListener('marble-build:toggle-pieces', () => toggleSide('pieces'));
     addEventListener('marble-build:toggle-comments', () => toggleSide('comments'));
-    sheet.addEventListener('change', dockSide);
-    addEventListener('marble-shell:layout', (event) => {
-      const layout = event.detail ?? {};
-      // The chat pinned, or brought out on purpose (its button, ⌘J), takes
-      // the side back.
-      if ((layout.pinChat || layout.focusChat) && side !== 'none') setSide('none', { byChat: true, animate: false });
-      const hidden = layout.frame === false;
-      if (hidden !== frameHidden) {
-        frameHidden = hidden;
-        slide(pieces, piecesOpen && !frameHidden);
-        M.setMargin?.(side === 'comments' && !frameHidden);
-        dockSide();
-        dispatchEvent(new CustomEvent('marble-build:side', { detail: { side, hidden: frameHidden } }));
-      }
-    });
-    /** The side this app had last time, unless the chat has it now. */
+    addEventListener('marble-build:toggle-history', () => toggleSide('history'));
+    /** The view this app had last time, in the sidebar, out or not. */
     const restoreSide = () => {
       let kept = 'none';
-      frameHidden = frameOff();
       try { kept = localStorage.getItem(SIDE_KEY) ?? 'none'; } catch { /* private mode */ }
-      if (window.marbleShell?.layout?.pinChat) kept = 'none';
       if (kept === 'comments' && !M.describing) kept = 'none';
-      if (SIDES.has(kept)) setSide(kept, { remember: false, reveal: false });
-      else dispatchEvent(new CustomEvent('marble-build:side', { detail: { side: 'none', hidden: frameHidden } }));
+      if (VIEW_OF[kept] && drawer) drawer.showView(VIEW_OF[kept]);
+      syncSide();
+      dispatchEvent(new CustomEvent('marble-build:side', { detail: { side, hidden: false } }));
     };
 
     /** A piece pulled out of the gallery and dropped where it should go. */
@@ -1548,7 +1618,7 @@
     const paintDescribing = () => {
       const on = M.describing;
       handle.toggleAttribute('data-away', on);
-      if (!on) { closePop(); closeThread(); sel.hidden = true; if (side === 'comments') setSide('none'); }
+      if (!on) { closePop(); closeThread(); sel.hidden = true; if (side === 'comments') { drawer?.showView('chat'); syncSide(); } }
       placeHandle();
     };
     addEventListener('marble-marks:describing', paintDescribing);
@@ -1596,8 +1666,8 @@
       framing = requestAnimationFrame(() => {
         framing = 0;
         placeThread();
-        placeFound();
         placeHandle();
+        placeLit();
         if (open) hangOver(open.node, open.button);
       });
     };
@@ -1650,6 +1720,8 @@
       get side() { return side; },
       get sideHidden() { return frameHidden; },
       setSide,
+      addView,
+      drawer,
       drawLines,
       comment: postComment,
       takeOffer,
@@ -1662,6 +1734,9 @@
       },
       archive,
       mountDrawn,
+      statusCard,
+      light,
+      unlight,
       slide,
       growing,
       /** A tip that says more than a control's own words, after a rest. */
@@ -1675,6 +1750,7 @@
       },
       current,
       act,
+      view,
       say,
     };
     return true;

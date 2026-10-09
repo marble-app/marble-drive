@@ -181,20 +181,46 @@
       transition: opacity 200ms ${EASE}, scale 260ms ${EASE}, visibility 0s;
     }
     .marble-marks-note[data-state="sent"] { opacity: .62; }
+    /* Being written, it is a box to type in: the composer's ring. Left, it
+       is a note: paper on the app. Sent, it folds into the pin of the comment
+       it becomes. */
+    .marble-marks-layer[data-build] .marble-marks-note[data-writing] {
+      border-color: var(--accent, #9bb6cf);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #9bb6cf) 30%, transparent), 0 8px 22px rgba(0, 0, 0, .12);
+    }
+    .marble-marks-note[data-sending] { opacity: 0; scale: .1; pointer-events: none; transition: opacity 200ms ${EASE}, scale 240ms ${EASE}; }
+    .marble-marks-note-act {
+      display: none; align-items: center; gap: 4px; padding: 0 6px 6px 8px;
+    }
+    .marble-marks-layer[data-build] .marble-marks-note:is([data-writing], :hover, :focus-within) .marble-marks-note-act { display: flex; }
+    .marble-marks-note-act .sp { flex: 1; }
+    .marble-marks-note-act button {
+      all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 8px;
+      font: 500 12px/1 var(--ui-font, system-ui, sans-serif); cursor: pointer; color: color-mix(in srgb, var(--marks-ink) 70%, transparent);
+    }
+    .marble-marks-note-act button:hover { background: color-mix(in srgb, var(--marks-ink) 7%, transparent); color: var(--marks-ink); }
+    .marble-marks-note-act button:focus-visible { outline: 2px solid var(--marks-mark); outline-offset: 1px; }
+    .marble-marks-note-act .send { background: var(--marks-ink); color: var(--marks-paper); }
+    .marble-marks-note-act .send:hover { background: color-mix(in srgb, var(--marks-ink) 84%, var(--marks-paper)); color: var(--marks-paper); }
+    .marble-marks-note-act .send[aria-disabled="true"] { opacity: .35; cursor: default; }
+    .marble-marks-note-act kbd { font: inherit; opacity: .6; }
+    .marble-marks-note-act svg { width: 13px; height: 13px; }
+    /* The top edge is the grip: no strip and no rule drawn on it, just the
+       hand when it is over it, and the × at its end. */
     .marble-marks-note-grip {
-      display: flex; align-items: center; gap: 4px; height: 16px; padding: 0 4px 0 7px;
-      background: color-mix(in srgb, var(--marks-mark) 12%, transparent);
+      display: flex; align-items: center; justify-content: flex-end; height: 18px; padding: 3px 4px 0 7px;
+      margin-bottom: -10px; position: relative; z-index: 1;
       cursor: grab; touch-action: none;
     }
     .marble-marks-note[data-dragging] .marble-marks-note-grip { cursor: grabbing; }
-    .marble-marks-note-dots { flex: 1; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--marks-mark) 40%, transparent); }
+    .marble-marks-note-dots { display: none; }
     .marble-marks-note-close {
-      all: unset; width: 13px; height: 13px; border-radius: 50%; display: grid; place-items: center;
-      cursor: pointer; font-size: 11px; line-height: 1; color: color-mix(in srgb, var(--marks-ink) 60%, transparent);
+      all: unset; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+      cursor: pointer; font-size: 13px; line-height: 1; color: color-mix(in srgb, var(--marks-ink) 55%, transparent);
     }
     .marble-marks-note-close:hover { background: color-mix(in srgb, var(--marks-ink) 10%, transparent); }
     .marble-marks-note-body {
-      display: block; padding: 8px 11px 9px; font-size: 13px; line-height: 1.45; min-height: 1.45em;
+      display: block; padding: 8px 26px 9px 11px; font-size: 13px; line-height: 1.45; min-height: 1.45em;
       outline: none; white-space: pre-wrap; overflow-wrap: anywhere;
     }
     /* What was pasted in: pictures as pictures, a part of a page as the part,
@@ -220,7 +246,8 @@
       position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; font-size: 13px;
       background: color-mix(in srgb, var(--marks-paper) 88%, transparent); opacity: 0; transition: opacity 120ms ${EASE};
     }
-    .marble-marks-att:hover .marble-marks-note-close, .marble-marks-att .marble-marks-note-close:focus-visible { opacity: 1; }
+    .marble-marks-att:hover .marble-marks-note-close, .marble-marks-att .marble-marks-note-close:focus-visible,
+    .marble-marks-note:focus-within .marble-marks-att .marble-marks-note-close { opacity: 1; }
     @media (hover: none) { .marble-marks-att .marble-marks-note-close { opacity: 1; } }
     .marble-marks-note-body:empty::before { content: attr(data-placeholder); color: color-mix(in srgb, var(--marks-ink) 38%, transparent); }
 
@@ -586,10 +613,8 @@
       sketch: button('sketch', 'Sketch', GLYPHS.sketch, { pressed: false, key: 'P' }),
       text: button('text', 'Note', GLYPHS.text, { pressed: false, key: 'T' }),
     };
-    if (building) {
-      tools.comment = button('comment', 'Comment', GLYPHS.comment, { pressed: false, key: 'C' });
-      try { if (!localStorage.getItem('marble-build:commented')) tools.comment.dataset.new = ''; } catch { /* private mode */ }
-    }
+    // Build mode has no Comment tool: a note is the one thing to write, and
+    // it is kept as a note or sent (⌘↵) to be answered or made now.
     el('span', 'marble-marks-sep', bar);
     // Build mode drops Explore from the bar: Build is what the marks are for.
     const exploreButton = button('explore', 'Explore variations', GLYPHS.explore, { key: 'E' });
@@ -1107,6 +1132,7 @@
         out.text = mark.text;
         if (mark.images?.length) out.images = mark.images.filter((image) => image.name).map(({ name, w, h }) => ({ name, w, h }));
         if (mark.clips?.length) out.clips = mark.clips.map(({ html, text }) => ({ html, text }));
+        if (mark.ids?.length) out.ids = [...mark.ids];
       }
       if (mark.type === 'stroke') {
         Object.assign(out, { kind: mark.kind, ids: mark.ids, from: mark.from, to: mark.to, parts: mark.parts.map((part) => ({ pairs: part.pairs })) });
@@ -1236,6 +1262,36 @@
       body.dataset.placeholder = building ? 'Say what you want here, or paste a picture…' : 'Say what you want here…';
       body.textContent = mark.text ?? '';
       const att = el('div', 'marble-marks-note-att', node);
+      // Build mode: keep it (leave it, the default) or send it now (⌘↵), and,
+      // written on a selection, keep that part as a piece.
+      let sendButton = null;
+      if (building) {
+        const act = el('div', 'marble-marks-note-act', node);
+        if (mark.ids?.length) {
+          const piece = document.createElement('button');
+          piece.type = 'button';
+          piece.className = 'piece';
+          piece.setAttribute(TRANSIENT, '');
+          piece.textContent = 'Save as piece';
+          piece.title = 'Keep this part to put on other apps';
+          piece.addEventListener('pointerdown', (event) => event.preventDefault());
+          piece.addEventListener('click', () => dispatchEvent(new CustomEvent('marble-marks:save-piece', { detail: { ids: [...mark.ids] } })));
+          act.append(piece);
+        }
+        el('span', 'sp', act);
+        sendButton = document.createElement('button');
+        sendButton.type = 'button';
+        sendButton.className = 'send';
+        sendButton.setAttribute(TRANSIENT, '');
+        sendButton.innerHTML = `Send <kbd ${TRANSIENT}>${MOD}↵</kbd>`;
+        sendButton.title = 'Ask it, or have it changed now';
+        sendButton.setAttribute('aria-label', 'Send: ask it, or have it changed now');
+        // A press here is not a blur that keeps the note.
+        sendButton.addEventListener('pointerdown', (event) => event.preventDefault());
+        sendButton.addEventListener('click', () => sendNote(mark));
+        act.append(sendButton);
+      }
+      mark.paintSend = () => sendButton?.setAttribute('aria-disabled', String(!hasWords(mark)));
       const foot = el('div', 'marble-marks-note-foot', node);
       foot.hidden = true;
       mark.el = node;
@@ -1258,8 +1314,13 @@
       });
       body.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') { event.stopPropagation(); body.blur(); }
+        // Enter is a new line; ⌘↵ sends it.
+        if (building && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); sendNote(mark); }
       });
       body.addEventListener('paste', (event) => pasteInto(mark, event));
+      body.addEventListener('input', () => mark.paintSend?.());
+      node.addEventListener('pointerenter', () => { hovered = mark; });
+      node.addEventListener('pointerleave', () => { if (hovered === mark) hovered = null; });
       body.addEventListener('focus', () => {
         node.setAttribute('data-writing', '');
         // Writing in a note that was already there is the Note tool's one
@@ -1269,6 +1330,11 @@
       // An empty note is a slip of the hand, not a mark.
       body.addEventListener('blur', () => {
         clearTimeout(typed);
+        // Written on a selection: what was picked is let go with it.
+        if (mark.fromSelection) {
+          delete mark.fromSelection;
+          if (area.length) { area = []; syncSelection(); paintHalos(); syncBrief(); }
+        }
         mark.text = body.innerText.trim();
         // Left: with the margin open it folds into its pin from here.
         node.removeAttribute('data-writing');
@@ -1279,9 +1345,39 @@
       // The × is not the grip: a press on it is a press, not a drag.
       grip.addEventListener('pointerdown', (event) => { if (!event.target.closest('.marble-marks-note-close')) startMove(event, [mark], node); });
       paintState(mark);
+      mark.paintSend();
       if (focus) { node.setAttribute('data-writing', ''); body.focus(); }
       return mark;
     };
+
+    // ---------------------------------------------------------- sending
+    //
+    // ⌘↵ in a note, or over one, or its Send: the note is sent to be
+    // answered or made now (build-mode.js asks the host; server/build: the
+    // note becomes a comment, which the app answers, or which a build makes
+    // at once). It folds into the pin of that comment as it goes.
+    const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
+    const senders = new Set();
+    let hovered = null;
+    const sendNote = (mark) => {
+      if (!building || !marks.includes(mark) || mark.type !== 'note' || mark.state !== 'waiting') return;
+      mark.text = mark.body?.innerText.trim() ?? mark.text;
+      if (!hasWords(mark) || mark.uploading) return;
+      delete mark.local;
+      keep(mark);
+      mark.el?.setAttribute('data-sending', '');
+      mark.el?.removeAttribute('data-writing');
+      mark.body?.blur();
+      for (const fn of senders) fn(serial(mark));
+    };
+    addEventListener('keydown', (event) => {
+      if (!building || !describing || event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
+      if (typing(event.composedPath()[0])) return;
+      if (!hovered) return;
+      event.preventDefault();
+      event.stopPropagation();
+      sendNote(hovered);
+    }, true);
 
     // ----------------------------------------------------------- pasting
     //
@@ -1294,8 +1390,13 @@
       const box = mark.att;
       if (!box) return;
       box.replaceChildren();
+      // By what it is, not by the object it was drawn from: the host's copy
+      // of the list may have replaced that object since.
       const off = (list, item) => {
-        const at = mark[list]?.indexOf(item) ?? -1;
+        const same = list === 'images'
+          ? (one) => one === item || (item.name && one.name === item.name)
+          : (one) => one === item || one.html === item.html;
+        const at = mark[list]?.findIndex(same) ?? -1;
         if (at < 0) return;
         mark[list].splice(at, 1);
         drawAttachments(mark);
@@ -1375,6 +1476,7 @@
       }
       mark.uploading -= 1;
       drawAttachments(mark);
+      mark.paintSend?.();
       if (marks.includes(mark) && hasWords(mark)) { delete mark.local; keep(mark); }
       else if (marks.includes(mark) && !mark.uploading && document.activeElement !== mark.body) removeMark(mark);
       scheduleRepaint();
@@ -1424,7 +1526,7 @@
       if (text) document.execCommand('insertText', false, text);
     };
 
-    const placeNote = (x, y, { text = '', anchor: given = null } = {}) => {
+    const placeNote = (x, y, { text = '', anchor: given = null, ids = null } = {}) => {
       const anchor = given ?? elementAt(x, y);
       if (!anchor) return null;
       const box = anchor.getBoundingClientRect();
@@ -1438,6 +1540,7 @@
         state: 'waiting',
         // Not kept until there are words in it.
         local: !text,
+        ...(ids?.length ? { ids: [...ids] } : {}),
         u: box.width ? (x - box.left) / box.width : 0,
         v: box.height ? (y - box.top) / box.height : 0,
         text,
@@ -1777,6 +1880,7 @@
       if (given.type === 'note') {
         mark.kind = 'text';
         mark.text = given.text ?? '';
+        mark.ids = given.ids ?? [];
         const same = (a, b) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
         const pictures = (given.images ?? []).map(({ name, w, h }) => ({ name, w, h }));
         const changed = !same((mark.images ?? []).filter((i) => i.name).map(({ name, w, h }) => ({ name, w, h })), pictures) || !same(mark.clips, given.clips);
@@ -1900,7 +2004,10 @@
         id: 'marks-describe',
         label: describing ? 'Leave Describe' : (count ? `Describe · ${count} kept` : 'Describe a change'),
       });
-      clearButton.hidden = count === 0 && !(fromUs && mine.length);
+      // Always there, so the bar never closes up round a gap: with nothing it
+      // could take off, it is shown and dimmed.
+      clearButton.disabled = count === 0 && !(fromUs && mine.length);
+      clearButton.setAttribute('aria-disabled', String(clearButton.disabled));
       exploreButton.disabled = !(fromUs && mine.length);
       for (const fn of watchers) fn();
       update({ id: 'ask', label: count && fromUs ? 'Ask about the sketch' : 'Ask here' });
@@ -1916,7 +2023,8 @@
       // stops at its edge, so the chat in it can be read, typed in and
       // scrolled with a tool still on.
       const side = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.panel');
-      const pinned = side?.dataset.open === 'true' && side?.dataset.pinned === 'true' ? side.getBoundingClientRect() : null;
+      const beside = side?.dataset.open === 'true' && (side?.dataset.pinned === 'true' || (side?.dataset.view ?? 'chat') !== 'chat');
+      const pinned = beside ? side.getBoundingClientRect() : null;
       overlay.style.right = pinned?.width ? `${Math.max(0, Math.round(innerWidth - pinned.left))}px` : '';
       const r = trayEl()?.getBoundingClientRect();
       if (!r?.width || !r?.height) { overlay.style.clipPath = ''; return; }
@@ -2049,7 +2157,7 @@
       if (!building || mode !== 'select' || event.button !== 0) return;
       const mark = marks.find((m) => m.el && m.el.contains(event.target));
       if (!mark) return;
-      if (event.target.closest('.marble-marks-note-close')) return;
+      if (event.target.closest('.marble-marks-note-close, .marble-marks-note-act, [data-writing]')) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.shiftKey) {
@@ -2249,7 +2357,7 @@
     const typing = (node) => node?.isContentEditable || ['INPUT', 'TEXTAREA'].includes(node?.tagName);
     // One key per tool while describing, and ⌘⇧D in and out from anywhere —
     // a chord, so it is heard even mid-sentence in a composer.
-    const KEYS = building ? { v: null, a: 'select', p: 'sketch', t: 'text', c: 'comment' } : { v: null, a: 'select', p: 'sketch', t: 'text' };
+    const KEYS = building ? { v: null, a: 'select', p: 'sketch', t: 'text', n: 'text' } : { v: null, a: 'select', p: 'sketch', t: 'text' };
     addEventListener('keydown', (event) => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
         event.preventDefault();
@@ -2338,7 +2446,9 @@
     // A fresh text selection is the person choosing something else; so is any
     // other selection this layer did not make.
     addEventListener('marble:agent-context', () => {
-      if (handling || !fromUs) return;
+      // In Build mode what Select picked is the marks layer's own, never the
+      // page's selection, so a caret moving in a note does not let it go.
+      if (building || handling || !fromUs) return;
       const now = agent.context().selection;
       if (now.length === mine.length && now.every((id, i) => id === mine[i])) return;
       fromUs = false;
@@ -2353,12 +2463,14 @@
     const panel = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.panel');
     if (panel) {
       new MutationObserver(() => {
-        const covered = panel.dataset.open === 'true' && panel.dataset.pinned !== 'true';
+        // Only the chat covers what the tools act on: the sidebar's other views
+        // (Build mode's marks, Pieces, History) are read beside the marking.
+        const covered = panel.dataset.open === 'true' && panel.dataset.pinned !== 'true' && (panel.dataset.view ?? 'chat') === 'chat';
         // A hidden bar is for the drawer covering the page. Leaving the mode is the
         // layer's own fade, which a display:none here would cut short.
         bar.hidden = covered;
         if (covered && mode) setMode(null);
-      }).observe(panel, { attributes: true, attributeFilter: ['data-open', 'data-pinned'] });
+      }).observe(panel, { attributes: true, attributeFilter: ['data-open', 'data-pinned', 'data-view'] });
     }
 
     // The rest of the app stays usable under a tool. The card the brief is
@@ -2367,7 +2479,7 @@
     dispatchEvent(new CustomEvent('marble-callout:raise'));
     if (panel) {
       new ResizeObserver(() => { if (mode) punch(); }).observe(panel);
-      new MutationObserver(() => { if (mode) punch(); }).observe(panel, { attributes: true, attributeFilter: ['data-open', 'data-pinned', 'style'] });
+      new MutationObserver(() => { if (mode) punch(); }).observe(panel, { attributes: true, attributeFilter: ['data-open', 'data-pinned', 'data-view', 'style'] });
     }
 
     const tray = trayEl();
@@ -2472,6 +2584,24 @@
         if (!describing) setDescribing(true);
         return placePiece(piece, at)?.id ?? null;
       },
+      /** The box to write in, under what Select picked: a note on those
+       *  parts, kept or sent like any other. One at a time: an empty one left
+       *  from before goes. */
+      prompt: (ids, span) => {
+        // An empty one left from before goes; one with words in it stays.
+        for (const old of marks.filter((m) => m.type === 'note' && m.local && m.fromSelection && !hasWords(m))) removeMark(old, { undo: false });
+        if (marks.some((m) => m.type === 'note' && m.fromSelection && m.body && m.body === document.activeElement)) return null;
+        const anchor = ids?.[0] ? document.querySelector(`[data-marble-id="${CSS.escape(ids[0])}"]`) : null;
+        if (!anchor || !span) return null;
+        const floor = (bar.hidden ? innerHeight : bar.getBoundingClientRect().top) - 10;
+        const below = span.top + span.height + 10;
+        const y = below + 96 > floor ? Math.max(8, span.top - 106) : below;
+        const mark = placeNote(Math.max(8, span.left), y, { anchor, ids });
+        if (mark) mark.fromSelection = true;
+        return mark?.id ?? null;
+      },
+      /** A note sent (⌘↵): build-mode.js asks the host. */
+      onSend: (fn) => { senders.add(fn); return () => senders.delete(fn); },
       /** A comment's pin, taken off when its thread was never started. */
       dropDraft: (id) => { const mark = marks.find((m) => m.id === id && m.local); if (mark) dropMark(mark); },
       /** Kept now (a comment once its first line is posted). */

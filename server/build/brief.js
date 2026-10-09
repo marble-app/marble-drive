@@ -34,9 +34,13 @@ const near = (index, id) => {
 export function phraseOf(mark, { index = null, piece = null, imagePath = null } = {}) {
   const on = mark.anchorId ? `#${mark.anchorId}${near(index, mark.anchorId)}` : 'the page';
   if (mark.type === 'note') {
+    const also = (mark.ids ?? []).filter((id) => id !== mark.anchorId);
+    const where = also.length ? `${on} (with ${also.map((id) => `#${id}`).join(', ')})` : on;
     const head = mark.first
-      ? `The prompt the app was made from, on ${on}: "${mark.text}"`
-      : mark.text ? `A note on ${on}: "${mark.text}"` : `A note on ${on}, with nothing written on it`;
+      ? `The prompt the app was made from, on ${where}: "${mark.text}"`
+      : mark.sent
+        ? `Sent by the person to be made now, on ${where}: "${mark.text}". If it only asks a question, change nothing and answer it in build_plan's \`settled\` for comment ${mark.sent}; if it asks for a change, make it, and say what you did there.`
+        : mark.text ? `A note on ${where}: "${mark.text}"` : `A note on ${where}, with nothing written on it`;
     const parts = [head];
     const pictures = (mark.images ?? []).map((image) => imagePath?.(image.name)).filter(Boolean);
     if (pictures.length) {

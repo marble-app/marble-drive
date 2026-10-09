@@ -91,6 +91,9 @@ export function cleanMark(raw) {
   };
   if (raw.first === true) mark.first = true;
   if (raw.held === true) mark.held = true;
+  // Sent to be made now (a note sent with ⌘↵ that asks for a change): the
+  // next build to start takes it first, and one starts for it at once.
+  if (raw.now === true) mark.now = true;
   // Put away: off the app and out of the margin's list, kept in its Archived
   // list to bring back. A built mark and a resolved comment are archived by
   // the host; anything else by its own press.
@@ -108,6 +111,11 @@ export function cleanMark(raw) {
       .map((clip) => ({ html: str(clip?.html, CLIP_HTML_MAX), text: str(clip?.text, 160).trim() }))
       .filter((clip) => clip.html.trim());
     if (clips.length) mark.clips = clips;
+    // The parts it was written about, when it was written on a selection.
+    const about = ids(raw.ids);
+    if (about.length) mark.ids = about;
+    // Sent: the comment it became.
+    if (raw.sent) mark.sent = idOf(raw.sent);
   }
   if (raw.type === 'stroke') {
     mark.kind = STROKE_KINDS.has(raw.kind) ? raw.kind : 'ink';
@@ -124,6 +132,8 @@ export function cleanMark(raw) {
   if (raw.type === 'comment') {
     mark.thread = (Array.isArray(raw.thread) ? raw.thread : []).slice(-THREAD_MAX).map(cleanLine).filter((line) => line.text || line.pending);
     mark.resolved = raw.resolved === true;
+    // A comment a sent note became, and the note a build makes it from.
+    if (raw.forNote) mark.forNote = idOf(raw.forNote);
   }
   if (raw.type === 'piece') {
     const piece = raw.piece ?? {};

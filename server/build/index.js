@@ -9,6 +9,8 @@
 // every tab of the app hears each change on `build:<path>`.
 
 import { parsePath, splitPath } from '../paths.js';
+import { LOG_MAX, linesOf, partNow, stepOf } from './steps.js';
+import { timelineOf } from './history.js';
 import { indexOf } from '../agent/source.js';
 import { buildBrief, resumeBrief } from './brief.js';
 import { outlineOf, pieceFrom, previewOf } from './pieces.js';
@@ -52,6 +54,9 @@ function publicState(state, current = null) {
     hasEnd: Boolean(b.end),
     drawn: b.drawn && (b.status === 'running' || b.status === 'paused' || b.id === lastEnded) ? b.drawn : null,
     hasDrawn: Boolean(b.drawn),
+    // Its steps, by stage, on the same rule as its drawing.
+    log: b.log && (b.status === 'running' || b.status === 'paused' || b.id === lastEnded) ? b.log : null,
+    hasLog: Boolean(b.log?.length),
   }));
   const first = state.builds[0];
   return {
@@ -67,7 +72,7 @@ function publicState(state, current = null) {
   };
 }
 
-export function createBuilds({ buildStore, store, runner, agentStore, hub, startConversation, defaultProvider, putDocument, moveDocument = null, freePath = null, reply = null, suggest = null, driveRegions = null, log = console }) {
+export function createBuilds({ buildStore, store, oplog = null, runner, agentStore, hub, startConversation, defaultProvider, putDocument, moveDocument = null, freePath = null, reply = null, suggest = null, driveRegions = null, log = console }) {
   // conversation id → document path, for the builds running or paused now.
   const byConversation = new Map();
   // turn id → resolve(), for a stop waiting on its turn to end.
@@ -90,6 +95,16 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
   async function read(docPath) {
     const state = await buildStore.read(docPath);
     return publicState(state, await currentSha(docPath));
+  }
+
+  // Steps come many a second; the tabs hear them at most every 800ms.
+  const later = new Map();
+  function soon(docPath) {
+    if (later.has(docPath)) return;
+    later.set(docPath, setTimeout(async () => {
+      later.delete(docPath);
+      await announce(docPath, await buildStore.read(docPath)).catch(() => {});
+    }, 800));
   }
 
   /** One change to an app's state, said to every tab of it. */
@@ -119,11 +134,18 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
         else delete mark.held;
         if (prior.archived === undefined) delete mark.archived;
         else mark.archived = prior.archived;
+        // Set on the host by sending, never by the page.
+        for (const key of ['now', 'sent', 'forNote']) {
+          if (prior[key] !== undefined) mark[key] = prior[key];
+          else delete mark[key];
+        }
         if (prior.type === 'comment') { mark.thread = prior.thread; mark.resolved = Boolean(prior.resolved); }
         state.marks[at] = mark;
       } else {
         if (mark.type === 'comment') { mark.thread = mark.thread.filter((line) => line.who === 'you'); mark.resolved = false; }
         delete mark.held;
+        delete mark.now;
+        delete mark.forNote;
         mark.state = 'waiting';
         mark.build = null;
         state.marks.push(mark);
@@ -189,10 +211,18 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
   }
 
   /** A build's last drawing, for a build picked in Builds. */
+  /** History: the builds and the person's own edits, newest first. */
+  async function history(docPath) {
+    const state = await read(docPath);
+    const lines = oplog ? await oplog.since(docPath, { limit: 4000 }).catch(() => []) : [];
+    const checkpoints = store.history ? await store.history(docPath).catch(() => []) : [];
+    return { entries: timelineOf({ builds: state.builds, lines, checkpoints }) };
+  }
+
   async function drawnOf(docPath, id) {
     const state = await buildStore.read(docPath);
     const build = find(state, id);
-    return { drawn: build.drawn ?? null };
+    return { drawn: build.drawn ?? null, log: build.log ?? [] };
   }
 
   // ----------------------------------------------------------------- builds
@@ -273,7 +303,8 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
     try {
       const conversation = await conversationFor(state, docPath);
       const taken = state.marks.filter((m) => build.marks.includes(m.id));
-      const context = state.marks.filter((m) => m.type === 'comment' && m.state === 'waiting' && !m.resolved && !m.archived);
+      // The comment a sent note became is that note's, not context.
+      const context = state.marks.filter((m) => m.type === 'comment' && m.state === 'waiting' && !m.resolved && !m.archived && !m.forNote);
       const index = indexOf(source);
       const prompt = buildBrief({
         path: docPath,
@@ -466,6 +497,29 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
       if (result) await announce(docPath, state);
       return;
     }
+    if (event.type === 'tool.call' || event.type === 'tool.result') {
+      // A step of the build, under the stage being made: kept with it, and
+      // said to every tab a beat later, with whatever else came meanwhile.
+      const { state, result } = await buildStore.update(docPath, (s) => {
+        const b = s.builds.find((x) => (x.turns ?? [x.turn]).includes(event.turn) && (x.status === 'running' || x.status === 'paused'));
+        if (!b) return false;
+        b.log ??= [];
+        if (event.type === 'tool.call') {
+          const step = stepOf(event.name, event.input ?? {}, { app: docPath });
+          if (!step) return false;
+          b.log.push({ id: String(event.callId ?? ''), at: Date.now(), part: partNow(b.plan), ...step, lines: [] });
+          if (b.log.length > LOG_MAX) b.log.splice(0, b.log.length - LOG_MAX);
+          return true;
+        }
+        const step = event.callId ? b.log.find((x) => x.id === String(event.callId)) : null;
+        if (!step) return false;
+        if (event.ok === false || event.denied) step.failed = true;
+        if (step.kind !== 'change') step.lines = linesOf(event.summary);
+        return true;
+      }).catch((err) => { log.error(`[builds] ${err.message}`); return {}; });
+      if (result) soon(docPath, state);
+      return;
+    }
     if (event.type === 'text' && event.text) {
       await buildStore.update(docPath, (s) => {
         const b = s.builds.find((x) => x.turn === event.turn);
@@ -491,6 +545,17 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
         b.endedAt = Date.now();
         // Built is done with: off the app, into the Archived list.
         for (const m of s.marks) if (m.build === b.id) { m.state = 'built'; m.archived = true; }
+        // A note sent to be made now is answered in its comment: what the
+        // build said of it, or that it is done, and the comment is put away.
+        const sentFor = new Map(s.marks.filter((m) => m.build === b.id && m.sent).map((m) => [m.sent, m.id]));
+        for (const m of s.marks) {
+          if (m.type !== 'comment' || !sentFor.has(m.id) || m.resolved) continue;
+          const said = (b.plan?.settled ?? []).find((x) => x.id === m.id)?.said;
+          m.thread = [...(m.thread ?? []).filter((line) => !line.pending), { who: 'agent', text: said || `Done in Build ${b.n}.`, at: Date.now() }];
+          m.resolved = true;
+          m.archived = true;
+        }
+        for (const m of s.marks) if (m.build === b.id) delete m.now;
         // The comments the build said it settled are answered, resolved and
         // put away, in the app's name.
         for (const { id, said } of b.plan?.settled ?? []) {
@@ -521,6 +586,8 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
     }).catch((err) => { log.error(`[builds] ${err.message}`); return {}; });
     waiters.get(event.turn)?.();
     if (state) await announce(docPath, state);
+    // Anything sent to be made now while this build ran is made next.
+    if (state && status !== 'cancelled') startNow(docPath).catch((err) => log.error(`[builds] ${err.message}`));
     if (named && moveDocument && freePath) await name(docPath, named).catch((err) => log.error(`[builds] naming failed: ${err.message}`));
   }
 
@@ -600,6 +667,80 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
       m.thread.push(said
         ? { who: 'agent', text: said.answer, at: Date.now(), ...(said.offer ? { offer: { text: said.offer, taken: null } } : {}) }
         : { who: 'agent', text: 'I could not answer just now. It is kept for the next build.', at: Date.now() });
+      return null;
+    });
+  }
+
+  /** A note sent with ⌘↵: it becomes a comment, which the app answers when
+   *  it asks something, and which a build makes, at once, when it asks for a
+   *  change. The note itself is kept, out of sight, as that build's brief. */
+  async function send(docPath, id, { client = null } = {}) {
+    const { result } = await change(docPath, (s) => {
+      const note = s.marks.find((m) => m.id === id && m.type === 'note');
+      if (!note) throw httpError(404, 'That note is gone');
+      if (note.state !== 'waiting') throw httpError(409, 'That note is in a build already');
+      if (!note.text && !note.images?.length && !note.clips?.length) throw httpError(400, 'Write something first');
+      const at = Date.now();
+      const comment = cleanMark({ id: newId('m'), type: 'comment', anchorId: note.anchorId, u: note.u, v: note.v, at });
+      comment.thread = [
+        { who: 'you', text: note.text || 'This, as pasted.', at },
+        { who: 'agent', text: '', pending: true, at },
+      ];
+      comment.forNote = note.id;
+      note.sent = comment.id;
+      note.archived = true;
+      delete note.held;
+      s.marks.push(comment);
+      return { note: { ...note }, comment: { ...comment } };
+    }, { by: client });
+    triage(docPath, result).catch((err) => log.error(`[builds] ${err.message}`));
+    return { ...(await read(docPath)), comment: result.comment.id };
+  }
+
+  /** Is a sent note a question or a change? Answered, or built. Without a
+   *  model to ask, it is built: the build answers a question in its stead. */
+  async function triage(docPath, { note, comment }) {
+    const source = await store.read(docPath);
+    let said = null;
+    if (reply && source !== null) {
+      const index = indexOf(source);
+      said = await reply({
+        title: splitPath(docPath).name,
+        html: (note.anchorId && index.outerOf(note.anchorId)) || '',
+        outline: outlineOf(source),
+        thread: comment.thread.filter((line) => !line.pending),
+      });
+    }
+    const making = !said || said.change;
+    const busy = (await buildStore.read(docPath)).builds.some((b) => b.status === 'running');
+    await change(docPath, (s) => {
+      const c = s.marks.find((m) => m.id === comment.id);
+      const n = s.marks.find((m) => m.id === note.id);
+      if (!c) return null;
+      c.thread = (c.thread ?? []).filter((line) => !line.pending);
+      if (making && n) {
+        n.now = true;
+        c.thread.push({ who: 'agent', text: busy ? 'I will make this as soon as the build running now is done.' : 'Making this now.', at: Date.now() });
+      } else {
+        c.thread.push({ who: 'agent', text: said?.answer || 'I could not answer just now.', at: Date.now(), ...(said?.offer ? { offer: { text: said.offer, taken: null } } : {}) });
+        // A question was asked and answered: the note it came from has done
+        // its work.
+        if (n) s.marks = s.marks.filter((m) => m !== n);
+        delete c.forNote;
+      }
+      return null;
+    });
+    if (making) await startNow(docPath);
+  }
+
+  /** Start a build of what was sent to be made now, if nothing is running. */
+  async function startNow(docPath) {
+    const state = await buildStore.read(docPath);
+    if (state.builds.some((b) => b.status === 'running' || b.status === 'paused')) return null;
+    const ids = state.marks.filter((m) => m.now && m.state === 'waiting').map((m) => m.id);
+    if (!ids.length) return null;
+    return start(docPath, { marks: ids }).catch((err) => {
+      if (err.status !== 409) throw err;
       return null;
     });
   }
@@ -707,6 +848,8 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
     hold,
     resolve,
     archive,
+    history,
+    send,
     drawnOf,
     start,
     pause,

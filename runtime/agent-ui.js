@@ -9317,6 +9317,16 @@
 
     marble-conversation { flex: 1; min-height: 0; }
 
+    /* The sidebar's other views (Build mode's marks, Pieces and History,
+       added with addView): one at a time in place of the chat, under the
+       same edge, width and motion. The chat stays laid out beneath, unseen
+       and out of reach, so it keeps its place and scroll for coming back. */
+    .views { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; min-height: 0; }
+    .views[hidden] { display: none; }
+    .views > [data-view] { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+    .views > [data-view][hidden] { display: none; }
+    .panel:not([data-view="chat"]) > :is(.bar, .usage, .where, .menu, marble-conversation) { visibility: hidden; }
+
     @media ${PHONE} {
       .panel { top: 0; left: 0; width: 100vw; border-left: 0; transform: translateY(100%); }
       .grip { display: block; position: absolute; top: calc(6px + env(safe-area-inset-top, 0px)); left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); }
@@ -9372,6 +9382,7 @@
           <div class="menu recent" role="menu" aria-label="Recent conversations" hidden></div>
           <div class="menu actions" role="menu" aria-label="Conversation actions" hidden></div>
           <marble-conversation project="drive"></marble-conversation>
+          <div class="views" hidden></div>
         </aside>`;
       this.launcher = root.querySelector('.launcher');
       this.dot = root.querySelector('.launcher-dot');
@@ -9389,6 +9400,10 @@
       this.pinButton = root.querySelector('.pin');
       this.resizeEl = root.querySelector('.resize');
       this.view = root.querySelector('marble-conversation');
+      this.viewsEl = root.querySelector('.views');
+      this.views = new Map();
+      this.viewName = 'chat';
+      this.panel.dataset.view = 'chat';
 
       this.progress = 0;
       this.width = WIDTH;
@@ -9481,7 +9496,9 @@
           if (!dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
           if (!this.isOpen) this.open();
           else this.view?.focusInput?.();
-        } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null) {
+        // On another view (Build mode's Marks, Pieces, History) Escape is the
+        // view's: letting go of what is picked there, not closing the sidebar.
+        } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null && this.viewName === 'chat') {
           if (!this.recent.hidden || !this.actions.hidden) this.hideMenus();
           // The shell's chat is one of its panels, not a sheet over the page:
           // Escape hands the keys back to the page and leaves it where it is.
@@ -9598,7 +9615,68 @@
      *  filed, because a list that was read a moment before the host heard
      *  (the shell's Agents, runtime/shell.js) would otherwise go on calling
      *  it unread. */
+    // ------------------------------------------------------------- views
+    //
+    // Other things the sidebar can show in place of the chat (Build mode's
+    // marks, Pieces and History). Each is a node of its own, styled by the
+    // CSS it brings, which is put in this shadow root once. The chat is the
+    // view named 'chat' and is always there.
+
+    addView(name, { node, css = '' } = {}) {
+      if (!name || name === 'chat' || !node) return;
+      if (!this.views.has(name) && css) {
+        const style = document.createElement('style');
+        style.dataset.view = name;
+        style.textContent = css;
+        this.shadowRoot.append(style);
+      }
+      node.dataset.view = name;
+      node.hidden = this.viewName !== name;
+      this.viewsEl.append(node);
+      this.views.set(name, { node });
+    }
+
+    /** Show a view in the sidebar, open or not; 'chat' is the conversation. */
+    showView(name) {
+      const next = this.views.has(name) ? name : 'chat';
+      const was = this.viewName;
+      this.viewName = next;
+      this.panel.dataset.view = next;
+      for (const [key, view] of this.views) view.node.hidden = key !== next;
+      const other = next !== 'chat';
+      this.viewsEl.hidden = !other;
+      for (const el of [this.bar, this.usageEl, this.where, this.view]) el.inert = other;
+      if (other) this.hideMenus();
+      else {
+        const id = this.view.getAttribute('conversation');
+        if (this.isOpen && id && this.summaries.get(id)?.needsReview) this.markSeen(id);
+      }
+      if (next !== was) this.announceView();
+    }
+
+    /** A view's button: shows the sidebar on that view, or puts the sidebar
+     *  away when it is showing that view already. */
+    toggleView(name) {
+      const next = this.views.has(name) ? name : 'chat';
+      if (this.isOpen && this.viewName === next) { this.close(); return false; }
+      this.showView(next);
+      if (!this.isOpen) this.open();
+      else if (next === 'chat') this.view.focusInput();
+      return true;
+    }
+
+    /** Which view is showing, and whether the sidebar is out: said whenever
+     *  either changes. */
+    announceView() {
+      const key = `${this.viewName}:${this.isOpen}`;
+      if (key === this.viewSaid) return;
+      this.viewSaid = key;
+      dispatchEvent(new CustomEvent('marble-agent:view', { detail: { view: this.viewName, shown: this.isOpen } }));
+    }
+
     markSeen(id) {
+      // Read only when it is the chat that is in view.
+      if (this.viewName !== 'chat') return;
       this.api.markReviewed(id)
         .then(() => dispatchEvent(new CustomEvent('marble-agent:seen', { detail: { id } })))
         .catch(() => {});
@@ -9699,6 +9777,7 @@
     }
 
     render() {
+      this.announceView();
       const phone = this.phone.matches;
       const p = Math.max(0, Math.min(1, this.progress));
       const visible = this.isOpen || p > 0.001;
@@ -10106,6 +10185,13 @@
      *  Put away by key, the caret goes back where it was before the chat
      *  took it, rather than to the launcher. */
     toggleChat() {
+      // Out on another view (Build mode's Marks, Pieces, History): ⌘⇧J is the
+      // way to the chat, not away from the sidebar.
+      if (this.isOpen && this.viewName !== 'chat') {
+        this.showView('chat');
+        this.view.focusInput();
+        return;
+      }
       if (this.isOpen) {
         const back = this.returnTo;
         this.returnTo = null;

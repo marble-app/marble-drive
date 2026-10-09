@@ -200,6 +200,50 @@ asks the lead to name, in `build_plan`'s `settled`, the ones its build answers
 or makes moot, each with a sentence. When the build finishes those comments
 get that sentence in the app's name, and are resolved and archived.
 
+## One sidebar, History, and one box to write in (9 October)
+
+**One sidebar.** Marks (build-margin.js), Pieces and History (build-history.js)
+are views of the chat's own sidebar, added with `drawer.addView` and shown with
+`showView` / `toggleView` (agent-ui.js). They live in its shadow root, with
+their CSS and Build mode's `--b-*` names put there once, and take its width
+(420px by default, resizable), its pinned or floating place and its spring.
+`marble-agent:view` says which view shows and whether the sidebar is out; Build
+mode's `side` is read from it. The old docked panels, `#marble-build-dock`
+and the take-turns-with-the-chat logic are gone. On another view the chat's
+Escape and ⌘⇧J give way: Escape is the view's, ⌘⇧J goes to the chat.
+
+**The bar.** Pieces, Marks, History and the chat are four buttons on the
+shell's bar, each showing its view or putting the sidebar away; Marks wears the
+build's status glyph (`marble-build:status`). The toolbar holds the tools,
+Clear (dimmed, never hidden, so separators never pair up), the status mark and
+Build. A rest on the status mark shows the latest build's picture.
+
+**Status in three layers** (`statusCard`, build-mode.js): the drawer's picture;
+pressed, the plan's stages with a count of steps; a stage pressed, its steps.
+Steps are kept on the host with the build (`b.log`, server/build/steps.js):
+each read, search and change, under the part that was `now`, with clean
+excerpts and, for a change, the ids it touched, so a hand on it lights them.
+The floating "what it read" cards are gone.
+
+**History** (GET `/agent/builds/history`, server/build/history.js): builds,
+with the ids each wrote (the ops log's `agent:<conversation>` lines in the
+build's window) and each write as a sub-change; the person's own edits,
+sessions of one client's ops cut at 90s of quiet; and chat agents' changes.
+Each entry lights what it changed; a build goes back with `view`, an edit with
+`/restore` to the checkpoint taken as it began. change-review.js no longer
+offers Keep / Undo on hover for the build conversation's turns.
+
+**One box to write in.** No Comment tool. A note is a box with the
+composer's ring while written (Enter is a new line), a note once left, and,
+sent with ⌘↵ (in it, over it, or its Send), a comment: POST
+`/agent/builds/send` makes the comment (`forNote`) and keeps the note out of
+sight as a brief (`sent`). The reply model says whether it is a change
+(`change: true`); a question is answered, a change is marked `now` and built
+at once, or right after the running build. With no model it is built, and the
+brief tells the lead to answer a question in `settled` instead. When the build
+finishes the comment says so and is put away. Selecting a part of the app
+opens the same box under it (`M.prompt`), with Save as piece.
+
 ## Left for later
 
 - Taking one finished part out of a stopped build (only looking at it is here).

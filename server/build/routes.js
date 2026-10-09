@@ -95,6 +95,11 @@ export function createBuildRoutes({ builds, hub, maxBody }) {
         const body = await readJson(req, maxBody);
         return json(res, 200, await builds.hold(pathOf(url), String(body.id ?? ''), body.held === true, { client }));
       }
+      if (route === '/agent/builds/history' && method === 'GET') return json(res, 200, await builds.history(pathOf(url)));
+      if (route === '/agent/builds/send' && method === 'POST') {
+        const body = await readJson(req, maxBody);
+        return json(res, 200, await builds.send(pathOf(url), String(body.id ?? ''), { client }));
+      }
       if (route === '/agent/builds/archive' && method === 'POST') {
         const body = await readJson(req, maxBody);
         return json(res, 200, await builds.archive(pathOf(url), body.ids, body.archived === true, { client }));

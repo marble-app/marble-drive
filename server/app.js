@@ -185,6 +185,7 @@ const RUNTIME = {
   'agent-marks.js': () => path.join(REPO, 'runtime', 'agent-marks.js'),
   'build-mode.js': () => path.join(REPO, 'runtime', 'build-mode.js'),
   'build-margin.js': () => path.join(REPO, 'runtime', 'build-margin.js'),
+  'build-history.js': () => path.join(REPO, 'runtime', 'build-history.js'),
   // Variations: the version pill and the compare surface for a <marble-alt>.
   'agent-variations.js': () => path.join(REPO, 'runtime', 'agent-variations.js'),
   // The shell: ⌘J's tree, bar and chat around whatever document is open.
@@ -448,6 +449,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="${runtimeUrl('build-mode.js')}" data-marble-transient></script>`;
       // Its margin: every mark beside the app, and how each is going.
       tags += `\n<script src="${runtimeUrl('build-margin.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('build-history.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-variations.js')}" data-marble-transient></script>`;
     }
     // Last: the shell seats the drawer, so it comes after everything that
@@ -1455,6 +1457,8 @@ export async function createDrive(config, { log = console, agentProviders = null
     agents = await createAgents({
       config,
       store,
+      // Build mode's History reads who wrote what (server/build/history.js).
+      oplog,
       awake,
       progress,
       streams,

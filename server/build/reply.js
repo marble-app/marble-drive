@@ -41,9 +41,10 @@ export function replyPrompt({ title = '', html = '', outline = '', thread = [] }
     ...said,
     '',
     'Answer their last line. Reply with ONLY a JSON object, no prose and no code fence:',
-    '{"answer": "…", "offer": "…" or null}',
+    '{"answer": "…", "offer": "…" or null, "change": true or false}',
     '- answer: one to three plain sentences, as you would say it to them. Say why the app is the way it is when they ask; never invent facts about their data.',
     '- offer: when what they said asks for the app to be different, the change as a short instruction for the next build (e.g. "Group the four invitations past three days on top"). Otherwise null.',
+    '- change: true when their last line is a request to change the app (do this, make that, move, add, remove, fix), false when it is a question or a remark.',
   ].join('\n');
 }
 
@@ -57,7 +58,7 @@ export function readReply(raw) {
   const answer = String(value?.answer ?? '').replace(/\s+/g, ' ').trim().slice(0, ANSWER_MAX);
   if (!answer) return null;
   const offer = typeof value?.offer === 'string' ? value.offer.replace(/\s+/g, ' ').trim().slice(0, OFFER_MAX) : '';
-  return { answer, offer: offer || null };
+  return { answer, offer: offer || null, change: value?.change === true };
 }
 
 /** Ask the installed CLI. Returns null — never throws — without an answer. */

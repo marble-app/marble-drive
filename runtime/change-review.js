@@ -499,7 +499,11 @@
       const answered = Date.now();
       // The host's clock against this page's, to the middle of the trip.
       if (Number.isFinite(body?.now)) offset = body.now - (asked + answered) / 2;
-      turns = Array.isArray(body?.turns) ? body.turns : [];
+      // A Build mode build's changes are reviewed in its History (build-mode.js),
+      // where hovering a build lights what it changed; they are not offered
+      // here, on the parts, after it ends.
+      const builder = window.marbleBuild?.state?.()?.conversation ?? null;
+      turns = (Array.isArray(body?.turns) ? body.turns : []).filter((t) => !builder || t.conversationId !== builder);
       for (const t of turns) if (!known.has(t.id)) known.set(t.id, answered);
       // Undone from here and listed again, by a list asked for after the
       // undo: it was redone somewhere else.
@@ -1981,6 +1985,15 @@
       soon();
       // A turn that just finished writes its own status last.
       if (before) setTimeout(soon, 1000);
+    });
+
+    // The build's conversation is known once Build mode has its state.
+    let builderSeen = null;
+    addEventListener('marble-build:state', () => {
+      const builder = window.marbleBuild?.state?.()?.conversation ?? null;
+      if (builder === builderSeen) return;
+      builderSeen = builder;
+      load();
     });
 
     window.marbleReview = {

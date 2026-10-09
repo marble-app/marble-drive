@@ -8,6 +8,8 @@ import { buildBrief, phraseOf, resumeBrief } from '../server/build/brief.js';
 import { kindOf, outlineOf, pieceFrom, previewOf, regionsOf } from '../server/build/pieces.js';
 import { readReply } from '../server/build/reply.js';
 import { cleanMark, cleanPlan, createBuildStore } from '../server/build/store.js';
+import { linesOf, partNow, stepOf } from '../server/build/steps.js';
+import { timelineOf } from '../server/build/history.js';
 
 const ROOT = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-build-'));
 const WORK = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-build-work-'));
@@ -217,6 +219,38 @@ test('marks done before the archive are read as archived; one put back stays put
   assert.deepEqual(marks, { m1: true, m2: false, m3: true, m4: undefined });
 });
 
+test('a build\'s steps are said plainly, under the stage being made, with what each change touched', () => {
+  assert.deepEqual(stepOf('mcp__marble__read_document', { path: 'Reviews.mrbl' }, { app: 'Reviews' }), { kind: 'read', head: 'Read this app', path: 'Reviews' });
+  assert.equal(stepOf('WebSearch', { query: 'CalDigit TS5 Plus' }).head, 'Searched the web for "CalDigit TS5 Plus"');
+  const change = stepOf('apply_ops', { note: 'Stage 2 of 4: the list says how many', ops: [{ type: 'setText', id: 'a' }, { type: 'insert', parentId: 'b', html: '<p>x</p>' }] });
+  assert.deepEqual(change, { kind: 'change', head: 'The list says how many', path: '2 changes', ids: ['a', 'b'] });
+  assert.equal(stepOf('build_plan', {}), null, 'planning is not a step');
+  assert.deepEqual(linesOf('# CalDigit TS5\n**Brand:** CalDigit\nLinks: [{"title":"x"}]\n12: some line'), ['CalDigit TS5', 'Brand: CalDigit', 'some line']);
+  assert.equal(partNow({ parts: [{ title: 'A', state: 'done' }, { title: 'B', state: 'now' }] }), 'B');
+});
+
+test('History: builds and the person\'s own edits on one timeline, each with what it changed and the way back', () => {
+  const t0 = 1_000_000;
+  const builds = [{ id: 'b1', n: 1, title: 'Group them', status: 'finished', conversation: 'c1', startedAt: t0 + 10_000, endedAt: t0 + 20_000, showing: true, hasEnd: true }];
+  const lines = [
+    { t: t0, client: 'tabA', type: 'setText', id: 'h', text: 'My reviews' },
+    { t: t0 + 2_000, client: 'tabA', type: 'setText', id: 's1p', text: 'Five' },
+    { t: t0 + 12_000, client: 'agent:c1', type: 'insert', parentId: 'm', html: '<p data-marble-id="n1">new</p>' },
+    { t: t0 + 12_000, client: 'agent:c1', type: 'setText', id: 'h', text: 'CHI reviews' },
+    { t: t0 + 15_000, client: 'agent:c1', type: 'remove', id: 'old' },
+    { t: t0 + 400_000, client: 'agent:c9', type: 'setText', id: 's2', text: 'From a chat' },
+  ];
+  const checkpoints = [{ t: t0 - 3, sha: 'a'.repeat(64), label: 'ops' }];
+  const [chat, build, edit] = timelineOf({ builds, lines, checkpoints, now: t0 + 500_000 });
+  assert.equal(chat.kind, 'chat');
+  assert.deepEqual(build.ids, ['m', 'n1', 'h', 'old']);
+  assert.deepEqual(build.changes.map((c) => c.count), [2, 1], 'one step per write it made');
+  assert.equal(edit.kind, 'edit');
+  assert.deepEqual(edit.ids, ['h', 's1p']);
+  assert.equal(edit.said, 'Wrote “Five” and 1 more');
+  assert.equal(edit.before, 'a'.repeat(64), 'the version just before it');
+});
+
 test('pieces: regions of an app, taken whole with what draws them', () => {
   const regions = regionsOf(SOURCE_APP, 'Calendar');
   assert.deepEqual(regions.map((r) => r.title), ['Weeks ahead'], 'a short aside is not a piece');
@@ -232,8 +266,10 @@ test('pieces: regions of an app, taken whole with what draws them', () => {
 
 test('a reply is read only when it has the shape asked for', () => {
   assert.equal(readReply('no'), null);
-  assert.deepEqual(readReply('{"answer":"Because it is due.","offer":null}'), { answer: 'Because it is due.', offer: null });
-  assert.deepEqual(readReply('x {"answer":"Yes.","offer":"Group the overdue on top"} y'), { answer: 'Yes.', offer: 'Group the overdue on top' });
+  assert.deepEqual(readReply('{"answer":"Because it is due.","offer":null}'), { answer: 'Because it is due.', offer: null, change: false });
+  assert.deepEqual(readReply('x {"answer":"Yes.","offer":"Group the overdue on top"} y'), { answer: 'Yes.', offer: 'Group the overdue on top', change: false });
+  // A sent note that asks for a change is built at once rather than answered.
+  assert.equal(readReply('{"answer":"Making it.","offer":"Bigger","change":true}').change, true);
 });
 
 test('the store keeps one document\'s state per path, and moves it', async () => {
