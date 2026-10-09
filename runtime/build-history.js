@@ -147,7 +147,7 @@
         if (!card.fetched) {
           card.fetched = true;
           get(`/agent/builds/${enc(entry.id)}/drawn?path=${enc(B.app)}`)
-            .then((got) => { card.log = got.log ?? []; card.update({ ...(buildOf(entry.id) ?? entry), drawn: got.drawn ?? null }, card.log); })
+            .then((got) => { card.log = got.log ?? []; card.update({ ...(buildOf(entry.id) ?? entry), drawn: got.drawn ?? null, summary: got.summary ?? null }, card.log); })
             .catch(() => {});
         }
       }

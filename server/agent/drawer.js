@@ -91,6 +91,18 @@ const isMoment = (event, line) =>
   || (event.type === 'tool.call' && /^(TodoWrite|updateTodos|create_document)$/.test(event.name))
   || (event.type === 'tool.result' && /\b(pass|passed|fail|failed|tests?)\b/i.test(line));
 
+/** What the drawer is told was asked. A build's brief is mostly how to
+ *  build, and a drawer handed it drew the plan every time; its marks are the
+ *  ask, so the rest is left out and the drawing is told it is a build (the
+ *  skill's "A build of an app"). */
+export function askOf(prompt) {
+  const text = String(prompt ?? '');
+  if (!/^Build mode[,:]/.test(text)) return text;
+  const cut = text.search(/\n(Also on the app, waiting|How to build:)/);
+  const marks = (cut < 0 ? text : text.slice(0, cut)).replace(/^The person marked up the app[^\n]*\n?/m, '').replace(/\n{2,}/g, '\n').trim();
+  return `A build of an app. ${marks}`;
+}
+
 export function drawPrompt({ ask, state, ran, lines, skipped, last }) {
   return [
     'The ask:',
@@ -256,7 +268,7 @@ export function createDrawer({ draw, emit, skill = readSkill, pace = PACE, now =
       await slot();
       try {
         const system = await skill();
-        const prompt = drawPrompt({ ask: s.turn.prompt, state, ran: ran(now() - s.started), lines: s.lines, skipped: s.skipped, last: s.html });
+        const prompt = drawPrompt({ ask: askOf(s.turn.prompt), state, ran: ran(now() - s.started), lines: s.lines, skipped: s.skipped, last: s.html });
         const drawn = await draw({ system, prompt });
         // Unless the work is a side border itself, drawn on its silhouette.
         const html = drawn && (hasFingernail(`${s.turn.prompt}\n${s.lines.join('\n')}`) ? drawn : unfingernail(drawn));

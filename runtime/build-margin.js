@@ -292,8 +292,9 @@
     .marble-margin-card .reply svg { width: 13px; height: 13px; }
 
     /* ---- the build's status (build-mode.js statusCard), heading the list
-       while a build is in hand. */
+       while a build is in hand, and the last one to end under them. */
     .marble-margin .marble-bst { position: absolute; left: 18px; right: 18px; z-index: 1; }
+    .marble-margin .marble-bst[data-folded]:not([data-open]) .bst-pic { display: none; }
 
     /* ---- the pins: each mark's number on the app, and how it is going. */
     .marble-margin-pins { position: fixed; inset: 0; pointer-events: none; }
@@ -707,11 +708,16 @@
 
     // Every build in hand (running, or waiting paused) heads the list as its
     // status in three layers (build-mode.js statusCard), newest first; builds
-    // can run side by side. Once one has ended its marks say how, and
-    // History keeps it.
+    // can run side by side. Under them, the last build to end stays, with its
+    // summary, until another ends; History keeps every one.
     const statusCards = new Map(); // build id → statusCard
-    const drawBuild = () => {
+    const drawBuild = (list = []) => {
       const hand = [...(B.inHand?.() ?? [B.current()].filter(Boolean))].reverse();
+      const last = B.lastEnded?.();
+      if (last && !hand.some((b) => b.id === last.id)) hand.push(last);
+      // Once the person is marking for the next build, the last one folds to
+      // its line; pressed, it opens on its summary again.
+      const marking = Boolean(last?.endedAt) && list.some((m) => (m.at ?? 0) > last.endedAt);
       const keep = new Set(hand.map((b) => b.id));
       for (const [id, card] of statusCards) if (!keep.has(id)) { card.node.remove(); statusCards.delete(id); }
       let after = null;
@@ -719,6 +725,7 @@
         let card = statusCards.get(b.id);
         if (!card) { card = B.statusCard(); statusCards.set(b.id, card); }
         card.update(b);
+        card.node.toggleAttribute('data-folded', b.id === last?.id && marking);
         if (after) after.after(card.node); else cards.prepend(card.node);
         after = card.node;
       }
@@ -830,7 +837,7 @@
         cardOf.delete(id);
         if (picked === id) picked = null;
       }
-      drawBuild();
+      drawBuild(list);
       none.hidden = list.length > 0 || Boolean(buildCard);
       none.textContent = all.length
         ? 'Nothing open on the app. What was built, resolved or put away is under Archived.'

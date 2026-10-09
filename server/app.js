@@ -234,7 +234,7 @@ export const rootRemoved = (priorSource, ops) => {
   return roots.size > 0 && (ops ?? []).some((op) => op?.type === 'remove' && roots.has(op.id));
 };
 
-export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, genui: genuiOpts = null, agentSandbox = null } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, genui: genuiOpts = null, agentSandbox = null, drawSummary = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
@@ -1471,6 +1471,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       putDocument: (docPath, source, options) => putDocument(docPath, source, options),
       moveDocument: (from, to) => moveDocument(from, to),
       freePath: (wanted) => freePath(wanted),
+      // Who draws an ended build's summary, when not the host's own drawer (a test).
+      drawSummary,
       // An agent's turn ending is the end of its claim on what it touched. Kept
       // for the life of the process, a turn's touches forked every later edit
       // near them — the person against an agent that finished an hour ago.

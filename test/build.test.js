@@ -10,6 +10,8 @@ import { readReply } from '../server/build/reply.js';
 import { cleanMark, cleanPlan, createBuildStore } from '../server/build/store.js';
 import { linesOf, partNow, stepOf } from '../server/build/steps.js';
 import { timelineOf } from '../server/build/history.js';
+import { questionsOf, summaryPrompt, wordsOf } from '../server/build/summary.js';
+import { askOf } from '../server/agent/drawer.js';
 
 const ROOT = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-build-'));
 const WORK = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-build-work-'));
@@ -66,6 +68,7 @@ const SCRIPTS = {
   ],
   resumed: [{ say: 'Carried on.' }],
   held: build('Held'),
+  summed: build('Summed'),
   drawn: [
     { call: 'build_plan', args: { parts: [{ title: 'Title', state: 'now' }] } },
     { call: 'read_document', args: { path: 'Drawn' } },
@@ -82,15 +85,23 @@ const config = loadConfig({
   MARBLE_DRIVE_AGENT_WORKDIR: WORK,
   MARBLE_DRIVE_AGENT_KEYS: KEYS,
 });
+// An ended build's summary, drawn by a stand-in for the drawer: it answers
+// with what it was asked for, so a test can read the prompt back.
+const summaryAsks = [];
 const drive = await createDrive(config, {
   log: quiet,
   agentProviders: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
+  drawSummary: async ({ system, prompt }) => {
+    summaryAsks.push({ system, prompt });
+    return `<p>${prompt.split('\n')[0].replace(/[<>&]/g, '')}</p>`;
+  },
 });
 await drive.createDocument('Untitled', APP);
 await drive.createDocument('Second', APP);
 await drive.createDocument('Slow', APP);
 await drive.createDocument('Calendar', SOURCE_APP);
 await drive.createDocument('Held', APP);
+await drive.createDocument('Summed', APP);
 await drive.createDocument('Drawn', APP);
 const port = await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', () => resolve(drive.server.address().port)));
 const base = `http://127.0.0.1:${port}`;
@@ -479,4 +490,69 @@ test('pieces: saved from an app, listed, drawn in a sandbox, and found in the dr
   assert.match(preview.headers.get('content-security-policy'), /sandbox/);
   assert.match(await preview.text(), /Weeks ahead/);
   assert.equal((await api('DELETE', `/agent/pieces/${saved.body.id}`)).body.removed, true);
+});
+
+test('an ended build is summed up from what it was asked, made, changed, answered and said', () => {
+  const build = {
+    id: 'b3', n: 3, title: 'Weekly plan', status: 'finished', startedAt: 1_000, endedAt: 181_000, marks: ['n1'],
+    plan: { parts: [{ title: 'Two weeks', detail: 'one row per day', state: 'done' }, { title: 'Colours', state: 'ahead' }], settled: [{ id: 'c1', said: 'The week starts on Monday now.' }] },
+    log: [
+      { kind: 'read', head: 'Read this app', lines: ['Seven rows'] },
+      { kind: 'change', head: 'Added the second week', ids: ['w2'] },
+    ],
+    said: 'The plan shows two weeks.',
+    drawn: { html: '<p>the weeks</p>' },
+  };
+  const marks = [
+    { id: 'n1', type: 'note', text: 'Show two weeks', build: 'b3' },
+    { id: 'c1', type: 'comment', thread: [{ who: 'you', text: 'Start on Monday?' }] },
+    { id: 'c2', type: 'comment', thread: [{ who: 'you', text: 'Why seven rows?', at: 2_000 }, { who: 'agent', text: 'One per day.', at: 5_000 }] },
+    { id: 'c3', type: 'comment', thread: [{ who: 'you', text: 'Make it blue', at: 2_000 }, { who: 'agent', text: 'Making this now.', at: 3_000 }] },
+    { id: 'c4', type: 'comment', thread: [{ who: 'you', text: 'Old one?', at: 1 }, { who: 'agent', text: 'Before it.', at: 2 }] },
+  ];
+  const prompt = summaryPrompt({ build, marks });
+  assert.match(prompt, /^Draw the summary of a build that has ended: build 3, "Weekly plan"\. It finished after 3 min\./);
+  assert.match(prompt, /1\. Note: Show two weeks/);
+  assert.match(prompt, /- Two weeks \(one row per day\): made/);
+  assert.match(prompt, /- Colours: not made/);
+  assert.match(prompt, /- Added the second week/);
+  assert.match(prompt, /Read this app: Seven rows/);
+  assert.match(prompt, /"Start on Monday\?" → The week starts on Monday now\./);
+  assert.match(prompt, /Q: Why seven rows\?\n  A: One per day\./);
+  assert.doesNotMatch(prompt, /Make it blue/, 'a change sent to be made is not a question');
+  assert.doesNotMatch(prompt, /Old one/, 'answered before the build began');
+  assert.match(prompt, /The plan shows two weeks\./);
+  assert.match(prompt, /<p>the weeks<\/p>/);
+  assert.deepEqual(questionsOf(marks, { from: 1_000, to: 181_000 }), [{ q: 'Why seven rows?', a: 'One per day.' }]);
+  assert.equal(wordsOf({ type: 'stroke', kind: 'box', text: 'this' }), 'a box drawn: "this"');
+});
+
+test('the drawer is handed a build\'s marks, not the brief around them', () => {
+  const brief = buildBrief({ path: 'Plan', n: 2, marks: [{ id: 'n1', type: 'note', text: 'Show two weeks' }], context: [] });
+  const ask = askOf(brief);
+  assert.match(ask, /^A build of an app\. Build mode, build 2/);
+  assert.match(ask, /Show two weeks/);
+  assert.doesNotMatch(ask, /How to build|build_plan|marked up the app instead/);
+  assert.equal(askOf('Make the chart blue'), 'Make the chart blue', 'a chat turn is left as it is');
+});
+
+test('a build that finishes is summed up by the drawer, kept with it and sent while it is the last', async () => {
+  await api('PUT', '/agent/builds/marks?path=Summed', { mark: note('s1', 'script:summed Title it') });
+  assert.equal((await api('POST', '/agent/builds/start?path=Summed', {})).status, 202);
+  const s = await until(async () => {
+    const got = await state('Summed');
+    return got.builds[0]?.summary ? got : null;
+  });
+  const b = s.builds[0];
+  assert.equal(b.status, 'finished');
+  assert.match(b.summary.html, /^<p>Draw the summary of a build that has ended: build 1/);
+  assert.equal(b.hasSummary, true);
+  assert.equal(b.summing, false);
+  const asked = summaryAsks.at(-1);
+  assert.match(asked.system, /When a build is done: its summary/, 'drawn after the skill');
+  assert.match(asked.prompt, /Note: script:summed Title it/);
+  assert.match(asked.prompt, /- Title: made/);
+  assert.match(asked.prompt, /Built the title\./);
+  const got = await api('GET', `/agent/builds/${b.id}/drawn?path=Summed`);
+  assert.equal(got.body.summary.html, b.summary.html, 'and asked for by History');
 });

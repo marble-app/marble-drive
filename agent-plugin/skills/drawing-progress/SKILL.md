@@ -14,10 +14,29 @@ last one whole.
 
 There is no kit of views to pick from. Look at what the work actually is and
 draw the picture someone who does that work would sketch on a whiteboard to
-show it: the pipeline with the new stage lit, the week with the day moved, the
-bar against its limit, the button before and after in its real colours, the
-grid of test results, the parts of a feature and how they connect. If none of
-the examples below fit, draw what does.
+show it: the week with the day moved, the bar against its limit, the button
+before and after in its real colours, the grid of test results, the page with
+its new shelf lit, the swatches of a palette. If none of the examples below
+fit, draw what does.
+
+## Reach past the flow
+
+Pills joined by arrows, and boxes joined by arrows, are the easiest picture
+to draw and the one that says least: every piece of work has steps, so every
+widget could be a flow, and then none of them shows anything. **A flow is the
+last picture you reach for.**
+
+- Before you draw, name what the person would see if they looked at the thing
+  itself right now: the card with its new button, the sentence before and
+  after, the column of numbers, the hour on the calendar. Draw that.
+- Draw a flow only when the work *is* a flow (a pipeline, a process, a
+  sequence the person cares about), or when nothing has been made yet and the
+  plan is all there is.
+- If your last drawing was a flow and the steps now show something being made
+  or found, switch to the thing. Never answer with a flow twice running.
+- Mix the parts: a silhouette with a redline under it, a bar chart beside a
+  number, swatches over a stops track. The parts below are a vocabulary, not a
+  menu of one.
 
 ## A picture, never a list
 
@@ -29,7 +48,8 @@ the rule the rest of the page serves.
   swatches, a ruler, a week). The picture is the first and largest thing.
 - Words caption the picture: at most **two lines** of plain sentences under
   it. Short names that sit *inside* the picture (a pill's label, a node's
-  name, an axis, a count) are part of the drawing and don't count.
+  name, an axis, a count) are part of the drawing and don't count. The one
+  exception is a build's summary, at its end (below).
 - **Never** a `<ul>`, `<ol>` or `<li>`. Never a column of sentences, one per
   thing. If the work is several things, draw them as several marks (pills in
   a flow, cells in a grid, nodes in a diagram, rows of bars) whose shape,
@@ -88,9 +108,9 @@ Start from what is being made or checked, not from what tool ran.
 | The work | Draw |
 | --- | --- |
 | Tests or a check running | A dot per test, sized so the field stays under ~90 px high: 7 px dots for tens, 5 px for a few hundred, 3 px with a 1 px gap for thousands; past about 3,000, a bar. Passed in `--accent-ink`, failed in `--danger`, the count large in tabular figures, the failing names in the caption. |
-| A plan, a to-do list, stages | **Progress pills** in a flow, joined by arrows: done filled, the current one ringed and breathing, the rest hollow. When the current stage has a count (6 of 11), the pill is a **loading pill**: a soft fill behind its label to that fraction. |
+| A plan, a to-do list, stages, before anything is made | **Progress pills** in a flow: done filled, the current one ringed and breathing, the rest hollow. When the current stage has a count (6 of 11), the pill is a **loading pill**: a soft fill behind its label to that fraction. Once something is made, draw it instead. |
 | A pipeline, a workflow, a process | The flow itself, stage to stage, with the stage that changed lit and what sits in each stage as a count or dots on it. |
-| Code being built | A **diagram** of the parts the person would recognise (a button, a popover, the server, a page) as nodes joined by arrows in the direction things flow; the ones this turn touched are lit, new ones are dashed. One caption line saying what it will do for the person. Never a diff, never file names they don't know. |
+| Code being built | The **piece the person will meet**, drawn small: the bar with its new button lit, the popover open over a silhouette of the page, the card before → after. Only when the change is in how parts talk to each other and nothing on screen changes, a **diagram** of the parts they would recognise (a button, the server, a page) as nodes joined by arrows, the touched ones lit and new ones dashed. One caption line saying what it will do for the person. Never a diff, never file names they don't know. |
 | Where work stands at the end | A **stops track** under the result: the stops this kind of work goes through, inked as far as it got. Code: Built, Tested, Committed, Pushed, Live. A page: Drafted, Checked, On the page. An answer: Looked, Read, Answered. |
 | A colour, border, radius or any look | **Silhouettes** of the piece before → after, each wearing its real values (fill, border, radius, size), with the values in small tabular type under each. Swatches with names and hex for a palette. |
 | A page or document changing | The page as a small outline of blocks, the changed ones lit, the next one hollow. Words that changed as a redline: `<del>` then `<ins>`. |
@@ -162,6 +182,15 @@ Copy the parts you use into your `<style>`; change sizes, never the meanings.
 .pw-red del { color: var(--danger); }
 .pw-red ins { text-decoration: none; padding: 0 2px; border-radius: 3px; background: var(--accent-soft); }
 
+/* a summary's groups: a label over rows, each row a drawn mark and one run
+   of words (a redline sits inside the words, never in a column of its own) */
+.pw-grp { display: grid; gap: 4px; }
+.pw-rw { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 12.5px; }
+.pw-rw::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-ink); }
+.pw-rw.chg::before { background: none; box-shadow: inset 0 0 0 1.5px var(--accent-ink); }
+.pw-rw.know::before { background: var(--caution); }
+.pw-rw .q { display: block; color: var(--muted); }
+
 /* a note: the one thing that needs a look, set apart by its fill and a dot, never a stripe */
 .pw-note { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border-radius: 8px; background: var(--paper-2); font-size: 12px; color: var(--ink); }
 .pw-note::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--caution); }
@@ -202,6 +231,51 @@ animates.
 person will meet it, and under it the stops track for this kind of work, inked
 as far as it got. The one caption line says what is not done, plainly: "Built
 and tested. Not committed."
+
+## A build of an app
+
+When the ask begins "A build of an app", the work is Build mode changing an
+app the person marked up. Their marks (notes, sketches, comments) are the
+ask. The build's plan is drawn beside your widget already, as its stages, so
+**never draw the plan, the parts list or a flow of stages**: that would say
+it twice. Draw the app as it is being changed: a silhouette of the page with
+the parts the steps changed lit and the one being made ringed, the new
+control in its real look, the words that changed as a redline, the rows or
+cells coming in, the colours as swatches. Read the markup in the steps'
+changes (`change page …: | <markup>`) for what the parts actually are.
+
+## When a build is done: its summary
+
+When the prompt begins "Draw the summary of a build that has ended", you are
+given what the build was asked, its parts, what it changed, the comments it
+answered, the questions asked while it ran, and what it said at the end. The
+person reads this card to catch up on a build they did not watch, so here, and
+only here, the words may run longer, up to about 520 px tall:
+
+1. **The result, drawn**, first and largest: the app as it is now, small,
+   with what this build added lit and what it changed ringed (or the swatches,
+   the week, the bars: whatever the work was). Not a flow, and not the plan.
+2. Then short groups, each a label (13 px, 600, `--muted`) over a few rows of
+   one line each, every row starting with a small drawn mark that says its
+   kind (a filled dot for new, a ring for changed, a `--caution` dot for
+   something to know). Leave out a group with nothing in it.
+   - **New**: what the person can now do or see that they could not before.
+   - **Changed**: what works or looks different, as before → after where it
+     fits (`<del>` then `<ins>`).
+   - **Good to know**: what is not done, a limit, a choice the build made for
+     them, anything they should check. Never invent one.
+   - **Asked**: each question asked on the app while it ran, with the answer
+     it got, in a line or two: the question in `--muted`, the answer in
+     `--ink`. Only questions: a change asked for in a comment is New or
+     Changed.
+3. A stops track at the foot, inked as far as it got (Planned, Built, On the
+   app, Checked).
+
+Rows are `div`s (`.pw-rw`, in the parts below), never `ul` or `li`, and a
+row's words are one `<span>`, with any `<del>`/`<ins>` inside it. Every word
+is in the person's terms, taken from what you are given; nothing animates.
+The result picture names its parts inside it (the bar, the card, the pin), so
+it reads without the groups under it.
 
 ## Words
 

@@ -707,6 +707,9 @@
     // Builds can run side by side: the newest is the one the bar shows.
     const runningBuild = () => [...builds()].reverse().find((b) => b.status === 'running') ?? null;
     const inHand = () => builds().filter((b) => b.status === 'running' || b.status === 'paused');
+    /** The last build to end, finished or not: Marks keeps it, with its
+     *  summary, under any running now. */
+    const lastEnded = () => [...builds()].reverse().find((b) => b.status !== 'running' && b.status !== 'paused') ?? null;
     const buildConversations = () => new Set(builds().map((b) => b.conversation).concat(state?.conversation ?? []).filter(Boolean));
     const pausedBuild = () => [...builds()].reverse().find((b) => b.status === 'paused') ?? null;
     const current = () => runningBuild() ?? pausedBuild();
@@ -1366,7 +1369,7 @@
       const done = parts.filter((p) => p.state === 'done').length;
       if (b.status === 'running') return parts.length ? `Build ${b.n} · ${done} of ${parts.length} parts made` : `Build ${b.n} · working out the plan`;
       if (b.status === 'paused') return parts.length ? `Build ${b.n} · paused at ${done} of ${parts.length} parts` : `Build ${b.n} · paused`;
-      if (b.status === 'finished') return parts.length ? `Build ${b.n} · ${plural(parts.length, 'part')} made` : `Build ${b.n} · done`;
+      if (b.status === 'finished') return `${parts.length ? `Build ${b.n} · ${plural(parts.length, 'part')} made` : `Build ${b.n} · done`}${b.summing && !b.summary ? ' · summing it up' : ''}`;
       if (b.status === 'stopped') return `Build ${b.n} · stopped, the app went back`;
       if (b.status === 'failed') return `Build ${b.n} · did not finish`;
       return `Build ${b.n}`;
@@ -1397,6 +1400,10 @@
       let log = [];
       let picAt = null;
       let ticker = 0;
+      let changedIds = [];
+      // An ended build lights everything it changed while a hand is on it.
+      top.addEventListener('pointerenter', () => { if (top.dataset.lights) light(changedIds); });
+      top.addEventListener('pointerleave', () => { if (top.dataset.lights) unlight(); });
       top.addEventListener('click', () => {
         const on = !node.hasAttribute('data-open');
         node.toggleAttribute('data-open', on);
@@ -1487,7 +1494,13 @@
           node.setAttribute('aria-label', `Build ${next.n}`);
           title.textContent = next.title || `Build ${next.n}`;
           subWords.textContent = statusLine(next);
-          const drawing = next.drawn;
+          // Once it has ended, its summary takes the picture's place.
+          const drawing = next.summary ?? next.drawn;
+          node.toggleAttribute('data-summary', Boolean(next.summary));
+          changedIds = [...new Set(log.filter((step) => step.kind === 'change').flatMap((step) => step.ids ?? []))];
+          const ended = next.status !== 'running' && next.status !== 'paused';
+          top.title = ended && changedIds.length ? 'Light what this build changed' : '';
+          if (ended && changedIds.length) top.dataset.lights = '1'; else delete top.dataset.lights;
           if (drawing?.html && drawing.at !== picAt) { picAt = drawing.at; mountDrawn(pic, drawing.html); }
           if (!drawing?.html && changed) { pic.textContent = ''; picAt = null; }
           tick();
@@ -1514,7 +1527,7 @@
       const b = now ?? builds().at(-1) ?? null;
       peekHead.textContent = b ? (b.title || `Build ${b.n}`) : 'No build yet';
       peekSub.textContent = now ? statusLine(now) : status.getAttribute('aria-label') ?? '';
-      const drawing = b?.drawn ?? null;
+      const drawing = b?.summary ?? b?.drawn ?? null;
       if (drawing?.html && drawing.at !== peekAt) { peekAt = drawing.at; mountDrawn(peekPic, drawing.html).then(placePeek); }
       if (!drawing?.html) { peekPic.textContent = ''; peekAt = null; }
       peek.hidden = false;
@@ -1913,6 +1926,7 @@
       },
       current,
       inHand,
+      lastEnded,
       buildConversations,
       act,
       view,

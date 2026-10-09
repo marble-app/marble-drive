@@ -11,6 +11,8 @@
 import { parsePath, splitPath } from '../paths.js';
 import { LOG_MAX, linesOf, partNow, stepOf } from './steps.js';
 import { timelineOf } from './history.js';
+import { summaryPrompt } from './summary.js';
+import { readSkill, unfingernail } from '../agent/drawer.js';
 import { indexOf } from '../agent/source.js';
 import { buildBrief, resumeBrief } from './brief.js';
 import { outlineOf, pieceFrom, previewOf } from './pieces.js';
@@ -54,6 +56,11 @@ function publicState(state, current = null) {
     hasEnd: Boolean(b.end),
     drawn: b.drawn && (b.status === 'running' || b.status === 'paused' || b.id === lastEnded) ? b.drawn : null,
     hasDrawn: Boolean(b.drawn),
+    // What it made, said and was asked, drawn once it has ended (summary.js).
+    summary: b.summary && b.id === lastEnded ? b.summary : null,
+    hasSummary: Boolean(b.summary),
+    // Being drawn; a host that went down meanwhile does not leave it so.
+    summing: Boolean(b.summing) && Date.now() - (b.endedAt ?? 0) < 180_000,
     // Its steps, by stage, on the same rule as its drawing.
     log: b.log && (b.status === 'running' || b.status === 'paused' || b.id === lastEnded) ? b.log : null,
     hasLog: Boolean(b.log?.length),
@@ -72,7 +79,7 @@ function publicState(state, current = null) {
   };
 }
 
-export function createBuilds({ buildStore, store, oplog = null, undoTurns = null, runner, agentStore, hub, startConversation, defaultProvider, putDocument, moveDocument = null, freePath = null, reply = null, suggest = null, driveRegions = null, log = console }) {
+export function createBuilds({ buildStore, store, oplog = null, undoTurns = null, runner, agentStore, hub, startConversation, defaultProvider, putDocument, moveDocument = null, freePath = null, reply = null, suggest = null, driveRegions = null, drawSummary = null, log = console }) {
   // conversation id → document path, for the builds running or paused now.
   const byConversation = new Map();
   // turn id → resolve(), for a stop waiting on its turn to end.
@@ -222,7 +229,7 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
   async function drawnOf(docPath, id) {
     const state = await buildStore.read(docPath);
     const build = find(state, id);
-    return { drawn: build.drawn ?? null, log: build.log ?? [] };
+    return { drawn: build.drawn ?? null, summary: build.summary ?? null, log: build.log ?? [] };
   }
 
   // ----------------------------------------------------------------- builds
@@ -607,7 +614,38 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
     if (state) await announce(docPath, state);
     // Anything sent to be made now while this build ran is made next.
     if (state && status !== 'cancelled') startNow(docPath).catch((err) => log.error(`[builds] ${err.message}`));
-    if (named && moveDocument && freePath) await name(docPath, named).catch((err) => log.error(`[builds] naming failed: ${err.message}`));
+    let at = docPath;
+    if (named && moveDocument && freePath) at = (await name(docPath, named).catch((err) => log.error(`[builds] naming failed: ${err.message}`))) ?? docPath;
+    // Its summary, drawn once it is over (at the app's new name, if the build
+    // gave it one): what is new, what changed, what to know, what was asked.
+    // The card shows the last drawing of the work until it comes.
+    if (state && (status === 'completed' || status === 'failed')) summarize(at, event.turn).catch((err) => log.error(`[builds] summary: ${err.message}`));
+  }
+
+  /** Ask the drawer for an ended build's summary, and keep it with the build.
+   *  Never fails the build: no drawer, no answer, and the card keeps the last
+   *  drawing of its work. */
+  async function summarize(docPath, turn) {
+    if (!drawSummary) return;
+    const first = await buildStore.read(docPath);
+    const build = first.builds.find((x) => x.turn === turn);
+    if (!build || (build.status !== 'finished' && build.status !== 'failed')) return;
+    await buildStore.update(docPath, (s) => { const b = s.builds.find((x) => x.id === build.id); if (b) b.summing = true; return null; });
+    let html = null;
+    try {
+      const prompt = summaryPrompt({ build, marks: first.marks });
+      const drawn = await drawSummary({ system: await readSkill(), prompt });
+      html = drawn ? unfingernail(drawn) : null;
+    } finally {
+      const { state } = await buildStore.update(docPath, (s) => {
+        const b = s.builds.find((x) => x.id === build.id);
+        if (!b) return null;
+        delete b.summing;
+        if (html && html.length <= DRAWN_MAX) b.summary = { html, at: Date.now() };
+        return null;
+      });
+      if (state) await announce(docPath, state).catch(() => {});
+    }
   }
 
   /** A rename retitles the document, so the build that named it ends where

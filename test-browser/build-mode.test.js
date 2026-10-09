@@ -246,6 +246,13 @@ test('Build hands the marks to one agent: its status is three layers, nothing fl
   // Built is done with: it leaves the list and the app for Archived.
   await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.marble-margin-card'));
   await page.locator('.marble-margin .tray', { hasText: '1' }).waitFor();
+  // The build that ended stays at the head of Marks, and a hand on it lights
+  // what it changed.
+  const ended = margin(page).locator('.marble-bst[data-status="finished"]');
+  await ended.locator('.bst-sub', { hasText: 'Build 1 · 2 parts made' }).waitFor();
+  await ended.locator('.bst-top').hover();
+  await page.locator('.marble-build-lit:not([hidden])').first().waitFor();
+  await page.mouse.move(5, 400);
   assert.equal(await page.locator('[data-marble-id="h"]').textContent(), 'CHI reviews');
   const s = await state();
   assert.equal(s.builds.at(-1).status, 'finished');
@@ -566,12 +573,25 @@ test('Marks: a view of the chat\'s sidebar, a card beside each mark, level with 
   await page.waitForTimeout(700);
   assert.equal(await page.locator('.marble-marks-note').first().evaluate((n) => getComputedStyle(n).visibility), 'hidden');
   assert.equal(await page.locator('.marble-margin-pin:not([hidden])').count(), 2);
-  const level = await page.evaluate(() => [...document.querySelector('marble-agent-drawer').shadowRoot.querySelectorAll('.marble-margin-card')].map((card) => {
-    const pin = document.querySelector(`.marble-margin-pin[data-id="${card.dataset.id}"]`);
-    return Math.round(card.getBoundingClientRect().top - (pin.getBoundingClientRect().top - 10));
-  }));
+  const level = await page.evaluate(() => {
+    const root = document.querySelector('marble-agent-drawer').shadowRoot;
+    // The last build stays at the head, folded to its line once marking
+    // for the next has begun; a card may sit just under it.
+    const head = [...root.querySelectorAll('.marble-margin .marble-bst')].map((n) => n.getBoundingClientRect().bottom);
+    let floor = head.length ? Math.max(...head) : -Infinity;
+    return [...root.querySelectorAll('.marble-margin-card')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top).map((card) => {
+      const pin = document.querySelector(`.marble-margin-pin[data-id="${card.dataset.id}"]`);
+      const r = card.getBoundingClientRect();
+      const off = Math.round(r.top - (pin.getBoundingClientRect().top - 10));
+      const under = r.top - floor >= 0 && r.top - floor <= 24;
+      floor = r.bottom;
+      return off > 8 && under ? 0 : off;
+    });
+  });
   // Level, or pushed down only as far as the card above it needs.
   for (const off of level) assert.ok(off >= -2 && off <= 8, `level with its pin: ${level}`);
+  const folded = margin(page).locator('.marble-bst[data-folded]');
+  if (await folded.count()) assert.equal(await folded.locator('.bst-pic').evaluate((n) => getComputedStyle(n).display), 'none', 'the last build is folded to its line');
 
   // A press picks it: it steps 12px toward the app, shaded in the accent as
   // its pin is. Esc lets go.

@@ -108,7 +108,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, oplog = null, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass = null, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
+export async function createAgents({ config, store, oplog = null, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass = null, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null, drawSummary = null }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -118,14 +118,14 @@ export async function createAgents({ config, store, oplog = null, writeOps, crea
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, oplog, writeOps, createDocument, putDocument, moveDocument, freePath, origin, browserPass, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity });
+    return await boot({ config, store, oplog, writeOps, createDocument, putDocument, moveDocument, freePath, origin, browserPass, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity, drawSummary });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, oplog = null, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
+async function boot({ config, store, oplog = null, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null, drawSummary = null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const keys = createKeyStore({ file: config.agentKeysFile });
@@ -303,6 +303,9 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     reply: config.agentNaming ? (input) => writeReply({ ...input, model: /claude|opus|sonnet|haiku|fable/i.test(input.model ?? '') ? input.model : config.agentNamingModel, log }) : null,
     suggest: config.agentNaming ? (input) => suggestPieces({ ...input, model: config.agentNamingModel, log }) : null,
     driveRegions: createDriveIndex({ store }),
+    // An ended build's summary is drawn once, by the drawer's skill, with a
+    // larger model and longer to answer than a running drawing gets.
+    drawSummary: drawSummary ?? (config.agentDrawing ? (input) => drawWithCli({ ...input, model: config.agentSummaryModel, timeout: 120_000, log }) : null),
     // Take back one build's own turns, op by op, leaving any other build's
     // work on the same app where it is (Stop, with builds side by side).
     undoTurns: async (turnIds) => {

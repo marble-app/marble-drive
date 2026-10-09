@@ -220,6 +220,9 @@ export function loadConfig(env = process.env) {
     // spawn a CLI of their own, and a test host wants neither.
     agentDrawing: bool('MARBLE_DRIVE_AGENT_DRAWING', bool('MARBLE_DRIVE_AGENT_NAMING', true)),
     agentDrawingModel: str('MARBLE_DRIVE_AGENT_DRAWING_MODEL', 'haiku'),
+    // Which model draws a build's summary when it ends (server/build/summary.js):
+    // once per build, read in full, so a larger one than the running drawings.
+    agentSummaryModel: str('MARBLE_DRIVE_AGENT_SUMMARY_MODEL', 'sonnet'),
     agentStallMinutes: num('MARBLE_DRIVE_AGENT_STALL_MINUTES', 30),
     // 0 is no cap: every conversation the person has started runs at once.
     agentMaxRunning: num('MARBLE_DRIVE_AGENT_MAX_RUNNING', 0),
