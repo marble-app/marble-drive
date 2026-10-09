@@ -255,7 +255,7 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     return out;
   }
 
-  async function start(docPath, { marks: chosen = null, words = '', anchor = null, client = null } = {}) {
+  async function start(docPath, { marks: chosen = null, words = '', anchor = null, client = null, model = null } = {}) {
     const source = await store.read(docPath);
     if (source === null) throw httpError(404, `no document "${docPath}"`);
     const startSha = await buildStore.putSnapshot(source);
@@ -303,6 +303,9 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     try {
       const conversation = await conversationFor(state, docPath);
       const taken = state.marks.filter((m) => build.marks.includes(m.id));
+      // A model chosen on what it takes (a note sent with one) is the build's.
+      const wanted = model ?? taken.find((m) => m.model)?.model ?? null;
+      if (wanted) await agentStore.updateConversation(conversation, { model: wanted }).catch(() => {});
       // The comment a sent note became is that note's, not context.
       const context = state.marks.filter((m) => m.type === 'comment' && m.state === 'waiting' && !m.resolved && !m.archived && !m.forNote);
       const index = indexOf(source);
@@ -709,6 +712,7 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
         html: (note.anchorId && index.outerOf(note.anchorId)) || '',
         outline: outlineOf(source),
         thread: comment.thread.filter((line) => !line.pending),
+        model: note.model ?? null,
       });
     }
     const making = !said || said.change;

@@ -754,7 +754,7 @@
       none.hidden = list.length > 0 || Boolean(buildCard);
       none.textContent = all.length
         ? 'Nothing open on the app. What was built, resolved or put away is under Archived.'
-        : 'Nothing on the app yet. Use + Comment to ask about a part, or Note and Sketch on the toolbar to say what to change.';
+        : 'Nothing on the app yet. Write on a part with Note, or select it: leave it as a note for the next build, or send it with ⌘↵ to have it answered or made now.';
       const count = { open: 0, build: 0, done: 0 };
       for (const id of order) count[cardOf.get(id).status.show] += 1;
       const said = [['open', 'open'], ['build', 'in the build'], ['done', 'done']].filter(([key]) => count[key]);

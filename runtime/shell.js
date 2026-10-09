@@ -280,8 +280,10 @@
       visibility 0s linear var(--hide-after, 0s); }
 
     /* ── The bar ── */
+    /* Shaded a step off the page's paper, so the bar reads as the frame's
+       even on a page whose own ground is that paper. */
     .bar { top: 0; left: 0; width: 100vw; height: ${BAR}px; display: flex; align-items: center; gap: 6px; padding: 0 8px;
-      background: var(--paper); border-bottom: 1px solid var(--line); font-size: 13px; }
+      background: color-mix(in srgb, var(--paper-2) 80%, var(--paper)); border-bottom: 1px solid var(--line); font-size: 13px; }
     .ib { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--muted); flex: none; }
     .ib:hover, .ib[aria-pressed="true"] { background: var(--paper-2); color: var(--ink); }
     .ib[hidden] { display: none; }
@@ -837,6 +839,7 @@
           <button type="button" class="ib me" data-act="me" aria-haspopup="dialog" aria-expanded="false" aria-label="This drive" title="This drive">${icon('me')}</button>
           <span class="vr"></span>
           <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat (⌘⇧J)" aria-keyshortcuts="Meta+Shift+J" hidden>${icon('chat')}</button>
+          <button type="button" class="ib" data-act="dock" aria-pressed="true" aria-label="Keep the sidebar beside the app" title="Keep the sidebar beside the app" hidden>${icon('chat')}</button>
           <button type="button" class="ib" data-act="close" aria-label="Hide everything" title="Hide everything (⌘\\)">${icon('collapse')}</button>
         </header>
         <nav class="nav" aria-label="Drive tree">
@@ -960,6 +963,9 @@
       // Focus alone does not hold a side — a click inside leaves focus there,
       // and a hand that clicked and moved on has moved on.
       this.keyed = { nav: false, chat: false };
+      // Brought out on purpose (a Build mode view's button): out until it is
+      // put away, not just while a hand is over it.
+      this.held = { nav: false, chat: false };
       this.intro = false;
       this.pointer = null;
       this.hideTimers = {};
@@ -1090,6 +1096,14 @@
         else if (act === 'chat' && this.chatInBar && this.drawer?.toggleView) this.drawer.toggleView('chat');
         else if (act === 'chat') this.pin('chat', !this.state.pinChat);
         else if (act === 'close') this.setOpen(false);
+        // Build mode: the sidebar beside the app (docked) or floating over it,
+        // whatever it shows. Floating, what was out stays out.
+        else if (act === 'dock') {
+          const out = Boolean(this.drawer?.isOpen);
+          const next = !this.state.pinChat;
+          this.pin('chat', next);
+          if (!next && out) { this.quiet.chat = false; this.reveal('chat', { hold: true }); }
+        }
         else if (act === 'share') this.toggleSharing();
         else if (act === 'settings') this.toggleSettings();
         else if (act === 'me') this.toggleMe();
@@ -1242,6 +1256,9 @@
         // way to.
         if (this.chatInBar) return;
         this.chatInBar = true;
+        // A Build mode app opens with the frame out, its bar and tree, unless
+        // it was put away (⌘\\) here before.
+        if (stored('open', null) === null && !this.state.open) this.setOpen(true);
         const chat = this.$('[data-act="chat"]');
         this.$('[data-act="comments"]').after(chat);
         chat.innerHTML = `${icon('talk')}<span class="dot" hidden></span>`;
@@ -1338,6 +1355,7 @@
     pin(side, pinned) {
       const key = side === 'nav' ? 'pinNav' : 'pinChat';
       if (this.state[key] === pinned) return;
+      this.held[side] = false;
       clearTimeout(this.hideTimers[side]);
       this.hideTimers[side] = null;
       this.shown[side] = false;
@@ -1380,10 +1398,11 @@
 
     /** Bring a side out on purpose — ⌘K, the chat button, a conversation
      *  opened — rather than because the pointer passed by. */
-    reveal(side, { focus = false } = {}) {
+    reveal(side, { focus = false, hold = false } = {}) {
       if (!this.hovers(side)) return;
       this.quiet[side] = false;
       this.keyed[side] = true;
+      if (hold) this.held[side] = true;
       if (this.shown[side] && !(focus && side === 'chat')) return;
       clearTimeout(this.hideTimers[side]);
       this.shown[side] = true;
@@ -1397,6 +1416,7 @@
       if (!this.hovers(side)) return;
       this.quiet[side] = true;
       this.keyed[side] = false;
+      this.held[side] = false;
       const drawer = this.drawer;
       if (side === 'chat' && document.activeElement === drawer) {
         let focused = drawer;
@@ -1417,7 +1437,7 @@
     wanted(side) {
       if (!this.hovers(side)) return false;
       if (side === 'chat' && !this.drawer) return false;
-      if (this.intro) return true;
+      if (this.intro || this.held[side]) return true;
       // A row's menu or dialog is open, something is being carried out of
       // the tree, or a pin is being renamed: the tree stays for it.
       if (side === 'nav' && (this.popRow || this.carrying || this.editing)) return true;
@@ -1552,6 +1572,11 @@
       this.drawer?.toggleAttribute('data-launcher-away', Boolean(this.chatInBar && open));
       this.$('[data-act="describe"]').hidden = !document.querySelector('.marble-marks-layer');
       this.$('[data-act="close"]').hidden = this.home;
+      const dock = this.$('[data-act="dock"]');
+      dock.hidden = !this.chatInBar || !this.drawer;
+      dock.setAttribute('aria-pressed', String(pinChat));
+      dock.setAttribute('aria-label', pinChat ? 'Float the sidebar over the app' : 'Keep the sidebar beside the app');
+      dock.title = pinChat ? 'Docked beside the app · press to float it over the app' : 'Floating over the app · press to dock it beside the app';
       this.$('.foot').hidden = !(HOME_DOC && window.marble?.drive);
       // A page can step aside for the frame: the Drive drops its own bars
       // while this is on. A marble- class is the page's, never the file's.

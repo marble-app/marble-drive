@@ -116,6 +116,9 @@ export function cleanMark(raw) {
     if (about.length) mark.ids = about;
     // Sent: the comment it became.
     if (raw.sent) mark.sent = idOf(raw.sent);
+    // The model it is to be answered or made with, chosen on the note.
+    const model = str(raw.model, 80).trim();
+    if (model) mark.model = model;
   }
   if (raw.type === 'stroke') {
     mark.kind = STROKE_KINDS.has(raw.kind) ? raw.kind : 'ink';

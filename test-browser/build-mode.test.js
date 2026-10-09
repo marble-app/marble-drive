@@ -92,13 +92,24 @@ const api = async (method, route, body) => {
 };
 const state = (doc = 'Reviews') => api('GET', `/agent/builds?path=${encodeURIComponent(doc)}`);
 
-/** A fresh Reviews app with nothing marked on it, open with Build mode on. */
-const open = async ({ doc = 'Reviews', width = 1280, height = 820, colorScheme = 'light', reducedMotion = 'no-preference' } = {}) => {
+/** A fresh Reviews app with nothing marked on it, open with Build mode on.
+ *  Unless `defaults` is asked for, it starts as these tests were written:
+ *  the frame put away and the sidebar on the chat, so the marks are on the
+ *  app rather than folded into Marks. */
+const open = async ({ doc = 'Reviews', width = 1280, height = 820, colorScheme = 'light', reducedMotion = 'no-preference', defaults = false } = {}) => {
   await closePages();
   const marks = (await state(doc)).marks ?? [];
   if (marks.length) await api('DELETE', `/agent/builds/marks?path=${encodeURIComponent(doc)}`, { ids: marks.map((m) => m.id) });
   await host.reset();
   const { page, errors } = await host.newPage({ build: true, viewport: { width, height }, colorScheme, reducedMotion });
+  if (!defaults) {
+    await page.addInitScript((name) => {
+      try {
+        if (localStorage.getItem('marble-shell:open') === null) localStorage.setItem('marble-shell:open', '0');
+        if (localStorage.getItem(`marble-build:side:${name}`) === null) localStorage.setItem(`marble-build:side:${name}`, 'none');
+      } catch { /* opaque origin */ }
+    }, doc);
+  }
   pages.push(page);
   await page.goto(`${host.base}/a/${encodeURIComponent(doc)}`);
   await page.waitForFunction(() => Boolean(window.marbleBuild?.state()));
@@ -153,6 +164,36 @@ test('every app starts in Describe: the toolbar is up, no ring, no notice, full 
   // The app still works under the cursor.
   assert.equal(await tool(page, 'use').getAttribute('aria-pressed'), 'true');
   assert.deepEqual(errors, []);
+});
+
+test('a Build mode app opens with the drive\'s frame out and the sidebar on Marks', async () => {
+  const { page, errors } = await open({ defaults: true });
+  await page.waitForFunction(() => window.marbleShell?.layout?.open === true);
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.viewName === 'marks');
+  // The bar is shaded off the page's paper.
+  const shade = await page.evaluate(() => getComputedStyle(document.querySelector('marble-shell').shadowRoot.querySelector('.bar')).backgroundColor);
+  assert.notEqual(shade, 'rgba(0, 0, 0, 0)');
+  // Docked or floating, from the bar; floating, Marks stays out while the hand moves.
+  const dock = () => page.locator('marble-shell').evaluate((s) => s.shadowRoot.querySelector('[data-act="dock"]').click());
+  assert.equal(await page.locator('marble-shell').evaluate((s) => s.shadowRoot.querySelector('[data-act="dock"]').hidden), false);
+  await dock();
+  await page.waitForFunction(() => window.marbleShell.layout.pinChat === false);
+  await page.mouse.move(300, 400);
+  await page.mouse.move(520, 520, { steps: 8 });
+  await page.waitForTimeout(800);
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), true, 'still out');
+  await dock();
+  await page.waitForFunction(() => window.marbleShell.layout.pinChat === true);
+  // The note's footer: a model on the left, Send on the right.
+  await page.evaluate(() => window.marbleBuild.setSide('none'));
+  await tool(page, 'text').click();
+  const r = await box(page, 's2');
+  await page.mouse.click(r.x + 60, r.y + 30);
+  await page.keyboard.type('Make the week two');
+  const act = page.locator('.marble-marks-note[data-writing] .marble-marks-note-act');
+  await act.locator('.model').waitFor();
+  await act.locator('.send').waitFor();
+  assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
 });
 
 test('a note is kept on the host, survives a reload, and the status mark counts it', async () => {
@@ -574,7 +615,8 @@ test('New goes to the app: the prompt is its first note, the first build names i
   await page.waitForFunction(() => Boolean(document.querySelector('marble-shell')?.buildApp));
   await page.evaluate(() => document.querySelector('marble-shell').buildApp('script:first Track my CHI review invitations'));
   await page.waitForURL(/\/a\/Untitled/);
-  await page.locator('.marble-marks-note[data-first]', { hasText: 'Track my CHI review invitations' }).waitFor();
+  // The sidebar opens on Marks, so the prompt is read there as its card.
+  await page.locator('.marble-marks-note[data-first]', { hasText: 'Track my CHI review invitations' }).waitFor({ state: 'attached' });
   assert.ok(!page.url().includes('#build='), 'the prompt is read once and taken off the address');
   await page.waitForURL(/\/a\/CHI%20reviews/, { timeout: 15_000 });
   await page.waitForFunction(() => Boolean(window.marbleBuild?.state()));
@@ -583,7 +625,9 @@ test('New goes to the app: the prompt is its first note, the first build names i
   assert.equal(s.folder, 'UCSD');
   const chip = await page.evaluate(() => document.querySelector('marble-shell').shadowRoot.querySelector('.offer:not([hidden])')?.textContent ?? '');
   assert.match(chip, /Move to UCSD/);
-  assert.deepEqual(errors.filter((e) => !/favicon/.test(e)), []);
+  // The frame is out on a Build mode app, and its tree asks for the drive's
+  // own page, which a test drive does not have: that one 404 is the frame's.
+  assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
 });
 
 test('the shell New offers App first, and Enter builds it there', async () => {

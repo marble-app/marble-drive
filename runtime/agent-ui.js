@@ -9686,8 +9686,11 @@
 
     open({ animate = true } = {}) {
       if (this.shell) {
+        // Floating, a view brought out on purpose (Build mode's Marks, Pieces,
+        // History) stays out until put away; the chat comes on reach.
+        const hold = this.viewName !== 'chat';
         if (!this.shell.chat) window.marbleShell.setChat(true);
-        else if (this.shell.chatShown === false) window.marbleShell.reveal('chat', { focus: true });
+        else if (this.shell.chatShown === false) window.marbleShell.reveal('chat', { focus: !hold, hold });
         else this.view.focusInput();
         return;
       }

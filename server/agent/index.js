@@ -297,7 +297,9 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     putDocument: putDocument ?? ((docPath, source, options) => createDocument(docPath, source, options)),
     moveDocument,
     freePath,
-    reply: config.agentNaming ? (input) => writeReply({ ...input, model: config.agentNamingModel, log }) : null,
+    // A comment is answered by the quick model, or by the one chosen on the
+    // note it was sent from.
+    reply: config.agentNaming ? (input) => writeReply({ ...input, model: /claude|opus|sonnet|haiku|fable/i.test(input.model ?? '') ? input.model : config.agentNamingModel, log }) : null,
     suggest: config.agentNaming ? (input) => suggestPieces({ ...input, model: config.agentNamingModel, log }) : null,
     driveRegions: createDriveIndex({ store }),
     log,

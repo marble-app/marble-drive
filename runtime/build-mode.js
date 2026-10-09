@@ -552,8 +552,13 @@
         let data;
         try { data = JSON.parse(message.data); } catch { return; }
         if (data.type === 'moved' && data.href) {
-          // The app was named, or filed: this tab goes where it went.
+          // The app was named, or filed: this tab goes where it went, with
+          // the sidebar on the view it had here.
           stream.close();
+          try {
+            const to = decodeURIComponent(new URL(data.href, location.href).pathname.replace(/^\/a\//, ''));
+            localStorage.setItem(`marble-build:side:${to}`, side === 'none' ? 'comments' : side);
+          } catch { /* private mode, or an address not of an app */ }
           location.replace(data.href);
           return;
         }
@@ -1530,6 +1535,7 @@
     const SIDE_OF = { marks: 'comments', pieces: 'pieces', history: 'history' };
     const SIDE_KEY = `marble-build:side:${app}`;
     let side = 'none';
+    let restored = false;
     const frameHidden = false;
     const readSide = () => (drawer?.isOpen ? SIDE_OF[drawer.viewName] ?? 'none' : 'none');
     function syncSide() {
@@ -1537,7 +1543,9 @@
       side = readSide();
       piecesOpen = side === 'pieces';
       M.setMargin?.(side === 'comments');
-      if (drawer?.isOpen) { try { localStorage.setItem(SIDE_KEY, side); } catch { /* private mode */ } }
+      // Kept once the view this app had has been read back, not before: the
+      // sidebar opening on the chat at load is not a choice.
+      if (restored && drawer?.isOpen) { try { localStorage.setItem(SIDE_KEY, side); } catch { /* private mode */ } }
       if (side === was) return;
       // The marks are read beside the app while Describe is on.
       if (side === 'comments' && !M.describing) M.setDescribing(true);
@@ -1561,10 +1569,12 @@
     addEventListener('marble-build:toggle-history', () => toggleSide('history'));
     /** The view this app had last time, in the sidebar, out or not. */
     const restoreSide = () => {
-      let kept = 'none';
-      try { kept = localStorage.getItem(SIDE_KEY) ?? 'none'; } catch { /* private mode */ }
+      // Marks, headed by the build's status, unless another view was left.
+      let kept = 'comments';
+      try { kept = localStorage.getItem(SIDE_KEY) ?? 'comments'; } catch { /* private mode */ }
       if (kept === 'comments' && !M.describing) kept = 'none';
       if (VIEW_OF[kept] && drawer) drawer.showView(VIEW_OF[kept]);
+      restored = true;
       syncSide();
       dispatchEvent(new CustomEvent('marble-build:side', { detail: { side, hidden: false } }));
     };

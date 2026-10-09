@@ -189,10 +189,34 @@
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #9bb6cf) 30%, transparent), 0 8px 22px rgba(0, 0, 0, .12);
     }
     .marble-marks-note[data-sending] { opacity: 0; scale: .1; pointer-events: none; transition: opacity 200ms ${EASE}, scale 240ms ${EASE}; }
+    /* It slides down out of the note while it is written or the hand is on
+       it, and back up into it after. */
     .marble-marks-note-act {
-      display: none; align-items: center; gap: 4px; padding: 0 6px 6px 8px;
+      display: none; align-items: center; gap: 4px; padding: 0 6px 0 8px;
+      max-height: 0; opacity: 0; overflow: hidden; visibility: hidden;
+      transition: max-height 220ms ${EASE}, padding 220ms ${EASE}, opacity 160ms ${EASE}, visibility 0s 220ms;
     }
-    .marble-marks-layer[data-build] .marble-marks-note:is([data-writing], :hover, :focus-within) .marble-marks-note-act { display: flex; }
+    .marble-marks-layer[data-build] .marble-marks-note-act { display: flex; }
+    .marble-marks-layer[data-build] .marble-marks-note:is([data-writing], :hover, :focus-within) .marble-marks-note-act {
+      max-height: 40px; padding: 2px 6px 6px 8px; opacity: 1; visibility: visible;
+      transition: max-height 220ms ${EASE}, padding 220ms ${EASE}, opacity 160ms ${EASE} 40ms, visibility 0s;
+    }
+    @media (prefers-reduced-motion: reduce) { .marble-marks-note-act { transition: opacity 120ms linear, visibility 0s 120ms !important; } }
+    /* The model it is sent to: the chat's choice, on the note. */
+    .marble-marks-note-act .model { gap: 3px; padding: 0 7px; color: color-mix(in srgb, var(--marks-ink) 62%, transparent); font-weight: 450; max-width: 150px; }
+    .marble-marks-note-act .model span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-marks-models {
+      position: fixed; pointer-events: auto; z-index: 1; min-width: 180px; max-width: 260px; padding: 4px; border-radius: 10px;
+      background: var(--marks-paper); color: var(--marks-ink); font: 400 12.5px/1.3 var(--ui-font, system-ui, sans-serif);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--marks-ink) 10%, transparent), 0 8px 22px rgba(0,0,0,.14);
+    }
+    .marble-marks-models[hidden] { display: none; }
+    .marble-marks-models button {
+      all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 7px; cursor: pointer;
+    }
+    .marble-marks-models button:hover, .marble-marks-models button:focus-visible { background: color-mix(in srgb, var(--marks-ink) 7%, transparent); outline: none; }
+    .marble-marks-models button[aria-checked="true"]::after { content: "✓"; margin-left: auto; color: var(--marks-mark); }
+    .marble-marks-models small { color: color-mix(in srgb, var(--marks-ink) 50%, transparent); font-size: 11px; }
     .marble-marks-note-act .sp { flex: 1; }
     .marble-marks-note-act button {
       all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 8px;
@@ -1133,6 +1157,7 @@
         if (mark.images?.length) out.images = mark.images.filter((image) => image.name).map(({ name, w, h }) => ({ name, w, h }));
         if (mark.clips?.length) out.clips = mark.clips.map(({ html, text }) => ({ html, text }));
         if (mark.ids?.length) out.ids = [...mark.ids];
+        if (mark.model) out.model = mark.model;
       }
       if (mark.type === 'stroke') {
         Object.assign(out, { kind: mark.kind, ids: mark.ids, from: mark.from, to: mark.to, parts: mark.parts.map((part) => ({ pairs: part.pairs })) });
@@ -1267,6 +1292,18 @@
       let sendButton = null;
       if (building) {
         const act = el('div', 'marble-marks-note-act', node);
+        const model = document.createElement('button');
+        model.type = 'button';
+        model.className = 'model';
+        model.setAttribute(TRANSIENT, '');
+        model.setAttribute('aria-haspopup', 'menu');
+        model.innerHTML = `<span ${TRANSIENT}>Model</span><svg ${TRANSIENT} viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6.5 8 9.5l3-3"/></svg>`;
+        model.title = 'The model it is answered or made with';
+        model.addEventListener('pointerdown', (event) => event.preventDefault());
+        model.addEventListener('click', () => pickModel(mark, model));
+        act.append(model);
+        mark.paintModel = () => paintModel(mark, model);
+        mark.paintModel();
         if (mark.ids?.length) {
           const piece = document.createElement('button');
           piece.type = 'button';
@@ -1349,6 +1386,69 @@
       if (focus) { node.setAttribute('data-writing', ''); body.focus(); }
       return mark;
     };
+
+    // ---------------------------------------------------------- models
+    //
+    // The chat's own choice of model (its composer's picker reads the same
+    // list), on the note: what a sent note is answered or built with. Left
+    // alone it is the drive's default.
+    let catalog = null;
+    const models = () => {
+      catalog ??= Promise.all([agent.providers?.().catch(() => []), agent.settings?.().catch(() => ({}))]).then(([providers, settings]) => {
+        const list = Array.isArray(providers) ? providers : providers?.providers ?? [];
+        const id = settings?.defaultProvider ?? list[0]?.id;
+        const provider = list.find((p) => p.default) ?? list.find((p) => p.id === id) ?? list[0] ?? null;
+        return {
+          models: (provider?.models ?? []).map((m) => ({ id: m.id, label: m.label ?? m.id, note: m.note ?? m.detail ?? '' })),
+          fallback: settings?.models?.[provider?.id] ?? null,
+        };
+      }).catch(() => ({ models: [], fallback: null }));
+      return catalog;
+    };
+    const paintModel = async (mark, button) => {
+      const { models: list, fallback } = await models();
+      const chosen = list.find((m) => m.id === (mark.model ?? fallback));
+      button.querySelector('span').textContent = chosen?.label ?? 'Default model';
+      button.hidden = !list.length;
+      button.setAttribute('aria-label', `Model: ${chosen?.label ?? 'the default'}. Press to choose another`);
+    };
+    const modelMenu = el('div', 'marble-marks-models', layer);
+    modelMenu.setAttribute('role', 'menu');
+    modelMenu.hidden = true;
+    let modelFor = null;
+    const closeModels = () => { modelMenu.hidden = true; modelFor = null; };
+    const pickModel = async (mark, button) => {
+      if (modelFor === mark) { closeModels(); return; }
+      const { models: list, fallback } = await models();
+      modelFor = mark;
+      modelMenu.replaceChildren();
+      for (const m of list) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.setAttribute(TRANSIENT, '');
+        item.setAttribute('role', 'menuitemradio');
+        item.setAttribute('aria-checked', String(m.id === (mark.model ?? fallback)));
+        item.textContent = m.label;
+        item.addEventListener('pointerdown', (event) => event.preventDefault());
+        item.addEventListener('click', () => {
+          mark.model = m.id;
+          closeModels();
+          mark.paintModel?.();
+          if (!mark.local) keep(mark);
+        });
+        modelMenu.append(item);
+      }
+      modelMenu.hidden = false;
+      const r = button.getBoundingClientRect();
+      const t = modelMenu.getBoundingClientRect();
+      modelMenu.style.left = `${Math.round(Math.min(Math.max(8, r.left), innerWidth - t.width - 8))}px`;
+      modelMenu.style.top = `${Math.round(r.bottom + 6 + t.height < innerHeight ? r.bottom + 6 : Math.max(8, r.top - t.height - 6))}px`;
+    };
+    addEventListener('pointerdown', (event) => {
+      if (modelMenu.hidden) return;
+      if (event.composedPath().some((node) => node === modelMenu || node?.classList?.contains?.('model'))) return;
+      closeModels();
+    }, true);
 
     // ---------------------------------------------------------- sending
     //
@@ -1881,6 +1981,7 @@
         mark.kind = 'text';
         mark.text = given.text ?? '';
         mark.ids = given.ids ?? [];
+        mark.model = given.model ?? null;
         const same = (a, b) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
         const pictures = (given.images ?? []).map(({ name, w, h }) => ({ name, w, h }));
         const changed = !same((mark.images ?? []).filter((i) => i.name).map(({ name, w, h }) => ({ name, w, h })), pictures) || !same(mark.clips, given.clips);
