@@ -7,7 +7,7 @@
 //     hears each change, so a note left here is on the app everywhere;
 //   - the toolbar's build: a status mark (nothing waits, how many marks wait,
 //     the build's ring filling, held when paused, a check when up to date)
-//     that opens the margin on Building; Builds, every build kept, to go back
+//     that opens the margin; Builds, every build kept, to go back
 //     and forth between; and Build, which becomes the build's meter with Pause
 //     and Stop while it runs;
 //   - the right side: Pieces or the margin (build-margin.js), one at a time,
@@ -16,8 +16,7 @@
 //   - comment threads, answered on the app by the app, in its own name;
 //   - what the agent reads, drawn beside the part it is working on;
 //   - Pieces, parts of other apps to put on this one;
-//   - out of Describe, one button in the corner, and a + on each part that
-//     drops a note there and goes back into Describe;
+//   - out of Describe, one button in the corner;
 //   - a new app's first note, from New, and its first build.
 //
 // The progress of the work itself — tints, the ring where it is working,
@@ -196,13 +195,18 @@
 
     /* A thread opens as a kept note's card does: frosted, a hairline, lifted.
        The agent's lines are plain; an offer is two buttons under it. */
+    /* As wide as what is being written, from 300px to 440px, and as tall:
+       the whole prompt is always in view. Put away, it folds into its pin. */
     .marble-build-thread {
-      position: fixed; pointer-events: auto; box-sizing: border-box; width: 300px; max-width: calc(100vw - 24px);
-      border-radius: 12px; padding: 4px 0 8px;
+      position: fixed; pointer-events: auto; box-sizing: border-box; width: var(--thread-w, 300px); max-width: calc(100vw - 24px);
+      border-radius: 12px; padding: 4px 0 8px; transform-origin: var(--thread-from, 0 0);
+      transition: width 200ms ${EASE}, opacity 180ms ${EASE}, scale 220ms ${EASE};
       background: color-mix(in srgb, var(--b-card) 92%, transparent);
       -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4);
       border: 1px solid var(--b-line); box-shadow: var(--b-shadow); font-size: 13px;
     }
+    @starting-style { .marble-build-thread { opacity: 0; scale: .92; } }
+    .marble-build-thread[data-leaving] { opacity: 0; scale: .12; pointer-events: none; }
     .marble-build-thread .lines { max-height: 300px; overflow: auto; }
     .marble-build-line { padding: 8px 12px 2px; }
     .marble-build-line .who { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--b-muted); margin-bottom: 2px; }
@@ -219,11 +223,12 @@
     .marble-build-dots i:nth-child(2) { animation-delay: .15s; }
     .marble-build-dots i:nth-child(3) { animation-delay: .3s; }
     @keyframes marble-build-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
-    .marble-build-compose { display: flex; align-items: center; gap: 6px; margin: 8px 8px 0; padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--b-card); box-shadow: 0 0 0 1px var(--b-line); }
+    .marble-build-compose { display: flex; align-items: flex-end; gap: 6px; margin: 8px 8px 0; padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--b-card); box-shadow: 0 0 0 1px var(--b-line); }
     .marble-build-compose:focus-within { box-shadow: 0 0 0 1px var(--b-accent), 0 0 0 4px var(--b-accent-soft); }
-    .marble-build-compose input { flex: 1; min-width: 0; border: 0; background: none; font: 13.5px/1.45 var(--b-ui); color: var(--b-ink); padding: 4px 0; caret-color: var(--b-mark); }
-    .marble-build-compose input:focus { outline: none; }
-    .marble-build-compose input::placeholder { color: var(--placeholder, #767676); }
+    .marble-build-compose textarea { flex: 1; min-width: 0; border: 0; background: none; font: 13.5px/1.45 var(--b-ui); color: var(--b-ink); padding: 4px 0; margin: 0; caret-color: var(--b-mark);
+      resize: none; field-sizing: content; min-height: calc(1.45em + 8px); max-height: 40vh; overflow-y: auto; overflow-wrap: anywhere; }
+    .marble-build-compose textarea:focus { outline: none; }
+    .marble-build-compose textarea::placeholder { color: var(--placeholder, #767676); }
     .marble-build-round { all: unset; box-sizing: border-box; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; background: var(--b-mark); color: var(--b-card); }
     .marble-build-round[aria-disabled="true"] { opacity: .35; cursor: default; }
     .marble-build-round svg { width: 15px; height: 15px; }
@@ -254,7 +259,8 @@
     .marble-build-found[data-gone] { opacity: 0; translate: 0 3px; }
 
     /* Out of Describe: the toolbar folds into one button in the corner, with
-       the build's state as its dot; and a + at a part's corner. */
+       the build's state as its dot. Nothing comes up over the app under a
+       passing hand. */
     .marble-build-handle {
       position: fixed; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); pointer-events: auto; box-sizing: border-box;
       width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border-radius: 50%; cursor: pointer;
@@ -271,14 +277,6 @@
     .marble-build-handle[data-run="pending"] .dot { background: var(--b-mark); }
     .marble-build-handle[data-away] { opacity: 0; translate: 0 8px; pointer-events: none; }
     @keyframes marble-build-breathe { 50% { opacity: .45; } }
-    .marble-build-plus {
-      position: fixed; pointer-events: auto; box-sizing: border-box; width: 24px; height: 24px; padding: 0; border-radius: 50%;
-      display: grid; place-items: center; cursor: pointer; border: 1px solid var(--b-line); background: var(--b-card); color: var(--b-ink);
-      box-shadow: var(--b-shadow); transition: opacity 140ms ${EASE};
-    }
-    .marble-build-plus svg { width: 14px; height: 14px; }
-    .marble-build-plus:hover { background: var(--b-paper-2); }
-    .marble-build-plus-ring { position: fixed; pointer-events: none; border-radius: 8px; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--b-mark) 55%, transparent); }
 
     /* The tip every icon here has: what a press does, and its key. */
     .marble-build-tip {
@@ -299,9 +297,10 @@
       position: fixed; top: var(--marble-shell-top, 0px); right: 0; bottom: 0; width: ${SIDE_W}px; max-width: 100vw;
       pointer-events: auto; display: flex; flex-direction: column; box-sizing: border-box;
       background: var(--b-paper); border-left: 1px solid var(--b-line);
-      transition: opacity 150ms linear;
+      translate: 100% 0; transition: translate 340ms ${EASE};
     }
-    @starting-style { .marble-build-pieces { opacity: 0; } }
+    /* In from the edge, and out the same way (slide(), below). */
+    .marble-build-pieces[data-in] { translate: 0 0; }
     .marble-build-pieces .head { height: 46px; padding: 0 8px 0 14px; display: flex; align-items: center; gap: 2px; flex: none; }
     .marble-build-pieces .head b { flex: 1; font-weight: 500; font-size: 14px; }
     .marble-build-find { margin: 0 12px 6px; display: flex; align-items: center; gap: .45rem; padding: 0 10px; height: 34px; border-radius: 17px; background: var(--b-card); border: 1px solid var(--b-line); flex: none; }
@@ -347,7 +346,8 @@
        foot, over the lower part of the page. */
     @media (max-width: 620px) {
       .marble-build-pieces { top: auto; left: 0; right: 0; width: auto; height: min(62vh, 520px); border-left: 0; border-top: 1px solid var(--b-line); border-radius: 16px 16px 0 0; box-shadow: var(--b-shadow); }
-      @starting-style { .marble-build-pieces { opacity: 0; translate: 0 16px; } }
+      .marble-build-pieces { translate: 0 100%; }
+      .marble-build-pieces[data-in] { translate: 0 0; }
       .marble-build-thread { width: calc(100vw - 24px); }
     }
     @media (max-width: 520px) {
@@ -364,7 +364,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       .marble-build-layer *, .marble-build-status .g, .marble-build-status .arc, .marble-build-meter i { transition: opacity 150ms linear !important; animation: none !important; }
-      @starting-style { .marble-build-pop, .marble-build-found, .marble-build-tip, .marble-build-pieces { translate: none; } }
+      @starting-style { .marble-build-pop, .marble-build-found, .marble-build-tip { translate: none; } }
     }
   `;
 
@@ -378,6 +378,48 @@
   };
   const clip = (text, n) => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
   const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  /** A side panel in and out: shown, then slid in from its edge on the next
+   *  frame; slid out, then hidden once it is out of sight. Its CSS says which
+   *  edge ([data-in] is in). */
+  const slide = (node, show) => {
+    clearTimeout(node.slideTimer);
+    if (show) {
+      if (node.hidden) {
+        node.hidden = false;
+        node.removeAttribute('data-in');
+        void node.offsetWidth;
+      }
+      node.setAttribute('data-in', '');
+      return;
+    }
+    if (node.hidden) return;
+    node.removeAttribute('data-in');
+    const away = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 360;
+    node.slideTimer = setTimeout(() => { if (!node.hasAttribute('data-in')) node.hidden = true; }, away);
+  };
+  /** A box for words that is as tall as what is in it (field-sizing where
+   *  there is one, measured where not), and says how wide its longest line
+   *  wants to be, so the card round it can widen. Enter sends; Shift+Enter is
+   *  a new line. */
+  const growing = (textarea, { onWidth = null, onSend = null } = {}) => {
+    textarea.rows = 1;
+    const measure = () => {
+      if (!CSS.supports?.('field-sizing', 'content')) {
+        textarea.style.height = 'auto';
+        textarea.style.height = `${textarea.scrollHeight}px`;
+      }
+      if (onWidth) {
+        const longest = Math.max(0, ...textarea.value.split('\n').map((line) => line.length));
+        onWidth(longest);
+      }
+    };
+    textarea.addEventListener('input', measure);
+    textarea.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && onSend) { event.preventDefault(); onSend(); }
+    });
+    requestAnimationFrame(measure);
+    return measure;
+  };
   const clock = (ms) => {
     const s = Math.max(0, Math.round(ms / 1000));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -740,16 +782,14 @@
       node.append(h('p', 'foot', busy ? 'Wait for the build to finish, or stop it, to look at another.' : 'Stop always goes back to the last finished build.'));
     };
 
-    // The status mark opens no card: it shows the build in the margin, on
-    // Building while one is in hand, and puts the margin away when pressed
-    // again (build-margin.js).
+    // The status mark opens no card: it brings the margin out, headed by the
+    // build while one is in hand, and puts it away when pressed again
+    // (build-margin.js).
     status.addEventListener('click', () => {
       hideTip();
       const margin = window.marbleMargin;
       if (!margin?.toggle) return;
-      const next = current() ? 'build' : 'open';
-      if (margin.open && (margin.show === next || !current())) setSide('none');
-      else margin.toggle(next);
+      margin.toggle();
     });
     buildsButton.addEventListener('click', () => openPop('builds', buildsButton, drawBuilds));
 
@@ -931,15 +971,24 @@
     thread.hidden = true;
     layer.append(thread);
     let threadFor = null;
-    const closeThread = () => {
+    let leaving = 0;
+    const closeThread = ({ posting = false } = {}) => {
       if (!threadFor) return;
       const id = threadFor;
       threadFor = null;
-      thread.hidden = true;
+      // It folds into its pin, the way it came out of it.
+      const pin = M.elementOf(id)?.getBoundingClientRect();
+      const box = thread.getBoundingClientRect();
+      if (pin?.width && box.width && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        thread.style.setProperty('--thread-from', `${Math.round(pin.left + pin.width / 2 - box.left)}px ${Math.round(pin.top + pin.height / 2 - box.top)}px`);
+        thread.setAttribute('data-leaving', '');
+        clearTimeout(leaving);
+        leaving = setTimeout(() => { if (!threadFor) thread.hidden = true; thread.removeAttribute('data-leaving'); }, 230);
+      } else thread.hidden = true;
       M.closeComments();
       // A pin with nothing said in it was a slip of the hand.
       const mark = M.get(id);
-      if (mark && !(state?.marks ?? []).some((m) => m.id === id)) M.dropDraft(id);
+      if (!posting && mark && !(state?.marks ?? []).some((m) => m.id === id)) M.dropDraft(id);
     };
     const placeThread = () => {
       if (!threadFor) return;
@@ -957,6 +1006,10 @@
       if (!threadFor) return;
       const kept = (state?.marks ?? []).find((m) => m.id === threadFor);
       const lines = kept?.thread ?? [];
+      // What is half written survives the thread being drawn again.
+      const was = thread.querySelector('textarea');
+      const draft = was?.value ?? '';
+      const typing = Boolean(was && document.activeElement === was);
       thread.replaceChildren();
       const top = h('div', 'top');
       if (kept) {
@@ -972,15 +1025,14 @@
       close.type = 'button';
       close.innerHTML = ICON.close;
       close.setAttribute('aria-label', 'Close');
-      close.addEventListener('click', closeThread);
+      close.addEventListener('click', () => closeThread());
       top.append(close);
       if (lines.length) thread.append(top);
       const box = h('div', 'lines');
       drawLines(box, kept);
       thread.append(box);
       const compose = h('form', 'marble-build-compose');
-      const input = h('input');
-      input.type = 'text';
+      const input = h('textarea');
       input.placeholder = lines.length ? 'Reply' : 'Add a comment';
       input.setAttribute('aria-label', input.placeholder);
       const post = h('button', 'marble-build-round');
@@ -990,20 +1042,29 @@
       post.setAttribute('aria-disabled', 'true');
       input.addEventListener('input', () => post.setAttribute('aria-disabled', String(!input.value.trim())));
       compose.append(input, post);
+      // The card widens with the longest line, 300 to 440px, then wraps.
+      const fit = growing(input, {
+        onWidth: (chars) => {
+          thread.style.setProperty('--thread-w', `${Math.round(Math.min(440, Math.max(300, chars * 7.4 + 70)))}px`);
+          placeThread();
+        },
+        onSend: () => compose.requestSubmit(),
+      });
+      if (draft) { input.value = draft; post.setAttribute('aria-disabled', String(!draft.trim())); requestAnimationFrame(fit); }
+      if (typing) requestAnimationFrame(() => input.focus({ preventScroll: true }));
       compose.addEventListener('submit', async (event) => {
         event.preventDefault();
         const text = input.value.trim();
         if (!text || !threadFor) return;
         const id = threadFor;
         input.value = '';
+        fit();
         post.setAttribute('aria-disabled', 'true');
+        // With the margin open the box that wrote it folds into its pin now,
+        // and the comment is read in its card.
+        if (side === 'comments') closeThread({ posting: true });
         await postComment(id, text);
-        // With the margin open, the comment is read there from now on: the
-        // box that wrote it goes, and its card is picked.
-        if (side === 'comments') {
-          closeThread();
-          dispatchEvent(new CustomEvent('marble-build:pick', { detail: { id } }));
-        }
+        if (side === 'comments') dispatchEvent(new CustomEvent('marble-build:pick', { detail: { id } }));
       });
       input.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeThread(); }
@@ -1024,6 +1085,9 @@
       const id = event.detail?.id;
       if (!id) return;
       if (threadFor && threadFor !== id) closeThread();
+      clearTimeout(leaving);
+      thread.removeAttribute('data-leaving');
+      thread.style.removeProperty('--thread-w');
       threadFor = id;
       drawThread({ focus: true });
     });
@@ -1314,11 +1378,20 @@
     const frameOff = () => window.marbleShell?.layout?.frame === false;
     let frameHidden = frameOff();
     const sheet = matchMedia('(max-width: 620px), (hover: none) and (pointer: coarse)');
-    const dockSide = () => {
+    // The side slides in from the edge and the app gives way beside it, in
+    // the one motion and the one time; and the same out. The motion is on
+    // the root only while it moves, as the shell's own docking does, so a
+    // margin never trails anything else.
+    let settling = 0;
+    let docked = false;
+    const dockSide = ({ animate = true } = {}) => {
       const shown = side !== 'none' && !frameHidden;
       const on = shown && !sheet.matches;
       let style = document.getElementById('marble-build-dock');
-      if (!shown) { style?.remove(); return; }
+      const moving = animate && on !== docked && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+      docked = on;
+      clearTimeout(settling);
+      if (!shown && !moving) { style?.remove(); return; }
       if (!style) {
         style = document.createElement('style');
         style.id = 'marble-build-dock';
@@ -1329,11 +1402,17 @@
       // toolbar) centres on what is left of it.
       // As a sheet it docks nothing, and says how tall it is so Describe's
       // toolbar stands above it (the margin lowers it: --marble-build-sheet).
-      style.textContent = on
-        ? `html { margin-inline-end: ${SIDE_W}px !important; --marble-dock-right: ${SIDE_W}px; }`
-        : 'html { --marble-dock-bottom: var(--marble-build-sheet, min(62vh, 520px)); }';
+      const write = (motion) => {
+        const ease = motion ? ` transition: margin 340ms ${EASE} !important;` : '';
+        style.textContent = on
+          ? `html { margin-inline-end: ${SIDE_W}px !important; --marble-dock-right: ${SIDE_W}px;${ease} }`
+          : shown ? 'html { --marble-dock-bottom: var(--marble-build-sheet, min(62vh, 520px)); }'
+          : `html { margin-inline-end: 0px !important;${ease} }`;
+      };
+      write(moving);
+      if (moving) settling = setTimeout(() => { if (shown) write(false); else style.remove(); }, 400);
     };
-    function setSide(next, { remember = true, byChat = false, reveal = true } = {}) {
+    function setSide(next, { remember = true, byChat = false, reveal = true, animate = true } = {}) {
       const wanted = SIDES.has(next) ? next : 'none';
       // The marks are read in the margin while Describe is on; asking for it
       // turns Describe on first.
@@ -1348,7 +1427,7 @@
       side = wanted;
       if (remember) { try { localStorage.setItem(SIDE_KEY, side); } catch { /* private mode */ } }
       piecesOpen = side === 'pieces';
-      pieces.hidden = !piecesOpen || frameHidden;
+      slide(pieces, piecesOpen && !frameHidden);
       piecesButton.setAttribute('aria-pressed', String(piecesOpen));
       M.setMargin?.(side === 'comments' && !frameHidden);
       if (side !== 'none' && side !== was) {
@@ -1363,7 +1442,7 @@
         if (tookChat && !byChat && remember) window.marbleShell?.setChat(true);
         tookChat = false;
       }
-      dockSide();
+      dockSide({ animate: animate && remember });
       dispatchEvent(new CustomEvent('marble-build:side', { detail: { side, hidden: frameHidden } }));
       placeFound();
     }
@@ -1377,11 +1456,11 @@
       const layout = event.detail ?? {};
       // The chat pinned, or brought out on purpose (its button, ⌘J), takes
       // the side back.
-      if ((layout.pinChat || layout.focusChat) && side !== 'none') setSide('none', { byChat: true });
+      if ((layout.pinChat || layout.focusChat) && side !== 'none') setSide('none', { byChat: true, animate: false });
       const hidden = layout.frame === false;
       if (hidden !== frameHidden) {
         frameHidden = hidden;
-        pieces.hidden = !piecesOpen || frameHidden;
+        slide(pieces, piecesOpen && !frameHidden);
         M.setMargin?.(side === 'comments' && !frameHidden);
         dockSide();
         dispatchEvent(new CustomEvent('marble-build:side', { detail: { side, hidden: frameHidden } }));
@@ -1444,65 +1523,9 @@
       if (t) handle.style.bottom = `${Math.round(innerHeight - t.bottom + (t.height - 44) / 2)}px`;
     };
 
-    const plus = h('button', 'marble-build-plus');
-    plus.type = 'button';
-    plus.innerHTML = ICON.plus;
-    plus.setAttribute('aria-label', 'Leave a note here');
-    plus.hidden = true;
-    const plusRing = h('div', 'marble-build-plus-ring');
-    plusRing.hidden = true;
-    layer.append(plusRing, plus);
-    let plusFor = null;
-    /** The part a hand is over: the closest addressed block that is a part of
-     *  the app, not the page or a line of text inside it. */
-    const partAt = (target) => {
-      const body = document.body;
-      let best = null;
-      for (let node = target?.closest?.('[data-marble-id]'); node && node !== body && node !== document.documentElement; node = node.parentElement?.closest('[data-marble-id]')) {
-        if (node.closest(`[${TRANSIENT}]`)) return null;
-        const r = node.getBoundingClientRect();
-        if (r.width < 120 || r.height < 32) continue;
-        if (r.width * r.height > innerWidth * innerHeight * 0.7 || node.matches('main, [role="main"]')) break;
-        const cs = getComputedStyle(node);
-        const boxed = cs.borderTopWidth !== '0px' || cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || /^(section|article|aside|table|form|figure|ul|ol|nav|header|footer|fieldset|details)$/i.test(node.tagName);
-        best = node;
-        if (boxed) break;
-      }
-      return best;
-    };
-    const paintPlus = () => {
-      if (!plusFor || M.describing) { plus.hidden = true; plusRing.hidden = true; return; }
-      const r = plusFor.getBoundingClientRect();
-      if (!r.width) { plus.hidden = true; plusRing.hidden = true; return; }
-      plus.hidden = false;
-      plusRing.hidden = false;
-      Object.assign(plusRing.style, { left: `${r.left - 3}px`, top: `${r.top - 3}px`, width: `${r.width + 6}px`, height: `${r.height + 6}px` });
-      Object.assign(plus.style, { left: `${Math.round(Math.min(innerWidth - 30, r.right - 12))}px`, top: `${Math.round(Math.max(6, r.top - 12))}px` });
-    };
-    let plusLeave = 0;
-    document.addEventListener('pointerover', (event) => {
-      if (M.describing || event.pointerType === 'touch') return;
-      if (event.composedPath().includes(plus)) { clearTimeout(plusLeave); return; }
-      const part = partAt(event.target);
-      if (part === plusFor) { clearTimeout(plusLeave); return; }
-      clearTimeout(plusLeave);
-      if (!part) { plusLeave = setTimeout(() => { plusFor = null; paintPlus(); }, 220); return; }
-      plusFor = part;
-      paintPlus();
-    });
-    plus.addEventListener('click', () => {
-      const part = plusFor;
-      plusFor = null;
-      paintPlus();
-      if (!part) return;
-      M.setDescribing(true);
-      M.note({ anchorId: part.getAttribute('data-marble-id'), u: 1, v: 0 });
-    });
-
     const paintDescribing = () => {
       const on = M.describing;
       handle.toggleAttribute('data-away', on);
-      if (on) { plusFor = null; paintPlus(); }
       if (!on) { closePop(); closeThread(); sel.hidden = true; if (side === 'comments') setSide('none'); }
       placeHandle();
     };
@@ -1552,7 +1575,6 @@
         framing = 0;
         placeThread();
         placeFound();
-        paintPlus();
         placeHandle();
         if (open) hangOver(open.node, open.button);
       });
@@ -1612,6 +1634,8 @@
       hold: (id, held) => settled(ask('POST', route('/hold'), { id, held: Boolean(held) })),
       resolve: (id, resolved) => settled(ask('POST', route('/resolve'), { id, resolved: Boolean(resolved) })),
       mountDrawn,
+      slide,
+      growing,
       /** A tip that says more than a control's own words, after a rest. */
       tip: (node, words) => {
         node.dataset.tipText = words;

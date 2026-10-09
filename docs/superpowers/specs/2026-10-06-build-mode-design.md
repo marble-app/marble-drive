@@ -146,6 +146,45 @@ finishes, the page renames it to the title and reloads at its new address. The
 folder is offered as a chip in the shell's bar ("Not in a folder yet · Move to
 UCSD") until taken or dismissed.
 
+## After the first ship (8 October)
+
+Marked up on the spec page after using it:
+
+- **Boxes that grow.** A note is as wide as its longest line, 220 to 380px,
+  then wraps; it is pulled in from the window's edge when it would run past
+  it. The comment box is a textarea that grows with what is typed, and its
+  card widens from 300 to 440px; Enter posts, Shift+Enter is a new line. The
+  margin's reply box grows the same way.
+- **One press.** In Build mode the Note tool, like Comment, puts down one
+  note and hands the cursor back to the app; writing in a note that was
+  already there does the same. The tool's icon is a note, not a T.
+- **Deleting is undoable.** The note's × works (the grip no longer captures
+  the press on it). A deleted mark, by its ×, Delete or a comment's trash,
+  says so in a line over the toolbar with Undo, and ⌘Z puts it back while
+  the line is up; putting back keeps it on the host again as it was.
+- **Pasting.** A picture pasted onto a note is shrunk to 1600px, kept beside
+  the builds (`.marble/builds/images`, by content hash; POST/GET
+  `/agent/builds/image`) and drawn on the note; a part copied off a page
+  (anything with a control, a table, a picture or an addressed element) is
+  drawn small as a pasted part; words are pasted as plain words. The brief
+  gives the build each picture's path to Read and each part's markup.
+- **The margin.** No filter: every mark in one list, its card drawn by state
+  (plain while waiting, tinted with its meter in the build, faint and folded
+  when done), the head counting each. No line from pin to card: the picked
+  card and its pin are shaded in the accent. A note's words are written on
+  its card while it waits. The margin and Pieces slide in from the edge and
+  the app's margin eases with them. Picking a card brings its part into
+  view, scrolling inside the app first when the app scrolls. The build's
+  card heads the list only while a build is in hand.
+- **What is being written stays.** With the margin open a new note or comment
+  stays whole on the app until it is left, then folds into its pin (notes and
+  pieces fold to their point and unfold when the margin shuts). Before, a new
+  note was hidden before it could take the caret.
+- **Quiet hover.** The + and ring on a part under a passing hand are gone.
+- **The chat on the bar.** In Build mode the shell's right-side button is the
+  chat's, drawn as a speech balloon beside Pieces and Comments with the
+  launcher's dot, and the launcher leaves the corner.
+
 ## Left for later
 
 - Taking one finished part out of a stopped build (only looking at it is here).
@@ -155,8 +194,6 @@ UCSD") until taken or dismissed.
   so a build is drawn, paused and stopped as one.
 - Undo for one built mark: going back to a build in Builds is the way back.
 - Hold back for a mark already in a running build: pause or stop the build.
-- Editing a note's words from its card in the margin (shut the margin to edit
-  it on the app).
 
 There is no comment on the whole app: a comment anywhere can be about all of
 it, and the app works out which.

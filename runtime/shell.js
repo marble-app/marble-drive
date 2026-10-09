@@ -166,6 +166,9 @@
     collapse: '<path d="M6 2.75V4.5c0 .83-.67 1.5-1.5 1.5H2.75M13.25 6H11.5c-.83 0-1.5-.67-1.5-1.5V2.75M2.75 10H4.5c.83 0 1.5.67 1.5 1.5v1.75M10 13.25V11.5c0-.83.67-1.5 1.5-1.5h1.75"/>',
     check: '<path d="m3.75 8.25 2.75 2.75 5.75-6.25"/>',
     describe: '<rect x="2.25" y="2.25" width="11.5" height="11.5" rx="2.75"/><path d="M5 10.25c1.5-3.1 2.55-4.65 3.2-4.65 1 0 .2 4.65 1.2 4.65.65 0 1.25-.95 1.75-2.85"/>',
+    // The chat, where the chat's own launcher would be: a speech balloon with a
+    // line in it, squarer than Comments' round one.
+    talk: '<path d="M2.75 4.75c0-.97.78-1.75 1.75-1.75h7c.97 0 1.75.78 1.75 1.75v4.5c0 .97-.78 1.75-1.75 1.75H7.25l-2.75 2.25V11c-.97 0-1.75-.78-1.75-1.75z"/><path d="M5.75 7h4.5"/>',
     // Build mode's Comments: the margin with every mark on the app.
     comments: '<path d="M8 2.75a5.25 5.25 0 1 1-2.45 9.9L2.75 13.25l.6-2.7A5.25 5.25 0 0 1 8 2.75z"/>',
     // Build mode's Pieces: four parts, one of them being added.
@@ -280,6 +283,16 @@
     .ib { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--muted); flex: none; }
     .ib:hover, .ib[aria-pressed="true"] { background: var(--paper-2); color: var(--ink); }
     .ib[hidden] { display: none; }
+    /* The chat's button in Build mode carries the launcher's one mark: an
+       agent working, one needing you, one failed, one finished unread. */
+    .ib { position: relative; }
+    .ib .dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; background: var(--ink); box-shadow: 0 0 0 2px var(--paper); pointer-events: none; }
+    .ib .dot[hidden] { display: none; }
+    .ib .dot[data-state="working"] { background: var(--accent-ink); animation: ib-breathe 1.6s ease-in-out infinite; }
+    .ib .dot[data-state="waiting"] { background: var(--card); border: 2px solid var(--caution); }
+    .ib .dot[data-state="failed"] { background: var(--danger); }
+    @keyframes ib-breathe { 50% { opacity: .45; } }
+    @media (prefers-reduced-motion: reduce) { .ib .dot { animation: none !important; } }
     .home { display: grid; border-radius: 7px; padding: 4px; margin: 0 2px; }
     .home:hover { background: var(--paper-2); }
     .crumbs { display: flex; align-items: center; gap: 2px; min-width: 0; color: var(--muted); overflow: hidden; }
@@ -978,6 +991,22 @@
       return document.querySelector('marble-agent-drawer');
     }
 
+    /** The chat button in the bar says what the launcher's dot says. */
+    mirrorLauncher() {
+      const dot = this.drawer?.shadowRoot?.querySelector('.launcher-dot');
+      const mine = this.$('[data-act="chat"] .dot');
+      if (!dot || !mine) return;
+      const copy = () => {
+        mine.hidden = dot.hidden;
+        if (dot.dataset.state) mine.dataset.state = dot.dataset.state;
+        else delete mine.dataset.state;
+      };
+      copy();
+      this.launcherWatch?.disconnect();
+      this.launcherWatch = new MutationObserver(copy);
+      this.launcherWatch.observe(dot, { attributes: true, attributeFilter: ['hidden', 'data-state'] });
+    }
+
     /** What the drawer and anything else sitting in the page needs to know. */
     get layout() {
       const active = this.isOpen && !this.phone.matches;
@@ -1173,6 +1202,17 @@
       // mode, and the other two are things that can take the side.
       this.onBuild = () => {
         for (const node of this.$$('[data-act="pieces"], [data-act="comments"], [data-build-vr]')) node.hidden = false;
+        // The chat joins them: the right side's button is the chat's, drawn as
+        // the chat, and the launcher in the corner goes. It still pins and
+        // puts away the chat beside the app, which Pieces and the margin give
+        // way to.
+        if (this.chatInBar) return;
+        this.chatInBar = true;
+        const chat = this.$('[data-act="chat"]');
+        this.$('[data-act="comments"]').after(chat);
+        chat.innerHTML = `${icon('talk')}<span class="dot" hidden></span>`;
+        this.mirrorLauncher();
+        this.apply();
       };
       this.onSide = (event) => {
         const side = event.detail?.side ?? 'none';
@@ -1445,8 +1485,15 @@
       const chatButton = this.$('[data-act="chat"]');
       chatButton.hidden = !this.drawer;
       chatButton.setAttribute('aria-pressed', String(pinChat));
-      chatButton.setAttribute('aria-label', pinChat ? 'Unpin the chat' : 'Pin the chat');
-      chatButton.title = `${pinChat ? 'Unpin the chat: it waits at the edge' : 'Pin the chat'} (⌘⇧J)`;
+      if (this.chatInBar) {
+        chatButton.setAttribute('aria-label', pinChat ? 'Put the chat away' : 'Chat');
+        chatButton.title = `${pinChat ? 'Put the chat away' : 'Chat beside the app'} (⌘⇧J)`;
+      } else {
+        chatButton.setAttribute('aria-label', pinChat ? 'Unpin the chat' : 'Pin the chat');
+        chatButton.title = `${pinChat ? 'Unpin the chat: it waits at the edge' : 'Pin the chat'} (⌘⇧J)`;
+      }
+      // The launcher in the corner goes while the bar is up to hold the chat.
+      this.drawer?.toggleAttribute('data-launcher-away', Boolean(this.chatInBar && open));
       this.$('[data-act="describe"]').hidden = !document.querySelector('.marble-marks-layer');
       this.$('[data-act="close"]').hidden = this.home;
       this.$('.foot').hidden = !(HOME_DOC && window.marble?.drive);

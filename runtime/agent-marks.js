@@ -40,7 +40,8 @@
     // way out.
     select: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 2.5"/></svg>',
     sketch: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.2c2.6-6.4 4.6-9.6 6-9.6 2 0 .4 9.6 2.4 9.6 1.4 0 3.1-3.2 5.1-9.6"/><path d="M4 20.2h16"/></svg>',
-    text: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5V5.5h14v2"/><path d="M12 5.5v13"/><path d="M9 18.5h6"/></svg>',
+    // A note: a slip of paper with its corner turned and two lines on it.
+    text: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v7.5l-5.5 5.5h-7.5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z"/><path d="M19.5 14H16a2 2 0 0 0-2 2v3.5"/><path d="M8.5 9h7M8.5 12.5h4"/></svg>',
     // Build mode's one new tool: a pin with a thread, which the agent answers.
     comment: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5a7.5 7.5 0 1 1-3.5 14.1L4.5 19.5l.9-3.9A7.5 7.5 0 0 1 12 4.5z"/></svg>',
     explore: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="4" width="8" height="7" rx="2"/><rect x="13" y="4" width="8" height="7" rx="2"/><rect x="3" y="13" width="8" height="7" rx="2"/><rect x="13" y="13" width="8" height="7" rx="2"/></svg>',
@@ -167,12 +168,17 @@
 
     /* A note is a thing you put *on* the page, so it has a paper of its own and
        a grip, and it never pretends to be part of the document under it. */
+    /* As wide as its longest line, from a slip to a card: it widens as the
+       words come and wraps once it is as wide as a note should be, so the
+       whole of what was typed is always in view. */
     .marble-marks-note {
-      position: fixed; pointer-events: auto; width: 190px; border-radius: 10px;
+      position: fixed; pointer-events: auto; box-sizing: border-box;
+      width: max-content; min-width: 220px; max-width: min(380px, calc(100vw - 32px)); border-radius: 12px;
       background: var(--marks-paper); color: var(--marks-ink);
       border: 1px solid color-mix(in srgb, var(--marks-mark) 45%, transparent);
       box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 8px 22px rgba(0, 0, 0, .12);
-      overflow: hidden;
+      overflow: hidden; transform-origin: 0 0;
+      transition: opacity 200ms ${EASE}, scale 260ms ${EASE}, visibility 0s;
     }
     .marble-marks-note[data-state="sent"] { opacity: .62; }
     .marble-marks-note-grip {
@@ -188,9 +194,34 @@
     }
     .marble-marks-note-close:hover { background: color-mix(in srgb, var(--marks-ink) 10%, transparent); }
     .marble-marks-note-body {
-      display: block; padding: 6px 8px 7px; font-size: 12.5px; line-height: 1.35; min-height: 1.35em;
-      outline: none; white-space: pre-wrap; word-break: break-word;
+      display: block; padding: 8px 11px 9px; font-size: 13px; line-height: 1.45; min-height: 1.45em;
+      outline: none; white-space: pre-wrap; overflow-wrap: anywhere;
     }
+    /* What was pasted in: pictures as pictures, a part of a page as the part,
+       drawn small. Each comes off with its own ×. */
+    .marble-marks-note-att { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 11px 10px; }
+    .marble-marks-note-att:empty { display: none; }
+    .marble-marks-att {
+      position: relative; margin: 0; border-radius: 8px; overflow: hidden; flex: none;
+      background: color-mix(in srgb, var(--marks-ink) 5%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--marks-ink) 10%, transparent);
+    }
+    .marble-marks-att img { display: block; max-width: 100%; max-height: 180px; object-fit: contain; }
+    .marble-marks-att[data-kind="image"] { max-width: 100%; }
+    .marble-marks-att[data-kind="image"]:only-child img { max-height: 240px; }
+    .marble-marks-att[data-loading] img { opacity: .5; }
+    .marble-marks-att[data-kind="clip"] { width: 100%; }
+    .marble-marks-att iframe { display: block; width: 100%; height: 88px; border: 0; pointer-events: none; background: var(--paper, #fafaf7); }
+    .marble-marks-att figcaption {
+      padding: 5px 8px; font-size: 11.5px; line-height: 1.3; color: color-mix(in srgb, var(--marks-ink) 62%, transparent);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .marble-marks-att .marble-marks-note-close {
+      position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; font-size: 13px;
+      background: color-mix(in srgb, var(--marks-paper) 88%, transparent); opacity: 0; transition: opacity 120ms ${EASE};
+    }
+    .marble-marks-att:hover .marble-marks-note-close, .marble-marks-att .marble-marks-note-close:focus-visible { opacity: 1; }
+    @media (hover: none) { .marble-marks-att .marble-marks-note-close { opacity: 1; } }
     .marble-marks-note-body:empty::before { content: attr(data-placeholder); color: color-mix(in srgb, var(--marks-ink) 38%, transparent); }
 
     /* Picked: a mark chosen by the marquee, which is a different thing from a
@@ -226,7 +257,7 @@
       -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%);
       box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent),
         0 1px 2px rgba(0, 0, 0, .08), 0 12px 32px rgba(0, 0, 0, .16);
-      transition: opacity 180ms ${EASE}, transform 180ms ${EASE}, bottom 340ms ${EASE};
+      transition: opacity 180ms ${EASE}, transform 180ms ${EASE}, bottom 340ms ${EASE}, left 340ms ${EASE};
     }
     .marble-marks-bar[hidden] { display: none; }
     @starting-style { .marble-marks-bar { opacity: 0; transform: translateX(-50%) translateY(10px); } }
@@ -284,6 +315,28 @@
     }
     .marble-marks-go:active { transform: scale(.99); }
 
+    /* What was just taken off, and the way to put it back: a line over the
+       toolbar for a few seconds, the same ⌘Z the hand already knows. */
+    .marble-marks-undo {
+      position: fixed; transform: translateX(-50%); pointer-events: auto;
+      left: calc(var(--marble-shell-left, 0px) + (100vw - var(--marble-shell-left, 0px) - var(--marble-dock-right, 0px)) / 2);
+      bottom: calc(76px + var(--marble-dock-bottom, 0px) + env(safe-area-inset-bottom, 0px));
+      display: flex; align-items: center; gap: 10px; padding: 5px 5px 5px 13px; border-radius: 11px;
+      background: var(--marks-paper); color: var(--marks-ink); white-space: nowrap;
+      font: 400 12.5px/1 var(--ui-font, system-ui, -apple-system, sans-serif);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--marks-ink) 10%, transparent), 0 1px 2px rgba(0,0,0,.06), 0 8px 22px rgba(0,0,0,.12);
+      transition: opacity 180ms ${EASE}, translate 180ms ${EASE}, left 340ms ${EASE};
+    }
+    .marble-marks-undo[hidden] { display: none; }
+    @starting-style { .marble-marks-undo { opacity: 0; translate: 0 6px; } }
+    .marble-marks-undo button {
+      all: unset; cursor: pointer; padding: 6px 10px; border-radius: 8px; font-weight: 500;
+      color: var(--marks-mark);
+    }
+    .marble-marks-undo button:hover { background: color-mix(in srgb, var(--marks-mark) 10%, transparent); }
+    .marble-marks-undo button:focus-visible { outline: 2px solid var(--marks-mark); outline-offset: 1px; }
+    .marble-marks-undo kbd { font: inherit; opacity: .6; margin-left: 6px; }
+
     /* ---------------------------------------------------------- Build mode
 
        Describe is where every app starts, so it says so with nothing but the
@@ -292,7 +345,7 @@
        sheet radius, its tools at 10px inside. */
     .marble-marks-layer[data-build] .marble-marks-ring,
     .marble-marks-layer[data-build] .marble-marks-notice { display: none; }
-    .marble-marks-layer[data-build] .marble-marks-bar { border-radius: 14px; transition: opacity 340ms ${EASE}, transform 340ms ${EASE}; }
+    .marble-marks-layer[data-build] .marble-marks-bar { border-radius: 14px; transition: opacity 340ms ${EASE}, transform 340ms ${EASE}, left 340ms ${EASE}; }
     .marble-marks-slot { display: contents; }
     /* Comment is the one tool Describe did not have: a dot says so until it
        is used once. */
@@ -328,10 +381,16 @@
     .marble-marks-pin[data-state="built"] { opacity: .62; }
     .marble-marks-pin[hidden] { display: none; }
     /* With Build mode's margin open (build-margin.js), the marks are read
-       there: the bodies of notes and pieces leave the app, sketches fade, and
-       the margin's own pins say where each one is. One being written stays
-       until it is left: a new note, a comment not yet posted. */
-    .marble-marks-layer[data-margin] :is(.marble-marks-note:not(:focus-within), .marble-marks-piece, .marble-marks-pin:not([data-local])) {
+       there: the bodies of notes and pieces fold into the point they were put
+       on, sketches fade, and the margin's own pins say where each one is. One
+       being written stays whole until it is left — a new note, a comment not
+       yet posted — and then folds the same way. Closing the margin unfolds
+       them from their pins. */
+    .marble-marks-layer[data-margin] :is(.marble-marks-note:not(:focus-within):not([data-writing]), .marble-marks-piece) {
+      opacity: 0; scale: .08; visibility: hidden; pointer-events: none;
+      transition: opacity 220ms ${EASE}, scale 260ms ${EASE}, visibility 0s 260ms;
+    }
+    .marble-marks-layer[data-margin] .marble-marks-pin:not([data-local]) {
       opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 200ms ${EASE}, visibility 0s 200ms;
     }
     .marble-marks-layer[data-margin] .marble-marks-stroke { opacity: .35; }
@@ -340,7 +399,8 @@
     /* A piece put on the app: attached on top like a card on a canvas,
        outlined dashed (a part still to come) until a build works it in. */
     .marble-marks-piece {
-      position: fixed; pointer-events: auto; width: 268px; border-radius: 12px;
+      position: fixed; pointer-events: auto; width: 268px; border-radius: 12px; transform-origin: 0 0;
+      transition: opacity 200ms ${EASE}, scale 260ms ${EASE}, visibility 0s;
       background: var(--marks-paper); color: var(--marks-ink);
       box-shadow: 0 2px 6px rgba(0,0,0,.07), 0 8px 18px rgba(0,0,0,.08);
       outline: 1px dashed color-mix(in srgb, var(--marks-mark) 75%, transparent); outline-offset: 3px;
@@ -377,6 +437,8 @@
     }
     @media (prefers-reduced-motion: reduce) {
       .marble-marks-stroke, .marble-marks-bar, .marble-marks-frame, .marble-marks-tool { transition: none; }
+      .marble-marks-layer[data-margin] :is(.marble-marks-note, .marble-marks-piece) { scale: none; }
+      .marble-marks-undo { transition: opacity 120ms linear; }
       @starting-style { .marble-marks-bar { opacity: 0; transform: translateX(-50%); } }
     }
   `;
@@ -769,7 +831,12 @@
         if (mark.el) {
           if (!box) { mark.el.hidden = true; continue; }
           mark.el.hidden = false;
-          mark.el.style.left = `${Math.round(box.left + mark.u * box.width)}px`;
+          // At its point, unless that would put it past the window's right
+          // edge: a wide note near the edge, or any note on a phone, comes in
+          // far enough to be read whole.
+          const x = box.left + mark.u * box.width;
+          const room = innerWidth - (mark.el.offsetWidth || 0) - 8;
+          mark.el.style.left = `${Math.round(mark.type === 'comment' ? x : Math.max(8, Math.min(x, room)))}px`;
           mark.el.style.top = `${Math.round(box.top + mark.v * box.height)}px`;
           continue;
         }
@@ -1031,7 +1098,11 @@
         state: mark.state ?? 'waiting', build: mark.build ?? null,
       };
       if (mark.first) out.first = true;
-      if (mark.type === 'note') out.text = mark.text;
+      if (mark.type === 'note') {
+        out.text = mark.text;
+        if (mark.images?.length) out.images = mark.images.filter((image) => image.name).map(({ name, w, h }) => ({ name, w, h }));
+        if (mark.clips?.length) out.clips = mark.clips.map(({ html, text }) => ({ html, text }));
+      }
       if (mark.type === 'stroke') {
         Object.assign(out, { kind: mark.kind, ids: mark.ids, from: mark.from, to: mark.to, parts: mark.parts.map((part) => ({ pairs: part.pairs })) });
       }
@@ -1041,6 +1112,9 @@
     };
     const keep = (mark) => {
       if (!building || !mark?.id || mark.local) return;
+      // What this page just said about it outranks what the host says back
+      // for a moment: its answer to an earlier change may still be on the way.
+      mark.touched = Date.now();
       for (const fn of keepers) fn({ type: 'put', mark: serial(mark) });
     };
     const forget = (list) => {
@@ -1135,50 +1209,207 @@
     };
 
     /** A note's card, for a note made here or one the host kept. */
+    const hasWords = (mark) => Boolean(mark.text || mark.images?.length || mark.clips?.length);
     const drawNote = (mark, { focus = false } = {}) => {
       const node = el('div', 'marble-marks-note', notes);
       node.dataset.state = 'draft';
       const grip = el('div', 'marble-marks-note-grip', node);
       el('span', 'marble-marks-note-dots', grip);
-      const close = closeButton('Remove this note');
+      const close = closeButton('Delete this note');
       grip.append(close);
       const body = el('div', 'marble-marks-note-body', node);
       body.contentEditable = 'true';
       body.setAttribute('role', 'textbox');
-      body.dataset.placeholder = 'Say what you want here…';
+      body.setAttribute('aria-multiline', 'true');
+      body.dataset.placeholder = building ? 'Say what you want here, or paste a picture…' : 'Say what you want here…';
       body.textContent = mark.text ?? '';
+      const att = el('div', 'marble-marks-note-att', node);
       const foot = el('div', 'marble-marks-note-foot', node);
       foot.hidden = true;
       mark.el = node;
       mark.body = body;
+      mark.att = att;
+      drawAttachments(mark);
       close.addEventListener('click', () => removeMark(mark));
       // A note names the element it was put on, the same way a stroke names
       // what it covers: what you wrote on is part of what you are pointing at.
       let typed = 0;
       body.addEventListener('input', () => {
-        mark.text = body.textContent.trim();
+        mark.text = body.innerText.trim();
+        scheduleRepaint();
         // Kept as it is typed, a beat after the last key, and for certain
         // when the caret leaves it.
         clearTimeout(typed);
-        if (mark.text) typed = setTimeout(() => { delete mark.local; keep(mark); }, 600);
+        if (hasWords(mark)) typed = setTimeout(() => { delete mark.local; keep(mark); }, 600);
         syncSelection();
         syncBrief();
       });
       body.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') { event.stopPropagation(); body.blur(); }
       });
+      body.addEventListener('paste', (event) => pasteInto(mark, event));
+      body.addEventListener('focus', () => {
+        node.setAttribute('data-writing', '');
+        // Writing in a note that was already there is the Note tool's one
+        // press too: the next press is the app's.
+        if (building && mode === 'text') setMode(null);
+      });
       // An empty note is a slip of the hand, not a mark.
       body.addEventListener('blur', () => {
         clearTimeout(typed);
-        if (!body.textContent.trim()) { removeMark(mark); return; }
-        mark.text = body.textContent.trim();
+        mark.text = body.innerText.trim();
+        // Left: with the margin open it folds into its pin from here.
+        node.removeAttribute('data-writing');
+        if (!hasWords(mark)) { if (!mark.uploading) removeMark(mark, { undo: false }); return; }
         delete mark.local;
         keep(mark);
       });
-      grip.addEventListener('pointerdown', (event) => startMove(event, [mark], node));
+      // The × is not the grip: a press on it is a press, not a drag.
+      grip.addEventListener('pointerdown', (event) => { if (!event.target.closest('.marble-marks-note-close')) startMove(event, [mark], node); });
       paintState(mark);
-      if (focus) body.focus();
+      if (focus) { node.setAttribute('data-writing', ''); body.focus(); }
       return mark;
+    };
+
+    // ----------------------------------------------------------- pasting
+    //
+    // A note takes what a hand pastes the way a person would mean it: a
+    // picture is a picture on the note, a part copied off a page is that part
+    // drawn small, and words are words, without the styles they came with.
+
+    const imageSrc = (name) => `/agent/builds/image?name=${encodeURIComponent(name)}`;
+    const drawAttachments = (mark) => {
+      const box = mark.att;
+      if (!box) return;
+      box.replaceChildren();
+      const off = (list, item) => {
+        const at = mark[list]?.indexOf(item) ?? -1;
+        if (at < 0) return;
+        mark[list].splice(at, 1);
+        drawAttachments(mark);
+        if (hasWords(mark)) keep(mark);
+        else removeMark(mark);
+        scheduleRepaint();
+      };
+      for (const image of mark.images ?? []) {
+        const fig = el('figure', 'marble-marks-att', box);
+        fig.dataset.kind = 'image';
+        fig.toggleAttribute('data-loading', !image.name);
+        const img = document.createElement('img');
+        img.setAttribute(TRANSIENT, '');
+        img.alt = 'A pasted picture';
+        img.src = image.preview ?? imageSrc(image.name);
+        if (image.w && image.h) { img.width = image.w; img.height = image.h; img.style.height = 'auto'; }
+        img.addEventListener('load', scheduleRepaint, { once: true });
+        fig.append(img);
+        const x = closeButton('Take this picture off');
+        x.addEventListener('click', () => off('images', image));
+        fig.append(x);
+      }
+      for (const clip of mark.clips ?? []) {
+        const fig = el('figure', 'marble-marks-att', box);
+        fig.dataset.kind = 'clip';
+        const frameEl = document.createElement('iframe');
+        frameEl.setAttribute('sandbox', '');
+        frameEl.setAttribute('tabindex', '-1');
+        frameEl.setAttribute('aria-hidden', 'true');
+        frameEl.setAttribute(TRANSIENT, '');
+        frameEl.srcdoc = `<!doctype html><meta charset="utf-8"><style>html{font:13px/1.4 system-ui,sans-serif;color:#222}body{margin:8px;zoom:.7}img{max-width:100%}</style>${clip.html}`;
+        fig.append(frameEl);
+        const cap = el('figcaption', '', fig);
+        cap.textContent = clip.text ? `Pasted part · ${clip.text}` : 'Pasted part';
+        const x = closeButton('Take this part off');
+        x.addEventListener('click', () => off('clips', clip));
+        fig.append(x);
+      }
+    };
+
+    /** A picture made small enough to keep: no side past 1600px. */
+    const shrink = async (blob) => {
+      try {
+        const bitmap = await createImageBitmap(blob);
+        const { width, height } = bitmap;
+        const scale = Math.min(1, 1600 / Math.max(width, height));
+        if (scale === 1 && blob.size < 2_500_000) { bitmap.close?.(); return { blob, w: width, h: height }; }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close?.();
+        const type = blob.type === 'image/png' && canvas.width * canvas.height < 1_200_000 ? 'image/png' : 'image/jpeg';
+        const out = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.86));
+        return { blob: out ?? blob, w: canvas.width, h: canvas.height };
+      } catch {
+        return { blob, w: 0, h: 0 };
+      }
+    };
+    const addImage = async (mark, blob) => {
+      const image = { name: null, preview: URL.createObjectURL(blob), w: 0, h: 0 };
+      (mark.images ??= []).push(image);
+      mark.uploading = (mark.uploading ?? 0) + 1;
+      drawAttachments(mark);
+      scheduleRepaint();
+      try {
+        const small = await shrink(blob);
+        const response = await fetch(`/agent/builds/image?path=${encodeURIComponent(app)}`, {
+          method: 'POST', headers: { 'Content-Type': small.blob.type || 'image/png' }, body: small.blob,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.name) throw new Error(data.error || 'not kept');
+        Object.assign(image, { name: data.name, w: small.w, h: small.h });
+      } catch (err) {
+        console.warn('marble-marks: a pasted picture was not kept', err);
+        mark.images = mark.images.filter((one) => one !== image);
+      }
+      mark.uploading -= 1;
+      drawAttachments(mark);
+      if (marks.includes(mark) && hasWords(mark)) { delete mark.local; keep(mark); }
+      else if (marks.includes(mark) && !mark.uploading && document.activeElement !== mark.body) removeMark(mark);
+      scheduleRepaint();
+    };
+    // What a pasted page fragment is: words, unless it carries the parts of
+    // an interface — a picture, a control, a table, an addressed element.
+    const PARTS = 'img, svg, button, input, select, textarea, table, form, canvas, video, iframe, [data-marble-id]';
+    const pasteInto = (mark, event) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      event.preventDefault();
+      const files = [...(data.files ?? [])].filter((file) => file.type.startsWith('image/'));
+      const html = data.getData('text/html');
+      const text = data.getData('text/plain');
+      if (building && files.length) {
+        for (const file of files.slice(0, 6)) addImage(mark, file);
+        if (text && !html) document.execCommand('insertText', false, text);
+        return;
+      }
+      if (building && html) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        for (const node of doc.querySelectorAll('script, style, meta, link, base')) node.remove();
+        const pics = [...doc.querySelectorAll('img[src]')].map((img) => img.getAttribute('src')).filter((src) => /^(data:image\/|https?:|\/)/.test(src));
+        // Its words, each piece of text apart from the next, as they read.
+        const pieces = [];
+        const walk = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+        for (let t = walk.nextNode(); t; t = walk.nextNode()) if (t.nodeValue.trim()) pieces.push(t.nodeValue.trim());
+        const words = pieces.join(' ').replace(/\s+/g, ' ').trim();
+        const onlyPictures = pics.length && words.length < 2;
+        if (onlyPictures) {
+          for (const src of pics.slice(0, 6)) fetch(src).then((r) => r.blob()).then((blob) => { if (blob.type.startsWith('image/')) addImage(mark, blob); }).catch(() => {});
+          return;
+        }
+        if (doc.body.querySelector(PARTS)) {
+          for (const node of doc.querySelectorAll('*')) {
+            for (const attr of [...node.attributes]) if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
+          }
+          (mark.clips ??= []).push({ html: doc.body.innerHTML.trim().slice(0, 20_000), text: words.slice(0, 160) });
+          drawAttachments(mark);
+          delete mark.local;
+          keep(mark);
+          syncBrief();
+          scheduleRepaint();
+          return;
+        }
+      }
+      if (text) document.execCommand('insertText', false, text);
     };
 
     const placeNote = (x, y, { text = '', anchor: given = null } = {}) => {
@@ -1208,10 +1439,15 @@
 
     // --------------------------------------------------------------- Comment
 
-    /** The comments, numbered in the order they were made. */
+    /** A comment's pin carries the number its card has in the margin: every
+     *  mark counts, in the order they were made. */
     const numberPins = () => {
       let n = 0;
-      for (const mark of marks) if (mark.type === 'comment') mark.el.textContent = String(n += 1);
+      for (const mark of marks) {
+        if (!mark.id) continue;
+        n += 1;
+        if (mark.type === 'comment') mark.el.textContent = String(n);
+      }
     };
     const drawComment = (mark) => {
       const pin = document.createElement('button');
@@ -1383,14 +1619,72 @@
       if (mark.type === 'comment') numberPins();
       return true;
     };
-    const removeMark = (mark) => {
+    const removeMark = (mark, { undo = true } = {}) => {
       // A mark a build is working from is its brief now.
       if (mark.state === 'building') return;
+      const kept = building && undo && mark.id && !mark.local && (mark.type !== 'note' || hasWords(mark)) ? serial(mark) : null;
       if (!dropMark(mark)) return;
       forget([mark]);
+      if (kept) offerUndo([kept]);
       syncSelection();
       syncBrief();
     };
+
+    // ------------------------------------------------------------- undo
+    //
+    // What was taken off can be put back: a line over the toolbar says what
+    // went, with Undo, and ⌘Z does the same while it is there and after. The
+    // host forgot the mark; putting it back keeps it again, as it was.
+    const undone = [];
+    const undoLine = el('div', 'marble-marks-undo', layer);
+    undoLine.setAttribute('role', 'status');
+    undoLine.hidden = true;
+    const undoWords = el('span', '', undoLine);
+    const undoButton = document.createElement('button');
+    undoButton.type = 'button';
+    undoButton.setAttribute(TRANSIENT, '');
+    undoButton.innerHTML = `Undo<kbd ${TRANSIENT}>${/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘Z' : 'Ctrl+Z'}</kbd>`;
+    undoLine.append(undoButton);
+    let undoTimer = 0;
+    const KIND_WORDS = { note: 'Note', comment: 'Comment', piece: 'Piece', stroke: 'Sketch' };
+    const offerUndo = (list) => {
+      if (batching) { batching.push(list); return; }
+      undone.push(list);
+      if (undone.length > 20) undone.shift();
+      undoWords.textContent = list.length === 1 ? `${KIND_WORDS[list[0].type] ?? 'Mark'} deleted` : `${list.length} marks deleted`;
+      undoLine.hidden = false;
+      clearTimeout(undoTimer);
+      undoTimer = setTimeout(() => { undoLine.hidden = true; }, 8000);
+    };
+    // A Delete over several picked marks is one step to undo, not several.
+    let batching = null;
+    const batch = (fn) => {
+      batching = [];
+      const offer = offerUndo;
+      try { fn(); } finally {
+        const list = batching;
+        batching = null;
+        if (list.length) offer(list.flat());
+      }
+    };
+    const undoLast = () => {
+      const list = undone.pop();
+      undoLine.hidden = true;
+      clearTimeout(undoTimer);
+      if (!list) return false;
+      for (const given of list) {
+        if (marks.some((m) => m.id === given.id)) continue;
+        const mark = upsert(given);
+        if (mark) keep(mark);
+      }
+      marks.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      numberPins();
+      repaint();
+      syncSelection();
+      syncBrief();
+      return true;
+    };
+    undoButton.addEventListener('click', undoLast);
     const clearMarks = () => {
       // What an agent is working from is its brief now, not this mode's to
       // rub out; it goes when that callout is put away. A mark in a running
@@ -1426,43 +1720,14 @@
       const held = moving ? new Set(moving.marks.map((item) => item.mark)) : new Set();
       for (const [id, given] of wanted) {
         let mark = marks.find((m) => m.id === id);
-        if (mark && (held.has(mark) || (mark.body && document.activeElement === mark.body))) {
+        if (mark && (held.has(mark) || (mark.body && document.activeElement === mark.body) || Date.now() - (mark.touched ?? 0) < 2500)) {
           mark.state = given.state;
           mark.build = given.build;
           mark.held = Boolean(given.held);
           paintState(mark);
           continue;
         }
-        if (!mark) {
-          mark = { id, type: given.type, sent: false };
-          marks.push(mark);
-        }
-        Object.assign(mark, {
-          anchorId: given.anchorId, u: given.u ?? 0, v: given.v ?? 0, at: given.at ?? Date.now(),
-          state: given.state ?? 'waiting', build: given.build ?? null, first: Boolean(given.first),
-          // Set by their own presses on the host, never by this page.
-          held: Boolean(given.held),
-        });
-        if (given.type === 'note') {
-          mark.kind = 'text';
-          mark.text = given.text ?? '';
-          if (!mark.el) drawNote(mark);
-          else if (mark.body && mark.body.textContent !== mark.text) mark.body.textContent = mark.text;
-        } else if (given.type === 'stroke') {
-          Object.assign(mark, { kind: given.kind, ids: given.ids ?? [], from: given.from ?? null, to: given.to ?? null });
-          const parts = (given.parts ?? []).map((part) => ({ pairs: part.pairs }));
-          for (const old of mark.parts ?? []) old.el.remove();
-          mark.parts = parts.map((part) => ({ ...part, el: newPath() }));
-        } else if (given.type === 'comment') {
-          mark.thread = given.thread ?? [];
-          mark.resolved = Boolean(given.resolved);
-          if (!mark.el) drawComment(mark);
-          mark.relabel?.();
-        } else if (given.type === 'piece') {
-          mark.piece = given.piece;
-          if (!mark.el) drawPiece(mark);
-        }
-        paintState(mark);
+        upsert(given, mark);
       }
       // The order the host keeps is the order they were made in.
       marks.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
@@ -1471,6 +1736,51 @@
       syncSelection();
       syncBrief();
     };
+    /** One mark as the host keeps it, drawn: made if it is new, or brought up
+     *  to date. */
+    function upsert(given, found = null) {
+      const id = given.id;
+      let mark = found ?? marks.find((m) => m.id === id);
+      if (!mark) {
+        mark = { id, type: given.type, sent: false };
+        marks.push(mark);
+      }
+      Object.assign(mark, {
+        anchorId: given.anchorId, u: given.u ?? 0, v: given.v ?? 0, at: given.at ?? Date.now(),
+        state: given.state ?? 'waiting', build: given.build ?? null, first: Boolean(given.first),
+        // Set by their own presses on the host, never by this page.
+        held: Boolean(given.held),
+      });
+      if (given.type === 'note') {
+        mark.kind = 'text';
+        mark.text = given.text ?? '';
+        const same = (a, b) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+        const pictures = (given.images ?? []).map(({ name, w, h }) => ({ name, w, h }));
+        const changed = !same((mark.images ?? []).filter((i) => i.name).map(({ name, w, h }) => ({ name, w, h })), pictures) || !same(mark.clips, given.clips);
+        // Pictures still on their way up are this page's until they land.
+        if (!mark.uploading) { mark.images = pictures; mark.clips = (given.clips ?? []).map(({ html, text }) => ({ html, text })); }
+        if (!mark.el) drawNote(mark);
+        else {
+          if (mark.body && mark.body.innerText.trim() !== mark.text) mark.body.textContent = mark.text;
+          if (changed && !mark.uploading) drawAttachments(mark);
+        }
+      } else if (given.type === 'stroke') {
+        Object.assign(mark, { kind: given.kind, ids: given.ids ?? [], from: given.from ?? null, to: given.to ?? null });
+        const parts = (given.parts ?? []).map((part) => ({ pairs: part.pairs }));
+        for (const old of mark.parts ?? []) old.el.remove();
+        mark.parts = parts.map((part) => ({ ...part, el: newPath() }));
+      } else if (given.type === 'comment') {
+        mark.thread = given.thread ?? [];
+        mark.resolved = Boolean(given.resolved);
+        if (!mark.el) drawComment(mark);
+        mark.relabel?.();
+      } else if (given.type === 'piece') {
+        mark.piece = given.piece;
+        if (!mark.el) drawPiece(mark);
+      }
+      paintState(mark);
+      return mark;
+    }
     const undoStroke = () => {
       const mark = marks[marks.length - 1];
       if (!mark || mark.sent || mark.type !== 'stroke') return;
@@ -1691,7 +2001,10 @@
         pen.el.setAttribute('d', pathOf(pen.points));
         return;
       }
-      if (mode === 'text') { placeNote(event.clientX, event.clientY); return; }
+      // In Build mode a note is one press, as a comment is: the note takes
+      // the caret and the cursor goes back to using the app, so the next
+      // press is the app's and not a second note.
+      if (mode === 'text') { placeNote(event.clientX, event.clientY); if (building) setMode(null); return; }
       if (mode === 'comment') { placeComment(event.clientX, event.clientY); setMode(null); return; }
     });
 
@@ -1951,9 +2264,17 @@
         undoStroke();
         return;
       }
+      // While the line that says what was deleted is up, ⌘Z puts it back;
+      // after that the key is the app's own again.
+      if (building && !undoLine.hidden && (event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        event.stopPropagation();
+        undoLast();
+        return;
+      }
       if ((event.key === 'Backspace' || event.key === 'Delete') && picked.size) {
         event.preventDefault();
-        for (const mark of [...picked]) removeMark(mark);
+        batch(() => { for (const mark of [...picked]) removeMark(mark); });
         picked.clear();
         repaint();
         return;
@@ -2079,7 +2400,20 @@
       picked: () => [...picked].map((mark) => mark.id).filter(Boolean),
       parts: () => (fromUs ? [...mine] : []),
       clearPicked: () => { picked.clear(); area = []; syncSelection(); paintHalos(); syncBrief(); },
-      remove: (ids) => { for (const mark of marks.filter((m) => ids.includes(m.id))) removeMark(mark); },
+      remove: (ids) => batch(() => { for (const mark of marks.filter((m) => ids.includes(m.id))) removeMark(mark); }),
+      /** A note's words, changed somewhere else (the margin's card). */
+      edit: (id, text) => {
+        const mark = marks.find((m) => m.id === id && m.type === 'note');
+        if (!mark || mark.state === 'building') return false;
+        mark.text = String(text ?? '').trim();
+        if (mark.body && mark.body.innerText.trim() !== mark.text) mark.body.textContent = mark.text;
+        if (!hasWords(mark)) { removeMark(mark); return true; }
+        keep(mark);
+        syncBrief();
+        scheduleRepaint();
+        return true;
+      },
+      undo: () => undoLast(),
       clear: () => clearMarks(),
       /** A note, put on a part of the app or at a point. */
       note: ({ x = null, y = null, anchorId = null, u = 0, v = 0, text = '', first = false } = {}) => {

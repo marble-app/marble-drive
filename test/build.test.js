@@ -159,6 +159,31 @@ test('the brief reads every mark into words, and a piece brings its markup', () 
   assert.match(resumeBrief({ path: 'x', n: 2, plan: { parts: [{ title: 'A', state: 'done' }, { title: 'B', state: 'now' }] } }), /Done already: A\.\nStill to do: B\./);
 });
 
+test('a note keeps what was pasted onto it, and the brief says where to look', async () => {
+  const mark = cleanMark({
+    id: 'm1', type: 'note', anchorId: 's1', text: 'Like this',
+    images: [{ name: 'a'.repeat(24) + '.png', w: 240, h: 120 }, { name: '../etc/passwd' }],
+    clips: [{ html: '<button>Accept</button>', text: 'Accept' }, { html: '  ' }],
+  });
+  assert.deepEqual(mark.images, [{ name: `${'a'.repeat(24)}.png`, w: 240, h: 120 }], 'only names the store made');
+  assert.deepEqual(mark.clips, [{ html: '<button>Accept</button>', text: 'Accept' }]);
+  const said = phraseOf(mark, { imagePath: (name) => `/drive/.marble/builds/images/${name}` });
+  assert.match(said, /A note on #s1: "Like this"/);
+  assert.match(said, /open it with Read/);
+  assert.match(said, new RegExp(`/drive/\\.marble/builds/images/${'a'.repeat(24)}\\.png`));
+  assert.match(said, /<button>Accept<\/button>/);
+
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-build-images-'));
+  const store = createBuildStore({ dir });
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+  const { name } = await store.putImage(png, 'image/png');
+  assert.match(name, /^[0-9a-f]{24}\.png$/);
+  assert.equal((await store.putImage(png, 'image/png')).name, name, 'the same picture is one file');
+  assert.deepEqual((await store.image(name)).bytes, png);
+  assert.equal(await store.image('../x.png'), null);
+  await assert.rejects(store.putImage(png, 'text/html'), /PNG, JPEG/);
+});
+
 test('pieces: regions of an app, taken whole with what draws them', () => {
   const regions = regionsOf(SOURCE_APP, 'Calendar');
   assert.deepEqual(regions.map((r) => r.title), ['Weeks ahead'], 'a short aside is not a piece');

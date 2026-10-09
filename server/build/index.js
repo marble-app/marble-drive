@@ -264,6 +264,7 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
         index,
         empty: !outlineOf(source).trim() || taken.some((m) => m.first),
         untitled: UNTITLED.test(splitPath(docPath).name),
+        imagePath: buildStore.imagePath,
       });
       const anchors = [...new Set(taken.map((m) => m.anchorId).filter((id) => id && index.has(id)))].slice(0, 20);
       byConversation.set(conversation, docPath);
@@ -690,6 +691,8 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
     suggested,
     savePiece,
     removePiece: (id) => buildStore.removePiece(id),
+    putImage: (bytes, type) => buildStore.putImage(bytes, type),
+    image: (name) => buildStore.image(name),
     preview,
     boot,
     move,

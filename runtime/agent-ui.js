@@ -9175,6 +9175,9 @@
       transition: opacity 200ms var(--settle), right 220ms var(--settle); }
     /* An overlay panel covers the page the tools act on; a pinned one does not. */
     .tray[data-away="true"] { opacity: 0; }
+    /* Build mode puts the chat's button in the shell's bar (runtime/shell.js):
+       the corner is the app's. */
+    :host([data-launcher-away]) .tray { display: none; }
     .tray[data-away="true"] * { pointer-events: none !important; }
 
     .launcher { pointer-events: auto; position: relative;

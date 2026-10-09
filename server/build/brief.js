@@ -31,12 +31,22 @@ const near = (index, id) => {
 };
 
 /** One mark, in words. */
-export function phraseOf(mark, { index = null, piece = null } = {}) {
+export function phraseOf(mark, { index = null, piece = null, imagePath = null } = {}) {
   const on = mark.anchorId ? `#${mark.anchorId}${near(index, mark.anchorId)}` : 'the page';
   if (mark.type === 'note') {
-    return mark.first
+    const head = mark.first
       ? `The prompt the app was made from, on ${on}: "${mark.text}"`
-      : `A note on ${on}: "${mark.text}"`;
+      : mark.text ? `A note on ${on}: "${mark.text}"` : `A note on ${on}, with nothing written on it`;
+    const parts = [head];
+    const pictures = (mark.images ?? []).map((image) => imagePath?.(image.name)).filter(Boolean);
+    if (pictures.length) {
+      parts.push(`   Pasted onto the note, ${pictures.length === 1 ? 'a picture' : `${pictures.length} pictures`} (open ${pictures.length === 1 ? 'it' : 'each'} with Read to see what is meant):`);
+      for (const file of pictures) parts.push(`   - ${file}`);
+    }
+    for (const clip of mark.clips ?? []) {
+      parts.push(`   Pasted onto the note, a part copied from a page${clip.text ? ` ("${clip.text}")` : ''}:`, '```html', clip.html, '```');
+    }
+    return parts.join('\n');
   }
   if (mark.type === 'stroke') {
     if (mark.kind === 'box') return `A box sketched around ${names(mark.ids)}`;
@@ -73,7 +83,7 @@ export function phraseOf(mark, { index = null, piece = null } = {}) {
  * @param {boolean} [input.empty]   the app has nothing in it yet
  * @param {boolean} [input.untitled] the app still has its placeholder name
  */
-export function buildBrief({ path, n, marks, context = [], pieces = new Map(), index = null, empty = false, untitled = false }) {
+export function buildBrief({ path, n, marks, context = [], pieces = new Map(), index = null, empty = false, untitled = false, imagePath = null }) {
   const lines = [];
   lines.push(
     empty
@@ -84,7 +94,7 @@ export function buildBrief({ path, n, marks, context = [], pieces = new Map(), i
     '',
   );
   marks.forEach((mark, i) => {
-    lines.push(`${i + 1}. ${phraseOf(mark, { index, piece: mark.type === 'piece' ? pieces.get(mark.piece?.id) : null })}`);
+    lines.push(`${i + 1}. ${phraseOf(mark, { index, imagePath, piece: mark.type === 'piece' ? pieces.get(mark.piece?.id) : null })}`);
   });
   if (context.length) {
     lines.push('', 'Also on the app, waiting for a later build (do not act on these unless a mark above needs them):');

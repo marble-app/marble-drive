@@ -29,6 +29,13 @@ const PARTS_MAX = 24;
 const IDS_MAX = 60;
 const PLAN_MAX = 24;
 const SNAPSHOT_HTML_MAX = 400_000;
+const IMAGES_MAX = 8;
+const CLIPS_MAX = 4;
+const CLIP_HTML_MAX = 20_000;
+export const IMAGE_NAME = /^[0-9a-f]{24}\.(png|jpg|webp|gif)$/;
+export const IMAGE_BYTES_MAX = 8 * 1024 * 1024;
+const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+const TYPE_OF = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 
 export const MARK_TYPES = new Set(['note', 'stroke', 'comment', 'piece']);
 export const STROKE_KINDS = new Set(['box', 'arrow', 'ink']);
@@ -84,7 +91,19 @@ export function cleanMark(raw) {
   };
   if (raw.first === true) mark.first = true;
   if (raw.held === true) mark.held = true;
-  if (raw.type === 'note') mark.text = str(raw.text).trim();
+  if (raw.type === 'note') {
+    mark.text = str(raw.text).trim();
+    // What was pasted onto it: pictures, kept beside the builds by name, and
+    // parts of pages, as their markup and their words.
+    const images = (Array.isArray(raw.images) ? raw.images : []).slice(0, IMAGES_MAX)
+      .filter((image) => IMAGE_NAME.test(String(image?.name ?? '')))
+      .map((image) => ({ name: image.name, w: Math.round(num(image.w, 0, 10_000)), h: Math.round(num(image.h, 0, 10_000)) }));
+    if (images.length) mark.images = images;
+    const clips = (Array.isArray(raw.clips) ? raw.clips : []).slice(0, CLIPS_MAX)
+      .map((clip) => ({ html: str(clip?.html, CLIP_HTML_MAX), text: str(clip?.text, 160).trim() }))
+      .filter((clip) => clip.html.trim());
+    if (clips.length) mark.clips = clips;
+  }
   if (raw.type === 'stroke') {
     mark.kind = STROKE_KINDS.has(raw.kind) ? raw.kind : 'ink';
     mark.ids = ids(raw.ids);
@@ -213,6 +232,28 @@ export function createBuildStore({ dir }) {
     return sha;
   }
 
+  // A picture pasted onto a note, kept by what it is: the same picture twice
+  // is one file.
+  const imagesDir = path.join(dir, 'images');
+  async function putImage(bytes, type) {
+    const ext = IMAGE_TYPES[String(type ?? '').split(';')[0].trim().toLowerCase()];
+    if (!ext) throw Object.assign(new Error('a note takes a PNG, JPEG, WebP or GIF picture'), { status: 415 });
+    if (!bytes?.length) throw Object.assign(new Error('the picture was empty'), { status: 400 });
+    const name = `${crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 24)}.${ext}`;
+    const file = path.join(imagesDir, name);
+    try { await fsp.access(file); } catch { await writeAtomic(file, bytes); }
+    return { name, path: file };
+  }
+  async function image(name) {
+    if (!IMAGE_NAME.test(String(name ?? ''))) return null;
+    try {
+      return { bytes: await fsp.readFile(path.join(imagesDir, name)), type: TYPE_OF[name.split('.').pop()] };
+    } catch {
+      return null;
+    }
+  }
+  const imagePath = (name) => (IMAGE_NAME.test(String(name ?? '')) ? path.join(imagesDir, name) : null);
+
   async function snapshot(sha) {
     if (!/^[0-9a-f]{64}$/.test(String(sha ?? ''))) return null;
     try {
@@ -268,6 +309,9 @@ export function createBuildStore({ dir }) {
     move,
     putSnapshot,
     snapshot,
+    putImage,
+    image,
+    imagePath,
     pieces: readPieces,
     async savePiece(raw) {
       const piece = cleanPiece(raw);

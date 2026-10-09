@@ -2,7 +2,8 @@
 // origin for a change): `/agent/builds…` for an app's marks and builds, and
 // `/agent/pieces…` for the gallery.
 
-import { json, readJson, send } from '../http.js';
+import { json, readBody, readJson, send } from '../http.js';
+import { IMAGE_BYTES_MAX } from './store.js';
 import { parsePath } from '../paths.js';
 
 const BUILD = /^\/agent\/builds\/(b\d{1,5}|origin)\/(pause|resume|stop|view)$/;
@@ -34,6 +35,20 @@ export function createBuildRoutes({ builds, hub, maxBody }) {
     const client = url.searchParams.get('client') || null;
     try {
       if (route === '/agent/builds' && method === 'GET') return json(res, 200, await builds.read(pathOf(url)));
+      // A picture pasted onto a note: its bytes up, its name back; and the
+      // picture by that name.
+      if (route === '/agent/builds/image' && method === 'POST') {
+        const bytes = await readBody(req, IMAGE_BYTES_MAX);
+        const { name } = await builds.putImage(bytes, req.headers['content-type']);
+        return json(res, 201, { name });
+      }
+      if (route === '/agent/builds/image' && method === 'GET') {
+        const found = await builds.image(String(url.searchParams.get('name') ?? ''));
+        if (!found) return json(res, 404, { error: 'no such picture' });
+        res.writeHead(200, { 'Content-Type': found.type, 'Content-Length': found.bytes.length, 'Cache-Control': 'private, max-age=31536000, immutable' });
+        res.end(found.bytes);
+        return true;
+      }
       if (route === '/agent/builds/events' && method === 'GET') return stream(req, res, pathOf(url));
 
       if (route === '/agent/builds/marks') {
