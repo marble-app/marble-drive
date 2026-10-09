@@ -72,7 +72,7 @@ function publicState(state, current = null) {
   };
 }
 
-export function createBuilds({ buildStore, store, oplog = null, runner, agentStore, hub, startConversation, defaultProvider, putDocument, moveDocument = null, freePath = null, reply = null, suggest = null, driveRegions = null, log = console }) {
+export function createBuilds({ buildStore, store, oplog = null, undoTurns = null, runner, agentStore, hub, startConversation, defaultProvider, putDocument, moveDocument = null, freePath = null, reply = null, suggest = null, driveRegions = null, log = console }) {
   // conversation id → document path, for the builds running or paused now.
   const byConversation = new Map();
   // turn id → resolve(), for a stop waiting on its turn to end.
@@ -227,8 +227,10 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
 
   // ----------------------------------------------------------------- builds
 
-  async function conversationFor(state, docPath) {
-    if (state.conversation && await agentStore.conversation(state.conversation)) return state.conversation;
+  async function conversationFor(state, docPath, { busy = new Set() } = {}) {
+    // The app's own conversation, unless a build in hand is using it: one
+    // alongside gets a conversation of its own.
+    if (state.conversation && !busy.has(state.conversation) && await agentStore.conversation(state.conversation)) return state.conversation;
     const made = await startConversation({ provider: await defaultProvider() });
     if (made.error) throw httpError(made.status ?? 500, made.error);
     const id = made.summary.id;
@@ -263,7 +265,8 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     // First, settled under the state's own lock: which marks this build
     // takes, its number, and that no other build is running.
     const { state, result: build } = await buildStore.update(docPath, async (state) => {
-      if (state.builds.some((b) => b.status === 'running')) throw httpError(409, 'A build is running already');
+      // Builds may run side by side (startOrJoin decides); each takes its own
+      // marks, and a mark in a build is not taken twice.
       const text = String(words ?? '').trim().slice(0, 4_000);
       const wanted = Array.isArray(chosen) && chosen.length ? new Set(chosen.map(String)) : null;
       if (text) {
@@ -301,7 +304,8 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     });
 
     try {
-      const conversation = await conversationFor(state, docPath);
+      const busy = new Set(state.builds.filter((b) => b.id !== build.id && (b.status === 'running' || b.status === 'paused')).map((b) => b.conversation).filter(Boolean));
+      const conversation = await conversationFor(state, docPath, { busy });
       const taken = state.marks.filter((m) => build.marks.includes(m.id));
       // A model and effort chosen on what it takes (a note sent with them) are
       // the build's.
@@ -330,7 +334,9 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
         context: { viewing: docPath, target: docPath, selection: anchors, also: [] },
       });
       const { state: next } = await change(docPath, (s) => {
-        s.conversation = conversation;
+        // The app's conversation stays the first one; one made for a build
+        // alongside is that build's alone.
+        s.conversation ??= conversation;
         const b = s.builds.find((x) => x.id === build.id);
         if (b) { b.conversation = conversation; b.turn = sent.turnId; b.turns = [sent.turnId]; }
         return null;
@@ -424,8 +430,15 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     const end = source === null ? null : await buildStore.putSnapshot(source);
     state = await buildStore.read(docPath);
     build = find(state, id);
-    const back = await buildStore.snapshot(build.start);
-    if (back !== null && back !== source) await putDocument(docPath, back, { label: 'before-restore', event: 'changed' });
+    // Alone, the app goes back to where the build started. With another
+    // build at work on it since, or ended since, only this build's own
+    // changes are taken back, op by op, and theirs stay.
+    const shared = state.builds.some((b) => b.id !== id && (b.status === 'running' || b.status === 'paused' || (b.endedAt && b.endedAt > (build.startedAt ?? 0))));
+    if (shared && undoTurns) await undoTurns(build.turns ?? [build.turn]).catch((err) => log.error(`[builds] undo on stop: ${err.message}`));
+    else {
+      const back = await buildStore.snapshot(build.start);
+      if (back !== null && back !== source) await putDocument(docPath, back, { label: 'before-restore', event: 'changed' });
+    }
     const { state: next } = await change(docPath, (s) => {
       const b = find(s, id);
       b.status = 'stopped';
@@ -679,26 +692,56 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     });
   }
 
-  /** Build, pressed while a build runs: what it would take is queued, and
-   *  built as soon as this one is done (startNow, on its end). */
-  async function startOrQueue(docPath, options = {}) {
+  /** Build, pressed while a build runs: no queue. What is marked joins
+   *  the running build when it is about the same parts of the app (one holds
+   *  the other, or they are the same), and otherwise starts at once as a
+   *  build of its own, alongside. */
+  async function startOrJoin(docPath, options = {}) {
     const state = await buildStore.read(docPath);
-    if (!state.builds.some((b) => b.status === 'running' || b.status === 'paused')) return start(docPath, options);
+    const running = state.builds.filter((b) => b.status === 'running');
+    if (!running.length) return start(docPath, options);
     const wanted = Array.isArray(options.marks) && options.marks.length ? new Set(options.marks.map(String)) : null;
-    const { result: queued } = await change(docPath, (s) => {
-      const taken = s.marks.filter((m) => m.state === 'waiting' && m.type !== 'comment' && (wanted ? wanted.has(m.id) : !m.held && !m.archived));
-      if (!taken.length) throw httpError(409, 'Nothing is marked to build yet');
-      for (const m of taken) { m.now = true; delete m.held; }
-      return taken.length;
-    }, { by: options.client ?? null });
-    return { ...(await read(docPath)), queued };
+    const taking = state.marks.filter((m) => m.state === 'waiting' && m.type !== 'comment' && (wanted ? wanted.has(m.id) : !m.held && !m.archived));
+    if (!taking.length && !String(options.words ?? '').trim()) throw httpError(409, 'Nothing is marked to build yet');
+    const source = await store.read(docPath);
+    const index = source === null ? null : indexOf(source);
+    const join = relatedBuild(index, taking, running, state);
+    if (join) return { ...(await steer(docPath, { ...options, marks: taking.map((m) => m.id), into: join.id })), joined: join.n };
+    return { ...(await start(docPath, options)), alongside: true };
+  }
+
+  /** The running build these marks are about, if any: one of its marks or
+   *  its plan's parts is the same part as one of theirs, or holds it, or is
+   *  held by it. */
+  function relatedBuild(index, marks, running, state) {
+    if (!index) return null;
+    const of = (m) => [m.anchorId, m.from, ...(m.ids ?? [])].filter(Boolean);
+    const ours = new Set(marks.flatMap(of));
+    if (!ours.size) return null;
+    const holds = (a, b) => a === b || (index.has(a) && String(index.outerOf(a) ?? '').includes(`data-marble-id="${b}"`));
+    const near = (a, b) => holds(a, b) || holds(b, a);
+    // The page, its body and its main hold everything; being on them says
+    // nothing about which parts a mark is about.
+    const whole = (id) => /^(html|body|main)$/i.test(index.tagOf?.(id) ?? '');
+    const body = new Set([...ours].filter(whole));
+    for (const b of running) {
+      const theirs = new Set([
+        ...state.marks.filter((m) => m.build === b.id).flatMap(of),
+        ...(b.plan?.parts ?? []).flatMap((p) => p.ids ?? []),
+      ]);
+      for (const a of ours) {
+        if (body.has(a)) continue;
+        for (const t of theirs) if (!whole(t) && near(a, t)) return b;
+      }
+    }
+    return null;
   }
 
   /** Steer the running build: these marks join it now, sent into its turn as
    *  a course-correction rather than waiting for the next build. */
-  async function steer(docPath, { marks: chosen = null, client = null } = {}) {
+  async function steer(docPath, { marks: chosen = null, client = null, into = null } = {}) {
     const before = await buildStore.read(docPath);
-    const running = before.builds.find((b) => b.status === 'running');
+    const running = before.builds.find((b) => b.status === 'running' && (!into || b.id === into)) ?? before.builds.find((b) => b.status === 'running');
     if (!running?.conversation) return start(docPath, { marks: chosen, client });
     const wanted = Array.isArray(chosen) && chosen.length ? new Set(chosen.map(String)) : null;
     const { result: taken } = await change(docPath, (s) => {
@@ -774,15 +817,13 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
       });
     }
     const making = !said || said.change;
-    const busy = (await buildStore.read(docPath)).builds.some((b) => b.status === 'running');
     await change(docPath, (s) => {
       const c = s.marks.find((m) => m.id === comment.id);
       const n = s.marks.find((m) => m.id === note.id);
       if (!c) return null;
       c.thread = (c.thread ?? []).filter((line) => !line.pending);
       if (making && n) {
-        n.now = true;
-        c.thread.push({ who: 'agent', text: busy ? 'I will make this as soon as the build running now is done.' : 'Making this now.', at: Date.now() });
+        c.thread.push({ who: 'agent', text: 'Making this now.', at: Date.now() });
       } else {
         c.thread.push({ who: 'agent', text: said?.answer || 'I could not answer just now.', at: Date.now(), ...(said?.offer ? { offer: { text: said.offer, taken: null } } : {}) });
         // A question was asked and answered: the note it came from has done
@@ -792,7 +833,8 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
       }
       return null;
     });
-    if (making) await startNow(docPath);
+    // Built at once: on its own, or into the running build it is about.
+    if (making) await startOrJoin(docPath, { marks: [note.id] }).catch((err) => log.error(`[builds] ${err.message}`));
   }
 
   /** Start a build of what was sent to be made now, if nothing is running. */
@@ -912,7 +954,7 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     archive,
     history,
     send,
-    startOrQueue,
+    startOrJoin,
     steer,
     drawnOf,
     start,

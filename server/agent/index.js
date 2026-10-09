@@ -28,6 +28,7 @@ import { createUsageHistory } from './usage-history.js';
 import { createBuilds } from '../build/index.js';
 import { createBuildRoutes } from '../build/routes.js';
 import { createBuildStore } from '../build/store.js';
+import { normalizeUndo, undoTurn } from './undo.js';
 import { createDriveIndex, suggestPieces } from '../build/pieces.js';
 import { writeReply } from '../build/reply.js';
 
@@ -302,6 +303,17 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     reply: config.agentNaming ? (input) => writeReply({ ...input, model: /claude|opus|sonnet|haiku|fable/i.test(input.model ?? '') ? input.model : config.agentNamingModel, log }) : null,
     suggest: config.agentNaming ? (input) => suggestPieces({ ...input, model: config.agentNamingModel, log }) : null,
     driveRegions: createDriveIndex({ store }),
+    // Take back one build's own turns, op by op, leaving any other build's
+    // work on the same app where it is (Stop, with builds side by side).
+    undoTurns: async (turnIds) => {
+      for (const id of [...turnIds].reverse()) {
+        const turn = await agentStore.turn(id);
+        if (!turn || turn.undoneAt || turn.status === 'queued' || turn.status === 'running') continue;
+        const saved = normalizeUndo(await agentStore.undoRecords(id));
+        await undoTurn({ records: saved.steps, restores: [], writeOps, restore, client: `agent-undo:${turn.conversationId}`, turn: id, log });
+        await agentStore.updateTurn(id, { undoneAt: Date.now() });
+      }
+    },
     log,
   });
   await builds.boot();

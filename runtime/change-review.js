@@ -502,8 +502,8 @@
       // A Build mode build's changes are reviewed in its History (build-mode.js),
       // where hovering a build lights what it changed; they are not offered
       // here, on the parts, after it ends.
-      const builder = window.marbleBuild?.state?.()?.conversation ?? null;
-      turns = (Array.isArray(body?.turns) ? body.turns : []).filter((t) => !builder || t.conversationId !== builder);
+      const builders = window.marbleBuild?.buildConversations?.() ?? new Set([window.marbleBuild?.state?.()?.conversation].filter(Boolean));
+      turns = (Array.isArray(body?.turns) ? body.turns : []).filter((t) => !builders.has(t.conversationId));
       for (const t of turns) if (!known.has(t.id)) known.set(t.id, answered);
       // Undone from here and listed again, by a list asked for after the
       // undo: it was redone somewhere else.
@@ -1990,7 +1990,7 @@
     // The build's conversation is known once Build mode has its state.
     let builderSeen = null;
     addEventListener('marble-build:state', () => {
-      const builder = window.marbleBuild?.state?.()?.conversation ?? null;
+      const builder = [...(window.marbleBuild?.buildConversations?.() ?? [])].sort().join(' ');
       if (builder === builderSeen) return;
       builderSeen = builder;
       load();

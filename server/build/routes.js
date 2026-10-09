@@ -74,7 +74,7 @@ export function createBuildRoutes({ builds, hub, maxBody }) {
           client,
         };
         if (body.steer === true) return json(res, 202, await builds.steer(pathOf(url), options));
-        return json(res, 202, await builds.startOrQueue(pathOf(url), options));
+        return json(res, 202, await builds.startOrJoin(pathOf(url), options));
       }
 
       const action = BUILD.exec(route);

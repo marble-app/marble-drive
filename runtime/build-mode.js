@@ -106,14 +106,20 @@
       all: unset; box-sizing: border-box; height: 36px; padding: 0 14px; margin: 0 2px; border-radius: 10px; cursor: pointer;
       display: inline-flex; align-items: center; white-space: nowrap;
       font: 500 13px/1 var(--ui, system-ui, sans-serif); background: var(--ink, #111); color: var(--card, #fff);
-      transition: background 120ms ${EASE}, opacity 120ms ${EASE};
+      overflow: hidden; interpolate-size: allow-keywords; width: auto;
+      transition: background 120ms ${EASE}, opacity 180ms ${EASE}, width 300ms ${EASE}, padding 300ms ${EASE}, margin 300ms ${EASE}, display 300ms allow-discrete;
     }
     .marble-build-go:hover { background: color-mix(in srgb, var(--ink, #111) 84%, var(--card, #fff)); }
     .marble-build-go:active { background: color-mix(in srgb, var(--ink, #111) 72%, var(--card, #fff)); }
     .marble-build-go:focus-visible { outline: 2px solid var(--accent-ink, #738698); outline-offset: 2px; }
     .marble-build-go[aria-disabled="true"] { opacity: .35; cursor: default; }
     .marble-build-go[aria-disabled="true"]:hover { background: var(--ink, #111); }
-    .marble-build-go[hidden], .marble-build-run[hidden] { display: none; }
+    /* Build becomes the run and back: one narrows and fades as the other
+       widens in from nothing, in the same place on the bar. */
+    .marble-build-go[hidden], .marble-build-run[hidden] { display: none; opacity: 0; width: 0; padding-inline: 0; margin-inline: 0; }
+    @starting-style {
+      .marble-build-go:not([hidden]), .marble-build-run:not([hidden]) { opacity: 0; width: 0; padding-inline: 0; }
+    }
     /* While a build runs, Build becomes the build: the tag's words and meter,
        in its ink, with Pause and Stop beside them. Paused is caution. */
     .marble-build-run {
@@ -122,6 +128,8 @@
       background: color-mix(in srgb, var(--mark) 12%, var(--card, #fff)); color: color-mix(in srgb, var(--mark) 70%, var(--ink, #111));
       box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mark) 30%, transparent);
       font: 500 11.5px/1 var(--ui, system-ui, sans-serif); white-space: nowrap;
+      max-width: 420px; overflow: hidden; interpolate-size: allow-keywords; width: auto;
+      transition: opacity 240ms ${EASE} 80ms, width 360ms ${EASE}, padding 360ms ${EASE}, margin 360ms ${EASE}, background 200ms ${EASE}, display 360ms allow-discrete;
     }
     .marble-build-run[data-run="paused"] { --mark: var(--caution, #a07a2c); }
     /* What it is doing, in one line, over the stages as dashes: made ones
@@ -696,7 +704,10 @@
 
     const builds = () => state?.builds ?? [];
     let workLine = null; // { say, at }: the running build's own line, newest
-    const runningBuild = () => builds().find((b) => b.status === 'running') ?? null;
+    // Builds can run side by side: the newest is the one the bar shows.
+    const runningBuild = () => [...builds()].reverse().find((b) => b.status === 'running') ?? null;
+    const inHand = () => builds().filter((b) => b.status === 'running' || b.status === 'paused');
+    const buildConversations = () => new Set(builds().map((b) => b.conversation).concat(state?.conversation ?? []).filter(Boolean));
     const pausedBuild = () => [...builds()].reverse().find((b) => b.status === 'paused') ?? null;
     const current = () => runningBuild() ?? pausedBuild();
     const waiting = () => (state?.marks ?? []).filter((m) => m.state === 'waiting' && m.type !== 'comment' && !m.archived);
@@ -740,13 +751,13 @@
       const picked = M.picked();
       const chosen = picked.filter((id) => waiting().some((m) => m.id === id));
       go.textContent = chosen.length ? 'Build selection' : 'Build';
-      // Build is never shut: while one runs it queues what is marked, to be
-      // built as soon as that one is done.
+      // Build is never shut, and never a queue: while one runs, what is marked
+      // starts at once, alongside it, or joins it when it is about the same
+      // parts (the host decides).
       const can = Boolean(chosen.length || n > 0);
       go.setAttribute('aria-disabled', String(!can));
       go.hidden = Boolean(build) && !can;
-      if (build) go.textContent = chosen.length ? 'Queue selection' : 'Queue';
-      tipped(go, build ? 'Build these as soon as the running build is done' : 'Build what is marked');
+      tipped(go, build ? 'Build these now: alongside the running build, or into it when they are about the same parts' : 'Build what is marked');
       run.hidden = !build;
       if (build) {
         run.dataset.run = build.status === 'paused' ? 'paused' : 'building';
@@ -854,8 +865,9 @@
       await flushing;
       const made = await settled(ask('POST', route('/start'), { marks, words, steer }));
       if (made?.conversation) agent.attend(made.conversation);
-      if (made?.queued) say(`${plural(made.queued, 'mark')} queued. ${made.queued === 1 ? 'It is' : 'They are'} built as soon as this build is done.`);
-      if (made?.steered) say(`${plural(made.steered, 'mark')} sent into the build running now.`);
+      if (made?.joined) say(`Added to build ${made.joined}, which is working on the same parts.`);
+      else if (made?.alongside) say('Building it now, alongside the build already running.');
+      else if (made?.steered) say(`${plural(made.steered, 'mark')} sent into the build running now.`);
       M.clearPicked();
       return made;
     };
@@ -924,7 +936,7 @@
         selArchive.hidden = false;
         // While a build runs: queue them for after it, or steer it with them.
         const busy = Boolean(runningBuild());
-        selB.textContent = busy ? 'Queue' : 'Build these';
+        selB.textContent = 'Build these';
         selB.setAttribute('aria-disabled', String(built === n));
         selSteer.hidden = !busy || built === n;
         sel.dataset.kind = 'marks';
@@ -1260,7 +1272,7 @@
     // The line the work itself says (agent-work.js), for the build's turns.
     addEventListener('marble-work:line', (event) => {
       const d = event.detail;
-      if (!d?.conversation || d.conversation !== state?.conversation) return;
+      if (!d?.conversation || d.conversation !== runningBuild()?.conversation) return;
       workLine = d.say ? { say: d.say, at: Date.now() } : null;
       paintBar();
     });
@@ -1272,14 +1284,13 @@
     // the build on the host (server/build/steps.js) and shown in its status,
     // never floated over the app.
 
-    let following = null; // { conversation, turn }
-    const follow = (build) => {
-      const turn = build?.status === 'running' ? build.turn : null;
-      if (following?.turn === turn) return;
-      following = null;
-      if (!turn || !build.conversation) return;
-      agent.attend(build.conversation);
-      following = { conversation: build.conversation, turn };
+    const following = new Set(); // turn ids attended
+    const follow = () => {
+      for (const b of builds()) {
+        if (b.status !== 'running' || !b.turn || !b.conversation || following.has(b.turn)) continue;
+        following.add(b.turn);
+        agent.attend(b.conversation);
+      }
     };
 
     // -------------------------------------------------------------- lit
@@ -1801,7 +1812,7 @@
       state = next;
       M.load(state.marks);
       M.setRunning(Boolean(runningBuild()));
-      follow(runningBuild());
+      follow();
       paintBar();
       if (open) redrawPop();
       if (threadFor) drawThread();
@@ -1901,6 +1912,8 @@
         node.addEventListener('pointerdown', hideTip);
       },
       current,
+      inHand,
+      buildConversations,
       act,
       view,
       say,

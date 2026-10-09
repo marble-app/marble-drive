@@ -328,6 +328,8 @@
        more. */
     .marble-margin-pin:is([data-key="built"], [data-key="resolved"]) { opacity: .45; box-shadow: inset 0 0 0 1px var(--b-faint); color: var(--b-muted); }
     .marble-margin-pin[hidden] { display: none; }
+    .marble-margin-pin { touch-action: none; }
+    .marble-margin-pin[data-carried] { cursor: grabbing; scale: 1.2; box-shadow: 0 6px 16px rgba(0,0,0,.22); transition: scale 140ms ${EASE}; }
 
 
     /* ---- on a phone the sidebar is a sheet from the foot: the cards in page
@@ -655,8 +657,41 @@
     const drawPin = (mark, n) => {
       const pin = button('marble-margin-pin', String(n));
       pin.dataset.id = mark.id;
+      // A press picks it; a drag carries the mark, folded as it is, to
+      // another place on the app (agent-marks.js placeAt).
+      let carried = false;
+      pin.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        const entry = cardOf.get(mark.id);
+        if (!entry || entry.status?.show === 'build') return;
+        const x0 = event.clientX;
+        const y0 = event.clientY;
+        const left0 = Number.parseFloat(pin.style.left) || 0;
+        const top0 = Number.parseFloat(pin.style.top) || 0;
+        carried = false;
+        pin.setPointerCapture?.(event.pointerId);
+        const move = (e) => {
+          if (!carried && Math.hypot(e.clientX - x0, e.clientY - y0) < 5) return;
+          carried = true;
+          pin.setAttribute('data-carried', '');
+          pin.style.left = `${Math.round(left0 + e.clientX - x0)}px`;
+          pin.style.top = `${Math.round(top0 + e.clientY - y0)}px`;
+        };
+        const up = (e) => {
+          pin.removeEventListener('pointermove', move);
+          pin.removeEventListener('pointerup', up);
+          pin.removeEventListener('pointercancel', up);
+          pin.removeAttribute('data-carried');
+          if (carried && e.type === 'pointerup') M.placeAt?.(mark.id, left0 + e.clientX - x0, top0 + e.clientY - y0);
+          schedule();
+        };
+        pin.addEventListener('pointermove', move);
+        pin.addEventListener('pointerup', up);
+        pin.addEventListener('pointercancel', up);
+      });
       pin.addEventListener('click', (event) => {
         event.stopPropagation();
+        if (carried) { carried = false; return; }
         pick(picked === mark.id ? null : mark.id);
       });
       pin.addEventListener('pointerenter', () => hot(mark.id, true));
@@ -670,18 +705,29 @@
       entry?.pin.toggleAttribute('data-hot', on);
     };
 
+    // Every build in hand (running, or waiting paused) heads the list as its
+    // status in three layers (build-mode.js statusCard), newest first; builds
+    // can run side by side. Once one has ended its marks say how, and
+    // History keeps it.
+    const statusCards = new Map(); // build id → statusCard
     const drawBuild = () => {
-      // The build in hand heads the list while it runs or waits paused, as
-      // its status in three layers (build-mode.js statusCard). Once it has
-      // ended its marks say how, and History keeps it.
-      const b = B.current();
-      if (!b) { buildCard?.node.remove(); buildCard = null; return; }
-      if (!buildCard || buildCard.id() !== b.id) {
-        buildCard?.node.remove();
-        buildCard = B.statusCard();
-        cards.prepend(buildCard.node);
+      const hand = [...(B.inHand?.() ?? [B.current()].filter(Boolean))].reverse();
+      const keep = new Set(hand.map((b) => b.id));
+      for (const [id, card] of statusCards) if (!keep.has(id)) { card.node.remove(); statusCards.delete(id); }
+      let after = null;
+      for (const b of hand) {
+        let card = statusCards.get(b.id);
+        if (!card) { card = B.statusCard(); statusCards.set(b.id, card); }
+        card.update(b);
+        if (after) after.after(card.node); else cards.prepend(card.node);
+        after = card.node;
       }
-      buildCard.update(b);
+      buildCard = hand.length ? { node: { get offsetHeight() { return stackHeight(); } }, id: () => hand[0].id } : null;
+    };
+    const stackHeight = () => {
+      let height = 0;
+      for (const card of statusCards.values()) height += card.node.offsetHeight + GAP;
+      return Math.max(0, height - GAP);
     };
 
     // ------------------------------------------------------------ archive
@@ -820,9 +866,13 @@
       }
       if (panel.hasAttribute('data-sheet')) return;
       let floor = GAP;
-      if (buildCard) {
-        buildCard.node.style.top = `${GAP}px`;
-        floor = GAP + buildCard.node.offsetHeight + GAP;
+      if (statusCards.size) {
+        let top = GAP;
+        for (const node of cards.querySelectorAll(':scope > .marble-bst')) {
+          node.style.top = `${top}px`;
+          top += node.offsetHeight + GAP;
+        }
+        floor = top;
       }
       const tops = stackCards(items, { head: floor, gap: GAP, picked });
       for (const [id, top] of tops) cardOf.get(id).node.style.top = `${top}px`;

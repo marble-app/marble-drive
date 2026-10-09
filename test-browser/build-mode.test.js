@@ -486,7 +486,7 @@ test('a pick hands the cursor back to the app; a press away lets it go, and a dr
   assert.deepEqual(await page.evaluate(() => window.marbleMarks.parts()), []);
 });
 
-test('while a build runs, Build queues what is marked and a selection can steer the build instead', async () => {
+test('while a build runs, Build starts another alongside it, or joins it when the marks are about the same parts; no queue', async () => {
   const { page } = await open();
   await noteOn(page, 'h', 'script:slow Half build it');
   await go(page).click();
@@ -494,25 +494,49 @@ test('while a build runs, Build queues what is marked and a selection can steer 
   // The run says what it is doing in a line, over a dash for each stage.
   await page.locator('.marble-build-meter i[data-state="now"]').waitFor();
   assert.ok(await page.locator('.marble-build-run .w > span:first-child').textContent());
-  // Away from the building note's corner.
-  const noteAt = async (id, text) => {
+  const noteAt = async (id, text, x = 40) => {
     await tool(page, 'text').click();
     const at = await box(page, id);
-    await page.mouse.click(at.x + 40, at.y + at.height - 20);
+    await page.mouse.click(at.x + x, at.y + at.height - 20);
     await page.locator('.marble-marks-note-body:focus').waitFor();
     await page.keyboard.type(text);
     await page.locator('.marble-marks-note-body:focus').evaluate((node) => node.blur());
+    await hostSays(page, (marks) => marks.some((m) => m.text === text), 'kept');
   };
-  await noteAt('s1', 'After it');
-  assert.equal(await go(page).textContent(), 'Queue');
+  // About another part: it starts at once, alongside.
+  await noteAt('s2', 'Show two weeks');
+  assert.equal(await go(page).textContent(), 'Build');
   await go(page).click();
-  await hostSays(page, (marks) => marks.find((m) => m.text === 'After it')?.now === true, 'queued');
-  await noteAt('s2', 'Into it');
-  await tool(page, 'select').click();
-  await page.locator('.marble-marks-note', { hasText: 'Into it' }).locator('.marble-marks-note-body').click();
-  await page.locator('.marble-build-sel button', { hasText: 'Steer' }).click();
-  await hostSays(page, (marks) => marks.find((m) => m.text === 'Into it')?.state === 'building', 'it joins the running build');
-  await page.locator('.marble-build-run button[aria-label^="Stop"]').click();
+  const running = async () => (await state()).builds.filter((b) => b.status === 'running');
+  await page.waitForFunction(() => fetch('/agent/builds?path=Reviews').then((x) => x.json()).then((s) => s.builds.filter((b) => b.status === 'running').length === 2).catch(() => false));
+  for (let i = 0; i < 50 && (await running()).length < 2; i += 1) await page.waitForTimeout(100);
+  const both = await running();
+  assert.equal(both.length, 2, 'two builds side by side');
+  assert.notEqual(both[0].conversation, both[1].conversation, 'each in a conversation of its own');
+  // About the same part as the first: it joins that build.
+  await noteAt('h', 'And make it bigger', 200);
+  await go(page).click();
+  const joined = await hostSays(page, (marks) => marks.find((m) => m.text === 'And make it bigger')?.state === 'building', 'it joins');
+  assert.equal(joined.find((m) => m.text === 'And make it bigger').build, joined.find((m) => m.text === 'script:slow Half build it').build);
+  for (const b of await running()) await api('POST', `/agent/builds/${b.id}/stop?path=Reviews`, {});
+});
+
+test('with Marks open, a mark folded into its pin can be dragged to another part', async () => {
+  const { page } = await open();
+  await noteOn(page, 's1', 'Move me');
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble-build:toggle-comments')));
+  await page.locator('.marble-margin').waitFor();
+  await page.waitForTimeout(600);
+  const pin = page.locator('.marble-margin-pin:not([hidden])').first();
+  const p = await pin.boundingBox();
+  const to = await box(page, 's2');
+  await page.mouse.move(p.x + 8, p.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(to.x + 120, to.y + 40, { steps: 8 });
+  await page.mouse.up();
+  const marks = await hostSays(page, (list) => list.find((m) => m.text === 'Move me')?.anchorId?.startsWith('s2'), 'put on the other part');
+  assert.ok(marks.length);
+  assert.equal(await page.locator('.marble-margin-card[aria-expanded="true"]').count(), 0, 'a drag is not a pick');
 });
 
 // Marks, Pieces and History are views of the chat's sidebar, in the

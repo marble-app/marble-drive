@@ -2918,6 +2918,33 @@
       },
       sendGlyph: GLYPHS.send,
       MOD,
+      /** A mark put down somewhere else by its pin (Marks folds marks into
+       *  pins; build-margin.js lets a pin be dragged): a note, comment, piece
+       *  or move takes the part under the point as its anchor; a sketch keeps
+       *  its anchor and moves by as far as its pin moved. Kept at once. */
+      placeAt: (id, x, y) => {
+        const mark = marks.find((m) => m.id === id);
+        if (!mark || mark.state === 'building') return false;
+        if (mark.type === 'stroke') {
+          const span = spanOf(mark);
+          const box = boxOf(mark.anchorId);
+          if (!span || !box?.width || !box?.height) return false;
+          const dx = (x - (span.left + span.width)) / box.width;
+          const dy = (y - span.top) / box.height;
+          for (const part of mark.parts) part.pairs = part.pairs.map(([u, v]) => [u + dx, v + dy]);
+        } else {
+          const anchor = elementAt(x, y);
+          if (!anchor) return false;
+          const box = anchor.getBoundingClientRect();
+          mark.anchorId = anchor.getAttribute('data-marble-id');
+          mark.u = box.width ? (x - box.left) / box.width : 0;
+          mark.v = box.height ? (y - box.top) / box.height : 0;
+        }
+        repaint();
+        keep(mark);
+        for (const fn of watchers) fn();
+        return true;
+      },
       /** Send a note from elsewhere (its card in Marks), or step its model. */
       send: (id) => { const mark = marks.find((m) => m.id === id); if (mark) sendNote(mark); },
       stepModel: (id, axis, delta) => { const mark = marks.find((m) => m.id === id); if (mark) stepModel(mark, axis, delta); },

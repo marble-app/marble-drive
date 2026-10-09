@@ -266,7 +266,7 @@
       if (d.target && String(d.target).replace(/\.mrbl$/, '') !== String(app).replace(/\.mrbl$/, '')) return;
       // A Build mode build says its line in Describe's bar, with its stages
       // (build-mode.js): no pill in the corner for it.
-      if (d.conversation === window.marbleBuild?.state?.()?.conversation) { line = null; paintIsland(); return; }
+      if (window.marbleBuild?.buildConversations?.().has(d.conversation)) { line = null; paintIsland(); return; }
       line = d;
       paintIsland();
     });
