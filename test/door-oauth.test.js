@@ -104,7 +104,9 @@ test('a missing, wrong or stale state is refused in words that echo nothing', as
   }
   const late = await refusal(finish('google', callback('google', flow), { env, fetchImpl, now: NOW + 601_000 }));
   assert.match(late.message, /took too long/);
-  const forged = flow.cookie.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A'));
+  // A changed character inside the MAC (the last one only carries padding bits).
+  const at = flow.cookie.lastIndexOf('.') + 5;
+  const forged = flow.cookie.slice(0, at) + (flow.cookie[at] === 'A' ? 'B' : 'A') + flow.cookie.slice(at + 1);
   await refusal(finish('google', callback('google', { ...flow, cookie: forged }), { env, fetchImpl, now: NOW }));
 });
 
