@@ -6,6 +6,7 @@
 // drive (router.js) and never needs the token.
 
 import { INITIAL, move } from './lease.js';
+import { Directory } from './door/directory.js';
 import { isFrontDoor, route } from './router.js';
 
 const json = (status, body) =>
@@ -43,5 +44,7 @@ export async function handle(request, env) {
   if (!match) return json(404, { why: 'no such route' });
   return env.LEASE.get(env.LEASE.idFromName(match[1])).fetch(request);
 }
+
+export { Directory };
 
 export default { fetch: handle };
