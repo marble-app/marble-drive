@@ -36,8 +36,8 @@ export class Lease {
   }
 }
 
-export async function handle(request, env) {
-  if (isFrontDoor(new URL(request.url).hostname)) return route(request, env);
+export async function handle(request, env, ctx) {
+  if (isFrontDoor(new URL(request.url).hostname)) return route(request, env, { ctx });
   if (!env.LEASE_TOKEN) return json(500, { why: 'LEASE_TOKEN is not set on this Worker' });
   if (request.headers.get('authorization') !== `Bearer ${env.LEASE_TOKEN}`) return json(401, { why: 'unauthorised' });
   const match = /^\/lease\/([a-z0-9-]+)(\/move)?$/.exec(new URL(request.url).pathname);
