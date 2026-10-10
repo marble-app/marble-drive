@@ -182,6 +182,31 @@ test('a Build mode app opens with the drive\'s frame out and the sidebar on Mark
   await page.mouse.move(520, 520, { steps: 8 });
   await page.waitForTimeout(800);
   assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), true, 'still out');
+  // Once the hand has been over it and left, it goes, as anything floating does.
+  const mid = await page.evaluate(() => { const r = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.mouse.move(mid.x, mid.y, { steps: 6 });
+  await page.waitForTimeout(300);
+  await page.mouse.move(300, 400, { steps: 8 });
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen === false, null, { timeout: 4000 });
+  // Brought out again, × slides it away rather than dropping it.
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble-build:toggle-comments')));
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen === true);
+  await page.waitForTimeout(700);
+  const slid = await page.evaluate(() => new Promise((resolve) => {
+    const panel = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel');
+    const seen = [];
+    panel.querySelector('.close').click();
+    const t0 = performance.now();
+    const look = () => {
+      seen.push([Math.round(performance.now() - t0), panel.style.transform, panel.style.visibility, Math.round(panel.getBoundingClientRect().left)]);
+      if (performance.now() - t0 < 600) requestAnimationFrame(look); else resolve(seen);
+    };
+    requestAnimationFrame(look);
+  }));
+  const start = slid[0][3];
+  const end = slid.at(-1)[3];
+  const between = slid.filter(([, , , left]) => left > start + (end - start) * 0.1 && left < start + (end - start) * 0.9);
+  assert.ok(between.length >= 5, `it slides out over several frames: ${between.length}`);
   await dock();
   await page.waitForFunction(() => window.marbleShell.layout.pinChat === true);
   // The note's footer: a model on the left, Send on the right.
@@ -716,6 +741,56 @@ test('in the margin a comment is a card: the app answers in its own name, and a 
   await page.locator('.marble-margin-old', { hasText: 'Resolved' }).locator('.sb', { hasText: 'Put back' }).click();
   await hostSays(page, (marks) => marks.find((m) => m.type === 'comment')?.resolved === false, 'opened again');
 });
+
+test('a long comment opens on its latest line, folds what was pasted, and reads at full size with the way back', async () => {
+  const { page } = await open();
+  const pasted = Array.from({ length: 30 }, (_, i) => `Pasted line ${i + 1} of the log`).join('\n');
+  const thread = [];
+  for (let i = 0; i < 8; i += 1) thread.push({ who: 'you', text: `Question ${i + 1}?` }, { who: 'agent', text: `Answer ${i + 1}.` });
+  thread.push({ who: 'you', text: pasted }, { who: 'agent', text: 'The latest answer.' });
+  await api('PUT', '/agent/builds/marks?path=Reviews', { mark: { id: 'mlong', type: 'comment', anchorId: 's2', u: 0.3, v: 0.3, at: Date.now(), thread } });
+  await openMargin(page);
+  const card = page.locator('.marble-margin-card', { hasText: 'Question 1?' });
+  await card.waitFor();
+  await page.waitForTimeout(200);
+  // In its card: scrolled to the latest line.
+  const inCard = await card.locator('.lines').evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight);
+  assert.ok(n0(inCard) < 4, `the card's lines end on the latest: ${inCard}`);
+  // Opened, what was pasted is still folded to a few lines, with Show all.
+  await card.locator('.k').click();
+  assert.equal(await card.getAttribute('aria-expanded'), 'true');
+  const long = card.locator('.marble-build-line[data-folded]');
+  assert.equal(await long.count(), 1);
+  const folded = (await long.locator('p').boundingBox()).height;
+  assert.ok(folded < 140, `folded: ${folded}`);
+  await long.locator('.more', { hasText: 'Show all' }).click();
+  const shown = (await card.locator('.marble-build-line', { hasText: 'Pasted line 1 ' }).locator('p').boundingBox()).height;
+  assert.ok(shown > folded * 2, `opened: ${shown}`);
+  // Out to full size: the comment as a chat, its box at the foot, and Back.
+  await card.locator('.arc[aria-label^="Open comment"]').click();
+  const full = margin(page).locator('.full');
+  await full.waitFor();
+  assert.equal(await margin(page).getAttribute('data-view'), 'thread');
+  assert.match(await margin(page).locator('.mh .ft').textContent(), /^Comment \d+ · on /);
+  await full.locator('.ff .marble-build-write').waitFor();
+  await page.waitForTimeout(200);
+  const atEnd = await full.locator('.fl').evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight);
+  assert.ok(atEnd < 4, `the full view opens on the latest line: ${atEnd}`);
+  assert.equal(await page.locator('.marble-margin-card').first().isVisible(), false, 'the list is put by');
+  await margin(page).locator('.mh .back', { hasText: 'Marks' }).click();
+  assert.equal(await margin(page).getAttribute('data-view'), 'marks');
+  await card.locator('.reply .marble-build-write').waitFor({ state: 'attached' });
+  // The floating thread on the app opens on its latest line too.
+  await page.evaluate(() => window.marbleBuild.setSide('none'));
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble-marks:comment', { detail: { id: 'mlong' } })));
+  const floating = page.locator('.marble-build-thread:not([hidden]) .lines');
+  await floating.waitFor();
+  await page.waitForTimeout(200);
+  const there = await floating.evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight);
+  assert.ok(there < 4, `the thread opens on the latest line: ${there}`);
+  await api('DELETE', '/agent/builds/marks?path=Reviews', { ids: ['mlong'] });
+});
+const n0 = (v) => Math.max(0, Math.round(v));
 
 test('on a phone Marks is in the sidebar\'s sheet from the foot, in page order, and docks nothing', async () => {
   const { page } = await open({ width: 390, height: 800 });

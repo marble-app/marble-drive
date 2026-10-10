@@ -9600,7 +9600,10 @@
     close() {
       if (this.shell) {
         // On hover, closing puts the chat back at its edge; pinned, it
-        // unpins it, which puts it there too.
+        // unpins it, which puts it there too. Put away on purpose, it slides
+        // out at the pace it came in, not at a hand's leaving pace.
+        this.closing = true;
+        setTimeout(() => { this.closing = false; }, 0);
         if (window.marbleShell.autoHide) window.marbleShell.conceal('chat');
         else window.marbleShell.setChat(false);
         this.launcher.focus({ preventScroll: true });
@@ -9638,8 +9641,9 @@
       // The shell's panels and the page ease over 340ms; this spring is tuned
       // to land with them rather than a beat behind. A card on hover leaves
       // faster than it came, as the tree does: the hand has already gone.
-      const away = !want && this.shell?.mode === 'float';
-      this.animateTo(want ? 1 : 0, { animate: !first, response: away ? 0.16 : 0.25 });
+      const away = !want && this.shell?.mode === 'float' && !this.closing;
+      this.closing = false;
+      this.animateTo(want ? 1 : 0, { animate: !first, response: want ? 0.25 : away ? 0.16 : 0.3 });
       if (want && !first) {
         // The caret goes in when the chat was asked for — the shell opening,
         // its button, a conversation opened — and never because a pointer

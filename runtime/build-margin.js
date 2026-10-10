@@ -132,6 +132,8 @@
     archive: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="3" width="11.5" height="3" rx="1"/><path d="M3.25 6v6.25c0 .55.45 1 1 1h7.5c.55 0 1-.45 1-1V6"/><path d="M6.5 8.75h3"/></svg>',
     back: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.75 4 5.75 8l4 4"/></svg>',
     trash: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.25c.04.42.39.75.81.75h4.18c.42 0 .77-.33.81-.75l.6-8.25"/></svg>',
+    // Out to full size: a comment read as a chat.
+    full: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.75h3.75V6.5M13.25 2.75 9 7M6.5 13.25H2.75V9.5M2.75 13.25 7 9"/></svg>',
     close: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
     send: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7"/></svg>',
   };
@@ -178,6 +180,15 @@
     .marble-margin .gone { display: inline-flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; color: var(--b-muted); }
     .marble-margin .gone:hover { background: var(--b-paper-2); color: var(--b-ink); }
     .marble-margin[data-view="archive"] .cards, .marble-margin[data-view="archive"] .none { display: none; }
+    .marble-margin[data-view="thread"] :is(.cards, .none, .arch) { display: none; }
+    .marble-margin .full { position: absolute; inset: 0; display: none; flex-direction: column; }
+    .marble-margin[data-view="thread"] .full { display: flex; }
+    .marble-margin .full .fl { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 6px 6px 12px; }
+    .marble-margin .full .ff { flex: none; padding: 8px 10px 12px; border-top: 1px solid var(--b-line); }
+    .marble-margin .full .ff .marble-build-write { margin: 0; }
+    .marble-margin .ft { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--b-muted); }
+    .marble-margin-card .lines { max-height: 260px; overflow: auto; overscroll-behavior: contain; }
+    .marble-margin-card .k .arc + .arc { margin-left: 2px; }
     .marble-margin .arch { position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 18px 18px; display: none; flex-direction: column; gap: ${GAP}px; }
     .marble-margin[data-view="archive"] .arch { display: flex; }
     .marble-margin-old { padding: 9px 12px 8px; border-radius: 12px; background: var(--b-paper-2); font-size: 12.5px; line-height: 1.4; color: var(--b-muted); }
@@ -244,6 +255,9 @@
     .marble-margin-card[data-show="done"] { background: var(--b-paper); box-shadow: none; }
     .marble-margin-card[data-show="done"] :is(.words, .marble-build-line p) { color: var(--b-muted); }
     .marble-margin-card[data-show="done"]:not([aria-expanded="true"]) :is(.words, .marble-build-line p) { -webkit-line-clamp: 1; }
+    /* Shut, every line is a few already; a long one's Show all is for the
+       card opened. */
+    .marble-margin-card:not([aria-expanded="true"]) .marble-build-line .more { display: none; }
     .marble-margin-card[data-show="done"]:not([aria-expanded="true"]) :is(.marble-build-line:not(:first-child), .stl) { display: none; }
 
     /* Its status: one line of words, and the one thing to do from there. */
@@ -433,7 +447,18 @@
     none.setAttribute('role', 'status');
     const arch = h('div', 'arch');
     arch.setAttribute('aria-label', 'Archived marks');
-    ground.append(cards, none, arch);
+    // One comment at the sidebar's full size, read as a chat: its lines
+    // down to the latest, the reply box at the foot, and Back to the list.
+    const full = h('div', 'full');
+    full.setAttribute('role', 'region');
+    const fullLines = h('div', 'fl');
+    const fullFoot = h('div', 'ff');
+    full.append(fullLines, fullFoot);
+    const toList = button('back', 'Marks', KIND.back);
+    toList.setAttribute('aria-label', 'Back to the marks');
+    toList.addEventListener('click', () => setView('marks'));
+    const fullTitle = h('span', 'ft');
+    ground.append(cards, none, arch, full);
     panel.append(head, ground);
 
     // ------------------------------------------------------------ the state
@@ -455,12 +480,20 @@
     };
     const archived = () => marks().filter((m) => m.archived);
     let view = 'marks';
-    function setView(next) {
-      view = next === 'archive' ? 'archive' : 'marks';
+    let threadId = null; // the comment open at full size
+    let threadSeen = ''; // its lines as last drawn, to keep the latest in view
+    function setView(next, id = null) {
+      const was = view;
+      view = next === 'archive' || next === 'thread' ? next : 'marks';
+      threadId = view === 'thread' ? id : null;
+      threadSeen = '';
       panel.dataset.view = view;
-      if (view === 'archive') unpick();
+      if (view !== 'marks') unpick();
+      // The reply box went to the full view; its card takes it back.
+      if (was === 'thread') for (const entry of cardOf.values()) if (entry.mark?.type === 'comment') entry.sig = null;
       draw();
       if (view === 'archive') back.focus({ preventScroll: true });
+      else if (view === 'thread') writers.get(threadId)?.focus();
       else tray.focus({ preventScroll: true });
     }
     const statusFor = (mark) => statusOf(mark, { builds: B.state()?.builds ?? [], holds, name: B.name });
@@ -529,6 +562,11 @@
       no.setAttribute('aria-hidden', 'true');
       kind.prepend(no);
       kind.append(h('span', '', `${kindOf(mark)} · ${whereOf(mark)}`));
+      if (mark.type === 'comment') {
+        const out = tapper(button('arc', '', KIND.full), () => setView('thread', mark.id), 'Open it at full size, as a chat');
+        out.setAttribute('aria-label', `Open comment ${n} at full size`);
+        kind.append(out);
+      }
       if (mark.state !== 'building') {
         const put = tapper(button('arc', '', KIND.archive), () => B.archive([mark.id], true), 'Archive: off the app, kept under Archived');
         put.setAttribute('aria-label', `Archive ${kindOf(mark).toLowerCase()} ${n}`);
@@ -539,6 +577,8 @@
         const lines = h('div', 'lines');
         B.drawLines(lines, mark);
         card.append(lines);
+        // A long thread scrolls in its card and opens on its latest line.
+        requestAnimationFrame(() => { lines.scrollTop = lines.scrollHeight; });
       } else if (mark.type === 'note') {
         const words = h('p', 'words', mark.text ?? '');
         // Written here as well as on the app, while it waits for a build.
@@ -606,17 +646,9 @@
       if (mark.type === 'comment') {
         // The same box as everywhere a thing is written: words, pasted
         // pictures, Send (⌘↵). One per comment, kept across redraws.
-        let write = writers.get(mark.id);
-        if (!write) {
-          write = B.composer({
-            placeholder: 'Ask more, or say what to change',
-            label: `Reply to comment ${n}`,
-            onSend: ({ text, images }) => B.comment(mark.id, text, images),
-          });
-          writers.set(mark.id, write);
-        }
+        const write = writerFor(mark, n);
         const reply = h('div', 'reply');
-        reply.append(write.node);
+        if (!(view === 'thread' && threadId === mark.id)) reply.append(write.node);
         card.append(reply);
       }
       // A note waiting for a build: the note's own footer, its model and
@@ -759,6 +791,7 @@
       if (headView !== view) {
         headView = view;
         if (view === 'archive') head.replaceChildren(back, h('span', 'sp'), gone, shut);
+        else if (view === 'thread') head.replaceChildren(toList, fullTitle, h('span', 'sp'), shut);
         else head.replaceChildren(sum, h('span', 'sp'), tray, add, shut);
       }
       if (view !== 'archive') return;
@@ -790,6 +823,40 @@
       if (!rows.length) arch.append(h('p', 'empty', 'Nothing archived.'));
     }
 
+    // ------------------------------------------------------- one at full size
+
+    const writerFor = (mark, n) => {
+      let write = writers.get(mark.id);
+      if (!write) {
+        write = B.composer({
+          placeholder: 'Ask more, or say what to change',
+          label: `Reply to comment ${n}`,
+          onSend: ({ text, images }) => B.comment(mark.id, text, images),
+        });
+        writers.set(mark.id, write);
+      }
+      return write;
+    };
+    function drawFull(list) {
+      const at = list.findIndex((m) => m.id === threadId);
+      const mark = list[at];
+      if (!mark || mark.type !== 'comment') { setView('marks'); return; }
+      fullTitle.textContent = `Comment ${at + 1} · ${whereOf(mark)}`;
+      full.setAttribute('aria-label', `Comment ${at + 1}`);
+      const key = JSON.stringify(mark.thread ?? []);
+      if (key !== threadSeen) {
+        // Kept at the latest line when it was there, as a chat is; opened,
+        // it starts there.
+        const atEnd = !threadSeen || fullLines.scrollHeight - fullLines.scrollTop - fullLines.clientHeight < 24;
+        threadSeen = key;
+        fullLines.replaceChildren();
+        B.drawLines(fullLines, mark);
+        if (atEnd) requestAnimationFrame(() => { fullLines.scrollTop = fullLines.scrollHeight; });
+      }
+      const write = writerFor(mark, at + 1);
+      if (write.node.parentNode !== fullFoot) fullFoot.replaceChildren(write.node);
+    }
+
     // ------------------------------------------------------------ drawing
 
     let order = [];
@@ -798,6 +865,7 @@
       const all = marks();
       const list = all.filter((m) => !m.archived);
       drawArchive(all.filter((m) => m.archived));
+      if (view === 'thread') drawFull(list);
       const live = new Set();
       order = [];
       list.forEach((mark, i) => {

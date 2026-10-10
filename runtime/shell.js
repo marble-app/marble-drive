@@ -963,9 +963,11 @@
       // Focus alone does not hold a side — a click inside leaves focus there,
       // and a hand that clicked and moved on has moved on.
       this.keyed = { nav: false, chat: false };
-      // Brought out on purpose (a Build mode view's button): out until it is
-      // put away, not just while a hand is over it.
+      // Brought out on purpose (a Build mode view's button): out until the
+      // hand has come to it and gone again, or gets on with the page, rather
+      // than only while a hand is over it.
       this.held = { nav: false, chat: false };
+      this.visited = { nav: false, chat: false };
       this.intro = false;
       this.pointer = null;
       this.hideTimers = {};
@@ -1402,7 +1404,7 @@
       if (!this.hovers(side)) return;
       this.quiet[side] = false;
       this.keyed[side] = true;
-      if (hold) this.held[side] = true;
+      if (hold) { this.held[side] = true; this.visited[side] = false; }
       if (this.shown[side] && !(focus && side === 'chat')) return;
       clearTimeout(this.hideTimers[side]);
       this.shown[side] = true;
@@ -1417,6 +1419,7 @@
       this.quiet[side] = true;
       this.keyed[side] = false;
       this.held[side] = false;
+      this.visited[side] = false;
       const drawer = this.drawer;
       if (side === 'chat' && document.activeElement === drawer) {
         let focused = drawer;
@@ -1437,7 +1440,17 @@
     wanted(side) {
       if (!this.hovers(side)) return false;
       if (side === 'chat' && !this.drawer) return false;
-      if (this.intro || this.held[side]) return true;
+      if (this.intro) return true;
+      if (this.held[side]) {
+        // Held out until the hand has been over it and left: floating is on
+        // hover, and a side brought out by a button is still floating.
+        const p = this.pointer;
+        const r = this.shown[side] ? this.rectOf(side) : null;
+        const over = Boolean(p && r?.width && p.x >= r.left - REACH && p.x <= r.right + REACH && p.y >= r.top - REACH && p.y <= r.bottom + REACH);
+        if (over) this.visited[side] = true;
+        else if (this.visited[side]) { this.held[side] = false; this.visited[side] = false; }
+        if (this.held[side]) return true;
+      }
       // A row's menu or dialog is open, something is being carried out of
       // the tree, or a pin is being renamed: the tree stays for it.
       if (side === 'nav' && (this.popRow || this.carrying || this.editing)) return true;
@@ -1523,8 +1536,19 @@
         if (side) this.keyed[side] = true;
       };
       this.onPress = (event) => {
-        const side = sideOf(event.composedPath());
-        if (side) this.keyed[side] = false;
+        const path = event.composedPath();
+        const side = sideOf(path);
+        if (side) { this.keyed[side] = false; return; }
+        // A press on the app is getting on with it: a side held out lets go
+        // and goes with the hand. Not a press on the bar, or on Build mode's
+        // own toolbar and marks, which bring sides out.
+        const ours = path.includes(this) || path.some((node) => node?.classList && [...node.classList].some((name) => /^marble-(build|marks|margin)/.test(name)));
+        if (ours || (!this.held.nav && !this.held.chat)) return;
+        this.held.nav = false;
+        this.held.chat = false;
+        this.visited.nav = false;
+        this.visited.chat = false;
+        this.settle();
       };
       // Doing something on the page — a press, a scroll, a key — is being
       // back at work, and the introduction is over.
