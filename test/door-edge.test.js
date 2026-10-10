@@ -202,6 +202,18 @@ test('a script with a bearer passes through for the drive to judge', async () =>
   assert.equal(w.upstream[0].headers.get('authorization'), 'Bearer the-drives-passphrase');
 });
 
+test('Claude\'s and ChatGPT\'s sign-in reaches the drive, but its Allow page needs a pass', async () => {
+  const w = await world();
+  for (const [path, method] of [['/mcp', 'POST'], ['/.well-known/oauth-protected-resource', 'GET'], ['/.well-known/oauth-authorization-server', 'GET'], ['/oauth/register', 'POST'], ['/oauth/token', 'POST']]) {
+    const res = await route(new Request(`https://ana.marbledrive.app${path}`, { method, ...(method === 'POST' ? { body: '{}' } : {}) }), w.env, { fetchImpl: w.fetchImpl });
+    assert.equal(res.status, 200, path);
+  }
+  assert.deepEqual(w.upstream.map((u) => new URL(u.href).pathname), ['/mcp', '/.well-known/oauth-protected-resource', '/.well-known/oauth-authorization-server', '/oauth/register', '/oauth/token']);
+  const allow = await route(new Request('https://ana.marbledrive.app/oauth/authorize?client_id=x', { headers: { accept: 'text/html' } }), w.env, { fetchImpl: w.fetchImpl });
+  assert.equal(allow.status, 302);
+  assert.match(allow.headers.get('location'), /^https:\/\/marbledrive\.app\/enter\?/);
+});
+
 test('leave clears the pass and walks on to the next drive, then home', async () => {
   const w = await world();
   const res = await route(new Request('https://ana.marbledrive.app/_marble/leave?then=bob,carol'), w.env, { fetchImpl: w.fetchImpl });

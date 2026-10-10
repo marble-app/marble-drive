@@ -57,6 +57,9 @@ import { createGenuiHandler } from './genui/routes.js';
 import { watchDrive } from './watch.js';
 import { createDaily } from './daily.js';
 import { createAlive } from './alive.js';
+import { createGrants } from './connector/grants.js';
+import { createMcp } from './connector/mcp.js';
+import { createConnectorRoutes } from './connector/routes.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -719,6 +722,8 @@ export async function createDrive(config, { log = console, agentProviders = null
   // Set once the server exists, because the agents need to know where to tell
   // their MCP bridge to call back. Null when agents are not allowed here.
   let agents = null;
+  /** Claude and ChatGPT's door (server/connector), once agents have booted or not. */
+  let connector = null;
   // The run the host starts once a day (server/daily.js), once agents are up.
   let daily = null;
   // Automations that run on a schedule (server/alive.js, Make it alive).
@@ -857,6 +862,9 @@ export async function createDrive(config, { log = console, agentProviders = null
         // Awaited, so a refusal thrown inside reaches the catch below as a status.
         return agents ? await agents.handleTools(req, res, url) : text(res, 404, 'not found');
       }
+      // In front of the gate: Claude's and ChatGPT's servers hold a token the
+      // owner let them have, not a cookie (server/connector/routes.js).
+      if (connector && (await connector.handlePublic(req, res, url))) return;
       // Not the owner, but maybe someone holding a share link. `visit` is the
       // link's grant for the one document this request is about; everything
       // a link does not open is turned away here, before any route runs.
@@ -882,6 +890,8 @@ export async function createDrive(config, { log = console, agentProviders = null
         }
         visit = asked.grant;
       }
+      // The owner's: the Allow page and Connected apps. Never a share link's.
+      if (connector && !visit && (await connector.handleOwner(req, res, url))) return;
       if (route.startsWith('/agent/')) {
         return agents ? await agents.handle(req, res, url) : text(res, 404, 'not found');
       }
@@ -1538,6 +1548,26 @@ export async function createDrive(config, { log = console, agentProviders = null
       agentsWhy = err.message;
       return null;
     });
+  }
+
+  if (config.connector) {
+    const why = config.multiTenant
+      ? 'this host is shared by many'
+      : gate.open && !door.configured
+        ? 'this drive has no passphrase or sign-in, so anyone could let an app in'
+        : null;
+    if (why) log.info?.(`[connector] off: ${why}`);
+    else {
+      connector = createConnectorRoutes({
+        grants: createGrants({ dir: store.marbleDir }),
+        mcp: createMcp({ agents, read: agents ? agents.read : () => ({ error: 'reading needs agents on this host' }), hasDocument: (docPath) => store.has(docPath), log }),
+        publicUrl: config.publicUrl,
+        isOwner,
+        signInAt,
+        log,
+      });
+      log.info?.(`[connector] on at /mcp${agents ? '' : ' (agents off: no chats, and no reading)'}`);
+    }
   }
 
   if (agents) {
