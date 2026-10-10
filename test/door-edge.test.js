@@ -270,3 +270,16 @@ test('a tunnel name caught by the wildcard goes on to the tunnel as it came', as
   assert.equal(seen[0].url, 'https://pc-bryan.marbledrive.app/health');
   assert.equal(seen[0].headers.get('cookie'), 'marble_drive=x');
 });
+
+test("the pass the edge sets is one the drive's own host accepts, with public keys only", async () => {
+  const { createDoor, parseDoorKeys } = await import('../server/door.js');
+  const w = await world();
+  await w.ana.go(await w.enter(w.ana));
+  const pass = w.ana.jar('ana.marbledrive.app').get('__Host-md_pass');
+  const owner = (await w.admin('GET', '/drives')).drives.find((d) => d.name === 'ana').owner;
+  const keys = parseDoorKeys(`k1:${w.env.keys.spki}`);
+  const req = { url: '/a/Notes', headers: { cookie: `__Host-md_pass=${pass}` } };
+  assert.equal(createDoor({ keys, name: 'ana', owner }).allows(req), true);
+  assert.equal(createDoor({ keys, name: 'bob', owner }).allows(req), false);
+  assert.equal(createDoor({ keys, name: 'ana', owner: 'ffffffffffffffff' }).allows(req), false);
+});
