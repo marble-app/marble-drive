@@ -754,7 +754,9 @@ test("a document is served with the agent scripts after the Drive's, when agents
   const ui = page.search(/<script src="\/runtime\/agent-ui\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
   assert.ok(drive > 0 && api > drive && ui > api, 'drive.js, then agent.js, then agent-ui.js');
   assert.ok(words > api && words < ui, 'the card reads its words from agent-words.js, so it comes first');
-  for (const file of ['agent.js', 'agent-words.js', 'agent-ui.js']) {
+  const voice = page.search(/<script src="\/runtime\/voice\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
+  assert.ok(voice > api && voice < ui, 'the composer listens through voice.js, so it comes first');
+  for (const file of ['agent.js', 'agent-words.js', 'voice.js', 'agent-ui.js']) {
     const response = await fetch(`${base}/runtime/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get('content-type'), /javascript/);
