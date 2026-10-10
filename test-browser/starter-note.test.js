@@ -512,7 +512,7 @@ test('clicking a row opens that note, and the file remembers which', async () =>
   await page.waitForTimeout(200);
 
   const now = await page.evaluate(() => ({
-    current: document.body.getAttribute('data-current'),
+    current: document.querySelector('#notes').getAttribute('data-current'),
     open: document.querySelector('.note.marble-open').getAttribute('data-marble-id'),
     hosts: [...document.querySelectorAll('[contenteditable]')].filter((el) => el.closest('.notes')).length,
     lit: [...document.querySelectorAll('.row')].map((el) => el.classList.contains('marble-current')),
