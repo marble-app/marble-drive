@@ -1345,7 +1345,11 @@ __ICON__
       overlay.append(handleEl);
     }
     const one = list.length === 1 ? list[0] : null;
-    if (one && !body.classList.contains('marble-moving')) {
+    // A finger's handle reaches 44px around it, so on a thing drawn smaller
+    // than that (a note with the board zoomed far out) it would cover the thing
+    // itself and take the press meant for its words. Zoom in to resize it.
+    const small = one && coarse.matches && (box(one).w * cam.z < 72 || box(one).h * cam.z < 40);
+    if (one && !small && !body.classList.contains('marble-moving')) {
       const b = box(one);
       const tall = kindOf(one) === 'frame' || isInk(one);
       const p = toStage({ x: b.x + b.w, y: tall ? b.y + b.h : b.y + b.h / 2 });
