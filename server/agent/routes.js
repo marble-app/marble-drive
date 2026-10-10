@@ -26,6 +26,9 @@ import { summarize } from './store.js';
 import { sliceTurns } from './slice.js';
 import { normalizeUndo, undoTurn } from './undo.js';
 import { BRIEF_MAX } from './marble-way.js';
+import { speakable } from './voice/speakable.js';
+import { VOICES, VoiceError, baseType } from './voice/openai.js';
+import { patchVoice, voiceSettings } from './voice/settings.js';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const LOCAL_NAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -59,7 +62,7 @@ const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i,
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const FAILOVER = /^\/agent\/conversations\/([0-9a-f]{12})\/failover$/;
 const USAGE_LEFT = /^\/agent\/conversations\/([0-9a-f]{12})\/usage-left$/;
-const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/redo|\/keep|\/answer)?$/;
+const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/redo|\/keep|\/answer|\/speech)?$/;
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
 const UPLOAD = /^\/agent\/uploads\/([0-9a-f]{16}\.(?:png|jpg|gif|webp))$/;
@@ -67,6 +70,15 @@ const PROJECT = /^\/agent\/projects\/([0-9a-f]{12}|drive)$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
 const INTENTS_AT_ONCE = 2;   // words read as one rule at a time
 const INTENT_BODY = 64 * 1024; // bytes a page's words and outline come in, at most
+// Voice (docs/superpowers/specs/2026-10-10-voice-design.md): a clip is at most
+// 4 MB, the kinds a browser records (webm on Chrome, mp4 on Safari) and two
+// plain ones; a spoken reply at most 2,000 characters.
+const CLIP_MAX_BYTES = 4 * 1024 * 1024;
+const CLIP_TYPES = new Set(['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/wav']);
+const SPOKEN_MAX_CHARS = 2000;
+const KEYWORDS_MAX = 40;
+const SAMPLE = 'This is how replies will sound. Talk, and I will answer like this.';
+const CLIP_TOO_LONG = 'That was too long to send. Keep a clip under two minutes.';
 
 const publicWindow = (window) => ({
   id: String(window?.id ?? ''),
@@ -106,7 +118,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, log = console }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, log = console }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -152,6 +164,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       defaultProvider: await runnableDefault(settings),
       claudeAuth: claudeAuth(settings),
       keys: keys ? await keys.flags() : NO_KEYS,
+      voice: voiceSettings(settings.voice),
     };
   };
 
@@ -330,6 +343,103 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     return { id, turn };
   }
 
+  /** A failure of voice's, as the page shows it. */
+  const voiceFailed = (res, err) => {
+    if (err instanceof VoiceError) return json(res, err.status, { error: err.message });
+    throw err;
+  };
+
+  /** Stream OpenAI's audio for `text` to the page. The page going away stops
+   *  OpenAI's request; nothing is cached. */
+  async function speakInto(res, text, chosenVoice) {
+    if (!voice) return json(res, 409, { error: 'Voice needs an OpenAI key on this drive. Add one in Settings › Voice.' });
+    const words = String(text).slice(0, SPOKEN_MAX_CHARS);
+    const stop = new AbortController();
+    const gone = () => { if (!res.writableEnded) stop.abort(); };
+    res.on('close', gone);
+    let response;
+    try {
+      response = await voice.speak({ text: words, voice: chosenVoice, signal: stop.signal });
+    } catch (err) {
+      res.off('close', gone);
+      if (stop.signal.aborted) return undefined;
+      return voiceFailed(res, err);
+    }
+    await voiceUsage?.add({ spokenChars: words.length });
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    try {
+      for await (const chunk of response.body) {
+        if (stop.signal.aborted) break;
+        if (!res.write(chunk)) await new Promise((resolve) => { res.once('drain', resolve); res.once('close', resolve); });
+      }
+    } catch {
+      // The page went, or OpenAI stopped mid-stream: what was sent is what it hears.
+    } finally {
+      res.off('close', gone);
+      if (stop.signal.aborted) await response.body?.cancel?.().catch?.(() => {});
+      res.end();
+    }
+    return undefined;
+  }
+
+  /** The words a turn ended on, spoken: its last reply, or that it failed,
+   *  stopped, or is waiting on an OK. A turn still working has nothing to say. */
+  async function speakTurn(res, turnId) {
+    const turn = await store.turn(turnId);
+    if (!turn) return json(res, 404, { error: `no turn "${turnId}"` });
+    const asked = runner.openAsks().some((ask) => ask.turn === turnId);
+    if ((turn.status === 'queued' || turn.status === 'running') && !asked) return json(res, 409, { error: 'the turn is still running' });
+    const events = await store.events(turn.conversationId);
+    const last = [...events].reverse().find((event) => event.turn === turnId && event.type === 'text');
+    const status = asked ? 'running' : turn.status;
+    const text = status === 'failed' ? String(turn.error ?? '') : String(last?.text ?? '');
+    const words = speakable(text, { status, asked }).slice(0, SPOKEN_MAX_CHARS);
+    return speakInto(res, words, voiceSettings((await store.settings()).voice).voice);
+  }
+
+  async function transcribeClip(req, res, url) {
+    const type = baseType(req.headers['content-type']);
+    if (!CLIP_TYPES.has(type)) return json(res, 415, { error: 'That is not a recording this drive can send.' });
+    const can = voice ? voice.available() : { ok: false };
+    if (!can.ok) return json(res, 409, { error: 'Voice needs an OpenAI key on this drive. Add one in Settings › Voice.' });
+    // Refused on what it says it is before a byte is read, and on what it
+    // turns out to be while reading: OpenAI never sees a clip over the cap.
+    const declared = Number(req.headers['content-length']);
+    if (Number.isFinite(declared) && declared > CLIP_MAX_BYTES) {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: CLIP_TOO_LONG });
+    }
+    const stop = new AbortController();
+    const gone = () => { if (!res.writableEnded) stop.abort(); };
+    res.on('close', gone);
+    try {
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > CLIP_MAX_BYTES) {
+          res.setHeader('Connection', 'close');
+          return json(res, 413, { error: CLIP_TOO_LONG });
+        }
+        chunks.push(chunk);
+      }
+      if (!size) return json(res, 422, { error: "Didn't catch anything. Try again a little closer." });
+      const audio = Buffer.concat(chunks);
+      chunks.length = 0;
+      const doc = url.searchParams.get('doc');
+      const keywords = voiceTitles ? (await voiceTitles(doc).catch(() => [])).slice(0, KEYWORDS_MAX) : [];
+      const { text } = await voice.transcribe({ audio, type, keywords, signal: stop.signal });
+      const seconds = Math.min(Math.max(Number(url.searchParams.get('seconds')) || 0, 0), voiceMaxSeconds);
+      await voiceUsage?.add({ heardSeconds: seconds });
+      return json(res, 200, { text });
+    } catch (err) {
+      if (stop.signal.aborted || err?.name === 'AbortError') return undefined;
+      return voiceFailed(res, err);
+    } finally {
+      res.off('close', gone);
+    }
+  }
+
   async function handle(req, res, url) {
     const route = url.pathname;
     const method = req.method;
@@ -488,6 +598,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           }
           patch.modes = modes;
         }
+        if (body.voice && typeof body.voice === 'object') patch.voice = patchVoice((await store.settings()).voice, body.voice);
         if (Object.keys(patch).length) await store.saveSettings(patch);
         if (keys && body.keys && typeof body.keys === 'object') {
           await keys.write(body.keys);
@@ -554,6 +665,34 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       }
       if (stop.signal.aborted) return undefined;
       return json(res, 200, { rule: rule ?? null });
+    }
+
+    if (route === '/agent/voice' && method === 'GET') {
+      const chosen = voiceSettings((await store.settings()).voice);
+      const can = voice ? voice.available() : { ok: false, why: 'no-key' };
+      return json(res, 200, {
+        available: can.ok,
+        ...(can.ok ? {} : { why: can.why }),
+        on: chosen.on,
+        voice: chosen.voice,
+        readAloud: chosen.readAloud,
+        sendWhenStop: chosen.sendWhenStop,
+        whileRunning: chosen.whileRunning,
+        maxSeconds: voiceMaxSeconds,
+        voices: VOICES,
+        usage: voiceUsage ? await voiceUsage.read() : null,
+      });
+    }
+
+    // A clip in, its words out. The clip is the raw body, held in memory for
+    // this request only and forwarded to OpenAI; nothing of it is written.
+    if (route === '/agent/voice/transcribe' && method === 'POST') return transcribeClip(req, res, url);
+
+    // A fixed sentence in the voice asked for, for Settings › Voice.
+    if (route === '/agent/voice/sample' && method === 'POST') {
+      const body = await readJson(req, maxBody);
+      const chosen = voiceSettings((await store.settings()).voice);
+      return speakInto(res, SAMPLE, VOICES.includes(body.voice) ? body.voice : chosen.voice);
     }
 
     // An image pasted or dropped into a composer. It becomes a file because
@@ -672,6 +811,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         // Where the words were typed, when that is not a document being worked
         // on: the Chat app sends `chat`, so the agent answers rather than edits.
         if (body.context.surface === 'chat') context.surface = 'chat';
+        // Said aloud, and to be heard: the agent is asked for a reply that
+        // sounds right spoken (runner.js), and the chat marks the prompt.
+        if (body.context.spoken === true) context.spoken = true;
         // What the page adds to the ask without showing it in the chat: the
         // callout's four actions say how to build here (agent-offer.js). It
         // rides in the prompt the agent reads, never in the message.
@@ -790,6 +932,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       }
       if (!action && method === 'DELETE') return json(res, 200, { removed: await runner.dequeue(turnId) });
       if (action === '/cancel' && method === 'POST') return json(res, 200, { cancelled: await runner.cancel(turnId) });
+      if (action === '/speech' && method === 'GET') return speakTurn(res, turnId);
       if (action === '/answer' && method === 'POST') {
         const body = await readJson(req, maxBody);
         if (typeof body.requestId !== 'string' || !body.requestId) return json(res, 400, { error: 'requestId is required' });
