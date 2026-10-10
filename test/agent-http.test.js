@@ -744,9 +744,11 @@ test("a document is served with the agent scripts after the Drive's, when agents
   const page = await (await fetch(`${base}/a/garden`)).text();
   const drive = page.indexOf('/runtime/drive.js');
   const api = page.search(/<script src="\/runtime\/agent\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
+  const words = page.search(/<script src="\/runtime\/agent-words\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
   const ui = page.search(/<script src="\/runtime\/agent-ui\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
   assert.ok(drive > 0 && api > drive && ui > api, 'drive.js, then agent.js, then agent-ui.js');
-  for (const file of ['agent.js', 'agent-ui.js']) {
+  assert.ok(words > api && words < ui, 'the card reads its words from agent-words.js, so it comes first');
+  for (const file of ['agent.js', 'agent-words.js', 'agent-ui.js']) {
     const response = await fetch(`${base}/runtime/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get('content-type'), /javascript/);

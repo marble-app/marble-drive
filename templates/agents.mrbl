@@ -6670,7 +6670,9 @@ __ICON__
      *  be told. The target is the fallback rather than a line of its own: on
      *  a running row "reading Hollan 1985" is the news and the path is not. */
     const secondLine = (summary) => {
-      if (summary.asking) return { text: 'Needs you', tone: 'asking' };
+      // Waiting on you, the line is what it waits for: its question, or that
+      // it needs your OK, as its card says.
+      if (summary.asking) return { text: summary.activity || 'Needs you', tone: 'asking' };
       if (summary.running || summary.queued || summary.status === 'running') {
         return { text: summary.activity || 'Working', tone: 'running' };
       }

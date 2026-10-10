@@ -16,6 +16,7 @@ import readline from 'node:readline';
 
 import { createAwakeClock, createProgress } from '../awake.js';
 import { createDrawer } from './drawer.js';
+import '../../runtime/agent-words.js';
 import { collectSlices, shaOf } from '../engine.js';
 import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
@@ -34,6 +35,9 @@ import {
   usageBrief,
   usageHandoffDue,
 } from './usage-failover.js';
+
+// What a chat's progress card says, shared with the card itself.
+const words = globalThis.marbleAgentWords;
 
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
@@ -156,6 +160,22 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       publish(turn.conversationId, stored, meta ? await store.summary(turn.conversationId) : null);
       return stored;
     });
+  }
+
+  // ------------------------------------------------------------------ the row
+
+  /** A chat's row says what its card says (runtime/agent-words.js): each
+   *  event the card follows moves the line, and a new line is written ahead
+   *  of the event that moved it, so the summary published with that event
+   *  carries it. A new sentence is not news about the chat, so it does not
+   *  move the chat up a list sorted by when it last changed. Once the turn
+   *  is finishing, the end line is finish()'s to write. */
+  function tell(turn, event) {
+    const activity = words.noteLine(turn.line, event);
+    if (!activity || activity === turn.activity) return;
+    turn.activity = activity;
+    chained(turn.conversationId, () => (turn.finishing ? null : store.updateConversation(turn.conversationId, { activity }, { touch: false })))
+      .catch((err) => log.error(`[agents] ${err.message}`));
   }
 
   // ------------------------------------------------------------------ drawing
@@ -383,6 +403,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       origins: new Map(),
       stderr: '',
       said: [], // the agent's own text, for naming the chat
+      line: words.createLine(), // what the turn's card says, followed through its events (runtime/agent-words.js)
+      activity: null, // the line last written to the conversation
       timers: [],
       inflight: new Set(), // tool-call promises the bridge is still waiting on
       sent: 0, // messages this turn has sent; capped
@@ -420,6 +442,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
             .catch((err) => log.error(`[agents] ${err.message}`));
         }
         drawer?.note(turn, event);
+        tell(turn, event);
         // The end of a long result is for the drawer, which reads a test
         // run's counts there; the transcript keeps its short summary.
         const { tail: _tail, ...stored } = event;
@@ -825,7 +848,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         const since = Date.now();
         turn.asks.set(event.requestId, { closed: false, request, since });
         turn.holdStall?.();
-        chained(turn.conversationId, () => store.updateConversation(turn.conversationId, { asking: true }))
+        // Waiting on you is the row's news: the question, or that it needs your OK.
+        turn.activity = words.noteLine(turn.line, request);
+        chained(turn.conversationId, () => store.updateConversation(turn.conversationId, { asking: true, activity: turn.activity }))
           .then(async () => {
             await emit(turn, request);
             drawer?.note(turn, request);
@@ -890,6 +915,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     for (const [requestId, ask] of turn.asks) {
       if (ask.closed) continue;
       ask.closed = true;
+      // Only noted: every caller is ending the turn, whose end line is next.
+      words.noteLine(turn.line, { type: 'ask.void', requestId });
       if (deny) writeControl(turn, requestId, { behavior: 'deny', message: `Turn ${why} from Marble` });
       await emit(turn, { type: 'ask.void', requestId, why });
       publishAsk('ask.resolved', { conversation: turn.conversationId, requestId });
@@ -996,6 +1023,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         }
       }
     }
+    // The row ends on what the card ends on; a turn with no card says what it always did.
+    const endLine = words.endLine(turn.line, status, { error });
     try {
       try {
         await turn.undoSaved;
@@ -1009,7 +1038,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           ...(lostSession ? { providerSession: null } : {}),
           running: false,
           asking: false,
-          activity: status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status,
+          activity: endLine || (status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status),
           lastOutcome: outcome,
           lastFinishedAt: finishedAt,
         });
@@ -1285,6 +1314,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (ask.closed) throw Object.assign(new Error('this ask was already answered'), { status: 409 });
       ask.closed = true;
       writeControl(turn, requestId, response);
+      tell(turn, { type: 'ask.answered', requestId, response });
       const stillOpen = [...turn.asks.values()].some((a) => !a.closed);
       if (!stillOpen) await store.updateConversation(turn.conversationId, { asking: false });
       await emit(turn, { type: 'ask.answered', requestId, response });

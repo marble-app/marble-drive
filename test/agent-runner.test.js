@@ -78,6 +78,13 @@ const SCRIPTS = {
   // A result, and then a process that neither reads its stdin nor takes SIGTERM.
   stubbornResult: [{ ignoreTerm: true }, { say: 'answer' }, { done: true }, { hang: true }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
+  // Code changed, then tested, then a pause long enough to read the row.
+  buildAndTest: [
+    { tool: 'Edit', input: { file_path: 'runtime/x.js' } },
+    { tool: 'Bash', input: { command: 'npm test', description: 'Run the unit tests' } },
+    { sleep: 700 },
+    { say: 'Built and tested.' },
+  ],
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
   // Sends one message to whoever is in $to (the test rewrites the script), then ends.
   sendone: [
@@ -442,6 +449,50 @@ test('a turn runs, streams into the transcript, and completes', async () => {
   assert.ok(published.some((p) => p.event.type === 'text.delta'), 'deltas are published live');
   assert.ok(!(await store.events(id)).some((e) => e.type === 'text.delta'), 'and never stored');
   assert.match((await store.conversation(id)).providerSession, /^fake-/);
+  await runner.close();
+});
+
+test('a chat’s row says what its card says while it runs, and its end line when it is done', async () => {
+  const { store, runner, published } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:buildAndTest', context: { target: 'doc' } });
+  await until(async () => (await store.conversation(id)).activity === 'Testing that it works');
+  // Each sentence reaches the lists with the step that caused it.
+  const edit = published.find((p) => p.event.type === 'tool.call' && p.event.name === 'Edit');
+  assert.equal(edit.summary.activity, 'Writing the changes');
+  const bash = published.find((p) => p.event.type === 'tool.call' && p.event.name === 'Bash');
+  assert.equal(bash.summary.activity, 'Testing that it works');
+  // A new sentence is not news about the chat: it keeps its place in a list.
+  assert.equal(bash.summary.updatedAt, edit.summary.updatedAt);
+
+  await finished(store, turnId);
+  assert.equal((await store.conversation(id)).activity, 'Made the changes');
+  await runner.close();
+});
+
+test('a chat waiting on a question shows the question; one waiting on a permission says it needs your OK', async () => {
+  const { store, runner } = await setup({ capability: 'full' });
+  const q = await store.createConversation({ provider: 'fake' });
+  await runner.send(q.id, { prompt: 'script:question', context: { target: 'garden' } });
+  await until(async () => (await store.events(q.id)).some((e) => e.type === 'ask'));
+  assert.equal((await store.summary(q.id)).activity, 'A or B?');
+
+  const p = await store.createConversation({ provider: 'fake' });
+  await runner.send(p.id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(p.id)).find((e) => e.type === 'ask'));
+  assert.equal((await store.summary(p.id)).activity, 'Needs your OK');
+  await runner.answer(`${p.id}-t1`, ask.requestId, { behavior: 'allow' });
+  await until(async () => (await store.turn(`${p.id}-t1`)).status === 'completed');
+  assert.equal((await store.summary(p.id)).activity, 'All done');
+  await runner.close();
+});
+
+test('a turn that only answered, with no card, keeps saying Answered', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'doc' } });
+  await finished(store, turnId);
+  assert.equal((await store.conversation(id)).activity, 'Answered');
   await runner.close();
 });
 
