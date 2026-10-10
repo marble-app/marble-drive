@@ -50,6 +50,15 @@
     .marble-nudge-x { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; color: var(--faint, #8a8a8a); }
     .marble-nudge-x:hover, .marble-nudge-x:focus-visible { color: var(--ink, #111); background: var(--paper-2, rgba(0,0,0,.05)); outline: none; }
     .marble-nudge-x svg { width: 12px; height: 12px; }
+    /* A fingertip needs 44px to land on, the dismiss as much as the offer. */
+    @media (pointer: coarse) {
+      .marble-nudge { font-size: 13.5px; }
+      .marble-nudge-go { min-height: 40px; padding: 0 12px 0 10px; }
+      .marble-nudge-x { width: 40px; height: 40px; }
+      .marble-nudge-go, .marble-nudge-x { position: relative; }
+      .marble-nudge-go::after, .marble-nudge-x::after { content: ""; position: absolute; inset: -2px; }
+      .marble-nudge-go:active, .marble-nudge-x:active { background: var(--paper-2, rgba(0,0,0,.06)); }
+    }
     @media (prefers-reduced-motion: reduce) { .marble-nudge { transition: none; } }
   `;
 

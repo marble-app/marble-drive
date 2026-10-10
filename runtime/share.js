@@ -56,6 +56,21 @@
       background: var(--ink); color: var(--card); border-radius: 999px; padding: 7px 14px; white-space: nowrap;
       transition: opacity 160ms ease, transform 160ms ease; }
     .toast[data-on] { opacity: 1; transform: translate(-50%, 0); }
+    /* Clear of the home bar and the rounded corner, and of the keyboard: the
+       toast says why a change did not take while the person is still typing
+       it, so it stands on the keys. The mark steps aside while they are up;
+       what is being typed is the thing on screen. */
+    :host { left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+    .toast { bottom: calc(24px + var(--kb, 0px) + env(safe-area-inset-bottom, 0px)); max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis; }
+    :host([data-keyboard]) .mark, :host([data-keyboard]) .says { display: none; }
+    :host([data-keyboard]) .toast { bottom: calc(12px + var(--kb, 0px)); }
+    /* A fingertip needs 44px to land on; the mark keeps its size and takes
+       the room round it. */
+    @media (pointer: coarse) {
+      .mark { position: relative; height: 32px; font-size: 13px; }
+      .mark::after { content: ""; position: absolute; inset: -6px -4px; }
+      .says { bottom: 42px; }
+    }
     @media (prefers-reduced-motion: reduce) { .toast { transition: opacity 120ms linear; transform: translate(-50%, 0); } }
   </style>
   <p class="says" id="says" hidden>${SAYS[ROLE] ?? SAYS.view}</p>
@@ -86,6 +101,11 @@
     toastTimer = setTimeout(() => toast.removeAttribute('data-on'), 2400);
   };
   (document.body ?? document.documentElement).append(host);
+  // phone.js says when a soft keyboard is up; the shadow root cannot see the
+  // attribute it puts on <html>, so the host carries it in.
+  const keys = (state) => host.toggleAttribute('data-keyboard', Boolean(state?.keyboard));
+  keys({ keyboard: window.marblePhone?.keyboard });
+  window.marblePhone?.onKeyboard?.(keys);
 
   // A refusal is only worth saying to someone who just did something: a page
   // that addresses its own elements on load would otherwise greet a reader

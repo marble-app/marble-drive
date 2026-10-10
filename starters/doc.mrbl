@@ -383,7 +383,10 @@ __ICON__
   .popup {
     position: fixed; z-index: 40; display: none; min-width: 11rem; padding: .35rem 0;
     background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
-    box-shadow: var(--shadow-rest); max-height: 70vh; overflow: auto;
+    box-shadow: var(--shadow-rest); overflow: auto; overscroll-behavior: contain;
+    /* Never taller than the strip of screen the keyboard leaves; what does not
+       fit scrolls inside it. */
+    max-height: min(70vh, calc(var(--vv-h, 100dvh) - 16px));
   }
   .popup[data-open] { display: block; }
   .popup button {
@@ -501,8 +504,14 @@ __ICON__
     .tool { height: 44px; min-width: 44px; }
     .tool.wide { min-width: 7rem; }
     .pt { height: 34px; }
-    .menu { padding: .45rem .5rem; }
-    .popup button, .fonts button { padding-top: .6rem; padding-bottom: .6rem; }
+    .menu { padding: .45rem .5rem; min-height: 44px; }
+    .popup button, .fonts button { padding-top: .6rem; padding-bottom: .6rem; min-height: 44px; }
+    .fonts .shut { width: 44px; height: 44px; }
+    /* The page is one field, and iOS zooms the screen into any field set
+       under 16px the moment it takes the caret. The size it asks is the
+       field's own, not its paragraphs', so the flow is set at 16 and every
+       paragraph keeps the points the document gives it. */
+    .flow { font-size: 16px; }
   }
 
   @container doc (max-width: 58rem) {
@@ -546,7 +555,8 @@ __ICON__
     .bar { padding: max(.5rem, env(safe-area-inset-top, 0px)) .7rem 0; gap: .5rem; align-items: center; }
     .mark { display: none; }
     .head { display: flex; align-items: center; gap: .3rem; }
-    .docname { flex: 1; min-width: 0; font-size: .98rem; max-width: none; }
+    /* The name is a field too, and under 16px a phone zooms into it. */
+    .docname { flex: 1; min-width: 0; font-size: 1rem; max-width: none; }
     .menus { margin: 0; }
     body .marble-status { top: auto; bottom: calc(1rem + var(--kb, 0px) + env(safe-area-inset-bottom, 0px)); right: 1rem; }
 
@@ -563,7 +573,23 @@ __ICON__
     .fonts .two { grid-template-columns: 1fr; }
     .fonts .col + .col { border-left: 0; border-top: 1px solid var(--line); }
     .popup { min-width: 13rem; }
+    .menus .all { min-height: 44px; }
+
+    /* With the keyboard up the toolbar stands on it, where a thumb already
+       is, the way Notes and Notion put theirs: the body already ends where
+       the keys begin, so the foot of the column is the top of the keyboard.
+       Opened out with the ⋯, its extra rows grow up from there. The count and
+       the save note step up over it rather than sit on its buttons. */
+    html.marble-keys body:has(.flow:focus) > .tools {
+      order: 1; border-bottom: 0; border-top: 1px solid var(--line);
+      padding-bottom: .3rem;
+    }
+    html.marble-keys body:has(.flow:focus) .count,
+    html.marble-keys body:has(.flow:focus) .marble-status { bottom: calc(var(--kb, 0px) + 4.2rem); }
+    html.marble-keys body:has(.flow:focus) .scroll { padding-bottom: 2rem; }
   }
+  /* A swipe past either end of the page stops at the page. */
+  .scroll { overscroll-behavior: contain; }
 
   /* ---------------------------------------------------------------- on paper
      A document that cannot be printed is a demo. This starter draws an 8.5in
@@ -839,12 +865,16 @@ __ICON__
       // the rest of itself, and which button holds its one tab stop. Every one
       // is derived from something else here, and a derivation is not a fact.
       marble.pageOnly(
-        'contenteditable', 'spellcheck', 'data-open', 'disabled',
+        'contenteditable', 'spellcheck', 'autocapitalize', 'autocorrect', 'data-open', 'disabled',
         'aria-pressed', 'aria-expanded', 'data-tools', 'tabindex',
       );
 
       flow.setAttribute('contenteditable', 'true');
       flow.setAttribute('spellcheck', 'true');
+      // A phone keyboard asked for prose: a capital to start each sentence,
+      // and its corrections on.
+      flow.setAttribute('autocapitalize', 'sentences');
+      flow.setAttribute('autocorrect', 'on');
 
       // ------------------------------------------------------------ the styles
 
@@ -1981,8 +2011,14 @@ __ICON__
         const across = vv?.offsetLeft ?? 0;
         popup.style.left =
           Math.max(across + 4, Math.min(box.left, across + wide - popup.offsetWidth - 8)) + 'px';
+        // Under its button when there is room, and over it when there is not —
+        // on a phone the toolbar stands on the keyboard, and a menu clamped
+        // up from the foot of the screen would cover the button that opened it.
+        const h = popup.offsetHeight;
+        const under = box.bottom + 4;
+        const over = box.top - h - 4;
         popup.style.top =
-          Math.max(down + 4, Math.min(box.bottom + 4, down + tall - popup.offsetHeight - 8)) + 'px';
+          (under + h <= down + tall - 8 ? under : over >= down + 4 ? over : Math.max(down + 4, down + tall - h - 8)) + 'px';
       }
 
       const showing = (name) => document.body.getAttribute(name) !== 'off';
@@ -2384,17 +2420,35 @@ __ICON__
       // Both are written on <html> and filed nowhere: where a keyboard is is
       // not a fact about the notes. A reconcile drops them with everything
       // else the page put there, so they are written again below.
+      //
+      // Whether the keys are up at all is a third answer, and neither number is
+      // it: a browser that slides the strip all the way down takes nothing off
+      // the bottom, and Android shrinks the window itself. A strip shorter than
+      // the window, or a window shorter than it has been at this width, while
+      // a touch screen has the caret: that is a keyboard. It is a marble- class
+      // on <html>, so it is the page's and a reconcile leaves it, and on a
+      // phone the toolbar stands on the keys by it.
+      const touch = matchMedia('(hover: none) and (pointer: coarse)');
+      let tallest = { width: 0, height: 0 };
       function viewport() {
         const vv = window.visualViewport;
         const top = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
         const kb = vv ? Math.max(0, Math.round(innerHeight - vv.height - top)) : 0;
         document.documentElement.style.setProperty('--kb', kb + 'px');
         document.documentElement.style.setProperty('--vv-top', top + 'px');
+        if (tallest.width !== innerWidth) tallest = { width: innerWidth, height: 0 };
+        tallest.height = Math.max(tallest.height, innerHeight);
+        const typing = document.activeElement?.isContentEditable;
+        const up = Boolean(vv) && touch.matches && typing &&
+          (innerHeight - vv.height >= 80 || tallest.height - innerHeight >= 160);
+        document.documentElement.classList.toggle('marble-keys', up);
       }
       viewport();
       visualViewport?.addEventListener('resize', viewport);
       visualViewport?.addEventListener('scroll', viewport);
       addEventListener('resize', viewport);
+      addEventListener('focusin', viewport);
+      addEventListener('focusout', () => setTimeout(viewport));
 
       // ----------------------------------------------------------- what is drawn
       //
@@ -2494,6 +2548,8 @@ __ICON__
       marble.register(() => {
         flow.setAttribute('contenteditable', 'true');
         flow.setAttribute('spellcheck', 'true');
+        flow.setAttribute('autocapitalize', 'sentences');
+        flow.setAttribute('autocorrect', 'on');
         shadow = readFlow();
         if (normalise()) file(false);
         derive();

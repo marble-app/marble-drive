@@ -127,6 +127,9 @@ const RUNTIME = {
   // Runs first on every page: lets a tab nobody is using close its streams,
   // so its sprite can sleep (server/streams.js).
   'tab-rest.js': () => path.join(REPO, 'runtime', 'tab-rest.js'),
+  // Second on every page: the viewport, the keyboard and touch, so no app
+  // has to solve the phone on its own (runtime/phone.js).
+  'phone.js': () => path.join(REPO, 'runtime', 'phone.js'),
   'console.js': () => path.join(REPO, 'runtime', 'console.js'),
   'console.css': () => path.join(REPO, 'runtime', 'console.css'),
   'console-charts.js': () => path.join(REPO, 'runtime', 'console-charts.js'),
@@ -394,7 +397,16 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   // ------------------------------------------------------------------ serving
 
-  const injectCarrier = (source, docPath, visit = null) => {
+  // runtime/phone.js goes in the <head>, ahead of anything the page runs
+  // itself, so an app's own inline script finds window.marblePhone waiting.
+  const withPhone = (source) => {
+    const tag = `<script src="${runtimeUrl('phone.js')}" data-marble-transient></script>`;
+    if (/<head\b[^>]*>/i.test(source)) return source.replace(/<head\b[^>]*>/i, (open) => `${open}\n${tag}`);
+    return `${tag}\n${source}`;
+  };
+
+  const injectCarrier = (raw, docPath, visit = null) => {
+    const source = withPhone(raw);
     // tab-rest.js first: it stands in for EventSource before any stream opens.
     let tags =
       `<script src="${runtimeUrl('tab-rest.js')}" data-hidden-ms="${config.tabHiddenSeconds * 1000}" data-idle-ms="${config.tabIdleMinutes * 60_000}" data-marble-transient></script>\n` +

@@ -25,6 +25,7 @@
 (() => {
   const TRANSIENT = 'data-marble-transient';
   const PHONE = matchMedia('(max-width: 719px)');
+  const COARSE = matchMedia('(pointer: coarse)');
   const HANDLE_DELAY = 180;
   const CARD_WIDTH = 440;
   const GAP = 12;
@@ -69,7 +70,14 @@
     }
     @starting-style { .marble-callout-handle { opacity: 0; transform: scale(.4); } }
     .marble-callout-handle[hidden] { display: none; opacity: 0; transform: scale(.4); }
-    .marble-callout-handle:hover { transform: scale(1.12); }
+    /* A finger leaves :hover stuck on whatever it last touched, so the lift
+       is for a pointer that rests. */
+    @media (hover: hover) { .marble-callout-handle:hover { transform: scale(1.12); } }
+    /* The bubble stays the size of a glyph beside the text; a fingertip gets
+       the 44px round it to land on. */
+    @media (pointer: coarse) {
+      .marble-callout-handle::before { content: ""; position: absolute; inset: -10px; border-radius: 50%; }
+    }
     .marble-callout {
       position: fixed; width: min(${CARD_WIDTH}px, calc(100vw - ${PAD * 2}px)); pointer-events: auto;
       background: var(--callout-paper); color: var(--callout-ink);
@@ -114,6 +122,22 @@
     }
     .marble-callout-tip[hidden] { display: none; }
     .marble-callout marble-conversation { display: flex; max-height: min(70vh, 560px); }
+    /* In a hand the card is a sheet standing on the keyboard, as the line is
+       (change-line.js): hung under its thing, it is under the keys whenever
+       the thing is low on the screen. */
+    .marble-callout[data-dock] { left: 0; right: 0; top: auto; bottom: var(--kb, 0px); width: auto; max-height: var(--vv-h, 100dvh); border-radius: 16px 16px 0 0;
+      padding-bottom: env(safe-area-inset-bottom, 0px); }
+    html[data-marble-keyboard] .marble-callout[data-dock] { padding-bottom: 0; }
+    .marble-callout[data-dock] marble-conversation { max-height: calc(var(--vv-h, 100dvh) - 48px); }
+    .marble-callout[data-dock][data-offer] { width: auto; padding: 0; }
+    .marble-callout[data-dock][data-offer] .marble-offer { border-radius: 16px 16px 0 0;
+      padding-bottom: env(safe-area-inset-bottom, 0px); }
+    html[data-marble-keyboard] .marble-callout[data-dock][data-offer] .marble-offer { padding-bottom: 0; }
+    @media (pointer: coarse) {
+      .marble-callout-head { padding: 2px 4px 0 12px; }
+      .marble-callout-head button { min-height: 44px; padding: 0 10px; font-size: 13px; }
+      .marble-callout-head button.marble-callout-icon { width: 44px; height: 44px; }
+    }
     .marble-callout[hidden] { display: none; }
     /* Resting the pointer: the element is outlined with one soft line and the
        faintest wash, and the mark waits in its left margin. Quieter than the
@@ -181,6 +205,15 @@
       border: 1px solid color-mix(in srgb, var(--callout-ink) 14%, transparent);
     }
     html.marble-callout-latched, html.marble-callout-latched * { cursor: default !important; }
+    .marble-callout-latch .for-touch, .marble-callout-unlatch { display: none; }
+    @media (hover: none) {
+      .marble-callout-latch { top: calc(12px + env(safe-area-inset-top, 0px)); padding: 0 0 0 14px; pointer-events: auto; }
+      .marble-callout-latch .for-keys, .marble-callout-latch kbd { display: none; }
+      .marble-callout-latch .for-touch { display: inline; }
+      .marble-callout-unlatch { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; margin: 0;
+        border: 0; border-radius: 999px; background: none; color: var(--callout-mark); font: inherit; cursor: pointer; }
+      .marble-callout-unlatch:active { background: color-mix(in srgb, var(--callout-mark) 12%, transparent); }
+    }
     /* The layer is in the top layer so a document's own stacking contexts
        cannot cover it; the UA sheet for [popover] would otherwise centre it
        and give it a border. */
@@ -313,6 +346,11 @@
       // knows where those are; this layer only knows the selection.
       if (record.owner) return;
       const el = record.el;
+      // In a hand, at phone width or with the keys up, it docks as a sheet
+      // and the stylesheet says where; the frames still mark its thing.
+      const dock = COARSE.matches && (PHONE.matches || Boolean(window.marblePhone?.keyboard));
+      el.toggleAttribute('data-dock', dock);
+      if (dock) Object.assign(el.style, { left: '', top: '', right: '', bottom: '' });
       const anchor = anchorOf(record.ids);
       if (!anchor) {
         // Nothing left to point at: the chat is still reachable, bottom-right
@@ -322,7 +360,7 @@
         const tray = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.tray');
         const r = tray?.getBoundingClientRect();
         const bottom = r?.height ? Math.max(PAD, innerHeight - r.top + GAP) : PAD;
-        Object.assign(el.style, { left: 'auto', top: 'auto', right: `${PAD}px`, bottom: `${bottom}px` });
+        if (!dock) Object.assign(el.style, { left: 'auto', top: 'auto', right: `${PAD}px`, bottom: `${bottom}px` });
         return;
       }
       const r = boxOf(record.ids) ?? anchor.getBoundingClientRect();
@@ -336,6 +374,7 @@
           });
         });
       }
+      if (dock) return;
       const h = el.offsetHeight;
       const w = el.offsetWidth;
       const left = Math.min(Math.max(PAD, r.left - 10), Math.max(PAD, innerWidth - PAD - w));
@@ -591,6 +630,9 @@
     addEventListener('scroll', schedule, true);
     addEventListener('resize', schedule);
     document.addEventListener('marble:ops', schedule);
+    // The keys coming up or going decide whether a card docks (phone.js).
+    window.visualViewport?.addEventListener('resize', schedule);
+    window.marblePhone?.onKeyboard?.(schedule);
 
     // ------------------------------------------------------------ the handle
 
@@ -640,8 +682,12 @@
       handle.classList.remove('is-quiet');
       handle.setAttribute('aria-label', 'Change this selection');
       const r = target.getBoundingClientRect();
+      // Inside what can be seen: on a phone with the keys up that ends well
+      // above the window's foot.
+      const vv = window.visualViewport;
+      const foot = vv ? vv.offsetTop + vv.height : innerHeight;
       handle.style.left = `${Math.round(Math.max(PAD, r.left - 10))}px`;
-      handle.style.top = `${Math.round(Math.min(innerHeight - 30, r.bottom + 4))}px`;
+      handle.style.top = `${Math.round(Math.min(foot - 30, r.bottom + 4))}px`;
       handle.hidden = false;
     }
     // The rested-on element's mark sits in its left margin, at its first line,
@@ -660,6 +706,11 @@
       handle.hidden = true;
     }, true);
     addEventListener('pointerup', () => { pointerDown = false; scheduleHandle(); }, true);
+    // A long press that selects words on a touch screen ends in a cancel,
+    // not an up: the browser took the touch for its own selection. Without
+    // this the press would never end here, and the handle would never come
+    // for anything selected by a finger.
+    addEventListener('pointercancel', () => { pointerDown = false; scheduleHandle(); }, true);
     addEventListener('marble:agent-context', scheduleHandle);
     addEventListener('marble-marks:mode', scheduleHandle);
 
@@ -1042,7 +1093,12 @@
     latchLine.className = 'marble-callout-latch';
     latchLine.setAttribute(TRANSIENT, '');
     latchLine.hidden = true;
-    latchLine.innerHTML = '<span>Click anything to ask about it. ⇧-click to add more.</span><kbd>esc</kbd>';
+    // A finger has no ⇧ and no esc: it taps, and leaves with Cancel.
+    latchLine.innerHTML = '<span class="for-keys">Click anything to ask about it. ⇧-click to add more.</span><span class="for-touch">Tap anything to ask about it.</span><kbd>esc</kbd><button type="button" class="marble-callout-unlatch">Cancel</button>';
+    latchLine.querySelector('.marble-callout-unlatch').addEventListener('click', (event) => {
+      event.stopPropagation();
+      setLatched(false);
+    });
     layer.append(latchLine);
 
     let aim = null; // { chain, index }

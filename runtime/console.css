@@ -73,6 +73,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: grid;
   grid-template-rows: var(--bar-h) 1fr;
 }
+/* With a phone's keys up, the frame is the strip that can still be seen
+   (runtime/phone.js publishes it). iOS leaves the layout as tall as the screen
+   and slides the visible part down it, so a frame fixed to the layout would
+   keep its foot (the bar of changes to apply, the chat's composer) behind
+   the keys and its head above the top edge. Only while typing: a pinch zoom
+   also shrinks what can be seen, and the page should not shrink with it. */
+html[data-marble-keyboard] .cx { top: var(--vv-top, 0px); bottom: auto; height: var(--vv-h, 100dvh); }
 
 /* A translucent bar: a layer above the page, not a wall it starts below. */
 .cx-bar {
@@ -81,7 +88,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: .75rem;
-  padding: 0 1rem;
+  padding: 0 max(1rem, env(safe-area-inset-right)) 0 max(1rem, env(safe-area-inset-left));
   padding-top: env(safe-area-inset-top);
   background: color-mix(in srgb, var(--paper) 78%, transparent);
   backdrop-filter: blur(20px) saturate(1.4);
@@ -149,7 +156,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   transition: color var(--t) var(--ease);
 }
 .seg button[aria-selected="true"], .seg button[aria-pressed="true"] { color: var(--ink); }
-.seg button:hover { color: var(--ink); }
+/* Hover only where there is a pointer to hover: a finger's tap leaves :hover
+   stuck on what it touched until the next tap somewhere else. */
+@media (hover: hover) { .seg button:hover { color: var(--ink); } }
+.seg button:active:not([aria-selected="true"], [aria-pressed="true"], [disabled]) { color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); }
 .seg button[disabled] { cursor: default; }
 .seg[data-busy] .seg-thumb { background: var(--accent-soft); }
 /* A dot on a segment says something there is live; the view says what. */
@@ -186,14 +196,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
   text-decoration: none;
   transition: background var(--t-fast) var(--snap), border-color var(--t) var(--ease), color var(--t) var(--ease), opacity var(--t) var(--ease);
 }
-.btn:hover { background: var(--paper-2); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.btn.quiet { border-color: transparent; background: none; color: var(--muted); }
+@media (hover: hover) {
+  .btn:hover { background: var(--paper-2); }
+  .btn.primary:hover { background: color-mix(in srgb, var(--ink) 88%, var(--paper)); }
+  .btn.quiet:hover { background: var(--paper-2); color: var(--ink); }
+}
 /* A press answers on the way down, in colour: nothing here scales. */
 .btn:active { background: var(--paper-3); }
-.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-.btn.primary:hover { background: color-mix(in srgb, var(--ink) 88%, var(--paper)); }
 .btn.primary:active { background: color-mix(in srgb, var(--ink) 80%, var(--paper)); }
-.btn.quiet { border-color: transparent; background: none; color: var(--muted); }
-.btn.quiet:hover { background: var(--paper-2); color: var(--ink); }
+.btn.quiet:active { background: var(--paper-3); color: var(--ink); }
 .btn.danger { color: var(--danger); }
 .btn.danger.primary { background: var(--danger); border-color: var(--danger); color: var(--paper); }
 .btn[disabled] { opacity: .45; cursor: default; }
@@ -222,7 +235,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   text-decoration: none;
   border-radius: var(--r-text);
 }
-.link:hover { text-decoration: underline; text-underline-offset: 2px; }
+@media (hover: hover) { .link:hover { text-decoration: underline; text-underline-offset: 2px; } }
+.link:active { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ------------------------------------------------------------------ the dot */
 
@@ -387,7 +401,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   -webkit-mask: var(--back) center / contain no-repeat;
   mask: var(--back) center / contain no-repeat;
 }
-.back:hover { background: var(--paper-2); }
+@media (hover: hover) { .back:hover { background: var(--paper-2); } }
+.back:active { background: var(--paper-3); }
 
 .sec { padding: 1rem 1.25rem 1.1rem; border-top: 1px solid var(--line); }
 .sec > h3 {
@@ -435,6 +450,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   word-break: break-word;
   max-height: 11rem;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .75rem; align-items: center; }
@@ -475,7 +491,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), background var(--t) var(--ease);
 }
 .field input::placeholder { color: var(--placeholder); }
-.field input:hover { border-color: color-mix(in srgb, var(--line) 50%, var(--faint)); }
+@media (hover: hover) { .field input:hover { border-color: color-mix(in srgb, var(--line) 50%, var(--faint)); } }
 .field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .field[data-dirty] input { background: var(--accent-soft); border-color: var(--accent); }
 .field[data-dirty] label::after { content: " · changed"; color: var(--accent-ink); }
@@ -535,6 +551,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   position: absolute;
   inset: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--well);
   padding: var(--pane-gap);
   padding-bottom: max(var(--pane-gap), env(safe-area-inset-bottom));
@@ -557,7 +574,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .stat-line { display: flex; flex-wrap: wrap; gap: .25rem 1.1rem; margin: .1rem 0 .6rem; font-size: .85rem; color: var(--muted); }
 .stat-line b { color: var(--ink); font-weight: 500; }
 
-.files { list-style: none; margin: .5rem 0 0; padding: 0; font: 12px/1.6 var(--mono); color: var(--muted); max-height: 9rem; overflow: auto; }
+.files { list-style: none; margin: .5rem 0 0; padding: 0; font: 12px/1.6 var(--mono); color: var(--muted); max-height: 9rem; overflow: auto; overscroll-behavior: contain; }
 .files .st { display: inline-block; width: 1.6rem; color: var(--faint); }
 .files.edits .st { width: 4.2rem; font-family: var(--ui); font-size: .78rem; }
 
@@ -615,6 +632,7 @@ a.btn { text-decoration: none; }
 .chat-list { list-style: none; margin: 0; padding: 0; }
 .chat-list a { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: .6rem; align-items: baseline; padding: .5rem 1.1rem; color: inherit; text-decoration: none; transition: background var(--t) var(--ease); }
 .chat-list a:hover { background: var(--paper-2); }
+.chat-list a:active { background: var(--paper-3); }
 .chat-list .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-list .a { font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; }
 
@@ -623,7 +641,7 @@ a.btn { text-decoration: none; }
 .still :is(.card, tbody tr, .commits li) { animation: none; }
 
 .chat-body { display: grid; grid-template-columns: minmax(0, 1fr) 16rem; flex: 1; min-height: 0; border-top: 1px solid var(--line); }
-.chat-side { border-left: 1px solid var(--line); min-width: 0; overflow: auto; }
+.chat-side { border-left: 1px solid var(--line); min-width: 0; overflow: auto; overscroll-behavior: contain; }
 .chat-side-head { display: flex; align-items: center; justify-content: space-between; padding: .55rem .6rem .3rem 1.1rem; font-size: 13px; font-weight: 600; }
 .chat-side-head .btn { padding: .12rem .55rem; font-size: .78rem; }
 .chat-list a[aria-current="true"] { background: var(--accent-soft); }
@@ -657,8 +675,11 @@ a.btn { text-decoration: none; }
   margin: 0;
   padding: 0;
   width: min(24rem, calc(100vw - 2rem));
-  max-height: calc(100vh - 6rem);
+  /* The screen that can be seen, not the one behind the keys. openPop narrows
+     this further to the room on the side of its button it opens to. */
+  max-height: calc(var(--vv-h, 100dvh) - 1.5rem);
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--line);
   border-radius: var(--r-sheet);
   background: color-mix(in srgb, var(--card) 88%, transparent);
@@ -681,6 +702,42 @@ a.btn { text-decoration: none; }
 .pop .foot { display: flex; justify-content: flex-end; gap: .4rem; flex-wrap: wrap; }
 .pop .field input { background: var(--card); }
 .pop .error { color: var(--danger); font-size: .82rem; }
+/* The bill is pasted into a box as wide as the card, edged like every field. */
+.pop textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: .5rem .6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  font: 12px/1.5 var(--mono);
+  resize: vertical;
+}
+.pop textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+
+/* A task with fields, on a phone: a sheet standing on the keyboard, where the
+   thumb is and where the keys leave the field in sight. A menu or a question
+   with no field stays a popover under its button (Design System, rejected:
+   the menu as a sheet far from its button); only typing earns the sheet. */
+.pop[data-sheet] {
+  inset: auto 0 var(--kb, 0px) 0;
+  width: auto;
+  max-height: calc(var(--vv-h, 100dvh) - 2.5rem);
+  border-width: 1px 0 0;
+  border-radius: var(--r-pane) var(--r-pane) 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  transform: translateY(1.5rem);
+  transform-origin: bottom center;
+}
+.pop[data-sheet]:popover-open { transform: none; }
+@starting-style { .pop[data-sheet]:popover-open { opacity: 0; transform: translateY(1.5rem); } }
+.pop[data-sheet]::backdrop { background: light-dark(rgba(17,17,17,.16), rgba(0,0,0,.4)); }
+/* The home bar is under the keys while they are up. */
+html[data-marble-keyboard] .pop[data-sheet] { padding-bottom: 0; }
+.pop[data-sheet] .pop-body { padding: 1.1rem 1rem 1rem; }
+/* Two answers the width of the thumb's reach, the one that acts on the right. */
+.pop[data-sheet] .foot { flex-wrap: nowrap; }
+.pop[data-sheet] .foot .btn { flex: 1 1 0; justify-content: center; min-height: 2.75rem; }
 
 /* Said at the control, and gone after a while. */
 .said {
@@ -761,7 +818,11 @@ select.small { font: inherit; font-size: .8rem; color: var(--ink); background: v
 
 .card-head .note { font-size: .78rem; color: var(--faint); }
 .chart-body { min-height: 3rem; overflow: hidden; }
-.chart-body .chart-table { margin: 0 -1.1rem; width: calc(100% + 2.2rem); }
+/* A chart's numbers as a table keep their columns and scroll sideways inside
+   the card, edge to edge, rather than squeezing or pushing the page wider. */
+.chart-body .table-scroll { margin: 0 -1.1rem; overflow-x: auto; overscroll-behavior-x: contain; }
+.chart-body .chart-table { margin: 0; width: 100%; }
+.chart-table :is(th, td) { white-space: nowrap; }
 .chart { display: block; max-width: 100%; touch-action: pan-y; }
 .chart text { font: 11px/1 var(--ui); fill: var(--muted); font-variant-numeric: tabular-nums; }
 .chart .axis { fill: var(--faint); }
@@ -855,12 +916,48 @@ select.small { font: inherit; font-size: .8rem; color: var(--ink); background: v
   /* A caption under its button, every time, rather than wherever it fits. */
   .also-row { display: grid; justify-items: start; gap: 0 0; margin-bottom: .35rem; }
   .go .caption { flex-basis: 100%; }
-  :root { --bar-h: 3rem; }
-  .cx-bar { gap: .5rem; padding: 0 .6rem; padding-top: env(safe-area-inset-top); }
+  /* Seven views do not fit beside anything on a phone, and the drive's pill
+     (runtime/shell.js) stands in the top-left corner whenever there is no
+     hover to summon it. So the bar is two rows: the corner's row, with the
+     view's one action at its right end, and under it the views as a strip
+     of tabs a thumb can scroll, each a full 44px tall. */
+  .cx { grid-template-rows: auto minmax(0, 1fr); }
+  .cx-bar {
+    flex-wrap: wrap;
+    gap: 0 .5rem;
+    padding: env(safe-area-inset-top) max(.6rem, env(safe-area-inset-right)) 0 max(.6rem, env(safe-area-inset-left));
+  }
   .cx-title { display: none; }
+  .cx-bar-end { min-height: 2.75rem; }
   .cx-live .when { display: none; }
+  .cx-bar > .seg {
+    order: 3;
+    flex: 1 0 100%;
+    min-width: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    font-size: .85rem;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    scroll-padding-inline: 2rem;
+  }
+  .cx-bar > .seg::-webkit-scrollbar { display: none; }
+  .cx-bar > .seg button { min-height: 2.75rem; padding: 0 .8rem; }
+  .cx-bar > .seg .seg-thumb { top: 6px; bottom: 6px; box-shadow: var(--shadow), inset 0 0 0 1px var(--line); }
+  /* While the keys are up the person is typing, not changing views, and the
+     strip's row is worth more to what they are typing into. */
+  html[data-marble-keyboard] .cx-bar > .seg { display: none; }
   .seg button { padding: .32rem .62rem; }
   .well { grid-template-columns: minmax(0, 1fr); padding: 0; gap: 0; }
+  /* Edge to edge, so the home bar's inset is each scroller's own to keep. */
+  .pane-scroll, .page { padding-bottom: env(safe-area-inset-bottom); }
+  .log { padding-bottom: calc(1.4rem + env(safe-area-inset-bottom)); }
+  .pending { padding-bottom: calc(.65rem + env(safe-area-inset-bottom)); }
+  html[data-marble-keyboard] :is(.pane-scroll, .page) { padding-bottom: 0; }
+  html[data-marble-keyboard] .pending { padding-bottom: .65rem; }
   .well .pane { border-radius: 0; border: 0; }
   .well .pane.detail {
     position: absolute;
@@ -873,7 +970,7 @@ select.small { font: inherit; font-size: .8rem; color: var(--ink); background: v
   .well[data-open] .pane.detail { transform: none; }
   .well[data-open] .pane.list { transform: translateX(-28%); }
   .back { display: inline-block; }
-  .page { padding: 0; }
+  .page { padding-top: 0; padding-inline: 0; }
   .page-grid, .shop, .repos { gap: 0; }
   .tiles { gap: 0; margin-bottom: 0; }
   .tile { border-radius: 0; border-left: 0; border-right: 0; border-top: 0; }
@@ -886,7 +983,11 @@ select.small { font: inherit; font-size: .8rem; color: var(--ink); background: v
   .d-head { padding: .9rem 1rem .8rem; }
   .sec { padding: .9rem 1rem 1rem; }
   .row { padding: .7rem 1rem .75rem; }
-  .table th:nth-child(4), .table td:nth-child(4) { display: none; }
+  /* The drives' table drops its least-read column. A chart's numbers keep
+     every column and scroll inside their card instead. */
+  .table:not(.chart-table) :is(th, td):nth-child(4) { display: none; }
+  /* A commit's subject wraps under its hash rather than losing its end. */
+  .repo .facts dd { white-space: normal; }
   .table .acts .btn { opacity: .75; }
   .chat-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(24rem, 1fr) auto; }
   .kv { grid-template-columns: minmax(0, 1fr); }
@@ -896,17 +997,59 @@ select.small { font: inherit; font-size: .8rem; color: var(--ink); background: v
 }
 @container (max-width: 420px) {
   .cx-live { display: none; }
-  /* Five views on a phone: tighter, and never wider than the bar. */
   .cx-bar { min-width: 0; }
-  .cx-bar > .seg { min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; }
-  .cx-bar > .seg::-webkit-scrollbar { display: none; }
-  .cx-bar > .seg button { padding: .32rem .52rem; }
-  .table th:nth-child(3), .table td:nth-child(3) { display: none; }
+  /* A phone's width is one drive to a row, stacked: its name and its two
+     actions, where the thumb reaches without scrolling the table sideways,
+     over its release and where it stands against main. */
+  .table:not(.chart-table), .table:not(.chart-table) tbody { display: block; }
+  .table:not(.chart-table) thead { display: none; }
+  .table:not(.chart-table) tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "name name acts" "rel against against";
+    column-gap: .6rem;
+    align-items: center;
+    padding: .6rem 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .table:not(.chart-table) tr:last-child { border-bottom: 0; }
+  .table:not(.chart-table) td { display: block; padding: 0; border: 0; min-width: 0; }
+  .table:not(.chart-table) td:nth-child(1) { grid-area: name; }
+  .table:not(.chart-table) td:nth-child(2) { grid-area: rel; padding-left: calc(8px + .55rem); font-size: .8rem; }
+  .table:not(.chart-table) td:nth-child(3) { grid-area: against; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .table:not(.chart-table) td.acts { grid-area: acts; display: flex; gap: .25rem; }
 }
 
 @media (hover: none) {
   .row:hover, .table tbody tr:hover, .chat-list a:hover { background: none; }
   .row:active { background: var(--paper-2); transition-duration: 100ms; }
+  .chat-list a:active { background: var(--paper-2); }
+}
+
+/* A finger, not a pointer. Type under 16px makes iOS zoom the page when a
+   field takes focus, and it never zooms back; so every field is 16px here,
+   whatever the desk's size. And everything pressed is 44px to the finger
+   (Design System §12): a control keeps its look and grows an invisible
+   margin (::after) to that size where the look is smaller, and the rows of
+   them space out so two margins never overlap. */
+@media (pointer: coarse) {
+  .field input, .field select, .pop :is(input, select, textarea), .fx-field input, select.small { font-size: 16px; }
+  .field input, .field select { min-height: 2.75rem; }
+  select.small { min-height: 2.75rem; padding-inline: .8rem; }
+  .btn { position: relative; box-sizing: border-box; min-height: 2.25rem; }
+  .seg button { min-height: 2rem; }
+  .btn::after, .seg button::after, .fx-open::after, .link::after {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc(50% - 22px));
+  }
+  .fx-open, .link { position: relative; }
+  .row-actions, .btns, .foot, .dash-end, .card-head .end, .job-now-head .end { gap: .5rem; }
+  .back { width: 44px; height: 44px; margin: -8px 0 -8px -.75rem; }
+  .chat-list a { padding-block: .75rem; }
+  .chat-side-head { padding-block: .3rem; }
+  .fx-waits button, .fx-cfeats button { min-height: 2.75rem; align-items: center; }
+  .fx-open:active, .fx-waits button:active, .fx-cfeats button:active { background: var(--paper-3); }
 }
 
 /* Motion is decoration: with it reduced, every change still happens and reads,

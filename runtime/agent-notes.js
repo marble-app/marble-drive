@@ -27,7 +27,10 @@
       font: 650 10.5px/19px var(--ui-font, system-ui, sans-serif); text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.2);
       transition: transform 140ms cubic-bezier(.22, 1, .36, 1); }
     @starting-style { .marble-note-pin { transform: scale(.4); } }
-    .marble-note-pin:hover, .marble-note-pin:focus-visible { transform: scale(1.12); outline: none; }
+    .marble-note-pin:focus-visible { transform: scale(1.12); outline: none; }
+    /* A finger leaves :hover stuck where it last was: the lift is for a
+       pointer that rests. */
+    @media (hover: hover) { .marble-note-pin:hover { transform: scale(1.12); } }
     .marble-note-pin[hidden] { display: none; }
     .marble-note-soft { position: fixed; pointer-events: none; border-radius: 8px;
       border: 1px solid color-mix(in srgb, var(--notes-mark) 40%, transparent);
@@ -57,7 +60,6 @@
     .marble-note-card-acts button:active, .marble-notes-del:active { background: color-mix(in srgb, var(--notes-ink) 12%, transparent); }
     .marble-note-card-acts button.danger, .marble-notes-del { color: var(--danger, #b3261e); }
     @media (prefers-reduced-transparency: reduce) { .marble-note-card { background: var(--notes-paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
-    @media (pointer: coarse) { .marble-note-card-acts button { height: 36px; padding: 0 12px; } }
     /* The count sits beside the chat button: words, and the one action. */
     .marble-notes-count { position: fixed; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 3px 0 4px; pointer-events: auto;
       border-radius: 999px; background: var(--notes-paper); color: var(--notes-ink); border: 1px solid var(--line, #e6e2d8);
@@ -91,6 +93,23 @@
       background: var(--notes-paper); color: var(--notes-ink); }
     .marble-notes-acts button.primary { background: var(--notes-mark); border-color: var(--notes-mark); color: var(--notes-paper); }
     .marble-notes-acts button.danger { color: var(--danger, #b3261e); }
+    /* A fingertip needs 44px to land on. The pins and the count keep their
+       size beside the page and take the room round them; the rows grow. */
+    @media (pointer: coarse) {
+      .marble-note-card-acts button { height: 44px; padding: 0 14px; font-size: 14px; }
+      .marble-note-pin::after { content: ""; position: absolute; inset: -12px; border-radius: 50%; }
+      .marble-notes-count { height: 44px; padding: 0 4px 0 4px; font-size: 13.5px; }
+      .marble-notes-count button { min-height: 36px; font-size: 13.5px; }
+      .marble-notes-open { padding: 0 10px; }
+      .marble-notes-send { padding: 0 14px; }
+      .marble-notes-pick { min-height: 44px; font-size: 14px; align-items: center; }
+      .marble-notes-del { width: 44px; height: 44px; }
+      .marble-notes-acts button { min-height: 44px; padding: 0 16px; font-size: 14px; }
+      .marble-notes-list { max-height: calc(var(--vv-h, 100dvh) - 24px); overflow-y: auto; overscroll-behavior: contain; }
+    }
+    /* While the keys are up the count steps aside, as the chat's button does:
+       what the person is typing is the thing on screen. */
+    html[data-marble-keyboard] .marble-notes-count, html[data-marble-keyboard] .marble-notes-list { display: none; }
     @media (prefers-reduced-motion: reduce) { .marble-note-pin, .marble-note-card { transition: none; } }
   `;
 
@@ -288,13 +307,21 @@
           pin.type = 'button';
           pin.addEventListener('pointerenter', (event) => { if (event.pointerType !== 'touch') showCard(pin, notes.find((x) => x.id === n.id) ?? n); });
           pin.addEventListener('pointerleave', (event) => { if (event.pointerType !== 'touch') hideSoon(); });
-          pin.addEventListener('focus', () => showCard(pin, notes.find((x) => x.id === n.id) ?? n));
+          // A tap focuses a button on Android before its click: the card it
+          // would open on focus would then be the one the click finds open,
+          // and the first tap would take the note back instead of showing it.
+          // So a finger's focus leaves the card to the click.
+          let tapping = false;
+          pin.addEventListener('pointerdown', (event) => { tapping = event.pointerType === 'touch'; });
+          pin.addEventListener('focus', () => { if (!tapping) showCard(pin, notes.find((x) => x.id === n.id) ?? n); });
           pin.addEventListener('blur', (event) => { if (!card.contains(event.relatedTarget)) hideSoon(); });
           // Pressing a pin takes the note back into the line, to change or
           // send. A finger has no hover to open the card with, so its first
           // tap opens the card, and Open there takes it back.
           pin.addEventListener('click', () => {
-            if (!hover.matches && cardFor !== n.id) { showCard(pin, notes.find((x) => x.id === n.id) ?? n); return; }
+            const tapped = tapping;
+            tapping = false;
+            if ((tapped || !hover.matches) && cardFor !== n.id) { showCard(pin, notes.find((x) => x.id === n.id) ?? n); return; }
             hideCard();
             reopen(n.id);
           });

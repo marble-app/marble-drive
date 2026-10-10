@@ -191,7 +191,7 @@
     }
 
     function textField(f, key, label, value, placeholder) {
-      const input = h('input', { type: 'text', value: value ?? '', placeholder, 'aria-label': label, 'data-key': `fx:${f.id}:${key}`, spellcheck: 'false' });
+      const input = h('input', { type: 'text', value: value ?? '', placeholder, 'aria-label': label, 'data-key': `fx:${f.id}:${key}`, spellcheck: 'false', autocapitalize: 'sentences', enterkeyhint: 'done' });
       const commit = () => {
         const v = input.value.trim();
         if (v === (value ?? '')) return;

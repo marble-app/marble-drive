@@ -128,7 +128,8 @@
     .marble-rules-grip[data-grip="padding"] { width: 6px; height: 20px; border-radius: 3px; cursor: ew-resize; }
     /* A little more room for the pointer than the mark itself. */
     .marble-rules-grip::after { content: ""; position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; translate: -50% -50%; }
-    .marble-rules-grip:hover { background: color-mix(in srgb, var(--rules-accent) 34%, var(--rules-card)); }
+    /* For a pointer that rests: a finger would leave it stuck lit. */
+    @media (hover: hover) { .marble-rules-grip:hover { background: color-mix(in srgb, var(--rules-accent) 34%, var(--rules-card)); } }
     .marble-rules-grip:active, .marble-rules-grip[data-held] { background: var(--rules-ink); }
     .marble-rules-grip:focus-visible { outline: 2px solid var(--rules-ink); outline-offset: 2px; }
     .marble-rules-grip[hidden] { display: none; }

@@ -263,6 +263,12 @@ __ICON__
     border-radius: 50%; background: var(--card);
     border: 1px solid var(--line); box-shadow: var(--shadow-lift);
   }
+  /* Under a finger the track is a 44pt strip, not a 14px line: the input's own
+     box is what takes the touch. The margins give the extra height back, so
+     the histogram and the scale sit where they always did. */
+  @media (pointer: coarse) {
+    .idle-range { height: 2.75rem; margin: -15px 0; }
+  }
   .idle-range:focus-visible { outline: none; }
   .idle-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }
   .idle-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -1092,7 +1098,7 @@ __ICON__
      distance from the one in your hand; the pane sits over the Full. */
   /* The home indicator is not a place to put the last card: the column ends
      where the hand does, and `phoneRoom()` subtracts the same inset. */
-  .focus[data-phone] { position: relative; top: var(--vv-top, 0px); overflow: hidden; height: calc(var(--vv-h, 100vh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0 0 env(safe-area-inset-bottom, 0px); }
+  .focus[data-phone] { position: relative; top: var(--vv-top, 0px); overflow: hidden; height: calc(var(--vv-h, 100dvh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0 0 env(safe-area-inset-bottom, 0px); }
   /* Folder colour rides every tier, not the chip alone: the leading rule is
      how a thumb reads which region it is passing through. It is a clean bar,
      not a border: a border-left had to follow the card's 12px corner and
@@ -1404,17 +1410,23 @@ __ICON__
   /* The sill is where the keyboard is, not where the screen ends: `--kb` is
      the keyboard's height and the sheet stands on top of it. `pan-y` so a
      tall sheet scrolls under the same finger that could dismiss it. */
-  .sheet { position: fixed; left: 0; right: 0; bottom: var(--kb, 0px); z-index: 41; background: var(--paper); border-radius: var(--pane-r) var(--pane-r) 0 0; box-shadow: var(--shadow-lift); padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px)); max-height: calc(var(--vv-h, 100vh) * .88); overflow-y: auto; overscroll-behavior: contain; transform: translateY(100%); touch-action: pan-y; will-change: transform; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: var(--kb, 0px); z-index: 41; background: var(--paper); border-radius: var(--pane-r) var(--pane-r) 0 0; box-shadow: var(--shadow-lift); padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px)); max-height: calc(var(--vv-h, 100dvh) * .88); overflow-y: auto; overscroll-behavior: contain; transform: translateY(100%); touch-action: pan-y; will-change: transform; }
   .sheet[hidden] { display: none; }
+  /* With the keyboard up the home indicator is under the keys, so the inset
+     that keeps Start off it would only be a gap between Start and the keys. */
+  html[data-marble-keyboard] .sheet { padding-bottom: 1rem; }
   .sheet-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 8px auto 12px; }
-  .sheet-body { display: grid; gap: .5rem; }
+  /* One column that is the sheet's width and no wider. A grid track is as
+     wide as its widest row's longest line by default, so one long title in
+     the Working here list pushed every row, and its age, past the right edge. */
+  .sheet-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: .5rem; }
   .sheet-body h3 { margin: .25rem 0 .5rem; font-size: 1rem; }
   /* A sheet says what it is before it says what it does. */
   .sheet-head { display: grid; gap: .15rem; padding: .1rem .25rem .5rem; }
   .sheet-head .sheet-name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sheet-head .sheet-sub { font-size: .8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Grouped lists: one card, hairlines inset past the label, 48pt rows. */
-  .sheet-group { display: grid; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .sheet-group { display: grid; grid-template-columns: minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .sheet-group + .sheet-group { margin-top: .35rem; }
   .sheet-group .sheet-row { background: none; border: 0; border-radius: 0; padding: 0 1rem; }
   .sheet-group .sheet-row + .sheet-row::before { content: ''; position: absolute; left: 16px; right: 0; top: 0; height: 1px; background: var(--line); }
@@ -1447,6 +1459,8 @@ __ICON__
      is a plain stack, and it goes home the way it came. */
   .sheet .filter-pop { display: flex; position: static; width: auto; inset: auto; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
   .sheet .filter-pop .search { min-height: 2.75rem; font-size: 17px; }
+  /* "All" is one short word, and a thumb is not: every chip is a 44pt box. */
+  .sheet .filter-pop .seg button { min-width: 2.75rem; }
   body[data-sheet] .deck, body[data-sheet] .focus, body[data-sheet] .library { transform: scale(.96); transition: transform 200ms var(--ease-out); transform-origin: 50% 0; }
   /* Translucency is a luxury the reduced-transparency setting declines. */
   @media (prefers-reduced-transparency: reduce) {
@@ -1960,7 +1974,7 @@ __ICON__
   }
 
   @media (max-width: 719px) {
-    :root { --vv-h: 100vh; --vv-top: 0px; --topbar-h: calc(2.75rem + env(safe-area-inset-top, 0px)); --thumb-h: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
+    :root { --vv-h: 100dvh; --vv-top: 0px; --topbar-h: calc(2.75rem + env(safe-area-inset-top, 0px)); --thumb-h: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
     /* The thumb bar: always at the sill, translucent, content scrolling under. */
     .thumb { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: .5rem; height: var(--thumb-h); padding: 0 .75rem env(safe-area-inset-bottom, 0px) 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-top: 1px solid var(--edge-lit); }
     .thumb::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 12px; background: linear-gradient(transparent, rgba(var(--paper-rgb), .9)); pointer-events: none; }
@@ -1972,6 +1986,14 @@ __ICON__
     /* Every list view can start a conversation. Focus is a stack of chats you
        already have, and an open conversation has its own composer. */
     body[data-open] .thumb, body[data-view="focus"] .thumb { display: none; }
+    /* With the keyboard up the bar steps aside. Whatever raised it (a sheet's
+       field) stands on the keys itself, and on Android, where the layout
+       shrinks instead, the bar would ride up into the sheet's way. */
+    html[data-marble-keyboard] .thumb { display: none; }
+    /* Focus ends where the hand does, which with the keys up is their top
+       edge: the home indicator is under them, so its inset is not room the
+       column has to give up. `phoneRoom()` reads the padding back. */
+    html[data-marble-keyboard] .focus[data-phone] { padding-bottom: 0; }
     @media (prefers-reduced-transparency: reduce) { .thumb { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
     /* Title + the view bar + Filter + New stay on the first wrap. The bar
        scrolls sideways if it cannot fit; the filter panel opens under the
@@ -2029,7 +2051,7 @@ __ICON__
     .filter-pop { left: .75rem; right: .75rem; width: auto; }
     /* Every height on a phone is measured against the visual viewport: with
        the keyboard up, `vh` is a promise the screen no longer keeps. */
-    .focus-look { max-height: calc(var(--vv-h, 100vh) * .7); }
+    .focus-look { max-height: calc(var(--vv-h, 100dvh) * .7); }
     /* The disclosure arrow is drawn, not typed: a text '▾' carries the font's
        own weight and baseline and matches none of the icons beside it. */
     .band-toggle::after {
@@ -2134,11 +2156,27 @@ __ICON__
     body[data-open] .list { display: none; }
     /* One conversation takes the screen, under the topbar and over everything
        else; it enters from the right and leaves by the same edge. */
-    body[data-open] .pane { display: grid; position: fixed; left: 0; right: 0; top: calc(var(--vv-top, 0px) + var(--topbar-h)); height: calc(var(--vv-h) - var(--topbar-h)); min-height: 0; z-index: 20; background: var(--paper); will-change: transform; }
+    body[data-open] .pane { display: grid; position: fixed; left: 0; right: 0; top: calc(var(--vv-top, 0px) + var(--topbar-h)); height: calc(var(--vv-h, 100dvh) - var(--topbar-h)); min-height: 0; z-index: 20; background: var(--paper); will-change: transform; }
     body[data-view="deck"][data-open] .deck { display: none; }
     body[data-view="deck"][data-open] .library { display: block; }
     .pane-hint { bottom: 7.5rem; }
 
+    /* ---- Folders on a phone. The rail is the view, edge to edge: the desk
+       keeps a second column for the panes beside it, and here that column
+       was an empty strip down the right of the screen (the track itself is
+       set with the resizable widths, at the foot of the page). Rows take the
+       size the List's rows have, and the last one clears the thumb bar. */
+    body[data-view="folders"] .folder-rail {
+      border-right: 0; padding-bottom: calc(var(--thumb-h) + 1rem); overscroll-behavior: contain;
+    }
+    .folder-header { min-height: 2.75rem; padding: 0 1rem; font-size: 15px; font-weight: 600; }
+    .folder-count { font-size: 13px; }
+    .folder-tab { min-height: 3rem; justify-content: center; padding: .4rem 1rem .4rem 1.75rem; font-size: 15px; color: var(--ink); }
+    .folder-tab .tab-age { font-size: 13px; }
+    .folder-tab .tab-target { font-size: 13px; color: var(--muted); }
+    /* 13px at 600 in the ink of a label, as the Deck's band heads are. */
+    .folder-ungrouped-label { padding: .5rem 1rem .25rem; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); }
+    .folder-new-chat { min-height: 2.75rem; padding: 0 1rem; font-size: 15px; }
     .board { scroll-snap-type: x mandatory; }
     .column { flex: 0 0 min(20rem, 85vw); scroll-snap-align: start; }
     body[data-view="board"][data-panel="open"] {
@@ -2218,6 +2256,24 @@ __ICON__
     .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more,
     .topbar button, .thumb button, .band-toggle, .sheet-row, .deck-ask-head { min-height: 2.75rem; }
     .dock-close { min-width: 2.75rem; height: 100%; }
+    .folder-header, .folder-tab, .folder-new-chat { min-height: 2.75rem; }
+    /* A held finger opens the rail's menu; it must not also raise the
+       selection loupe or the system's own callout over the row. */
+    .folder-header, .folder-tab, .folder-ungrouped-label, .folder-new-chat {
+      -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+    }
+    /* A folder's tick is an 11px swatch and a finger is not: the box a press
+       lands in is 44pt, centred on it, and the swatch stays the size it is. */
+    .folder-tick, .focus-folder { position: relative; }
+    .folder-tick::before, .focus-folder::before { content: ''; position: absolute; inset: calc((2.75rem - 100%) / -2); }
+    /* The menus a held finger opens stay beside it, as on a desk, with rows a
+       thumb can take and a height that never leaves the visible strip. */
+    .rail-menu, .focus-folder-menu {
+      max-height: calc(var(--vv-h, 100dvh) - 16px); overflow-y: auto; overscroll-behavior: contain;
+    }
+    .rail-menu button, .focus-folder-menu button { min-height: 2.75rem; font-size: 15px; }
+    .folder-palette { width: auto; max-width: calc(100vw - 2rem); gap: .25rem; }
+    .folder-palette button { width: 2.75rem; height: 2.75rem; border-radius: 10px; }
     /* Without a pointer there is no hover to answer a finger, so every control
        answers on the way down: rows take the paper wash, things shaped like
        buttons give a little. 100ms, ease-out — under that it reads as a flash. */
@@ -2233,6 +2289,14 @@ __ICON__
       .topbar .phone-back:active, .thumb-new:active, .sheet-start:active,
       .sheet-seg button:active, .conv .manage .more:active, .deck-ask .ask-actions button:active { transform: none; }
     }
+  }
+  /* A field under 16px makes iOS zoom the page when it takes the caret, and
+     it never zooms back. That is true on a tablet's desk layout too, where
+     these keep the page's 14px, so the rule follows the finger, not the width. */
+  @media (pointer: coarse) {
+    /* Last in the sheet, so it outranks each field's own size above. */
+    input.search, .folder-save input,
+    .folder-name[contenteditable="true"], .folder-name[contenteditable="plaintext-only"] { font-size: max(16px, 1em); }
   }
 </style>
 </head>
@@ -2259,7 +2323,7 @@ __ICON__
   <div class="filterbox" data-marble-id="__ID__">
     <button type="button" class="filter-toggle" aria-haspopup="dialog" aria-expanded="false" data-marble-id="__ID__">Filter<span class="filter-count" data-marble-transient></span></button>
     <div class="filter-pop" role="dialog" aria-label="Filter and search conversations" data-marble-id="__ID__">
-      <input class="search" type="search" placeholder="Search conversations" autocomplete="off" aria-label="Search conversations" data-marble-id="__ID__">
+      <input class="search" type="search" placeholder="Search conversations" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Search conversations" data-marble-id="__ID__">
       <div class="filter-row" data-marble-id="__ID__">
         <span class="filter-name" data-marble-id="__ID__">Status</span>
         <div class="seg filters" role="group" aria-label="Status" data-marble-id="__ID__">
@@ -3026,6 +3090,9 @@ __ICON__
       const input = document.createElement('input');
       input.type = 'text';
       input.placeholder = suggested;
+      input.enterKeyHint = 'done';
+      input.setAttribute('autocorrect', 'off');
+      input.spellcheck = false;
       input.setAttribute('data-marble-transient', '');
       const confirm = document.createElement('button');
       confirm.type = 'button';
@@ -3052,6 +3119,12 @@ __ICON__
         } catch { /* create failed */ }
       });
       dismiss.addEventListener('click', () => hideFolderSave());
+      // The key that says Done does what the button beside it says.
+      input.addEventListener('keydown', (event) => {
+        if (event.isComposing) return;
+        if (event.key === 'Enter') { event.preventDefault(); confirm.click(); }
+        if (event.key === 'Escape') { event.preventDefault(); hideFolderSave(); }
+      });
       pop.append(input, confirm, dismiss);
       folderRail.append(pop);
       folderSaveEl = pop;
@@ -3230,6 +3303,11 @@ __ICON__
     const bindFolderTabDrag = (tab, dragId) => {
       tab.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
+        // On a phone there is no room of panes to drop a tab into, and a
+        // finger moving down the rail is reading it: the drag would only
+        // fight the scroll. A held finger opens the rail's menu instead,
+        // which files a chat the way the drag would have.
+        if (event.pointerType === 'touch' && narrowView.matches) return;
         closeRailMenu();
         // The drag carries the selection when the tab is in one: picking
         // several chats and dragging them is the other half of the gesture the
@@ -3393,6 +3471,11 @@ __ICON__
       closeFolderPalettes();
       name.setAttribute('contenteditable', 'true');
       name.setAttribute('role', 'textbox');
+      // Enter commits a name, so the key says Done; a name is not prose, so
+      // the phone neither corrects it nor underlines it while it is typed.
+      name.setAttribute('enterkeyhint', 'done');
+      name.setAttribute('autocorrect', 'off');
+      name.setAttribute('spellcheck', 'false');
       name.focus();
       const range = document.createRange();
       range.selectNodeContents(name);
@@ -3407,6 +3490,7 @@ __ICON__
         const next = (name.textContent || '').trim().slice(0, 40);
         name.removeAttribute('contenteditable');
         name.removeAttribute('role');
+        for (const attr of ['enterkeyhint', 'autocorrect', 'spellcheck']) name.removeAttribute(attr);
         if (!commit || !next || next === prev) {
           name.textContent = prev;
           return;
@@ -3726,6 +3810,58 @@ __ICON__
       openRailMenu(event);
     });
 
+    // A held finger is the right-click. iOS never sends `contextmenu` for one,
+    // so on an iPhone the rail's menu (and with it Rename, Colour and New
+    // folder) had no way in; double-click, the desk's way to rename, is not a
+    // gesture a phone keeps either. Android does send it, a beat after this
+    // fires, and that second one is swallowed. The release that ends the hold
+    // is not a tap: the click it makes opens nothing.
+    (() => {
+      const HOLD_MS = 450;
+      let hold = null;
+      // Never, rather than zero: a page younger than a second would read a
+      // hold at time zero as one that just happened and eat the right-click.
+      let heldAt = -Infinity;
+      let swallowClick = false;
+      const cancel = () => {
+        if (hold) clearTimeout(hold.timer);
+        hold = null;
+      };
+      folderRail?.addEventListener('pointerdown', (event) => {
+        swallowClick = false;
+        if (event.pointerType !== 'touch' || !agent) return;
+        if (event.target.closest?.('.folder-name[contenteditable], .folder-palette')) return;
+        cancel();
+        const { target, clientX, clientY } = event;
+        hold = {
+          x: clientX,
+          y: clientY,
+          timer: setTimeout(() => {
+            hold = null;
+            heldAt = performance.now();
+            swallowClick = true;
+            openRailMenu({ target, clientX, clientY });
+          }, HOLD_MS),
+        };
+      });
+      folderRail?.addEventListener('pointermove', (event) => {
+        if (hold && Math.hypot(event.clientX - hold.x, event.clientY - hold.y) > 10) cancel();
+      });
+      folderRail?.addEventListener('pointerup', cancel);
+      folderRail?.addEventListener('pointercancel', cancel);
+      folderRail?.addEventListener('click', (event) => {
+        if (!swallowClick) return;
+        swallowClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }, true);
+      folderRail?.addEventListener('contextmenu', (event) => {
+        if (performance.now() - heldAt > 1000) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }, true);
+    })();
+
     /** Right-click a pane. The chat in it is the subject — that one chat,
      *  never the rail's selection: a menu opened over a pane must not
      *  rearrange the panes behind it before anything has been chosen. */
@@ -3897,7 +4033,7 @@ __ICON__
       const label = document.createElement('div');
       label.className = 'folder-ungrouped-label';
       label.setAttribute('data-marble-transient', '');
-      label.textContent = 'ungrouped';
+      label.textContent = 'Ungrouped';
       const ungroupedTabs = document.createElement('div');
       ungroupedTabs.className = 'folder-tabs';
       ungroupedTabs.setAttribute('data-marble-transient', '');
@@ -9579,6 +9715,10 @@ __ICON__
         const prompt = document.createElement('textarea');
         prompt.className = 'sheet-prompt';
         prompt.placeholder = 'What should it do?';
+        // A request is sentences, and Return is a new line in one: Start is
+        // the button under the field, a thumb's width from it.
+        prompt.setAttribute('autocapitalize', 'sentences');
+        prompt.enterKeyHint = 'enter';
         prompt.value = text;
         const start = document.createElement('button');
         start.type = 'button';
@@ -9689,20 +9829,37 @@ __ICON__
 
     // ---- Phone chrome. The keyboard is just less room: the visual viewport
     // writes one variable and every phone layout reads it.
-    const syncViewport = () => {
+    //
+    // The keyboard does not only take room, it moves the room: to keep the
+    // caret clear the browser slides the visual viewport down the layout
+    // viewport, and everything the page fixed to the layout viewport is then
+    // that much too high. `--vv-top` is where the visible strip starts and
+    // `--kb` is where it ends; between them they place every fixed surface on
+    // the screen the person is actually looking at.
+    //
+    // runtime/phone.js now measures that strip for every page and publishes
+    // it in a style of its own. This page takes its numbers from the same
+    // measurement rather than a second one, so the two can never disagree,
+    // and still mirrors them inline on <html> for one reader: the Focus
+    // fisheye asks for `--kb` inside a drag frame, and an inline property
+    // reads back without a style recalc. What phone.js cannot know is the
+    // part this page adds: Focus re-lays its column for the room it has now.
+    const measureViewport = () => {
+      const phone = window.marblePhone?.state?.();
+      if (phone) return phone;
       const vv = window.visualViewport;
-      const h = vv?.height ?? window.innerHeight;
-      document.documentElement.style.setProperty('--vv-h', `${Math.round(h)}px`);
-      // The keyboard does not only take room, it moves the room: to keep the
-      // caret clear the browser slides the visual viewport down the layout
-      // viewport, and everything the page fixed to the layout viewport is then
-      // that much too high. `--vv-top` is where the visible strip starts and
-      // `--kb` is where it ends; between them they place every fixed surface
-      // on the screen the person is actually looking at.
-      const top = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
-      document.documentElement.style.setProperty('--vv-top', `${top}px`);
-      const kb = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
-      document.documentElement.style.setProperty('--kb', `${kb}px`);
+      return {
+        h: Math.round(vv?.height ?? window.innerHeight),
+        top: vv ? Math.max(0, Math.round(vv.offsetTop)) : 0,
+        kb: vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0,
+      };
+    };
+    const syncViewport = () => {
+      const { h, top, kb } = measureViewport();
+      const root = document.documentElement;
+      root.style.setProperty('--vv-h', `${h}px`);
+      root.style.setProperty('--vv-top', `${top}px`);
+      root.style.setProperty('--kb', `${kb}px`);
       if (narrowView.matches && (document.body.getAttribute('data-view') || 'library') === 'focus') paintFocus({ quiet: true });
     };
     syncViewport();
@@ -10605,6 +10762,14 @@ __ICON__
       query = search.value.trim().toLowerCase();
       applyFilters();
     });
+    // The list filters as you type, so the keyboard's Search key has nothing
+    // left to run. On a phone it is how you put the keys away to read what
+    // is left; at a desk there are no keys to put away, and Enter stays inert.
+    search.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.isComposing || !matchMedia('(pointer: coarse)').matches) return;
+      event.preventDefault();
+      search.blur();
+    });
     // Focus the search only where there is a keyboard to type on; on a phone
     // it would throw the keyboard up over the list the person came to filter.
     filterToggle.addEventListener('click', () => setFilterOpen(!filterOpen, { focus: matchMedia('(hover: hover)').matches }));
@@ -11017,7 +11182,13 @@ __ICON__
   /* Nothing hovers on a touch screen, so the grips simply stay visible. */
   @media (hover: none) { .rz::after, .rz-col::after { opacity: .55; } }
   /* One column of everything: there is no seam left to drag. */
-  @media (max-width: 719px) { .rz, .rz-col { display: none !important; } }
+  @media (max-width: 719px) {
+    .rz, .rz-col { display: none !important; }
+    /* No seam on a phone, so no track for one: the folder rail is the whole
+       width, not a desk rail with an empty column beside it. */
+    body[data-view="folders"] .folders,
+    body[data-view="folders"] .library { grid-template-columns: minmax(0, 1fr); }
+  }
 </style>
   <script data-marble-id="rzjs7a1x">
   // Drag the seam beside a bar, or between two board columns. The width is

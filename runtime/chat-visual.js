@@ -173,6 +173,15 @@ const BASE = `
   }
   .send:hover { background: color-mix(in srgb, var(--ink) 84%, var(--paper)); }
   :root[data-answered] .send { background: var(--paper-3); color: var(--muted); }
+  /* Under a finger. A field under 16px makes iOS zoom the whole page in
+     when it is tapped, frame or no frame; the pills and the send button are
+     the visual's answers, and an answer a thumb misses is one not given. */
+  @media (pointer: coarse) {
+    input, select, textarea { font-size: max(16px, 1em); }
+    .pill, .send { min-height: 44px; }
+    .pill:active { background: var(--paper-2); }
+    .send:active { background: color-mix(in srgb, var(--ink) 70%, var(--paper)); }
+  }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 `;
 
@@ -281,6 +290,12 @@ export const VISUAL_CSS = `
   .visual-act:hover, .visual-act:focus-visible { background: var(--paper-2); color: var(--ink); outline: none; }
   .visual-act[aria-pressed="true"] { color: var(--accent-ink); }
   .visual-act[hidden] { display: none; }
+  /* The card's own words (Code, Open) keep their size and get a thumb's reach. */
+  @media (pointer: coarse) {
+    .visual-act { position: relative; }
+    .visual-act::after { content: ''; position: absolute; inset: -13px -3px; }
+    .visual-act:active { background: var(--paper-2); color: var(--ink); }
+  }
   .visual-frame {
     display: block; width: 100%; height: 108px; border: 1px solid var(--line); border-radius: 12px;
     /* Paper, not card: what a visual puts on it — an option, a node, a field —

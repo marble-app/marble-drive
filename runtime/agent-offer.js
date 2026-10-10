@@ -111,6 +111,16 @@
     .marble-offer-hint kbd { font: 500 10.5px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--faint, #8a8a8a); padding: 1px 4px; border-radius: 4px;
       border: 1px solid color-mix(in srgb, var(--callout-ink, #111) 12%, transparent); background: var(--paper, transparent); }
     .marble-offer-hint .marble-offer-teach { color: var(--callout-mark, #738698); }
+    /* A hand: type under 16px makes iOS zoom the page in on focus, and a
+       fingertip needs 44px to land on. The keys row teaches shortcuts a phone
+       has no keys for, so it goes. */
+    @media (pointer: coarse) {
+      .marble-offer-input { font-size: 16px; }
+      .marble-offer-send { width: 40px; height: 40px; margin: -4px -2px -4px 6px; border-radius: 10px; }
+      .marble-offer-act { min-height: 44px; font-size: 13.5px; }
+      .marble-offer-bubble { min-height: 44px; font-size: 14px; }
+    }
+    @media (hover: none) { .marble-offer-hint { display: none; } }
     @media (prefers-reduced-motion: reduce) {
       .marble-offer-bubble { opacity: 1; transform: none; animation: none; }
       .marble-offer-act, .marble-offer-bubble { transition: none; }
@@ -271,6 +281,9 @@
     input.setAttribute('role', 'textbox');
     input.setAttribute('aria-label', 'Ask an agent');
     input.setAttribute('aria-multiline', 'true');
+    // ⏎ sends, so a phone's return key says Send.
+    input.setAttribute('enterkeyhint', 'send');
+    input.setAttribute('autocapitalize', 'sentences');
     const send = h('button', 'marble-offer-send');
     send.type = 'button';
     send.innerHTML = ICONS.send;
