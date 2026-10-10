@@ -283,3 +283,16 @@ test("the pass the edge sets is one the drive's own host accepts, with public ke
   assert.equal(createDoor({ keys, name: 'bob', owner }).allows(req), false);
   assert.equal(createDoor({ keys, name: 'ana', owner: 'ffffffffffffffff' }).allows(req), false);
 });
+
+test('DOOR_PUBLIC_KEYS: a pass signed by a key named there is accepted, and one by a key it does not name is not', async () => {
+  const { edgeKeys } = await import('./fixtures/door-env.js');
+  const older = edgeKeys();
+  const w = await world();
+  const owner = (await w.admin('GET', '/drives')).drives.find((d) => d.name === 'ana').owner;
+  const now = Math.floor(Date.now() / 1000);
+  const old = await sign(await importSigningKey(older.pkcs8), 'k0', { typ: 'pass', drv: 'ana', acct: owner, sid: 'x', iat: now, exp: now + 600 });
+  const ask = () => route(new Request('https://ana.marbledrive.app/docs', { headers: { cookie: `__Host-md_pass=${old}` } }), w.env, { fetchImpl: w.fetchImpl });
+  assert.equal((await ask()).status, 401);
+  w.env.DOOR_PUBLIC_KEYS = `k1:${w.env.keys.spki} k0:${older.spki}`;
+  assert.equal((await ask()).status, 200);
+});

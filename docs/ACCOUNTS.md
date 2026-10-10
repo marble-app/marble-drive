@@ -57,10 +57,12 @@ sed -n 's/^DOOR_ADMIN_TOKEN=//p' ~/.config/marble-drive/door.env | npx wrangler@
 
 `door-keys` holds the public half as `k1:<base64>`: it is what every drive gets
 as `MARBLE_DOOR_KEYS`, and `DOOR_KEY_ID` in `worker/wrangler.toml` is `k1` to
-match. To roll the key later: make a `k2`, put its private half in
-`DOOR_SIGNING_KEY` and `k2` in `DOOR_KEY_ID`, and keep `k1`'s public half in
-`DOOR_OLD_KEYS` and in every drive's `MARBLE_DOOR_KEYS` until the passes signed
-with it have run out (12 hours); then drop it.
+match. Put the same line in the Worker as the var `DOOR_PUBLIC_KEYS` (it is
+public); unset, the edge derives it from the private key. To roll the key
+later: make a `k2`, put its private half in `DOOR_SIGNING_KEY` and `k2` in
+`DOOR_KEY_ID`, and keep `k1`'s public half beside `k2`'s in `DOOR_PUBLIC_KEYS`
+and in every drive's `MARBLE_DOOR_KEYS` until the passes signed with it have
+run out (12 hours); then drop it.
 
 ### 2. Google
 
@@ -194,7 +196,7 @@ In the spec's order: `t-bryan` first, then `bryan`, then the testers.
 | Worker var | `DOOR_KEY_ID` | the key id the edge signs with (`k1`) |
 | Worker var | `MAX_DRIVES` | how many drives sign-up may make, claimed drives aside (10) |
 | Worker var | `DOOR_SPRITE_URL` | the door sprite, poked when a drive is asked for |
-| Worker var | `DOOR_OLD_KEYS` | older public keys still accepted while a new one rolls out |
+| Worker var | `DOOR_PUBLIC_KEYS` | the public keys a pass may be signed with, as in `MARBLE_DOOR_KEYS`; unset, derived from the signing key |
 | drive `sprite.env` | `MARBLE_DOOR_KEYS` | `<kid>:<base64 SPKI>` entries separated by spaces |
 | drive `sprite.env` | `MARBLE_DOOR_NAME`, `MARBLE_DOOR_OWNER` | the name a pass must be for, and the account it must name |
 | drive `sprite.env` | `MARBLE_DRIVE_GATE` | `on` (the default) or `tools` |

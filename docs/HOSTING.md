@@ -577,9 +577,9 @@ turn it on, every setting, and the day-to-day commands are in
   own output) has the script's error. Finish it with `--resume` or remove it
   with `--remove` (ACCOUNTS.md, "Day to day").
 - *The signing key is lost or out.* Make a new pair, `DOOR_KEY_ID` to a new id,
-  the new private half into `DOOR_SIGNING_KEY`, and the new public half added to
-  every drive's `MARBLE_DOOR_KEYS` (deploy them). If the old key leaked, do not
-  keep it in `DOOR_OLD_KEYS` or any drive's list: every pass it signed stops
+  the new private half into `DOOR_SIGNING_KEY`, and the new public half into
+  `DOOR_PUBLIC_KEYS` and every drive's `MARBLE_DOOR_KEYS` (deploy them). If the old key leaked, do not
+  keep it in `DOOR_PUBLIC_KEYS` or any drive's list: every pass it signed stops
   working at once and its people sign in again. Nothing else holds it.
 - *Someone's session must end.* They can sign out everywhere from their account
   page. For you to do it: hold their drive (`node tools/door.mjs hold <name>`),

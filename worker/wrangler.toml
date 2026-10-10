@@ -41,8 +41,9 @@ DOOR_KEY_ID = "k1"
 MAX_DRIVES = "10"
 # The door sprite's URL, which the door pokes when a drive is asked for.
 # DOOR_SPRITE_URL = "https://door-xxxx.sprites.app"
-# Older public keys still accepted while a new one rolls out: "<kid>:<SPKI> …".
-# DOOR_OLD_KEYS = ""
+# The public keys a pass may be signed with: the same line as a drive's
+# MARBLE_DOOR_KEYS ("<kid>:<base64 SPKI> …"). Unset, the edge derives its own.
+# DOOR_PUBLIC_KEYS = ""
 
 [[durable_objects.bindings]]
 name = "LEASE"
