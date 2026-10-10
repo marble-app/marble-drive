@@ -6,6 +6,8 @@
 // body, method) and the answer comes back untouched, so Set-Cookie survives
 // and SSE streams. The drive's own gate does the signing in.
 
+import { apex, doorReady } from './door/apex.js';
+
 export const APEX = 'marbledrive.app';
 const RESERVED = new Set(['www', 'app', 'api', 'docs', 'status', 'admin', 'mail']);
 const UNREACHABLE = new Set([530]); // a Cloudflare tunnel with no connector (error 1033)
@@ -54,10 +56,12 @@ async function readLease(env, name, now) {
   return lease;
 }
 
-export async function route(request, env, { fetchImpl = fetch, now = Date.now() } = {}) {
+export async function route(request, env, { fetchImpl = fetch, now = Date.now(), ctx = null } = {}) {
   const url = new URL(request.url);
   const host = url.hostname;
-  if (host === APEX || host === `www.${APEX}`) return placeholder();
+  // The apex is the door once it is switched on (worker/src/door/apex.js),
+  // and the placeholder until then.
+  if (host === APEX || host === `www.${APEX}`) return doorReady(env) ? apex(request, env, { fetchImpl, now, ctx }) : placeholder();
 
   const name = host.slice(0, -(APEX.length + 1));
   const table = drives(env);
