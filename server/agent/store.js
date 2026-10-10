@@ -519,6 +519,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
       await fsp.rm(convDir(id), { recursive: true, force: true });
       counters.delete(id);
       parsed.delete(id);
+      steps.delete(id);
       await serial('folders', async () => {
         const state = await readFolders();
         const before = JSON.stringify(state);
