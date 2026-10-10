@@ -1041,6 +1041,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           activity: endLine || (status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status),
           lastOutcome: outcome,
           lastFinishedAt: finishedAt,
+          // Kept on the conversation, so its summary still says what it last
+          // did after the host restarts (store.summary).
+          ...(store.lastStep?.(turn.conversationId) ? { lastStep: store.lastStep(turn.conversationId) } : {}),
         });
         await emit(turn, { type: `turn.${status}`, applied, ...(error ? { error } : {}), ...(usageMark ?? {}) });
       } finally {
