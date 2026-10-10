@@ -28,6 +28,17 @@ DRIVES = '{"bryan":{"mac":"https://mac-bryan.marbledrive.app","pc":"https://pc-b
 name = "LEASE"
 class_name = "Lease"
 
+# The door's Directory (worker/src/door/directory.js): people, invites, drives
+# and sessions. Bound always; read only once DOOR_SIGNING_KEY is set, so with no
+# secrets this Worker behaves as it did before the door (docs/ACCOUNTS.md).
+[[durable_objects.bindings]]
+name = "DIRECTORY"
+class_name = "Directory"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Lease"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Directory"]
