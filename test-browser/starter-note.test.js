@@ -345,6 +345,58 @@ test('four heading sizes: #### and Ctrl+Alt+4 make the smallest, in the face of 
   assert.deepEqual(errors, []);
 });
 
+test('two hints: ##### is a quiet italic aside and ###### the same in red, and neither runs on', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('##### Quiet');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('###### Loud');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Body');
+  await page.waitForTimeout(150);
+  let all = await blocks(page);
+  assert.deepEqual(all.slice(2, 5).map((b) => [b.tag, b.text]), [['H6', 'Quiet'], ['H6', 'Loud'], ['P', 'Body']]);
+
+  const look = await page.evaluate(() => {
+    const note = document.querySelector('.note.marble-open');
+    const of = (el) => {
+      const s = getComputedStyle(el);
+      return { size: parseFloat(s.fontSize), weight: s.fontWeight, style: s.fontStyle, color: s.color, red: el.hasAttribute('data-red') };
+    };
+    return { quiet: of(note.children[2]), loud: of(note.children[3]), body: of(note.children[4]) };
+  });
+  assert.equal(look.quiet.size, look.body.size, 'a hint is the text\'s size');
+  assert.equal(look.quiet.style, 'italic');
+  assert.equal(look.quiet.weight, '400');
+  assert.notEqual(look.quiet.color, look.body.color, 'and a shade lighter than it');
+  assert.equal(look.quiet.red, false);
+  assert.equal(look.loud.style, 'italic');
+  assert.equal(look.loud.color, 'rgb(255, 0, 0)', 'the red hint is pure red');
+  assert.equal(look.body.red, false, 'Enter after a red hint hands over to a plain paragraph');
+
+  const source = await filed(page);
+  assert.match(source, /<h6 [^>]*>Quiet<\/h6>/);
+  assert.match(source, /<h6 [^>]*data-red[^>]*>Loud<\/h6>/);
+
+  // Ctrl+Alt+5 and 6 move a line between the two, and Ctrl+Alt+0 makes it
+  // plain again.
+  await caretToEndOf(page, 2);
+  await page.keyboard.press('Control+Alt+Digit6');
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => document.querySelector('.note.marble-open').children[2].hasAttribute('data-red')), true);
+  await page.keyboard.press('Control+Alt+Digit5');
+  await page.waitForTimeout(150);
+  all = await blocks(page);
+  assert.equal(all[2].tag, 'H6');
+  assert.equal(await page.evaluate(() => document.querySelector('.note.marble-open').children[2].hasAttribute('data-red')), false);
+  assert.match(await filed(page), /<h6 (?![^>]*data-red)[^>]*>Quiet<\/h6>/);
+  await page.keyboard.press('Control+Alt+Digit0');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[2].tag, 'P');
+  assert.deepEqual(errors, []);
+});
+
 test('bold marks exactly what was selected, across lines', async () => {
   const { page, errors } = await open();
   // The second line of this note already holds two marks of its own, so the
@@ -460,7 +512,7 @@ test('clicking a row opens that note, and the file remembers which', async () =>
   await page.waitForTimeout(200);
 
   const now = await page.evaluate(() => ({
-    current: document.body.getAttribute('data-current'),
+    current: document.querySelector('#notes').getAttribute('data-current'),
     open: document.querySelector('.note.marble-open').getAttribute('data-marble-id'),
     hosts: [...document.querySelectorAll('[contenteditable]')].filter((el) => el.closest('.notes')).length,
     lit: [...document.querySelectorAll('.row')].map((el) => el.classList.contains('marble-current')),

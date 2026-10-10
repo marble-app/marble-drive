@@ -56,7 +56,7 @@
   const LAST = `${KEY}last`;
   const LAST_MAX = 1_500_000;
   // All a conversation's row and pips are drawn from.
-  const CONV_KEEP = ['id', 'target', 'title', 'running', 'queued', 'asking', 'status', 'needsReview', 'updatedAt', 'lastFinishedAt', 'lastInteractedAt', 'createdAt'];
+  const CONV_KEEP = ['id', 'target', 'title', 'activity', 'running', 'queued', 'asking', 'status', 'needsReview', 'updatedAt', 'lastFinishedAt', 'lastInteractedAt', 'createdAt'];
   const SECTIONS = ['pinned', 'recent', 'agents', 'drive', 'builtin'];
   const LABELS = { pinned: 'Pinned', recent: 'Recent', agents: 'Modifying', drive: 'Drive', builtin: 'Built-in' };
   // Where the pages the drive runs on show (the Drive's Settings, kept on its
@@ -3434,7 +3434,9 @@
       const said = ORDER.filter((k) => counts[k]).map((k) => `${counts[k]} ${WORDS[k]}`).join(', ');
       wrap.setAttribute('role', 'img');
       wrap.setAttribute('aria-label', said);
-      wrap.title = said;
+      // Pointed at, one chat says the line its row in the Agents list says,
+      // which is what its card says. Several are counted.
+      wrap.title = (threads.length === 1 && threads[0].activity) || said;
       for (const k of ORDER) {
         if (!counts[k]) continue;
         const group = h('span', 'pg');
@@ -3504,7 +3506,7 @@
             t.dataset.thread = c.id;
             if (this.unread(c)) t.setAttribute('data-unread', '');
             t.append(h('span', 'name', c.title || 'New chat'), this.pip(this.stateOf(c)));
-            t.title = `${c.title || 'New chat'} — ${WORDS[this.stateOf(c)]}`;
+            t.title = `${c.title || 'New chat'} — ${c.activity || WORDS[this.stateOf(c)]}`;
             threads.append(this.item(t));
           }
           drop.append(threads);

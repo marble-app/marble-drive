@@ -16,6 +16,7 @@ import readline from 'node:readline';
 
 import { createAwakeClock, createProgress } from '../awake.js';
 import { createDrawer } from './drawer.js';
+import '../../runtime/agent-words.js';
 import { collectSlices, shaOf } from '../engine.js';
 import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
@@ -35,6 +36,9 @@ import {
   usageHandoffDue,
 } from './usage-failover.js';
 
+// What a chat's progress card says, shared with the card itself.
+const words = globalThis.marbleAgentWords;
+
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
 
@@ -50,10 +54,12 @@ export function clipFailure(text) {
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 // How long a result has to stand unchallenged before the runner acts on it,
-// and how long it waits instead while the CLI still carries background work.
-// Both are `limits` a host can set; these are the fallbacks.
+// and how long a process gets once its last background work has ended: the
+// CLI takes that work's report as a new message, and says so within moments.
+// Both are `limits` a host can set; these are the fallbacks. While background
+// work is still out, no clock ends the turn (armEnd).
 const SETTLE_MS = 500;
-const BACKGROUND_SETTLE_MS = 60_000;
+const DRAINED_SETTLE_MS = 5_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
@@ -154,6 +160,22 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       publish(turn.conversationId, stored, meta ? await store.summary(turn.conversationId) : null);
       return stored;
     });
+  }
+
+  // ------------------------------------------------------------------ the row
+
+  /** A chat's row says what its card says (runtime/agent-words.js): each
+   *  event the card follows moves the line, and a new line is written ahead
+   *  of the event that moved it, so the summary published with that event
+   *  carries it. A new sentence is not news about the chat, so it does not
+   *  move the chat up a list sorted by when it last changed. Once the turn
+   *  is finishing, the end line is finish()'s to write. */
+  function tell(turn, event) {
+    const activity = words.noteLine(turn.line, event);
+    if (!activity || activity === turn.activity) return;
+    turn.activity = activity;
+    chained(turn.conversationId, () => (turn.finishing ? null : store.updateConversation(turn.conversationId, { activity }, { touch: false })))
+      .catch((err) => log.error(`[agents] ${err.message}`));
   }
 
   // ------------------------------------------------------------------ drawing
@@ -361,6 +383,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       provider: null,
       project: null, // resolved at start; the cwd of a full turn
       asks: new Map(), // requestId → { closed }: prompts the process is waiting on
+      calls: new Set(), // callIds of the process's own tool calls with no result yet
       holdStall: null,
       resumeStall: null,
       resume: null, // the provider session this turn was started to resume
@@ -380,6 +403,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       origins: new Map(),
       stderr: '',
       said: [], // the agent's own text, for naming the chat
+      line: words.createLine(), // what the turn's card says, followed through its events (runtime/agent-words.js)
+      activity: null, // the line last written to the conversation
       timers: [],
       inflight: new Set(), // tool-call promises the bridge is still waiting on
       sent: 0, // messages this turn has sent; capped
@@ -417,6 +442,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
             .catch((err) => log.error(`[agents] ${err.message}`));
         }
         drawer?.note(turn, event);
+        tell(turn, event);
         // The end of a long result is for the drawer, which reads a test
         // run's counts there; the transcript keeps its short summary.
         const { tail: _tail, ...stored } = event;
@@ -692,9 +718,22 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           if (lastSample !== null) turn.lastProgress = awake.now();
           lastSample = measured;
         }
-        if (awake.now() - turn.lastProgress >= limits.stallMs) {
-          stop(turn, { status: 'failed', error: `stalled — no output and no work for ${Math.round(limits.stallMs / 1000)} s` });
+        if (awake.now() - turn.lastProgress < limits.stallMs) return;
+        // An answer that is in, waiting on background work that has gone
+        // quiet (a dev server, a hung run): the turn did what it was asked,
+        // so it ends as it would have, not as a failure. Only a process whose
+        // stdin the runner holds can be ended this way; one handed its prompt
+        // on a closed stdin falls to the stall rule below, or nothing would
+        // ever end its turn.
+        if (turn.done && turn.background > 0 && turn.stdinOpen) {
+          if (!turn.endingIdle) {
+            turn.endingIdle = true;
+            log.log(`[agents] ${turn.id}: background work idle for ${Math.round(limits.stallMs / 1000)} s after the answer; ending the turn`);
+            endInput(turn);
+          }
+          return;
         }
+        stop(turn, { status: 'failed', error: `stalled — no output and no work for ${Math.round(limits.stallMs / 1000)} s` });
       };
       const stallCheck = setInterval(checkStall, Math.max(50, Math.min(60_000, Math.floor(limits.stallMs / 4))));
       stallCheck.unref?.();
@@ -779,12 +818,18 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   /** Take up a result's proposal to end the turn: if the process says nothing
    *  more for the settle window, close its stdin. One still carrying
-   *  background work gets a far longer window — what it waits on is its own
-   *  subagent, not us — and every line it prints resets the wait. */
-  function armEnd(turn) {
+   *  background work is not ended at all. A backgrounded test run is silent
+   *  for as long as it runs, and closing stdin under it ends the CLI and the
+   *  run with it, so the agent never hears how it went. The CLI wakes itself
+   *  when the work ends; the stall rule ends a wait whose work has gone
+   *  quiet. `drained` is the proposal standing again once that work is done. */
+  function armEnd(turn, { drained = false } = {}) {
     if (!turn.stdinOpen) return; // a CLI handed its prompt on a closed stdin leaves by itself
     clearTimeout(turn.settle);
-    const wait = turn.background > 0 ? (limits.backgroundSettleMs ?? BACKGROUND_SETTLE_MS) : (limits.settleMs ?? SETTLE_MS);
+    // Nor while one of its own commands runs: background work can end in the
+    // middle of a silent foreground one, after a result.
+    if (turn.background > 0 || turn.calls.size) return;
+    const wait = drained ? (limits.drainedSettleMs ?? DRAINED_SETTLE_MS) : (limits.settleMs ?? SETTLE_MS);
     turn.settle = setTimeout(() => endInput(turn), wait);
     turn.settle.unref?.();
   }
@@ -803,7 +848,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         const since = Date.now();
         turn.asks.set(event.requestId, { closed: false, request, since });
         turn.holdStall?.();
-        chained(turn.conversationId, () => store.updateConversation(turn.conversationId, { asking: true }))
+        // Waiting on you is the row's news: the question, or that it needs your OK.
+        turn.activity = words.noteLine(turn.line, request);
+        chained(turn.conversationId, () => store.updateConversation(turn.conversationId, { asking: true, activity: turn.activity }))
           .then(async () => {
             await emit(turn, request);
             drawer?.note(turn, request);
@@ -817,9 +864,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           publish(turn.conversationId, { turn: turn.id, ...event });
         });
         return;
-      case 'text':
       case 'tool.call':
+        turn.calls.add(event.callId);
+        turn.onEvent(event);
+        return;
       case 'tool.result':
+        turn.calls.delete(event.callId);
+        turn.onEvent(event);
+        return;
+      case 'text':
         turn.onEvent(event);
         return;
       case 'usage':
@@ -828,6 +881,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         return;
       case 'done':
         turn.done = event;
+        // Nothing is in flight once the CLI has printed a result; a call
+        // whose result never came cannot hold the end off.
+        turn.calls.clear();
         // A result only *proposes* the end. A CLI prints one before it has
         // read the prompt at all when it has a queued notification to flush,
         // and prints one and keeps working when it has answered while a
@@ -840,7 +896,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // drained and the process has nothing more to say, not before.
       case 'background':
         turn.background = Number(event.pending) || 0;
-        if (turn.background === 0 && turn.done) armEnd(turn);
+        if (turn.background === 0 && turn.done) armEnd(turn, { drained: true });
         return;
       default:
     }
@@ -859,6 +915,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     for (const [requestId, ask] of turn.asks) {
       if (ask.closed) continue;
       ask.closed = true;
+      // Only noted: every caller is ending the turn, whose end line is next.
+      words.noteLine(turn.line, { type: 'ask.void', requestId });
       if (deny) writeControl(turn, requestId, { behavior: 'deny', message: `Turn ${why} from Marble` });
       await emit(turn, { type: 'ask.void', requestId, why });
       publishAsk('ask.resolved', { conversation: turn.conversationId, requestId });
@@ -965,6 +1023,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         }
       }
     }
+    // The row ends on what the card ends on; a turn with no card says what it always did.
+    const endLine = words.endLine(turn.line, status, { error });
     try {
       try {
         await turn.undoSaved;
@@ -978,9 +1038,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           ...(lostSession ? { providerSession: null } : {}),
           running: false,
           asking: false,
-          activity: status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status,
+          activity: endLine || (status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status),
           lastOutcome: outcome,
           lastFinishedAt: finishedAt,
+          // Kept on the conversation, so its summary still says what it last
+          // did after the host restarts (store.summary).
+          ...(store.lastStep?.(turn.conversationId) ? { lastStep: store.lastStep(turn.conversationId) } : {}),
         });
         await emit(turn, { type: `turn.${status}`, applied, ...(error ? { error } : {}), ...(usageMark ?? {}) });
       } finally {
@@ -1254,6 +1317,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (ask.closed) throw Object.assign(new Error('this ask was already answered'), { status: 409 });
       ask.closed = true;
       writeControl(turn, requestId, response);
+      tell(turn, { type: 'ask.answered', requestId, response });
       const stillOpen = [...turn.asks.values()].some((a) => !a.closed);
       if (!stillOpen) await store.updateConversation(turn.conversationId, { asking: false });
       await emit(turn, { type: 'ask.answered', requestId, response });

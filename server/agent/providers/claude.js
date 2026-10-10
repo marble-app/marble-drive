@@ -58,6 +58,9 @@ const claudeEffort = (effort) => (CLAUDE_EFFORTS.includes(effort) ? effort : nul
 // The request id Marble gives the stream-json initialize handshake. Its reply
 // carries the CLI's own skills list.
 export const INIT_REQUEST_ID = 'marble-init';
+// The longest one Bash command of a full agent may ask for: half an hour, the
+// stall rule's default, against the CLI's own ten minutes.
+export const BASH_MAX_TIMEOUT_MS = 30 * 60_000;
 const SUMMARY = 200;
 const TAIL = 600;
 
@@ -93,6 +96,13 @@ export function parseClaudeLine(line, state = {}) {
         if (e.subtype === 'task_started') tasks.add(e.task_id);
         else tasks.delete(e.task_id);
         return [{ type: 'background', pending: tasks.size }];
+      }
+      // The CLI's own list of what is still out, whenever it changes: the
+      // count follows it, so a notification that never came cannot hold a
+      // turn open.
+      if (e.subtype === 'background_tasks_changed' && Array.isArray(e.tasks)) {
+        state.tasks = new Set(e.tasks.map((t) => t?.task_id).filter(Boolean));
+        return [{ type: 'background', pending: state.tasks.size }];
       }
       if (e.subtype !== 'init') return [];
       const events = [];
@@ -303,7 +313,13 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       return {
         command: 'claude',
         args,
-        env: api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {},
+        env: {
+          // A full agent runs the project's tests itself, and a whole suite
+          // outlasts the CLI's ten-minute ceiling on one command. Its default
+          // per command is unchanged.
+          ...(full ? { BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS) } : {}),
+          ...(api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {}),
+        },
         stdin,
         ...(full ? { stdinOpen: true } : {}),
         // A full agent works in its project. A documents agent keeps its empty

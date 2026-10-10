@@ -1,8 +1,14 @@
 // What each share level may change, and what none of them may.
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-import { SAYS, markupRefusal, shareRefusal } from '../server/share-policy.js';
+import { enginePath } from '../server/engine.js';
+import { MARKERS, SAYS, markupRefusal, shareRefusal } from '../server/share-policy.js';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const DOC = `<!doctype html>
 <html data-marble-id="h"><head data-marble-id="hd"><title data-marble-id="t">Sign-up</title>
@@ -125,6 +131,7 @@ test('setAttr is checked by name and by value', () => {
   assert.equal(set('ONMOUSEOVER', 'alert(1)'), SAYS.markup);
   assert.equal(set('x><script>alert(1)</script', ''), SAYS.markup);
   assert.equal(set('data-marble-run', 'tidy up'), SAYS.markup);
+  assert.equal(set('data-marble-paused', null), SAYS.markup, 'a shared link neither holds nor lets go of the owner\'s schedule');
   assert.equal(set('data-marble-id', 'title'), SAYS.markup);
   assert.equal(set('srcdoc', '<p>x</p>'), SAYS.markup);
   assert.equal(set('href', 'javascript:alert(1)'), SAYS.address);
@@ -138,4 +145,45 @@ test('markup a person writes in rich text goes in', () => {
   assert.equal(markupRefusal('Bring <b>chips</b> and <i>salsa</i><br>and <a href="#menu">see the menu</a>', 'edit'), null);
   assert.equal(markupRefusal('Rules: 2 &lt; 3, and “onload=” is only text', 'edit'), null);
   assert.equal(markupRefusal('<ul><li>one<li>two</ul>', 'edit'), null);
+});
+
+test('read & write types in rich text and in source a starter marks', () => {
+  const doc = `<!doctype html>
+<html data-marble-id="h"><head data-marble-id="hd"></head>
+<body data-marble-id="b">
+  <article data-marble-id="n1"><p data-marble-id="p1" data-marble-rich>Groceries</p><p data-marble-id="p2" data-marble-rich>Oat milk</p></article>
+  <pre data-marble-id="src" data-marble-code>\\section{Intro}</pre>
+</body></html>`;
+  const judge = (ops) => shareRefusal(doc, ops, 'edit');
+  assert.equal(judge([{ type: 'setInner', id: 'p2', html: 'Oat milk, <b>lemons</b>' }]), null);
+  assert.equal(judge([{ type: 'setText', id: 'p1', text: 'Shopping' }]), null);
+  assert.equal(judge([{ type: 'setText', id: 'src', text: '\\section{Introduction}' }]), null);
+  // The note around them is the app's, not a line of it.
+  assert.equal(judge([{ type: 'remove', id: 'n1' }]), SAYS.region);
+});
+
+// A marker the host does not know is a part of the page a Read & write link
+// cannot change, however the page wires it. So the list is checked against
+// everything that wires one: Marble's affordances and the starters' own code.
+test('the host knows every marker the affordances and the starters wire', async () => {
+  const NOT_MARKERS = new Set([
+    'data-marble-id', 'data-marble-transient', 'data-marble-of', 'data-marble-by', 'data-marble-instruction',
+    'data-marble-controls', 'data-marble-readonly', 'data-marble-look',
+  ]);
+  const wired = (source) => [...source.matchAll(/\[(data-marble-[a-z-]+)|RICH = '(data-marble-[a-z-]+)'/g)].map((m) => m[1] ?? m[2]);
+  const sources = [['lib/affordances.js', await fsp.readFile(enginePath('lib/affordances.js'), 'utf8')]];
+  for (const entry of await fsp.readdir(path.join(REPO, 'starters'), { withFileTypes: true })) {
+    const at = path.join(REPO, 'starters', entry.name);
+    if (entry.isFile() && entry.name.endsWith('.mrbl')) sources.push([entry.name, await fsp.readFile(at, 'utf8')]);
+    if (entry.isDirectory()) {
+      for (const part of await fsp.readdir(at)) {
+        if (part.endsWith('.html')) sources.push([`${entry.name}/${part}`, await fsp.readFile(path.join(at, part), 'utf8')]);
+      }
+    }
+  }
+  for (const [name, source] of sources) {
+    for (const marker of wired(source)) {
+      if (!NOT_MARKERS.has(marker)) assert.ok(MARKERS.includes(marker), `${name} wires ${marker}, which the host does not know`);
+    }
+  }
 });

@@ -1728,7 +1728,12 @@
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const seconds = (ms) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`);
-  const firstSentence = (text) => String(text ?? '').split(/(?<=[.!?—])\s/)[0].replace(/\s*—\s*$/, '');
+  // What the progress card says (runtime/agent-words.js, loaded first). The
+  // host reads the same words into a chat's one-line status, so its row in
+  // every list says what its card says.
+  const {
+    firstSentence, docName, CHECK_WORDS, BUILD_WORDS, plainStep, askSay, askClosedSay, endSay, stuckWhy, failedLine,
+  } = globalThis.marbleAgentWords;
 
   /** What to send back for an ask. `picks` is a Map question → Set of labels.
    *  For a permission, `note === null` is Allow; any string is Deny with that
@@ -2040,108 +2045,6 @@
     { key: 'done', name: 'Done', gist: '' },
   ];
   const stageIndex = (key) => STAGES.findIndex((s) => s.key === key);
-
-  const docName = (path) => tail(path).replace(/\.mrbl$/, '') || 'this document';
-
-  // A shell command says what it is for in its description; the words there
-  // are the only honest hint whether it looked, made, or tested.
-  const CHECK_WORDS = /\b(test|tests|testing|spec|verify|verifies|check|checks|lint|screenshot|render|renders|playwright|smoke|assert)\b/i;
-  const BUILD_WORDS = /\b(install|build|compile|bundle|mkdir|create|creates|write|writes|generate|commit|deploy|push|patch|apply|migrate|copy|move|rename|replace|update|updates|add|adds)\b/i;
-
-  /** A call in words anyone can read: the stage it belongs to (null keeps
-   *  the stage the turn is in), a sentence, and the document it makes. */
-  function plainStep(name, input = {}, built = false) {
-    const doc = input.path ? docName(input.path) : '';
-    const step = (stage, say, extra = {}) => ({ stage, say, ...extra });
-    switch (name) {
-      case 'read_document':
-      case 'read_affordances':
-        return step('look', doc ? `Reading ${doc}` : 'Reading the document');
-      case 'list_documents': return step('look', 'Looking through your drive');
-      case 'read_guide': return step('look', 'Reading up on how this works');
-      case 'create_document': return step('build', `Creating ${doc || 'a new document'}`, { makes: input.path });
-      case 'apply_ops': {
-        // The note is written for whoever is watching ("Stage 2 of 4: the
-        // cards"), so it is the best sub-line there is.
-        const note = String(input.note ?? '').trim();
-        return step('build', doc ? `Updating ${doc}` : 'Updating the document', { makes: input.path, note });
-      }
-      case 'fan_out': {
-        const note = String(input.note ?? '').trim();
-        return step('build', doc ? `Updating ${doc}` : 'Updating the document', { makes: input.path, note });
-      }
-      case 'act': return step(built ? 'check' : 'build', doc ? `Using ${doc}` : 'Using the app', { makes: input.path });
-      case 'check_document': return step('check', doc ? `Double-checking ${doc}` : 'Double-checking the document');
-      case 'browser_navigate':
-      case 'browser_tabs':
-        return step(built ? 'check' : 'look', built ? 'Opening the page to see the result' : 'Opening the page');
-      case 'browser_snapshot':
-      case 'browser_take_screenshot':
-        return step(built ? 'check' : 'look', built ? 'Looking at how it turned out' : 'Looking at the page');
-      case 'browser_click':
-      case 'browser_type':
-        return step(built ? 'check' : 'look', built ? 'Trying it out' : 'Clicking around the page');
-      case 'browser_close':
-      case 'browser_navigate_back':
-        return step(null, 'Looking at the page');
-      case 'WebSearch':
-      case 'web_search': {
-        const q = trimTo(input.search_term || input.query || '', 48);
-        return step('look', q ? `Searching the web for “${q}”` : 'Searching the web');
-      }
-      case 'WebFetch': return step('look', `Reading ${hostOf(input.url)}`);
-      case 'Read':
-      case 'read':
-      case 'read_file':
-        return step('look', 'Reading through the files');
-      case 'Grep':
-      case 'grep':
-      case 'Glob':
-      case 'glob':
-      case 'LS':
-      case 'ToolSearch':
-        return step('look', 'Searching for the right place');
-      case 'Edit':
-      case 'edit':
-      case 'MultiEdit':
-      case 'NotebookEdit':
-        return step('build', 'Writing the changes', { file: input.file_path ?? input.notebook_path ?? input.path });
-      case 'Write':
-      case 'write':
-        return step('build', 'Writing a new piece', { file: input.file_path ?? input.path });
-      case 'Bash':
-      case 'Shell':
-      case 'shell': {
-        const said = String(input.description || input.command || input.cmd || input.preview || '');
-        if (CHECK_WORDS.test(said)) return step('check', 'Testing that it works');
-        if (BUILD_WORDS.test(said)) return step('build', 'Putting the pieces in place');
-        return step('look', 'Looking around behind the scenes');
-      }
-      case 'Task':
-      case 'task':
-      case 'Agent': return step(null, 'Handing part of the work to a helper');
-      case 'TodoWrite':
-      case 'updateTodos':
-        return step(null, 'Making a plan');
-      case 'Skill': return step('look', input.skill ? `Following the ${input.skill} playbook` : 'Following a playbook');
-      case 'send_message':
-      case 'SendMessage':
-      case 'wait_for_reply':
-      case 'list_agents':
-      case 'ListAgents':
-        return step(null, 'Checking in with another agent');
-      case 'Monitor': return step(null, 'Waiting for something to finish');
-      case 'list_events':
-      case 'search_events':
-      case 'get_event':
-        return step('look', 'Checking your calendar');
-      case 'search_threads':
-      case 'get_thread':
-      case 'get_message':
-        return step('look', 'Checking your email');
-      default: return step(null, 'Working on it');
-    }
-  }
 
   /** A plan the agent wrote down, as `{ text, status }` rows: Claude's
    *  TodoWrite hands the list itself, Cursor's updateTodos a JSON preview. */
@@ -8136,7 +8039,7 @@
       card.ask = { requestId: event.requestId, askCard, choice: null };
       card.el.dataset.state = 'asking';
       this.glyphFor(card, 'ask');
-      card.say.textContent = 'Needs your OK';
+      card.say.textContent = askSay(event);
       const input = event.input ?? {};
       const rows = [];
       if (input.command) rows.push({ k: 'Command', v: trimTo(input.command, 80) });
@@ -8157,7 +8060,7 @@
       card.el.dataset.state = 'running';
       card.glyphStage = '';
       this.settle(turn, voided ? '' : allowed ? 'You allowed it' : 'You didn’t allow it');
-      this.plainPaint(card, card.stage ?? 'look', voided ? 'Going on without an answer' : allowed ? 'Going ahead' : 'Stopping there');
+      this.plainPaint(card, card.stage ?? 'look', askClosedSay(event));
       this.setNext(turn, 'running');
     }
 
@@ -8168,7 +8071,7 @@
       const step = plainStep(row.dataset.name, {}, card.built);
       card.stuck = {
         what: event.denied ? 'Your OK' : step.say.replace(/^(\w)/, (c) => c.toUpperCase()),
-        why: firstSentence(event.summary) || (event.denied ? 'That was turned down.' : 'That step failed.'),
+        why: stuckWhy(event),
         denied: Boolean(event.denied),
       };
     }
@@ -8200,16 +8103,8 @@
       const declined = status === 'failed' && card.stuck?.denied;
       const state = declined ? 'declined' : status;
       card.el.dataset.state = state;
-      const names = [...card.docs.values()];
-      const listed = names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
       const took = record.started && event.t ? seconds(event.t - record.started) : '';
-      card.say.textContent = {
-        completed: names.length ? `Updated ${listed}` : card.built ? 'Made the changes' : 'All done',
-        declined: 'Stopped at your call',
-        failed: 'Something went wrong',
-        cancelled: 'Stopped',
-        interrupted: 'Interrupted',
-      }[state] ?? 'Done';
+      card.say.textContent = endSay(state, { names: [...card.docs.values()], built: card.built });
       card.say.title = card.say.textContent;
       card.time.textContent = took;
       this.glyphFor(card, state === 'completed' ? 'done' : state === 'failed' ? 'failed' : 'stopped');
@@ -8222,7 +8117,7 @@
       if (state !== 'completed') {
         const done = card.plan ? card.frames.filter((f) => f.el.dataset.st === 'done').length : null;
         const line = state === 'failed' || state === 'declined'
-          ? (card.stuck?.why || firstSentence(event.error) || 'It could not finish.')
+          ? failedLine({ stuck: card.stuck, error: event.error })
           : `${state === 'interrupted' ? 'Marble restarted' : 'Stopped'}${took ? ` after ${took}` : ''}.${done != null ? ` ${done} of ${card.plan.length} stages done; nothing was lost.` : ' Nothing was lost.'}`;
         const v = { kind: 'halt', d: { line, path: (state === 'failed' || state === 'declined') && card.stuck ? card.stuck.what : '' }, meta: { label: state === 'failed' ? 'Where it got stuck' : 'Stopped', key: 'halt' } };
         v.node = WV.halt.make(v.d);

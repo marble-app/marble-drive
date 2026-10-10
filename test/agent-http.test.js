@@ -52,6 +52,12 @@ const SCRIPTS = {
     { say: 'Renamed late.' },
   ],
   wait: [{ sleep: 2500 }, { say: 'waited' }],
+  // A turn of its own page, for the status widgets' reads.
+  status: [
+    { call: 'read_document', args: { path: 'status' } },
+    { call: 'apply_ops', args: { path: 'status', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { say: 'Renamed the heading.' },
+  ],
   // Writes, then stays: long enough to ask what zones are standing while one is.
   park: [
     { sleep: 700 },
@@ -744,9 +750,11 @@ test("a document is served with the agent scripts after the Drive's, when agents
   const page = await (await fetch(`${base}/a/garden`)).text();
   const drive = page.indexOf('/runtime/drive.js');
   const api = page.search(/<script src="\/runtime\/agent\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
+  const words = page.search(/<script src="\/runtime\/agent-words\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
   const ui = page.search(/<script src="\/runtime\/agent-ui\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
   assert.ok(drive > 0 && api > drive && ui > api, 'drive.js, then agent.js, then agent-ui.js');
-  for (const file of ['agent.js', 'agent-ui.js']) {
+  assert.ok(words > api && words < ui, 'the card reads its words from agent-words.js, so it comes first');
+  for (const file of ['agent.js', 'agent-words.js', 'agent-ui.js']) {
     const response = await fetch(`${base}/runtime/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get('content-type'), /javascript/);
@@ -1122,4 +1130,38 @@ test('an undo whose redo could not be kept is still an undo', async () => {
   assert.equal(await drive.store.read('meadow4'), original);
   assert.ok((await drive.agents.store.turn(run.turnId)).undoneAt, 'the turn is marked undone');
   assert.equal((await api('POST', `/agent/turns/${run.turnId}/undo`)).status, 409, 'and is not undone twice');
+});
+
+test('a summary carries the last step in plain words, and every chat\'s turns since a time come in one request', async () => {
+  await drive.createDocument('status', SOURCE);
+  const before = Date.now();
+  const made = await start('script:status\nRename the heading', 'status');
+  const { turn } = await finished(made.conversationId, made.turnId);
+  assert.equal(turn.status, 'completed');
+
+  const { body: listed } = await api('GET', '/agent/conversations');
+  const summary = listed.find((s) => s.id === made.conversationId);
+  assert.equal(summary.lastStep.kind, 'change');
+  assert.equal(summary.lastStep.words, 'Changing status');
+  assert.equal(summary.lastStep.turn, made.turnId);
+  assert.ok(summary.lastStep.t >= before);
+  assert.equal(summary.turnStartedAt, null, 'a finished chat has no running turn');
+  assert.equal(summary.lastStep.input, undefined, 'none of the step\'s input');
+
+  const { status, body } = await api('GET', `/agent/turns?since=${before}&paths=1`);
+  assert.equal(status, 200);
+  assert.ok(Number.isFinite(body.now));
+  const mine = body.turns.find((t) => t.id === made.turnId);
+  assert.ok(mine, 'the new turn is in range');
+  assert.equal(mine.conversationId, made.conversationId);
+  assert.equal(mine.status, 'completed');
+  assert.equal(mine.applied, 1);
+  assert.equal(mine.target, 'status');
+  assert.deepEqual(mine.changed, ['status']);
+  assert.equal(mine.prompt, undefined, 'a turn is cut to its times, outcome and page');
+  assert.ok(body.turns.every((t) => (t.finishedAt ?? t.startedAt ?? Infinity) >= before || ['running', 'queued'].includes(t.status)));
+
+  const { body: later } = await api('GET', `/agent/turns?since=${Date.now() + 60_000}`);
+  assert.equal(later.turns.find((t) => t.id === made.turnId), undefined, 'a turn that ended before the time is left out');
+  assert.equal((await api('GET', '/agent/turns')).status, 400);
 });

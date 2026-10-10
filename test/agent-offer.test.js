@@ -49,3 +49,16 @@ test('the model is asked on the login, and its answer comes back read', async ()
   assert.equal(seen.env.ANTHROPIC_API_KEY, undefined, 'never billed to a key');
   assert.deepEqual(written, { suggestions: ['A shorter title'], automatic: null, interactive: null });
 });
+
+test('the idea Make it visual starts from is read when the model writes one', () => {
+  assert.match(offerPrompt({ html: '<p>Hi</p>' }), /"visual": "…"/);
+  const read = readOffer('{"suggestions": ["Add the venue"], "visual": "the due dates as dots on a timeline"}');
+  assert.equal(read.visual, 'the due dates as dots on a timeline');
+  assert.equal('visual' in readOffer('{"suggestions": ["Add the venue"]}'), false, 'none written, none kept');
+});
+
+test('the idea Make it alive starts from is read when the model writes one', () => {
+  assert.match(offerPrompt({ html: '<p>Hi</p>' }), /"alive": "…"/);
+  const read = readOffer('{"suggestions": ["Add the venue"], "alive": "every morning, add new invitations from my notes"}');
+  assert.equal(read.alive, 'every morning, add new invitations from my notes');
+});

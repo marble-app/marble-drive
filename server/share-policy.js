@@ -28,13 +28,16 @@ import { applyOp, indexIds, parseSource } from './engine.js';
 
 export const ROLES = ['view', 'edit', 'modify'];
 
-/** Every marker an affordance in lib/affordances.js answers to. An element
- *  under one of these is a part of the page made for changing. */
-const MARKERS = [
+/** Every marker an affordance in lib/affordances.js answers to, and the ones
+ *  a starter wires itself: a note's and a doc's rich text, a paper's source.
+ *  An element under one of these is a part of the page made for changing.
+ *  test/share-policy.test.js fails when something wires a marker this misses. */
+export const MARKERS = [
   'data-marble-editable', 'data-marble-toggle', 'data-marble-choose', 'data-marble-step',
   'data-marble-value', 'data-marble-expand', 'data-marble-sortable', 'data-marble-add',
   'data-marble-removable', 'data-marble-resizable', 'data-marble-alt', 'data-marble-active',
   'data-marble-note', 'data-marble-note-body', 'data-marble-canvas', 'data-marble-into',
+  'data-marble-rich', 'data-marble-code',
 ];
 /** The controls that set an attribute on an ancestor (`data-marble-of`), so the
  *  element they point at is fair game for a setAttr even with no marker of its own. */
@@ -59,8 +62,9 @@ const URL_ATTRS = new Set([
 /** Attributes refused outright, whatever their value. */
 const BLOCKED_ATTRS = new Set([
   'srcdoc', 'action', 'formaction', 'http-equiv', 'is',
-  // An automation: pressing it starts one of the owner's agents with its brief.
-  'data-marble-run', 'data-marble-scope', 'data-marble-on',
+  // An automation: pressing it starts one of the owner's agents with its brief,
+  // and one on a schedule starts them by itself unless it is held.
+  'data-marble-run', 'data-marble-scope', 'data-marble-on', 'data-marble-paused',
   // Identity is the file's to give (assignId), never an attribute to rewrite.
   'data-marble-id',
 ]);

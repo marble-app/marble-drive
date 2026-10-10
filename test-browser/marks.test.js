@@ -371,6 +371,29 @@ test('one composer: Describe mode hangs the ⌘J line on the marks, never a card
   await page.waitForFunction(() => document.querySelector('.marble-line')?.hidden === false);
 });
 
+test('the line Describe borrows offers the actions for what is marked, without Sketch it or suggestions', async () => {
+  const page = await open();
+  await describe(page);
+  await use(page, 'sketch');
+  const q1 = await boxOf(page, 'q1');
+  await stroke(page, boxAround(q1));
+  await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder.includes('a box around q1'));
+  const acts = field(page).locator('.marble-line-chip');
+  await acts.first().waitFor();
+  assert.deepEqual(await acts.evaluateAll((els) => els.map((el) => el.dataset.act ?? 'suggestion')), ['variations', 'automate', 'alive', 'interactive', 'visual']);
+  await words(page).click();
+  await acts.filter({ hasText: 'Make it visual' }).click();
+  assert.equal(await words(page).textContent(), 'Make what is marked visual: a chart or diagram of what it shows');
+  await page.keyboard.type('as a timeline');
+  const before = await knownChats(page);
+  await page.locator('.marble-line-send').click();
+  const turn = await newTurn(page, before);
+  assert.equal(turn.prompt, 'Make what is marked visual: as a timeline');
+  const brief = String(turn.context.brief ?? '');
+  assert.match(brief, /seen rather than read/);
+  assert.ok(brief.includes('I marked up the page: a box around q1.'), brief);
+});
+
 test('with a tool on, the pinned chat panel and the card are still the app\'s to click', async () => {
   const page = await open();
   await launcher(page).click();

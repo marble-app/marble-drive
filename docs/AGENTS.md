@@ -233,6 +233,55 @@ the first place: with something selected it asks what you want to try and why,
 how many to make, and sends one turn asking for exactly that, in `<marble-alt>`
 form. When the alternatives land the compare surface opens on them.
 
+## Automations: Automate it and Make it alive
+
+A document cannot fetch or run anything on its own, so an automation is an
+element that carries its own brief and the Drive runs it
+(`runtime/agent-run.js`):
+
+```html
+<button data-marble-id="go" data-marble-run="Gather what is new about the Ai2
+  project from Bryan's Days and update the notes under Progress."
+  data-marble-scope="progress" data-marble-on="daily 07:00">Update now</button>
+```
+
+Pressing it starts an agent with that brief, aimed at this document and at the
+element named by `data-marble-scope`; its changes land like any other, with
+Undo. One run per element at a time: pressing again while it works opens that
+chat. **Automate it**, in the ⌘J line, asks for one of these with
+`data-marble-on="press"`: a button that runs when pressed and only then.
+
+**Make it alive** asks for the same trigger with a schedule in
+`data-marble-on`, and the host runs it on that schedule with no page open
+(`server/alive.js`). The schedules are `hourly`, `every 6h` (any whole number
+of hours or days), `daily 07:00` and `weekly mon 07:00`, in
+`MARBLE_DRIVE_DAY_TZ`. Nothing runs more often than once an hour; anything the
+parser does not know, `every 30m` included, is not a schedule. The agent builds
+three things beside it: the **Update now** button itself (a press still runs it
+at once), a line saying how often and when it last ran ("Updates every morning
+· last Oct 7, 7:02"), which each run sets, and a **Pause** button carrying
+`data-marble-pause="<the trigger's id>"`. Pause writes `data-marble-paused` on
+the trigger and `aria-pressed` on itself, both as ops, so the hold is in the
+file and the host reads it there. A shared link can neither hold one nor let
+it go (docs/SHARING.md).
+
+The host looks at the drive every five minutes for triggers and checks every
+minute, and when a request comes in, whether one is due. Each scheduled run is a
+conversation titled `Kept alive · <document> · <id>` and aimed at the
+document, and that is how the last run is remembered: a restart neither
+forgets one nor starts a second. A trigger that never ran counts from when the
+host first saw it, so making something alive does not set it off at once.
+Before a run the file is read again, so a pause made since the last look wins.
+What a schedule can cost is kept small: one run of a trigger at a time (a run
+still going holds the next), at most three scheduled runs across the drive at
+once, and a run that will not start is tried again after fifteen minutes, not
+every minute.
+
+The timer holds nothing up. A sprite asleep at seven runs the morning's run
+when something next wakes it, as the day's run does, and the run is then held
+awake like any other turn. `MARBLE_DRIVE_ALIVE=0` turns scheduled runs off;
+pressing still works.
+
 ## What a full agent can do
 
 Every provider runs at capability `full` unless it declares `documents` or

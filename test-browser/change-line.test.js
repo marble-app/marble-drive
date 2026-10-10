@@ -377,9 +377,10 @@ test('Describe mode borrows this line, not a card, and ⌘J there means that lin
   await page.mouse.move(list.x + list.width + 6, list.y + list.height + 6, { steps: 4 });
   await page.mouse.up();
   await input(page).waitFor();
-  // What the marks say is its placeholder; it offers no chips of its own.
+  // What the marks say is its placeholder; it offers the actions for what is
+  // marked, and no suggestions or Sketch it of its own.
   assert.equal(await input(page).getAttribute('data-placeholder'), '1 element');
-  assert.equal(await page.locator('.marble-line-chip').count(), 0);
+  assert.deepEqual(await page.locator('.marble-line-chip').evaluateAll((els) => els.map((el) => el.dataset.act ?? 'suggestion')), ['variations', 'automate', 'alive', 'interactive', 'visual']);
   assert.equal(await page.locator('.marble-callout').count(), 0);
   await summon(page);
   await page.waitForFunction(() => document.activeElement?.classList.contains('marble-line-input'));
@@ -817,15 +818,15 @@ test('the line offers what the thing could become: its kind\'s suggestions and t
   await input(page).waitFor();
   await chips(page).first().waitFor();
   // A row of a list is an item (marbleScope.kindOf).
-  assert.deepEqual(await chipTexts(page), ['Say it more plainly', 'Add a detail', 'Try variations', 'Automate it', 'Make it interactive', 'Sketch it']);
+  assert.deepEqual(await chipTexts(page), ['Say it more plainly', 'Add a detail', 'Try variations', 'Automate it', 'Make it alive', 'Make it interactive', 'Make it visual', 'Sketch it']);
   assert.deepEqual(asked.map((b) => b.ids), [['r2']]);
   assert.equal(asked[0].path, 'list');
   // Typing does not hide them.
   await page.keyboard.type('Add');
-  assert.equal(await chips(page).count(), 6);
+  assert.equal(await chips(page).count(), 8);
   release();
   await page.waitForFunction(() => [...document.querySelectorAll('.marble-line-chip')].some((b) => b.textContent.trim() === 'Mark it read'));
-  assert.deepEqual(await chipTexts(page), ['Mark it read', 'Say who wrote it', 'Try variations', 'Automate it', 'Make it interactive', 'Sketch it']);
+  assert.deepEqual(await chipTexts(page), ['Mark it read', 'Say who wrote it', 'Try variations', 'Automate it', 'Make it alive', 'Make it interactive', 'Make it visual', 'Sketch it']);
   assert.equal(await input(page).textContent(), 'Add', 'what was typed stays');
   // An action drafts with what was written for this thing.
   await chips(page).filter({ hasText: 'Automate it' }).click();
@@ -909,6 +910,51 @@ test('Try variations drafts its words with the idea selected, and ⏎ sends it w
   assert.deepEqual(await page.evaluate(() => window.__watched), ['r2']);
 });
 
+test('Make it visual drafts its words with the idea selected, and ⏎ sends it with what visual means beside it', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await chips(page).filter({ hasText: 'Make it visual' }).click();
+  assert.equal(await input(page).textContent(), 'Make this item visual: a small picture of what it is');
+  assert.equal(await page.evaluate(() => getSelection().toString()), 'a small picture of what it is');
+  assert.equal(await chips(page).filter({ hasText: 'Make it visual' }).getAttribute('aria-pressed'), 'true');
+  await page.keyboard.type('its status as a dot');
+  await page.keyboard.press('Enter');
+  const [{ detail }] = await until(page, async () => {
+    const list = [];
+    for (const s of await window.marble.agent.conversations()) list.push({ detail: await window.marble.agent.conversation(s.id) });
+    return list[0]?.detail?.turns?.length ? list : null;
+  });
+  assert.equal(detail.turns[0].prompt, 'Make this item visual: its status as a dot');
+  assert.match(detail.turns[0].context.brief, /seen rather than read/);
+  assert.match(detail.turns[0].context.brief, /never drawn into an image, a canvas or an SVG label/);
+});
+
+test('Make it alive drafts a schedule for the thing, and ⏎ sends it with how to build one', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  // Pointing at it shows what it would ask without moving the chips.
+  await settled(page);
+  const before = await line(page).boundingBox();
+  await chips(page).filter({ hasText: 'Make it alive' }).hover();
+  assert.equal(await input(page).getAttribute('data-placeholder'), 'Make this item alive: check on it every morning and update its status');
+  assert.ok(Math.abs((await line(page).boundingBox()).height - before.height) < 1, 'the line keeps its height');
+  await chips(page).filter({ hasText: 'Make it alive' }).click();
+  assert.equal(await input(page).textContent(), 'Make this item alive: check on it every morning and update its status');
+  await page.keyboard.press('Enter');
+  const [{ detail }] = await until(page, async () => {
+    const list = [];
+    for (const s of await window.marble.agent.conversations()) list.push({ detail: await window.marble.agent.conversation(s.id) });
+    return list[0]?.detail?.turns?.length ? list : null;
+  });
+  assert.equal(detail.turns[0].prompt, 'Make this item alive: check on it every morning and update its status');
+  assert.match(detail.turns[0].context.brief, /data-marble-on="<the schedule>"/);
+  assert.match(detail.turns[0].context.brief, /data-marble-pause/);
+});
+
 test('Sketch it puts the line away and opens Describe mode on the thing', async () => {
   const page = await open();
   await pointAt(page, 'r2');
@@ -916,6 +962,8 @@ test('Sketch it puts the line away and opens Describe mode on the thing', async 
   await input(page).waitFor();
   await chips(page).filter({ hasText: 'Sketch it' }).click();
   await page.locator('.marble-marks-bar').waitFor();
+  // Off the chips, which would show their own words in an empty line.
+  await page.mouse.move(4, 4);
   // The same line hangs on the marks now, about what they say.
   await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder === '1 element');
   assert.equal(await page.locator('.marble-line').count(), 1);

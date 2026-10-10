@@ -45,9 +45,46 @@ const SCRIPTS = {
     { say: 'the subagent finished' },
     { lingerUntilEof: true },
   ],
+  // A test run left going in the background: silent from start to end, and
+  // its report is what the agent answers after its result.
+  backgroundRun: [
+    { say: 'tests are running' },
+    { bg: 'start', id: 'tests' },
+    { done: true },
+    { silent: 1_500 },
+    { bg: 'end', id: 'tests' },
+    { sleep: 300 },
+    { say: 'the tests passed' },
+    { done: true },
+    { lingerUntilEof: true },
+  ],
+  // After the answer, the agent is in a long silent command of its own when its
+  // background run ends: the end of the run is not the end of the turn.
+  backgroundEndsMidCommand: [
+    { say: 'tests are running' },
+    { bg: 'start', id: 'tests' },
+    { done: true },
+    { sleep: 200 },
+    { toolStart: 'Bash', id: 'build' },
+    { bg: 'end', id: 'tests' },
+    { silent: 1_500 },
+    { toolEnd: 'build' },
+    { say: 'built and tested' },
+    { done: true },
+    { lingerUntilEof: true },
+  ],
+  // Background work that never ends, after the answer is in.
+  backgroundIdle: [{ say: 'started the server' }, { bg: 'start', id: 'server' }, { done: true }, { lingerUntilEof: true }],
   // A result, and then a process that neither reads its stdin nor takes SIGTERM.
   stubbornResult: [{ ignoreTerm: true }, { say: 'answer' }, { done: true }, { hang: true }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
+  // Code changed, then tested, then a pause long enough to read the row.
+  buildAndTest: [
+    { tool: 'Edit', input: { file_path: 'runtime/x.js' } },
+    { tool: 'Bash', input: { command: 'npm test', description: 'Run the unit tests' } },
+    { sleep: 700 },
+    { say: 'Built and tested.' },
+  ],
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
   // Sends one message to whoever is in $to (the test rewrites the script), then ends.
   sendone: [
@@ -412,6 +449,50 @@ test('a turn runs, streams into the transcript, and completes', async () => {
   assert.ok(published.some((p) => p.event.type === 'text.delta'), 'deltas are published live');
   assert.ok(!(await store.events(id)).some((e) => e.type === 'text.delta'), 'and never stored');
   assert.match((await store.conversation(id)).providerSession, /^fake-/);
+  await runner.close();
+});
+
+test('a chat’s row says what its card says while it runs, and its end line when it is done', async () => {
+  const { store, runner, published } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:buildAndTest', context: { target: 'doc' } });
+  await until(async () => (await store.conversation(id)).activity === 'Testing that it works');
+  // Each sentence reaches the lists with the step that caused it.
+  const edit = published.find((p) => p.event.type === 'tool.call' && p.event.name === 'Edit');
+  assert.equal(edit.summary.activity, 'Writing the changes');
+  const bash = published.find((p) => p.event.type === 'tool.call' && p.event.name === 'Bash');
+  assert.equal(bash.summary.activity, 'Testing that it works');
+  // A new sentence is not news about the chat: it keeps its place in a list.
+  assert.equal(bash.summary.updatedAt, edit.summary.updatedAt);
+
+  await finished(store, turnId);
+  assert.equal((await store.conversation(id)).activity, 'Made the changes');
+  await runner.close();
+});
+
+test('a chat waiting on a question shows the question; one waiting on a permission says it needs your OK', async () => {
+  const { store, runner } = await setup({ capability: 'full' });
+  const q = await store.createConversation({ provider: 'fake' });
+  await runner.send(q.id, { prompt: 'script:question', context: { target: 'garden' } });
+  await until(async () => (await store.events(q.id)).some((e) => e.type === 'ask'));
+  assert.equal((await store.summary(q.id)).activity, 'A or B?');
+
+  const p = await store.createConversation({ provider: 'fake' });
+  await runner.send(p.id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(p.id)).find((e) => e.type === 'ask'));
+  assert.equal((await store.summary(p.id)).activity, 'Needs your OK');
+  await runner.answer(`${p.id}-t1`, ask.requestId, { behavior: 'allow' });
+  await until(async () => (await store.turn(`${p.id}-t1`)).status === 'completed');
+  assert.equal((await store.summary(p.id)).activity, 'All done');
+  await runner.close();
+});
+
+test('a turn that only answered, with no card, keeps saying Answered', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'doc' } });
+  await finished(store, turnId);
+  assert.equal((await store.conversation(id)).activity, 'Answered');
   await runner.close();
 });
 
@@ -1374,7 +1455,7 @@ test('a process that waits for more input after its result is ended by the runne
 });
 
 test('a result while background work is outstanding is not the end of the turn', async () => {
-  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50, backgroundSettleMs: 5_000 } });
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50 } });
   const { id } = await store.createConversation({ provider: 'fake' });
   await runner.send(id, { prompt: 'script:background', context: { target: 'garden' } });
   const turn = await finished(store, `${id}-t1`);
@@ -1382,6 +1463,57 @@ test('a result while background work is outstanding is not the end of the turn',
   assert.equal(turn.error, null);
   const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
   assert.ok(said.includes('the subagent finished'), said.join(' | '));
+  await runner.close();
+});
+
+// A backgrounded command prints nothing while it runs. Ending the turn after
+// any stretch of silence closed the CLI under the run, and killed it.
+test('a silent background run outlives the settle window, and the agent answers after it', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, drainedSettleMs: 1_000, killGraceMs: 50 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundRun', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
+  const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
+  const answered = said.indexOf('the tests passed');
+  assert.ok(answered > said.indexOf('tests are running') && said.indexOf('tests are running') !== -1, said.join(' | '));
+  await runner.close();
+});
+
+test('background work that ends during a silent command of the agent\'s own does not end the turn under it', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, drainedSettleMs: 300, killGraceMs: 50 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundEndsMidCommand', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
+  assert.ok(said.includes('built and tested'), said.join(' | '));
+  await runner.close();
+});
+
+test('background work gone quiet after the answer ends the turn as completed, not stalled', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50, stallMs: 400 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundIdle', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
+  await runner.close();
+});
+
+// The runner cannot end by closing stdin a process it never held stdin for;
+// waiting on its background work for good would leave the turn running forever.
+test('background work gone quiet under a process handed a closed stdin still ends the turn', async () => {
+  const closed = createFakeProvider({ scripts: { idle: [{ say: 'started the server' }, { bg: 'start', id: 'server' }, { done: true }, { hang: true }] } });
+  const spawn = closed.spawn.bind(closed);
+  closed.spawn = (opts) => ({ ...spawn(opts), stdinOpen: false });
+  const { store, runner } = await setup({ providerMap: new Map([['fake', closed]]), limits: { settleMs: 50, killGraceMs: 50, stallMs: 400 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:idle', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'failed');
+  assert.match(turn.error, /stalled/);
   await runner.close();
 });
 

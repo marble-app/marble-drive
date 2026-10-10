@@ -590,6 +590,34 @@ cannot be held, so `drive-home rescue-to <side> --from pc` takes the drive from
 the hub's last upload; the PC's unuploaded minutes stay on its disk. As with the Mac, never run `drive-home` from a conversation
 hosted on either side.
 
+### 30. Background work outlives the answer; a run is never cut off by silence
+
+**Found 2026-10-08.** An agent building a feature on admin-p2 started its test
+runs in the background, answered, and lost every run: "my background test runs
+keep getting cut off between turns". A result with background work still out
+ended the turn after a minute of silence. That window was meant for subagents,
+which print as they go; a backgrounded command prints nothing until it ends, so
+the minute always ran out, stdin closed, and the CLI left and took the run with
+it. The drive's logs on the PC alone held 20 "Background shell command didn't
+finish before the previous session ended" and 16 "Orphaned by a previous Claude
+Code process exit". Separately, one whole unit suite outran the CLI's ten-minute
+ceiling on a single command, which a host setting could not lift: the
+environment allowlist drops `BASH_MAX_TIMEOUT_MS`.
+
+**Chose.** While the CLI reports background work outstanding, no clock ends the
+turn. The CLI picks the conversation up by itself when the work ends, as the
+terminal does (52 times in those logs); the runner then gives it five seconds
+to say so, and none while one of the agent's own tool calls is still running,
+since background work can end in the middle of a silent foreground command. The one thing
+that ends the wait is decision 20's rule: no output and no CPU or I/O in the
+turn's process tree for the stall window, and a turn whose answer is in ends
+then as completed, not failed. A full Claude turn gets `BASH_MAX_TIMEOUT_MS` of
+30 min from the provider, so the allowlist stays as tight as it was.
+
+**Cost.** A message sent while an agent waits on its own background work queues
+behind it, as it does behind any running turn; Interrupt still cuts in, and
+ends the run.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |

@@ -283,6 +283,8 @@
       usageHistory: (weeks) => ask(weeks ? `/agent/usage/history?weeks=${enc(weeks)}` : '/agent/usage/history'),
       workspace: () => ask('/agent/workspace'),
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),
+      /** Every chat's turns since a time (ms), archived ones' too: `{ turns, now }`. */
+      turnsSince: (since, { paths = false } = {}) => ask(`/agent/turns?since=${enc(since)}${paths ? '&paths=1' : ''}`),
       // `turns`: only the last few turns (or the few `before` a turn id), for
       // a reader that draws the end of a long chat first. Without it, all.
       // `after`: only events past that seq, for a reader holding the rest.
