@@ -276,6 +276,13 @@ __ICON__
   .note > h5 { margin-top: 1.15em; font-size: 1em; font-weight: 600; line-height: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; }
   .note > h2 + *, .note > h3 + *, .note > h4 + * { margin-top: .5em; }
   .note > h5 + * { margin-top: .3em; }
+  /* The two smallest are not headings to look for but asides: a hint said
+     under the breath, at the text's own size, in italic and a shade lighter,
+     with a little room either side. The red one is the same aside said aloud,
+     in pure red. */
+  .note > h6 { margin-top: .6em; font-size: 1em; font-weight: 400; font-style: italic; line-height: inherit; color: var(--muted); }
+  .note > h6[data-red] { color: #ff0000; }
+  .note > h6 + * { margin-top: .6em; }
   /* A quote is a block with a square bar down its edge — the bar is drawn, the
      tag is what it is. */
   .note > blockquote { margin-top: .85em; padding-left: 1em; border-left: 3px solid var(--line); color: var(--muted); }
@@ -438,7 +445,7 @@ __ICON__
     /* A heading is no use at the foot of a page, and one line of a paragraph is
        no use on its own at either end of one. */
     .note > * { orphans: 2; widows: 2; }
-    .note > :is(h2, h3, h4, h5), .note > :first-child { break-after: avoid; break-inside: avoid; }
+    .note > :is(h2, h3, h4, h5, h6), .note > :first-child { break-after: avoid; break-inside: avoid; }
   }
 
   /* Reduced motion zeroes the transitions rather than guessing which of them
@@ -938,16 +945,24 @@ __ICON__
         { key: 'h2', tag: 'h3' },
         { key: 'h3', tag: 'h4' },
         { key: 'h4', tag: 'h5' },
+        { key: 'h5', tag: 'h6' },
+        // The red hint is the hint's own tag with one attribute more, since
+        // HTML runs out of headings at six.
+        { key: 'h6', tag: 'h6', mark: 'data-red' },
         { key: 'quote', tag: 'blockquote' },
         { key: 'body', tag: 'p' },
       ];
       const styleNamed = (key) => STYLES.find((s) => s.key === key) ?? STYLES[STYLES.length - 1];
-      const styleOf = (el) => STYLES.find((s) => s.tag.toUpperCase() === el?.tagName)?.key ?? 'body';
+      const MARKS = STYLES.filter((s) => s.mark).map((s) => s.mark);
+      const styleOf = (el) =>
+        STYLES.find((s) =>
+          s.tag.toUpperCase() === el?.tagName &&
+          (s.mark ? el.hasAttribute(s.mark) : !MARKS.some((m) => el.hasAttribute(m))))?.key ?? 'body';
 
       // A paragraph's style is its tag, so this list is also the list of tags
       // the file is allowed to hold in a note; anything else the browser leaves
       // there is turned into one.
-      const BLOCKS = new Set(['P', 'H2', 'H3', 'H4', 'H5', 'BLOCKQUOTE', 'HR']);
+      const BLOCKS = new Set(['P', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'HR']);
 
       const blocks = () => (flow ? [...flow.children] : []);
       const at = (el) => blocks().indexOf(el);
@@ -1233,6 +1248,8 @@ __ICON__
         const el = document.createElement(styleNamed(key).tag);
         if (from) for (const a of marble.clone(from).attributes) el.setAttribute(a.name, a.value);
         el.removeAttribute('class');
+        for (const m of MARKS) el.removeAttribute(m);
+        if (styleNamed(key).mark) el.setAttribute(styleNamed(key).mark, '');
         el.setAttribute(RICH, '');
         el.setAttribute(ID, marble.newId());
         el.innerHTML = '';
@@ -1654,6 +1671,8 @@ __ICON__
         ['##', () => restyle('h2')],
         ['###', () => restyle('h3')],
         ['####', () => restyle('h4')],
+        ['#####', () => restyle('h5')],
+        ['######', () => restyle('h6')],
         ['>', () => restyle('quote')],
         ['-', () => listOn('bullet')],
         ['*', () => listOn('bullet')],
@@ -2467,6 +2486,8 @@ __ICON__
         ['style', 'h2', 'H2', 'Subheading', KEY('Mod', 'Alt', '2') + '  or  ## space'],
         ['style', 'h3', 'H3', 'Small heading', KEY('Mod', 'Alt', '3') + '  or  ### space'],
         ['style', 'h4', 'H4', 'Smallest heading', KEY('Mod', 'Alt', '4') + '  or  #### space'],
+        ['style', 'h5', 'H5', 'Hint', KEY('Mod', 'Alt', '5') + '  or  ##### space'],
+        ['style', 'h6', 'H6', 'Red hint', KEY('Mod', 'Alt', '6') + '  or  ###### space'],
         null,
         ['mark', 'bold', '<b>B</b>', 'Bold', KEY('Mod', 'B')],
         ['mark', 'italic', '<i>I</i>', 'Italic', KEY('Mod', 'I')],
@@ -2970,7 +2991,7 @@ __ICON__
         // character on a Mac, so Ctrl+Alt+1 arrives as "¡" and a document that
         // matched on the character would work on one platform only.
         if (mod && event.altKey) {
-          const digit = /^Digit([0-4])$/.exec(event.code)?.[1];
+          const digit = /^Digit([0-6])$/.exec(event.code)?.[1];
           if (!digit) return;
           event.preventDefault();
           return restyle(digit === '0' ? 'body' : 'h' + digit);
