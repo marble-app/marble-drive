@@ -239,6 +239,10 @@
     .marble-build-line .pics img { height: 48px; max-width: 120px; object-fit: cover; border-radius: 6px; box-shadow: 0 0 0 1px var(--b-line); }
     .marble-build-line .acts { display: flex; gap: 4px; padding-top: 6px; }
     .marble-build-line .done { color: var(--b-muted); font-size: 12px; padding-top: 4px; }
+    .marble-build-line[data-folded] p { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+    .marble-build-line .more { all: unset; cursor: pointer; display: inline-block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--b-muted); border-radius: 4px; }
+    .marble-build-line .more:hover { color: var(--b-ink); }
+    .marble-build-line .more:focus-visible { outline: 2px solid var(--b-mark); outline-offset: 2px; }
     .marble-build-dots { display: inline-flex; gap: 3px; padding: 4px 0; }
     .marble-build-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--b-mark); animation: marble-build-dot 1.2s ${EASE} infinite; }
     .marble-build-dots i:nth-child(2) { animation-delay: .15s; }
@@ -1000,10 +1004,14 @@
      *  draw them: yours, and the app's, signed with its name and its tile. An
      *  answer that offers a change carries Build that and Not now. */
     const tileOf = () => (name.trim().match(/[\p{L}\p{N}]/u)?.[0] ?? '·').toUpperCase();
+    // A long line (most often something pasted) is folded to a few lines
+    // with Show all; which are open is kept across redraws, in this tab.
+    const unfolded = new Set();
+    const isLong = (text) => String(text ?? '').length > 420 || String(text ?? '').split('\n').length > 7;
     function drawLines(box, kept) {
       // A question and its answer, not a chat: what you asked, slanted and
       // faded; what the app says, plain under it. No faces and no names.
-      for (const line of kept?.thread ?? []) {
+      (kept?.thread ?? []).forEach((line, i) => {
         const row = h('div', 'marble-build-line');
         row.dataset.who = line.who;
         row.setAttribute('aria-label', line.who === 'agent' ? `${name} answers` : 'You asked');
@@ -1025,6 +1033,22 @@
           dots.append(h('i'), h('i'), h('i'));
           row.append(dots);
         } else row.append(h('p', '', line.text));
+        if (!line.pending && isLong(line.text)) {
+          const key = `${kept.id}:${i}`;
+          row.toggleAttribute('data-folded', !unfolded.has(key));
+          const more = h('button', 'more', unfolded.has(key) ? 'Show less' : 'Show all');
+          more.type = 'button';
+          more.setAttribute('aria-expanded', String(unfolded.has(key)));
+          more.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const open = !unfolded.has(key);
+            if (open) unfolded.add(key); else unfolded.delete(key);
+            row.toggleAttribute('data-folded', !open);
+            more.textContent = open ? 'Show less' : 'Show all';
+            more.setAttribute('aria-expanded', String(open));
+          });
+          row.append(more);
+        }
         if (line.offer) {
           if (line.offer.taken === null) {
             const acts = h('div', 'acts');
@@ -1041,7 +1065,7 @@
           }
         }
         box.append(row);
-      }
+      });
     }
     const takeOffer = (id, take) => settled(ask('POST', route('/offer'), { id, take }));
     /** The box a reply is written in, as a note is: words, pictures pasted
@@ -1206,6 +1230,9 @@
       // One box for the thread, kept across redraws, so what is half written
       // (and pasted) survives them.
       const writing = threadWrite?.node.contains(document.activeElement);
+      // Opened, or read to the end, it shows the latest line, as a chat does.
+      const old = thread.querySelector('.lines');
+      const atEnd = focus || !old || thread.hidden || old.scrollHeight - old.scrollTop - old.clientHeight < 24;
       thread.replaceChildren();
       const top = h('div', 'top');
       if (kept) {
@@ -1227,6 +1254,8 @@
       const box = h('div', 'lines');
       drawLines(box, kept);
       thread.append(box);
+      if (atEnd) requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
+      else if (old) box.scrollTop = old.scrollTop;
       if (!threadWrite || threadWrite.for !== threadFor) {
         const id = threadFor;
         threadWrite = composer({
