@@ -238,6 +238,18 @@ test('sign out revokes the session and walks the drive’s leave; sign out every
   assert.equal((await two.go('/account')).status, 303, 'everywhere means the other browser too');
 });
 
+test('without the door sprite, naming a drive says it can’t be made yet, and spends nothing', async () => {
+  const w = world({ DOOR_SPRITE_URL: '' });
+  const code = await w.invite();
+  const b = w.b();
+  await signInWith(b, 'google', { invite: code, fake: w.fake });
+  const page = await b.go('/name');
+  assert.equal(page.status, 503);
+  assert.match(await text(page), /Bryan hasn’t switched on making drives/);
+  assert.equal((await b.form('/name', { name: 'ana' })).status, 503);
+  assert.equal((await w.adminCall('GET', '/drives')).data.drives.length, 0);
+});
+
 test('a claim invite hands an existing drive over at sign-in, without a sprite being made', async () => {
   const w = world({ DOOR_SPRITE_URL: 'https://door-sprite.example' });
   const code = await w.invite({ drive: 'irene', sprite: 't-irene' });
