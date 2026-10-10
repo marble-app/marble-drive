@@ -59,8 +59,9 @@ const URL_ATTRS = new Set([
 /** Attributes refused outright, whatever their value. */
 const BLOCKED_ATTRS = new Set([
   'srcdoc', 'action', 'formaction', 'http-equiv', 'is',
-  // An automation: pressing it starts one of the owner's agents with its brief.
-  'data-marble-run', 'data-marble-scope', 'data-marble-on',
+  // An automation: pressing it starts one of the owner's agents with its brief,
+  // and one on a schedule starts them by itself unless it is held.
+  'data-marble-run', 'data-marble-scope', 'data-marble-on', 'data-marble-paused',
   // Identity is the file's to give (assignId), never an attribute to rewrite.
   'data-marble-id',
 ]);

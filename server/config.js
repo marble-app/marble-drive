@@ -134,6 +134,9 @@ export function loadConfig(env = process.env) {
     dayZone: str('MARBLE_DRIVE_DAY_TZ', 'America/Los_Angeles'),
     dayPrompt: str('MARBLE_DRIVE_DAY_PROMPT', '/my-day'),
     dayTarget: str('MARBLE_DRIVE_DAY_TARGET', null),
+    // Automations whose data-marble-on is a schedule run on it, in dayZone
+    // (server/alive.js). On unless turned off.
+    alive: bool('MARBLE_DRIVE_ALIVE', true),
 
     // A document that carries megabytes of base64 is the case blobs exist for,
     // and `marble-drive weigh` is how you find out before deciding.
