@@ -35,10 +35,28 @@ With a secret set:
 The comparison is constant-time, over hashes of both sides so a length mismatch
 leaks nothing either.
 
-**This is thrown away at G2.** It is one shared secret for one owner. Accounts,
-capability URLs and per-document policy are the next generation's work, and the
-vision is explicit that building identity now would be building it before
-knowing what sharing needs of it.
+**The door, beside it** ([ACCOUNTS.md](ACCOUNTS.md)). People sign in at
+`marbledrive.app`, and the edge hands their browser a pass for the drive,
+signed with Ed25519, which the drive checks with public keys only
+(`server/door.js`). Three settings turn it on for a drive:
+`MARBLE_DOOR_KEYS`, `MARBLE_DOOR_NAME` and `MARBLE_DOOR_OWNER`. With them:
+
+- the pass opens the drive as the passphrase's cookie does;
+- a browser without either, through a tunnel or the edge, is sent to
+  `https://marbledrive.app/enter`; at `127.0.0.1` it still gets the form;
+- the form offers **Sign in with Marble Drive** above the passphrase.
+
+`MARBLE_DRIVE_GATE=tools` then takes the passphrase out of the browser: the
+form, `POST /gate` and the passphrase's cookie are refused to any request
+that came through `cloudflared` (`Cf-Ray`), the edge (`X-Forwarded-Host`) or
+another proxy (`X-Forwarded-For`, `Forwarded`). It still works at
+`127.0.0.1`, as `Authorization: Bearer` for scripts, and as the agent's
+browser pass. Without the door settings `tools` changes nothing, so it can
+never lock a drive's only person out.
+
+The passphrase was always meant to go at G2; the spec keeps it as the key for
+scripts and the desk instead, and moves each drive's browsers off it one at a
+time.
 
 ## From your own devices: Tailscale Serve
 

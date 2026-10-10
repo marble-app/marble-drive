@@ -32,8 +32,14 @@ this is the map.
 
 ## G2 — isolation, accounts, sharing (in progress)
 
-Being built on `worktree-multi-tenant-g2`. The plan and the disk layout are in
-[ACCOUNTS.md](ACCOUNTS.md).
+**Superseded for accounts** by
+[the accounts and sign-in spec](superpowers/specs/2026-10-10-accounts-and-sign-in-design.md)
+(2026-10-10): identity lives at `marbledrive.app`, in the Worker, and a sign-up
+makes a sprite of its own rather than a store on a shared host, because an
+agent has a real shell. Phase 1 of it is in [ACCOUNTS.md](ACCOUNTS.md). The
+`k-acct`, `k-tenant` and `k-quota` rows below describe the earlier plan;
+`k-sess`'s `sameOrigin` is still the drive's CSRF check, and `k-orig` is still
+the precondition for anyone opening someone else's drive.
 
 | card | | where |
 |---|---|---|

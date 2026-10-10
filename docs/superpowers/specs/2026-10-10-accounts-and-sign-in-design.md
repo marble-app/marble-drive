@@ -1,7 +1,9 @@
 # Accounts and sign-in: anyone can sign up and get a drive of their own
 
-2026-10-10. Status: design, written autonomously for the owner's review. Not
-built. The plan for phase 1 is
+2026-10-10. Status: design, written autonomously for the owner's review.
+Phase 1 is built on the `accounts` branch and is not switched on: nothing
+changes until the settings in [`../../ACCOUNTS.md`](../../ACCOUNTS.md) are made.
+The plan for phase 1 is
 [`../plans/2026-10-10-accounts-phase-1.md`](../plans/2026-10-10-accounts-phase-1.md).
 A readable copy for the owner is the drive page
 `Notes and Sketches/Drive and Sharing/Accounts and sign-in`.
@@ -441,6 +443,24 @@ them; whether to delete `server/accounts.js` is a cleanup for after phase 1.
   an error.
 
 ## Open questions for Bryan
+
+Phase 1 was built without answers, taking the proposals below. Each is
+**defaulted, pending Bryan**: one setting or one line of words to change, not
+a rebuild.
+
+| # | Defaulted, pending Bryan | Where it lives |
+|---|---|---|
+| 1 | Invite links only, plus Ask for access that you approve. No domain sign-up | `worker/src/door/directory.js` `identity` |
+| 2 | `MAX_DRIVES` = 10; drives handed over by a claim invite don't count. Budgets wait for phase 2 | `worker/wrangler.toml` |
+| 3 | Irene and Sam stay on your Claude login; phase 1 changes nothing about agents | nothing to change |
+| 4 | The person chooses the name, checked as typed. The testers' public names are `irene`, `sam`, `sangho`, `peiling`, with `tbryan` for t-bryan and `bryan` as it is; the Directory keeps those for them until a claim invite hands each over | `worker/src/door/names.js` `KEPT_FOR_CLAIM` |
+| 5 | One drive per person. Your account (role `owner`) is exempt, since claim invites hand you both `bryan` and `tbryan` | `directory.js` `claimDrive` |
+| 6 | Two-step required for you, offered to others: phase 2. Phase 1 has no second factor at all | phase 2 |
+| 7 | The sign-up page says you can reach the machine a drive runs on and nobody else can open it unless they share a page; `/privacy` lists what is kept and promises nothing more | `worker/src/door/pages.js` `nameDrive`, `privacy` |
+| 8 | No mail service chosen; nothing in phase 1 sends mail | phase 3 |
+| 9 | `/terms`: no mining, scraping at scale, bulk mail or harm, and you may hold a drive that does and say why; agents run on the person's own account; no warranty. Wording yours to change | `pages.js` `terms` |
+
+The questions as they were asked:
 
 1. **Who should be able to sign up now?** Invite links only (recommended), or
    invite links plus anyone with a Google account at a chosen domain (for
