@@ -26,6 +26,17 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 export const overHttps = (req) =>
   LOOPBACK.has(req?.socket?.remoteAddress) && req.headers?.['x-forwarded-proto'] === 'https';
 
+/** A request made on this machine, not passed on by something in front of
+ *  it: loopback, and none of the headers a tunnel (`Cf-Ray`), the edge
+ *  (`X-Forwarded-Host`) or another proxy (`X-Forwarded-For`, `Forwarded`)
+ *  adds. Where the passphrase still opens a drive in `tools` mode. */
+export const isLocal = (req) =>
+  LOOPBACK.has(req?.socket?.remoteAddress) &&
+  !req.headers?.['x-forwarded-host'] &&
+  !req.headers?.['cf-ray'] &&
+  !req.headers?.['x-forwarded-for'] &&
+  !req.headers?.forwarded;
+
 const equal = (a, b) => {
   const left = Buffer.from(a ?? '', 'utf8');
   const right = Buffer.from(b ?? '', 'utf8');
@@ -96,10 +107,12 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
 
   /** Is this request allowed through? An open host says yes to everything, and
    *  says so at boot rather than quietly. */
-  function allows(req) {
+  function allows(req, { cookie = true } = {}) {
     if (open) return true;
     const jar = cookies(req.headers.cookie);
-    if (valid(jar[cookieName])) return true;
+    // `cookie: false` is a drive in `tools` mode, asked from outside: the
+    // passphrase has left the browser there, and only a script's bearer counts.
+    if (cookie && valid(jar[cookieName])) return true;
     // A bearer token is the same secret by another name, for a script, a
     // backup job, or curl. Not a second mechanism — the same one, unwrapped.
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');

@@ -26,7 +26,8 @@ import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, merge
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten } from './flatten.js';
 import { createTouched } from './touched.js';
-import { createGate, overHttps, returnPath } from './gate.js';
+import { createDoor } from './door.js';
+import { createGate, isLocal, overHttps, returnPath } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
@@ -255,6 +256,20 @@ export async function createDrive(config, { log = console, agentProviders = null
     days: config.sessionDays,
     secure: config.secureCookie,
   });
+  // The door (server/door.js): a pass from marbledrive.app opens the drive
+  // beside the passphrase. Not configured without its three settings, and then
+  // nothing below changes. `strict` is `tools` mode with a door to send people
+  // to: the passphrase is then for scripts and the desk, not a browser outside.
+  const door = createDoor({ keys: config.doorKeys, name: config.doorName, owner: config.doorOwner });
+  const strict = config.gateMode === 'tools' && door.configured && !gate.open;
+  if (config.gateMode === 'tools' && !strict) {
+    log.info?.('[drive] MARBLE_DRIVE_GATE=tools does nothing without the door settings (MARBLE_DOOR_KEYS, _NAME, _OWNER) and a passphrase');
+  }
+  /** The owner: the door's pass, or the passphrase where it still counts. */
+  const isOwner = (req) => door.allows(req) || gate.allows(req, { cookie: !strict || isLocal(req) });
+  /** Where a browser that is not the owner is sent to sign in. */
+  const signInAt = (req) =>
+    door.configured && (strict || !isLocal(req)) ? door.enterUrl(req) : `/gate?to=${encodeURIComponent(req.url)}`;
   // Links to one page each, for people who do not have the passphrase
   // (server/shares.js). The gate still decides who the owner is.
   const shares = createShares({
@@ -846,7 +861,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // link's grant for the one document this request is about; everything
       // a link does not open is turned away here, before any route runs.
       let visit = null;
-      if (!gate.allows(req)) {
+      if (!isOwner(req)) {
         const grants = await shares.visitor(req);
         const asked = grants ? await visitorMay(req, url, route, grants) : null;
         if (asked?.redirect) return send(res, 302, '', { Location: asked.redirect });
@@ -856,10 +871,13 @@ export async function createDrive(config, { log = console, agentProviders = null
           const lapsed = !grants && shares.carries(req);
           if ((req.headers.accept ?? '').includes('text/html')) {
             if (lapsed) return linkIsOff(res);
-            return send(res, 302, '', { Location: `/gate?to=${encodeURIComponent(req.url)}` });
+            return send(res, 302, '', { Location: signInAt(req) });
           }
           if (lapsed) return json(res, 403, { error: 'This link was turned off' });
           if (grants) return json(res, 403, { error: asked?.error ?? 'a shared link opens one page, not the drive' });
+          if (door.configured && (strict || !isLocal(req))) {
+            return json(res, 401, { error: 'this drive is closed', hint: `sign in at ${door.enterUrl(req)}, or send the secret as a bearer token` });
+          }
           return json(res, 401, { error: 'this drive is closed', hint: 'POST /gate with the secret' });
         }
         visit = asked.grant;
@@ -1621,7 +1639,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     const quiet = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' };
     if (!share || !(await store.has(share.path))) return linkIsOff(res);
     const to = `/a/${encodeURIComponent(share.path)}`;
-    if (gate.allows(req)) return send(res, 302, '', { ...quiet, Location: to });
+    if (isOwner(req)) return send(res, 302, '', { ...quiet, Location: to });
     // When it was last used is the owner's to read; failing to note it is no
     // reason to turn the visitor away.
     await shares.opened(share.id).catch((err) => log.error(`[share] could not note an open: ${err.message}`));
@@ -1641,6 +1659,19 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   function gateRoute(req, res, url) {
     if (gate.open) return send(res, 302, '', { Location: '/' });
+    // `tools` mode: the passphrase has left the browser. The form is still
+    // here at the desk (127.0.0.1, not through a tunnel); from anywhere else
+    // it is refused, and the page says where to sign in instead.
+    if (strict && !isLocal(req)) {
+      if (req.method === 'POST') return json(res, 403, { error: 'this drive opens with Marble Drive sign-in', hint: door.enterUrl({ url: '/' }) });
+      const enter = escapeHtml(door.enterUrl({ url: returnPath(url.searchParams.get('to')) }));
+      return html(res, 403, `<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
+<link rel="icon" href="${iconUri('drive')}">
+<style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;padding:0 24px;background:#fafaf7;color:#111111}p{color:#5a5a5a}a{color:#4f6070}
+@media (prefers-color-scheme: dark){body{background:#161616;color:#ededed}p{color:#a3a3a3}a{color:#9dc0dc}}</style>
+<div><p>This drive opens with your Marble Drive sign-in.</p><p><a href="${enter}">Sign in with Marble Drive</a></p></div>`, { 'Cache-Control': 'no-store' });
+    }
 
     if (req.method === 'POST') {
       return readJson(req, 4096)
@@ -1655,15 +1686,18 @@ export async function createDrive(config, { log = console, agentProviders = null
     // the host having an interface, which is the thing the Drive exists not to
     // need — but a door has to be openable before there is a document to open.
     // `to` is untrusted: kept only as a path on this host, and handed to the
-    // page's fixed script as data, never written into script.
+    // page's fixed script as data, never written into script. With the door
+    // configured, signing in there comes first and the passphrase second.
     const to = escapeHtml(returnPath(url.searchParams.get('to')));
+    const enter = door.configured ? escapeHtml(door.enterUrl({ url: returnPath(url.searchParams.get('to')) })) : null;
     return html(res, 200, `<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
 <link rel="icon" href="${iconUri('drive')}">
 <style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#fafaf7;color:#111111}
 form{display:flex;gap:.5rem}input,button{font:inherit;padding:.6rem .8rem;border:1px solid #ddd9cf;border-radius:8px}
-button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{color:#5a5a5a}</style>
-<div><p>This drive is closed.</p>
+button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{color:#5a5a5a}
+.door{display:inline-block;padding:.6rem .9rem;border:1px solid #ddd9cf;border-radius:8px;color:#111111;text-decoration:none;font-weight:500}</style>
+<div>${enter ? `<p><a class="door" href="${enter}">Sign in with Marble Drive</a></p><p>Or use the drive’s passphrase.</p>` : '<p>This drive is closed.</p>'}
 <form data-to="${to}">
 <input name="secret" type="password" placeholder="Secret" autofocus><button>Open</button></form></div>
 <script>const f=document.querySelector('form');f.addEventListener('submit',(e)=>{e.preventDefault();fetch('/gate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:f.secret.value})}).then((r)=>r.ok?location.replace(f.dataset.to):f.secret.select())})</script>`);
@@ -1917,6 +1951,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     ledger,
     channels,
     gate,
+    door,
     oplog,
     writeOps,
     genui,
