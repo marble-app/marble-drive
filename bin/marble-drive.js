@@ -13,6 +13,7 @@
 //   marble-drive starters         what you can make
 //   marble-drive genui space <doc>       is this document an app space? every issue, or ok
 //   marble-drive genui decide <doc>      let Jev position it — --dry to look without writing, --verbose for the distributions
+//   marble-drive provisioner      the door sprite: make the drives people asked for at marbledrive.app
 //
 // Every one of these goes through the same store the host does, which is the
 // point: a command and a request are two callers of one seam, not two
@@ -39,6 +40,7 @@ import { createLeaseClient } from '../server/hub/lease-client.js';
 import { holdPath, loadHubSettings } from '../server/hub/settings.js';
 import { scheduleUploads, touchOnWrites } from '../server/hub/schedule.js';
 import { createKeepAwake } from '../server/keep-awake.js';
+import { createProvisioner, scriptRunner } from '../server/provisioner.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
 
@@ -93,8 +95,52 @@ switch (command) {
   case 'apps':
     await appsCommand();
     break;
+  case 'provisioner':
+    await provisioner();
+    break;
   default:
-    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui, apps`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui, apps, provisioner`);
+}
+
+// ---------------------------------------------------------------- provisioner
+
+/** The door sprite (server/provisioner.js). Its settings: DOOR_URL (the door,
+ *  https://marbledrive.app by default), DOOR_ADMIN_TOKEN, MARBLE_DOOR_KEYS (the
+ *  public keys every new drive is given), and PORT. */
+async function provisioner() {
+  const adminToken = process.env.DOOR_ADMIN_TOKEN;
+  const keys = process.env.MARBLE_DOOR_KEYS;
+  if (!adminToken) fail('provisioner: set DOOR_ADMIN_TOKEN');
+  if (!keys) fail('provisioner: set MARBLE_DOOR_KEYS');
+  const { parseDoorKeys } = await import('../server/door.js');
+  try {
+    parseDoorKeys(keys);
+  } catch (err) {
+    fail(`provisioner: ${err.message}`);
+  }
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'marble-door-'));
+  const keysFile = path.join(dir, 'door-keys');
+  fs.writeFileSync(keysFile, `${keys}\n`, { mode: 0o600 });
+  const script = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'tools', 'sprite-provision.sh');
+  const runner = scriptRunner({ script, keysFile, org: process.env.MARBLE_PROVISION_ORG || 'marble-drive' });
+  // A sprite pauses about a second after its last connection; a drive takes
+  // minutes to make, so the work holds it up until it is done.
+  let p = null;
+  const awake = createKeepAwake({ socket: config.spriteSocket, busy: () => Boolean(p?.busy()), name: 'marble-door' });
+  awake.start();
+  p = createProvisioner({
+    directoryUrl: process.env.DOOR_URL || 'https://marbledrive.app',
+    adminToken,
+    run: (job, onLine) => {
+      awake.nudge();
+      return runner(job, onLine);
+    },
+  });
+  const port = Number(process.env.PORT || 8080);
+  await p.serve(port);
+  console.log(`[door] provisioner listening on ${port}; poke it at POST /poke`);
+  p.drain().catch((err) => console.error(`[door] ${err.message}`));
 }
 
 // ---------------------------------------------------------------------- serve
