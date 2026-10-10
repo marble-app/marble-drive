@@ -6,8 +6,8 @@
 // a change does not take, and, for a link that only reads, a page that does
 // not pretend to be editable in the first place.
 //
-// It holds no state of its own: the level comes from its script tag, and the
-// page is the file's.
+// It holds one kind of state of its own: where this person is looking (below).
+// The level comes from its script tag, and the rest of the page is the file's.
 
 (() => {
   const script = document.currentScript;
@@ -134,6 +134,106 @@
     if (document.visibilityState === 'visible') check();
   });
 
+  // --------------------------------------------------------------- looking
+  //
+  // Where a person is in the page (the step, the tab, the open note, a row
+  // expanded) is looking, not changing, and every level may do it. A page says
+  // an op is looking with marble.op(op, { look: true }), or by the control that
+  // files it: a step, an expand and a choose are looking unless they carry
+  // data-marble-look="off" (a choose that records an answer), and a toggle is
+  // looking only when it carries data-marble-look. Saying it by the control is
+  // also what makes a page whose affordances predate the flag work.
+  //
+  // The owner's tab files a look like any change (the carrier ignores the
+  // flag), so a link opens where the owner left it. This tab keeps it and sends
+  // nothing: no level refuses it, nothing snaps back, and nobody else moves.
+  // It lasts as long as the tab; a reload opens where the file is.
+
+  const LOOKS = [
+    ['data-marble-step', true],
+    ['data-marble-expand', true],
+    ['data-marble-choose', true],
+    ['data-marble-toggle', false],
+  ];
+  // The attribute a control sets (lib/affordances.js): `data-x:1:7` for a
+  // step, `data-x:on|off` for a toggle, `data-x` for a choose.
+  const nameOf = (control, kind) =>
+    kind === 'data-marble-expand' ? 'data-expanded' : (control.getAttribute(kind) || '').split(':')[0].trim();
+  const targetOf = (control) => {
+    const selector = control.getAttribute('data-marble-of');
+    try {
+      return selector ? control.closest(selector) : control;
+    } catch {
+      return null;
+    }
+  };
+
+  const looking = (op, flag) => {
+    if (flag === true) return true;
+    if (flag === false || op?.type !== 'setAttr') return false;
+    const target = window.marble?.byId(op.id);
+    if (!target) return false;
+    for (const [kind, byDefault] of LOOKS) {
+      for (const control of document.querySelectorAll(`[${kind}]`)) {
+        if (nameOf(control, kind) !== op.name || targetOf(control) !== target) continue;
+        const says = control.getAttribute('data-marble-look');
+        return says === null ? byDefault : says !== 'off';
+      }
+    }
+    return false;
+  };
+
+  // What this tab is looking at, as the attributes that say so. Whatever puts
+  // the page back to the file (someone else's change, a refusal, an edit on
+  // disk) is followed by these going back on, so the visitor stays put.
+  const looks = new Map();
+  const keep = (op) => {
+    if (op.type === 'setAttr') looks.set(`${op.id}\n${op.name}`, op);
+  };
+  const lookAgain = () => {
+    for (const { id, name, value } of looks.values()) {
+      const el = window.marble?.byId(id);
+      if (!el || el.getAttribute(name) === value) continue;
+      if (value === null) el.removeAttribute(name);
+      else el.setAttribute(name, value);
+    }
+  };
+
+  // Anything else a page's own script would file goes to the host as it
+  // always did, except from a link that only reads: that is dropped here, and
+  // the page is put back to what the file says. The host would refuse it
+  // anyway; this saves the round trip and says why at once.
+  let patching = 0;
+  const wrap = (marble) => {
+    if (!marble || marble.shareWrapped) return;
+    marble.shareWrapped = true;
+    const send = marble.op;
+    const record = marble.record;
+    marble.op = (op, options = {}) => {
+      if (looking(op, options?.look)) {
+        keep(op);
+        return;
+      }
+      if (ROLE !== 'view') {
+        send(op, options);
+        return;
+      }
+      if (recent()) say(READ_ONLY);
+      clearTimeout(patching);
+      patching = setTimeout(() => marble.patch?.(), 120);
+    };
+    // Undo is for changes. A step undone here would be filed, so a look is
+    // never made one.
+    marble.record = (entry, options) => {
+      const ops = [entry?.redo].flat().filter(Boolean);
+      if (ops.length && ops.every((op) => looking(op))) return;
+      record(entry, options);
+    };
+    marble.register?.(lookAgain);
+  };
+  if (window.marble) wrap(window.marble);
+  else addEventListener('marble:ready', (event) => wrap(event.detail), { once: true });
+
   // ------------------------------------------------------------- read only
 
   if (ROLE !== 'view') return;
@@ -158,20 +258,4 @@
   addEventListener('click', (event) => {
     if (event.target?.closest?.('input[type="checkbox"], input[type="radio"]')) refuse(event);
   }, { capture: true });
-
-  // Anything a page's own script would file is dropped here, and the page is
-  // put back to what the file says. The host would refuse it anyway; this
-  // saves the round trip and says why at once.
-  let patching = 0;
-  const wrap = (marble) => {
-    if (!marble || marble.shareWrapped) return;
-    marble.shareWrapped = true;
-    marble.op = () => {
-      if (recent()) say(READ_ONLY);
-      clearTimeout(patching);
-      patching = setTimeout(() => marble.patch?.(), 120);
-    };
-  };
-  if (window.marble) wrap(window.marble);
-  else addEventListener('marble:ready', (event) => wrap(event.detail), { once: true });
 })();

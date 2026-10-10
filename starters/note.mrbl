@@ -915,9 +915,11 @@ __ICON__
 
       const noteEls = () => [...notes.children].filter((el) => el.classList.contains('note'));
       const noteById = (id) => (id ? noteEls().find((el) => marble.id(el) === id) ?? null : null);
-      // The open note, as the file has it — and the first one when the file says
+      // The open note, as the page has it — and the first one when it says
       // nothing, so a note opened straight off the disk opens on something.
-      const current = () => noteById(app.getAttribute(CURRENT)) ?? noteEls()[0] ?? null;
+      // It is kept on the notes; a notebook made before that kept it on <body>.
+      const current = () =>
+        noteById(notes.getAttribute(CURRENT) ?? app.getAttribute(CURRENT)) ?? noteEls()[0] ?? null;
       // A note marked data-view is a page to read, not text to type: it is
       // never made editable, never normalised and never filed from, so the UI
       // inside it is whatever its markup says and nothing here rewrites it.
@@ -2011,16 +2013,17 @@ __ICON__
         if (!el) return;
         if (el !== flow) {
           settle();
-          // Which note is open is a fact about the document, so it is written
-          // down — the note you were in is the one you come back to. It records
-          // no step of undo, though: looking at something else is not an edit,
-          // and Ctrl+Z belongs to the text. A person who wants the other note
+          // Which note is open is looking, not an edit, so it is filed as
+          // looking: the owner's is written down, so the note you were in is
+          // the one you come back to, and someone in by a share link keeps
+          // theirs in their own tab. It records no step of undo either:
+          // Ctrl+Z belongs to the text. A person who wants the other note
           // back clicks it.
           const id = marble.id(el);
-          const mine = marble.id(app);
-          if (id && mine && app.getAttribute(CURRENT) !== id) {
-            app.setAttribute(CURRENT, id);
-            marble.op({ type: 'setAttr', id: mine, name: CURRENT, value: id }, { immediate: true });
+          const mine = marble.id(notes);
+          if (id && mine && notes.getAttribute(CURRENT) !== id) {
+            notes.setAttribute(CURRENT, id);
+            marble.op({ type: 'setAttr', id: mine, name: CURRENT, value: id }, { immediate: true, look: true });
           }
           reopen();
           sheet.scrollTo({ top: 0 });
@@ -3100,6 +3103,16 @@ __ICON__
       // text editor, another window's undo, an agent's op. What comes back from
       // the file is the file's idea of these notes, so the shadow and the open
       // note are both taken from it again rather than kept from before.
+      // A share link's tab puts its own open note back once the page has been
+      // put back to the file, after the reopen below has read the file's:
+      // follow it.
+      new MutationObserver(() => {
+        if (current() !== flow) {
+          drawn = null;
+          reopen();
+        }
+      }).observe(notes, { attributes: true, attributeFilter: [CURRENT] });
+
       marble.register(() => {
         drawn = null;
         reopen();
