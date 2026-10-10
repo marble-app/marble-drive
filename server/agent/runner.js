@@ -61,6 +61,10 @@ const CLOSE_GRACE_MS = 5_000;
 const SETTLE_MS = 500;
 const DRAINED_SETTLE_MS = 5_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
+// A prompt said aloud, whose reply will be read aloud (server/agent/voice).
+// The host still cleans what it speaks (speakable.js); this asks for words
+// that need no cleaning.
+const SPOKEN_NOTE = "They said this aloud, and your reply will be read aloud to them. Start your reply at once. Keep it to one to three short sentences that sound right spoken: no lists, headings, tables, code, links, file paths or ids. Say what you did or found and anything you need from them; the page and the chat already show the work, so don't walk through it. A transcription can mishear a name: if a word doesn't fit, take the nearest document or term that does.";
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
 export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, browserPass = null, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, drawProgress = null, awake = createAwakeClock(), progress = createProgress() }) {
@@ -275,6 +279,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         `Sent from Marble Drive. The person was viewing the document "${viewing}" (on disk at ${path.join(driveRoot ?? '', `${viewing}.mrbl`)}) when they sent this. Marble's document tools can read and edit it; use them only if the request is about that document.`,
       );
     }
+    if (context.spoken) lines.push(`- ${SPOKEN_NOTE}`);
     if (context.selectionSource) lines.push('- They selected these elements:', '', context.selectionSource);
     // What the page added to the ask without showing it, and the Marble way
     // for any ask that builds (marble-way.js). Neither is part of the message
@@ -346,6 +351,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
     const frozen = { viewing: context.viewing ?? null, target: context.target, selection: context.selection ?? [] };
     if (context.surface === 'chat') frozen.surface = 'chat';
+    if (context.spoken === true) frozen.spoken = true;
     if (typeof context.brief === 'string' && context.brief.trim()) frozen.brief = context.brief.trim();
     const also = [...new Set((Array.isArray(context.also) ? context.also : []).map((item) => String(item).trim()).filter(Boolean))]
       .filter((doc) => doc !== frozen.target && doc !== frozen.viewing);
@@ -461,6 +467,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       type: 'user',
       text: turn.prompt,
       context: { viewing: frozen.viewing, target: frozen.target, selection: frozen.selection, also: frozen.also ?? [] },
+      ...(frozen.spoken ? { spoken: true } : {}),
       ...(from ? { from } : {}),
     });
     await emit(turn, { type: 'turn.queued', dispatch: turn.dispatch });
