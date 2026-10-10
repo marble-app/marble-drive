@@ -1,12 +1,12 @@
 // The offer: what a fresh callout card shows before anything is sent.
 //
 // Asking starts with Marble saying what the thing could become, not with an
-// empty box. So a new card is one card: the input on top, then the four
+// empty box. So a new card is one card: the input on top, then the five
 // actions as a row of words — Try variations, Automate it, Make it
-// interactive, Sketch it — then two suggestions written for this element,
-// then one faint line of help.
+// interactive, Make it visual, Sketch it — then two suggestions written for
+// this element, then one faint line of help.
 //
-// All four actions stay in sight, in words, so there is nothing to decode and
+// All five actions stay in sight, in words, so there is nothing to decode and
 // no menu to open (v2, Notes and Sketches/Ask at Anything). Pointing at one
 // puts what it would ask for this thing in the empty line, in grey. Pressing
 // it drafts that, with the idea after the colon selected so typing replaces
@@ -30,6 +30,8 @@
     variations: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="4" width="8" height="7" rx="2"/><rect x="13" y="4" width="8" height="7" rx="2"/><rect x="3" y="13" width="8" height="7" rx="2"/><rect x="13" y="13" width="8" height="7" rx="2"/></svg>',
     automate: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>',
     interactive: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5v-2a1.5 1.5 0 0 1 3 0V12"/><path d="M14 11a1.5 1.5 0 0 1 3 0v1.5"/><path d="M17 12a1.5 1.5 0 0 1 3 0v3a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-4.9-2.6L5 15.5a1.6 1.6 0 0 1 2.6-1.9L8 14"/></svg>',
+    // Make it visual: a small chart, drawn as the other actions are.
+    visual: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="12" width="4.5" height="8.5" rx="1.5"/><rect x="9.75" y="3.5" width="4.5" height="17" rx="1.5"/><rect x="16" y="8.5" width="4.5" height="12" rx="1.5"/></svg>',
     sketch: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M7.5 15c2.2-4.6 3.8-6.9 4.8-6.9 1.5 0 .3 6.9 1.8 6.9 1 0 1.9-1.4 2.6-4.2"/></svg>',
     send: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
     // A suggestion's mark: a drawn corner arrow, so it weighs what the action
@@ -40,24 +42,25 @@
     ['variations', 'Try variations'],
     ['automate', 'Automate it'],
     ['interactive', 'Make it interactive'],
+    ['visual', 'Make it visual'],
     ['sketch', 'Sketch it'],
   ];
 
   // Until the host writes suggestions for this element (POST /agent/offer),
   // these stand in, by kind. They are drafts either way.
   const DEFAULTS = {
-    row: { sugs: ['Add a one-line takeaway', 'Link it to its source'], auto: 'a Fill button that looks up what is missing', interactive: 'click to change its status', axes: 'as a card, compact, or title first' },
-    cell: { sugs: ['Explain this value', 'Link it to its source'], auto: 'fill this in from the rest of the row', interactive: 'click to edit it in place', axes: 'shorter, plainer, or with a note' },
-    table: { sugs: ['Sort it by what matters most', 'Add a column saying why each one matters'], auto: 'a Fill button on every row with gaps', interactive: 'sort by clicking a header', axes: 'as a table, cards, or a board' },
-    heading: { sugs: ['A shorter title', 'Add a line under it that says what this is for'], auto: 'keep it in step with what the page is about', interactive: 'click to fold what is under it', axes: 'shorter, bolder, or quieter' },
-    paragraph: { sugs: ['Tighten it', 'Turn it into a short list'], auto: 'keep it current with the rest of the page', interactive: 'show the detail only when asked', axes: 'plainer, shorter, or warmer' },
-    list: { sugs: ['Order it by what matters', 'Group the items'], auto: 'add an item when I paste a link', interactive: 'drag items to reorder them', axes: 'as chips, a list, or with counts' },
-    item: { sugs: ['Say it more plainly', 'Add a detail'], auto: 'fill in its detail from its title', interactive: 'click to check it off', axes: 'plainer, shorter, or with a detail' },
-    figure: { sugs: ['Add a caption', 'Describe it for a screen reader'], auto: 'caption it from what it shows', interactive: 'click to see it larger', axes: 'larger, cropped, or captioned' },
-    control: { sugs: ['Say what it does', 'Give it a clearer label'], auto: 'do this on its own when the page opens', interactive: 'show what will happen before it does', axes: 'quieter, clearer, or as a toggle' },
-    section: { sugs: ['Summarise it in a line', 'Make it easier to scan'], auto: 'keep it up to date', interactive: 'fold it into a summary you can open', axes: 'shorter, as a list, or as a table' },
-    words: { sugs: ['Rephrase this', 'Define it'], auto: 'link terms like this to their definition', interactive: 'show a definition on hover', axes: 'plainer, shorter, or warmer' },
-    part: { sugs: ['Make it clearer', 'Explain what it is for'], auto: 'fill in what is missing when I press a button', interactive: 'make it respond to a click', axes: 'plainer, bolder, or quieter' },
+    row: { sugs: ['Add a one-line takeaway', 'Link it to its source'], auto: 'a Fill button that looks up what is missing', interactive: 'click to change its status', visual: 'its values as small bars you can compare down the column', axes: 'as a card, compact, or title first' },
+    cell: { sugs: ['Explain this value', 'Link it to its source'], auto: 'fill this in from the rest of the row', interactive: 'click to edit it in place', visual: 'a small bar showing where it falls among the others', axes: 'shorter, plainer, or with a note' },
+    table: { sugs: ['Sort it by what matters most', 'Add a column saying why each one matters'], auto: 'a Fill button on every row with gaps', interactive: 'sort by clicking a header', visual: 'a chart of the column that matters most', axes: 'as a table, cards, or a board' },
+    heading: { sugs: ['A shorter title', 'Add a line under it that says what this is for'], auto: 'a button that rewrites it from what is under it', interactive: 'click to fold what is under it', visual: 'a small figure under it showing what the section holds', axes: 'shorter, bolder, or quieter' },
+    paragraph: { sugs: ['Tighten it', 'Turn it into a short list'], auto: 'a button that brings it in line with the rest of the page', interactive: 'show the detail only when asked', visual: 'a diagram of what it describes', axes: 'plainer, shorter, or warmer' },
+    list: { sugs: ['Order it by what matters', 'Group the items'], auto: 'add an item when I paste a link', interactive: 'drag items to reorder them', visual: 'the items as a diagram of how they connect', axes: 'as chips, a list, or with counts' },
+    item: { sugs: ['Say it more plainly', 'Add a detail'], auto: 'fill in its detail from its title', interactive: 'click to check it off', visual: 'a small picture of what it is', axes: 'plainer, shorter, or with a detail' },
+    figure: { sugs: ['Add a caption', 'Describe it for a screen reader'], auto: 'caption it from what it shows', interactive: 'click to see it larger', visual: 'labels pointing at the parts that matter', axes: 'larger, cropped, or captioned' },
+    control: { sugs: ['Say what it does', 'Give it a clearer label'], auto: 'do this on its own when the page opens', interactive: 'show what will happen before it does', visual: 'show its state as a picture, not a word', axes: 'quieter, clearer, or as a toggle' },
+    section: { sugs: ['Summarise it in a line', 'Make it easier to scan'], auto: 'an Update button that refreshes it', interactive: 'fold it into a summary you can open', visual: 'a chart or diagram of what it says', axes: 'shorter, as a list, or as a table' },
+    words: { sugs: ['Rephrase this', 'Define it'], auto: 'link terms like this to their definition', interactive: 'show a definition on hover', visual: 'a small diagram beside them', axes: 'plainer, shorter, or warmer' },
+    part: { sugs: ['Make it clearer', 'Explain what it is for'], auto: 'fill in what is missing when I press a button', interactive: 'make it respond to a click', visual: 'a chart or diagram of what it shows', axes: 'plainer, bolder, or quieter' },
   };
   const PLURAL = { row: 'rows', cell: 'cells', table: 'tables', heading: 'headings', paragraph: 'paragraphs', list: 'lists', item: 'items', figure: 'figures', control: 'controls', section: 'sections', part: 'parts' };
 
@@ -76,7 +79,7 @@
     .marble-offer-send svg { width: 14px; height: 14px; }
     .marble-offer-send[hidden] { display: none; }
     .marble-offer-send:active { opacity: .75; }
-    /* The four actions: words on the bare card, lit only when pointed at or
+    /* The five actions: words on the bare card, lit only when pointed at or
        holding the draft. Words, not capsules. */
     .marble-offer-acts { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 6px 5px; }
     .marble-offer-act { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border: 0; border-radius: 8px; cursor: pointer;
@@ -141,6 +144,9 @@
     if (mode === 'interactive') {
       return `Change ${at} in place so it can be acted on rather than read: prefer direct manipulation, live feedback and graphics over text. Keep what it says; change how you can act on it. State that must survive a reload goes in the document (attributes or text with ids), not in script variables. Undo is how the person gets the original back.`;
     }
+    if (mode === 'visual') {
+      return `Change ${at} in place so it is seen rather than read: give what it says the visual form that fits it — a chart for amounts, a diagram for a structure or a flow, a timeline for dates, a small picture or swatch for a kind of thing. Keep every fact it states, and keep its words as words: labels and values stay HTML text, editable where they were, never drawn into an image, a canvas or an SVG label. Draw with the page's own colours and type, one accent at most, no gradients and no emoji. Keep its data-marble-id. Undo is how the person gets the original back.`;
+    }
     return '';
   }
 
@@ -170,6 +176,7 @@
     if (id === 'variations') return { lead: `Try 3 variations of ${thisWhat}: `, idea: offer.axes };
     if (id === 'automate') return { lead: `Automate ${thisWhat}: `, idea: offer.auto };
     if (id === 'interactive') return { lead: `Make ${thisWhat} interactive: `, idea: offer.interactive };
+    if (id === 'visual') return { lead: `Make ${thisWhat} visual: `, idea: offer.visual };
     return { lead: '', idea: '', line: 'Mark and draw on the page what you mean' };
   }
 
@@ -190,6 +197,7 @@
     if (!written || typeof written !== 'object') return false;
     if (written.automatic && !gaps) offer.auto = written.automatic;
     if (written.interactive) offer.interactive = written.interactive;
+    if (written.visual) offer.visual = written.visual;
     if (written.variations) offer.axes = written.variations;
     const got = (Array.isArray(written.suggestions) ? written.suggestions : [])
       .map((s) => (typeof s === 'string' ? s : s?.label)).filter(Boolean).map(capital);
@@ -199,7 +207,7 @@
   }
 
   /** Ask the host to write suggestions for these things: `{ suggestions,
-   *  automatic, interactive, variations }`, or null when it writes none. */
+   *  automatic, interactive, visual, variations }`, or null when it writes none. */
   async function fetchOffer({ path, ids, words = '' } = {}) {
     try {
       const res = await fetch('/agent/offer', {
@@ -359,7 +367,7 @@
       for (const b of acts.children) b.setAttribute('aria-pressed', String(b.dataset.act === act));
     };
 
-    // Two plain edits the four don't cover, written for this thing. When one
+    // Two plain edits the five don't cover, written for this thing. When one
     // action is plainly the next step — a row with empty cells — its move
     // leads the list, with its icon.
     function paintSuggestions() {
@@ -457,7 +465,7 @@
     input.dataset.placeholder = placeholder();
     paintHint();
     changed();
-    // Opened with something in it: one of the four drafted for this thing
+    // Opened with something in it: one of the five drafted for this thing
     // (an offer after an edit), or words to carry on with (a note).
     if (o.action && o.action !== 'sketch') pick(o.action);
     else if (o.draft) { act = null; draft(o.draft); }

@@ -24,8 +24,9 @@
 //     rather than folding into a send that can only fail.
 //   - While words are being written, a quiet row under them offers what the
 //     thing could become, as the card's offer did (agent-offer.js): two
-//     suggestions written for it, and the four actions. A suggestion fills
-//     the line; an action drafts its words; nothing is sent until ⏎.
+//     suggestions written for it, and the five actions. A suggestion fills
+//     the line; an action drafts its words; nothing is sent until ⏎. Lent
+//     to Describe mode, the line keeps the actions for what is marked.
 //   - ⇧⏎ (or ⌥⏎) breaks the line. Esc puts the line away and keeps its words
 //     for the next ⌘J on the same thing. A click away keeps them as a note on
 //     the thing (agent-notes.js) instead. Esc while a change runs stops it,
@@ -193,7 +194,7 @@
 
     /* What the thing could become, while words are written: the words it
        could be told on the left, each led by the drawn corner arrow, and the
-       four actions on the right as icon and word. All are bare text until
+       five actions on the right as icon and word. All are bare text until
        reached for, as context is: a hover lays a well under one, a press
        deepens it, nothing has a border. Two rows at most (fitChips). */
     .marble-line-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; margin: 0 0 0 -8px; }
@@ -233,6 +234,9 @@
       .marble-line-input { font-size: 16px; padding: 6px 0; }
     }
     .marble-line-input.is-previewing:empty::before { color: color-mix(in srgb, var(--line-ink) 70%, var(--line-faint)); }
+    /* A preview keeps to one line: were it to wrap, the chips would move out
+       from under the pointer showing it, and it would flicker. */
+    .marble-line-input.is-previewing:empty::before { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* The words a line is about, when it is about words. */
     ::highlight(marble-line-words) { background-color: color-mix(in srgb, var(--accent, light-dark(#9bb6cf, #7fa8c9)) 34%, transparent); }
@@ -606,7 +610,7 @@
     // ------------------------------------------------------------ the offer
     // What the thing could become, under the words while they are written:
     // its kind's two suggestions (then the ones the host writes for it), and
-    // the four actions, each as the card's offer had them (agent-offer.js).
+    // the five actions, each as the card's offer had them (agent-offer.js).
 
     const offering = () => globalThis.marbleOffer;
 
@@ -615,9 +619,14 @@
       return s.words ? 'words' : els.length > 1 ? (kinds.length === 1 ? kinds[0] : 'part') : kinds[0] ?? 'part';
     }
 
-    /** The page's own line has nothing it could sensibly suggest. */
+    /** The page's own line has nothing it could sensibly suggest. Describe
+     *  mode's line is about whatever is marked, which changes as the marks
+     *  do: it offers the actions for what is marked, and no suggestions,
+     *  which are written for one thing. */
     function offerOf(s) {
-      if (s.page || s.lent || !offering()?.offerFor) return null;
+      if (!offering()?.offerFor) return null;
+      if (s.lent) return { ...offering().offerFor({ kind: 'part' }), gaps: null, thisWhat: 'what is marked' };
+      if (s.page) return null;
       const els = elementsOf(s.ids);
       if (!els.length) return null;
       return offering().offerFor({ kind: kindOf(s, els), count: els.length, element: els[0] });
@@ -628,7 +637,7 @@
     function askOffer(s) {
       const o = offering();
       const asked = s.offer;
-      if (!asked || !o?.fetchOffer || !o.takeWritten) return;
+      if (!asked || s.lent || !o?.fetchOffer || !o.takeWritten) return;
       o.fetchOffer({ path: app, ids: [...s.ids], words: s.words?.text ?? '' }).then((written) => {
         if (!sessions.has(s) || s.offer !== asked) return;
         if (o.takeWritten(asked.offer, written, asked.gaps) && s.state === 'edit' && s.chips?.isConnected) paintSugs(s, { arriving: true });
@@ -664,6 +673,8 @@
       const acts = h('div', 'marble-line-acts');
       row.append(acts);
       for (const [id, name] of offering().ACTIONS ?? []) {
+        // In Describe mode already: its own tools are the sketch.
+        if (id === 'sketch' && s.lent) continue;
         const b = chip(name, icons[id]);
         b.dataset.act = id;
         b.dataset.tip = name;
@@ -688,7 +699,7 @@
       if (!row || !s.offer) return;
       for (const old of row.querySelectorAll('[data-sug]')) old.remove();
       const before = row.querySelector('.marble-line-acts');
-      const made = s.offer.offer.sugs.slice(0, 2).map((text) => {
+      const made = (s.lent ? [] : s.offer.offer.sugs.slice(0, 2)).map((text) => {
         const b = chip(text, offering().ICONS?.suggest ?? null);
         b.dataset.sug = '';
         b.addEventListener('click', () => suggest(s, text));
@@ -721,7 +732,7 @@
       if (rows() <= 2) return;
       const sugs = all.filter((c) => c.hasAttribute('data-sug'));
       const act = (id) => all.find((c) => c.dataset.act === id);
-      const order = [...sugs.slice(1).reverse(), act('sketch'), act('interactive'), act('automate'), sugs[0], act('variations')];
+      const order = [...sugs.slice(1).reverse(), act('sketch'), act('visual'), act('interactive'), act('automate'), sugs[0], act('variations')];
       for (const c of order.filter(Boolean)) {
         if (rows() <= 2) break;
         c.hidden = true;
@@ -1576,6 +1587,7 @@
       if (shown) put(shown, { keep: true, restore: false });
       const s = makeSession({ ids: present, scope: null, from: 'describe', conversation: null });
       s.lent = { label, brief, onSent, onClose, floor, span: null, ids: marked };
+      s.offer = offerOf(s);
       // The mode draws what is marked; the line adds no tint of its own.
       s.handed = true;
       sessions.add(s);
@@ -1622,6 +1634,7 @@
           s.ids = kept;
           s.page = !kept.length;
           s.lent = null;
+          s.offer = offerOf(s);
           schedule();
         },
         discard() { if (sessions.has(s)) { s.lent = null; put(s, { keep: false, restore: false }); } },
