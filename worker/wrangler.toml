@@ -18,11 +18,31 @@ routes = [
   { pattern = "marbledrive.app/*", zone_name = "marbledrive.app" },
   { pattern = "www.marbledrive.app/*", zone_name = "marbledrive.app" },
   { pattern = "bryan.marbledrive.app/*", zone_name = "marbledrive.app" },
+  # The door (docs/ACCOUNTS.md, "To turn it on"): every drive name comes
+  # through here, so a drive made by sign-up needs no route of its own. Turn
+  # it on only after routes with no Worker for pc-bryan.marbledrive.app/* and
+  # mac-bryan.marbledrive.app/* are added in the dashboard and proven to keep
+  # the tunnels off this Worker.
+  # { pattern = "*.marbledrive.app/*", zone_name = "marbledrive.app" },
 ]
 
 [vars]
 # Each drive's homes; its lease says which one it is at.
 DRIVES = '{"bryan":{"mac":"https://mac-bryan.marbledrive.app","pc":"https://pc-bryan.marbledrive.app","fly":"https://admin-p2-b3fwm.sprites.app"}}'
+# The door (worker/src/door/). Nothing here turns it on: it is on only once
+# the secret DOOR_SIGNING_KEY is set. Its other secrets, each with
+# `npx wrangler@latest secret put <NAME>`:
+#   DOOR_SIGNING_KEY      the Ed25519 private key, PKCS#8 in base64
+#   DOOR_ADMIN_TOKEN      for tools/door.mjs and the door sprite
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+# The key id the edge signs with; a drive's MARBLE_DOOR_KEYS names it too.
+DOOR_KEY_ID = "k1"
+# How many drives sign-up may make before it says no (claimed drives aside).
+MAX_DRIVES = "10"
+# The door sprite's URL, which the door pokes when a drive is asked for.
+# DOOR_SPRITE_URL = "https://door-xxxx.sprites.app"
+# Older public keys still accepted while a new one rolls out: "<kid>:<SPKI> …".
+# DOOR_OLD_KEYS = ""
 
 [[durable_objects.bindings]]
 name = "LEASE"
