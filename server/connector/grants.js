@@ -26,20 +26,36 @@ const CLIENTS_MAX = 64;
 const digest = (value) => crypto.createHash('sha256').update(String(value)).digest('base64url');
 const random = (bytes = 32) => crypto.randomBytes(bytes).toString('base64url');
 
-/** A redirect a client may name: https anywhere, or plain http back to this
- *  machine (a desktop client listening on loopback). Nothing else, and no
- *  fragment, which OAuth forbids. */
-export function redirectAllowed(value) {
+/** The apps a code may go to, by the address their sign-in comes back on.
+ *  A name an app registers is only its claim; where the code lands is what
+ *  decides whose account ends up holding the drive. So a code goes only to
+ *  Claude's or ChatGPT's own callback, which hands it to the account that
+ *  pressed Connect there, or back to this machine (Claude Code, a desktop
+ *  client), which only the owner sits at. */
+export const APPS = [
+  { name: 'Claude', hosts: ['claude.ai', 'claude.com'] },
+  { name: 'ChatGPT', hosts: ['chatgpt.com', 'chat.openai.com'] },
+];
+const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
+
+/** Which app a redirect belongs to, or null when a code may not go there. */
+export function appFor(value) {
   let url;
   try {
     url = new URL(value);
   } catch {
-    return false;
+    return null;
   }
-  if (url.hash) return false;
-  if (url.protocol === 'https:') return true;
-  return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.hash || url.username || url.password) return null;
+  if (url.protocol === 'https:') {
+    const app = APPS.find((a) => a.hosts.includes(url.hostname));
+    return app ? { name: app.name, host: url.hostname, local: false } : null;
+  }
+  if (url.protocol === 'http:' && LOOPBACK.includes(url.hostname)) return { name: null, host: url.host, local: true };
+  return null;
 }
+
+export const redirectAllowed = (value) => Boolean(appFor(value));
 
 export function createGrants({ dir, now = () => Date.now() }) {
   const file = path.join(dir, 'connector.json');
@@ -83,13 +99,17 @@ export function createGrants({ dir, now = () => Date.now() }) {
    *  that registered and was never allowed is dropped first when the list is
    *  full. */
   async function register({ redirect_uris: redirects, client_name: name } = {}) {
-    if (!Array.isArray(redirects) || !redirects.length || !redirects.every((r) => typeof r === 'string' && redirectAllowed(r))) {
-      throw Object.assign(new Error('redirect_uris must be https addresses (or http on loopback)'), { code: 'invalid_redirect_uri' });
+    const apps = Array.isArray(redirects) ? redirects.map((r) => (typeof r === 'string' ? appFor(r) : null)) : [];
+    if (!apps.length || apps.some((app) => !app) || new Set(apps.map((app) => app.name)).size > 1) {
+      throw Object.assign(new Error('this drive lets in Claude, ChatGPT, or an app on its own computer: redirect_uris must be one of theirs'), { code: 'invalid_redirect_uri' });
     }
     const s = await load();
+    const claimed = String(name ?? '').trim().slice(0, 60);
     const client = {
       id: random(16),
-      name: String(name ?? '').trim().slice(0, 80) || 'An app',
+      // Claude is Claude whatever it calls itself; an app on this machine is
+      // named by its own word, and said to be here.
+      name: apps[0].name ?? `${claimed || 'An app'} on this computer`,
       redirects: [...new Set(redirects)].slice(0, 8),
       made: now(),
     };
