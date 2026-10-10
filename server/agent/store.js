@@ -186,7 +186,9 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     });
   }
 
-  async function updateConversation(id, patch) {
+  /** `touch: false` leaves `updatedAt` alone: for a change that is not news
+   *  about the chat, like the line its card says changing as a turn runs. */
+  async function updateConversation(id, patch, { touch = true } = {}) {
     const interactionFields = ['folderId', 'pinned', 'focusX', 'focusY'];
     const folderIdPatched = 'folderId' in patch;
     let previousFolderId;
@@ -203,7 +205,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         processed.lastInteractedAt = Date.now();
       }
 
-      const updated = { ...meta, ...processed, updatedAt: Date.now() };
+      const updated = { ...meta, ...processed, updatedAt: touch ? Date.now() : meta.updatedAt };
       await writeJson(metaFile(id), updated);
       return updated;
     });
