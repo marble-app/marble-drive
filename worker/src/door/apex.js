@@ -28,7 +28,7 @@ import { nameProblem } from './names.js';
 import { APEX_ORIGIN, DoorError, cookie, finish, isProvider, providerReady, readCookie, start } from './oauth.js';
 import * as pages from './pages.js';
 import { returnPath } from './paths.js';
-import { importSigningKey, randomId, sameSecret, seal, sha256Hex, sign, unseal } from './tokens.js';
+import { importSigningKey, importVerifyKey, publicFromPrivate, randomId, sameSecret, seal, sha256Hex, sign, unseal } from './tokens.js';
 
 export const SESSION_COOKIE = '__Host-md_session';
 const ASK_COOKIE = '__Host-md_ask';
@@ -59,6 +59,40 @@ async function edgeKey(env) {
   }
   return signingKey.key;
 }
+
+export const PASS_COOKIE = '__Host-md_pass';
+export const PASS_SECONDS = 12 * 60 * 60;
+
+/** The keys a grant or a pass is checked with: the public half of the edge's
+ *  own key, and any older ones still being retired (DOOR_OLD_KEYS, the same
+ *  `<kid>:<base64 SPKI>` list a drive's MARBLE_DOOR_KEYS holds). */
+let verifying = null; // per isolate: { from, keys }
+export async function edgeVerifyKeys(env) {
+  const from = `${env.DOOR_KEY_ID}|${env.DOOR_SIGNING_KEY}|${env.DOOR_OLD_KEYS ?? ''}`;
+  if (verifying?.from === from) return verifying.keys;
+  const keys = new Map();
+  for (const entry of String(env.DOOR_OLD_KEYS ?? '').trim().split(/\s+/).filter(Boolean)) {
+    const at = entry.indexOf(':');
+    if (at < 1) continue;
+    try {
+      keys.set(entry.slice(0, at), await importVerifyKey(entry.slice(at + 1)));
+    } catch {
+      console.log('door: an entry in DOOR_OLD_KEYS is not an Ed25519 public key');
+    }
+  }
+  keys.set(env.DOOR_KEY_ID, (await publicFromPrivate(env.DOOR_SIGNING_KEY)).key);
+  verifying = { from, keys };
+  return keys;
+}
+
+/** A drive's pass: 12 hours, renewed at the edge while its session lives. */
+export async function mintPass(env, { drive, account, session, now = Date.now() }) {
+  const iat = Math.floor(now / 1000);
+  return sign(await edgeKey(env), env.DOOR_KEY_ID, { typ: 'pass', drv: drive, acct: account, sid: session, role: 'owner', iat, exp: iat + PASS_SECONDS });
+}
+
+export const passCookie = (token) => cookie(PASS_COOKIE, token, PASS_SECONDS);
+export const clearPass = () => clear(PASS_COOKIE);
 
 /** A single-use ticket, 60 seconds, for one drive: the edge in front of the
  *  drive trades it for a pass. */
