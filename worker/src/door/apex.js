@@ -63,24 +63,31 @@ async function edgeKey(env) {
 export const PASS_COOKIE = '__Host-md_pass';
 export const PASS_SECONDS = 12 * 60 * 60;
 
-/** The keys a grant or a pass is checked with: the public half of the edge's
- *  own key, and any older ones still being retired (DOOR_OLD_KEYS, the same
- *  `<kid>:<base64 SPKI>` list a drive's MARBLE_DOOR_KEYS holds). */
+/** The keys a grant or a pass is checked with: DOOR_PUBLIC_KEYS, the same
+ *  `<kid>:<base64 SPKI>` line every drive's MARBLE_DOOR_KEYS holds (older keys
+ *  stay in it while a new one rolls out). The edge's own key is derived from
+ *  its private half when the list does not name it. */
 let verifying = null; // per isolate: { from, keys }
 export async function edgeVerifyKeys(env) {
-  const from = `${env.DOOR_KEY_ID}|${env.DOOR_SIGNING_KEY}|${env.DOOR_OLD_KEYS ?? ''}`;
+  const from = `${env.DOOR_KEY_ID}|${env.DOOR_SIGNING_KEY}|${env.DOOR_PUBLIC_KEYS ?? ''}`;
   if (verifying?.from === from) return verifying.keys;
   const keys = new Map();
-  for (const entry of String(env.DOOR_OLD_KEYS ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const entry of String(env.DOOR_PUBLIC_KEYS ?? '').trim().split(/\s+/).filter(Boolean)) {
     const at = entry.indexOf(':');
     if (at < 1) continue;
     try {
       keys.set(entry.slice(0, at), await importVerifyKey(entry.slice(at + 1)));
     } catch {
-      console.log('door: an entry in DOOR_OLD_KEYS is not an Ed25519 public key');
+      console.log('door: an entry in DOOR_PUBLIC_KEYS is not an Ed25519 public key');
     }
   }
-  keys.set(env.DOOR_KEY_ID, (await publicFromPrivate(env.DOOR_SIGNING_KEY)).key);
+  if (!keys.has(env.DOOR_KEY_ID)) {
+    try {
+      keys.set(env.DOOR_KEY_ID, (await publicFromPrivate(env.DOOR_SIGNING_KEY)).key);
+    } catch {
+      console.log('door: could not derive the public key; put this key in DOOR_PUBLIC_KEYS');
+    }
+  }
   verifying = { from, keys };
   return keys;
 }
