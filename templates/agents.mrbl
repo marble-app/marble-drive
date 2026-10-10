@@ -196,6 +196,31 @@ __ICON__
     font: inherit; font-size: .75rem; color: var(--accent-ink);
   }
   .filter-clear:hover, .filter-clear:focus-visible { text-decoration: underline; outline: none; }
+  /* Glance is words on the bare bar, like Filter: the lead in ink, the chat
+     it is about in muted, and a wash only under the pointer. It gives before
+     the meters do: the chat's line truncates first, and goes below desk width,
+     where the lead is enough and the tip still names the chat. */
+  .glance {
+    appearance: none; border: 0; background: none; color: var(--ink);
+    display: inline-flex; align-items: center; gap: .45rem; flex: 0 10 auto;
+    padding: .2rem .55rem; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: 12.5px; line-height: 1.25; white-space: nowrap;
+    transition: background-color var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .glance:hover, .glance:focus-visible { background: var(--paper-3); outline: none; }
+  .glance:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .glance:active { background: var(--paper-3); filter: brightness(.95); transition-duration: var(--t-fast); }
+  .glance-lead { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .glance-sub { min-width: 0; max-width: 22rem; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  .glance-sub:empty { display: none; }
+  /* Nothing to open: the lead is context, not a control. */
+  .glance:disabled { cursor: default; color: var(--muted); background: none; filter: none; }
+  /* Only the chat's line may give, so only with it showing may the button
+     go under its content; below that the meters give instead. */
+  @media (min-width: 1100px) { .glance { min-width: 0; } }
+  @media (max-width: 1099px) { .glance-sub { display: none; } }
+  /* The phone's bar is one row already: open asks, the worst meter, ⋯. */
+  @media (max-width: 719px) { .topbar .glance { display: none; } }
   /* The idle cut. Its value is a duration, and the durations that matter here
      run from five minutes to a fortnight — a range no linear track can hold.
      So the track carries the logistic of the log: position is a sigmoid over
@@ -2129,7 +2154,7 @@ __ICON__
     }
     body[data-view="board"][data-panel="open"] .pane { height: auto; }
   }
-  /* ---- One dot vocabulary, drawn once. Five states, five looks, and every
+  /* ---- One dot vocabulary, drawn once. Six states, six looks, and every
      surface that shows a conversation's state wears the same one: a List or
      Deck row, a Focus card, an ask card, the topbar's title. The state is on
      the dot itself rather than on whatever encloses it, so the rule does not
@@ -2138,7 +2163,7 @@ __ICON__
      appended to the head after this sheet.
        running  accent, breathing      asking  a caution ring, the drive's needs-you everywhere
        review   ink, filled            failed  danger, filled
-       idle     a hairline ring — present, asking for nothing. */
+       quiet    an accent ring, still   idle    a hairline ring — present, asking for nothing. */
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state] {
     flex: none; width: 8px; height: 8px; border-radius: 999px; box-sizing: border-box;
     background: var(--faint); border: 0; box-shadow: none; animation: none;
@@ -2151,6 +2176,13 @@ __ICON__
   }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="asking"] {
     background: transparent; border: 2px solid var(--caution);
+  }
+  /* Quiet: in a turn, with no step for a while (runtime/agent-status.js).
+     Working's colour without the breath, and a ring so it reads apart by
+     shape too: the stillness is the signal. Maybe a long command, maybe
+     stuck; either way worth a look. */
+  :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="quiet"] {
+    background: transparent; border: 2px solid var(--accent);
   }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="review"] { background: var(--ink); }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="failed"] { background: var(--danger); }
@@ -2453,12 +2485,17 @@ __ICON__
       if (summary?.needsReview) return 'review';
       return 'completed';
     };
-    const stateOf = (summary) => window.marbleAgentUI?.stateOf?.(summary) ?? 'idle';
-    /** The dot's own five-word vocabulary, named for what a person would say
+    // The runtime's five states and Quiet: a working chat that has taken no
+    // step for five minutes, read off its summary's last step and turn start
+    // (runtime/agent-status.js). Quiet is drawn here, where many chats are
+    // seen at once; the drawer and the glints keep the five.
+    const statusLib = () => window.marbleAgentStatus;
+    const stateOf = (summary) => statusLib()?.stateOf?.(summary) ?? window.marbleAgentUI?.stateOf?.(summary) ?? 'idle';
+    /** The dot's own six-word vocabulary, named for what a person would say
      *  about the conversation rather than for the runtime's internal state.
      *  Set on the dot itself wherever one is painted (rows, Focus cards, ask
      *  cards, the topbar title), so one rule set draws all of them. */
-    const DOT_STATE = { waiting: 'asking', working: 'running', failed: 'failed', unseen: 'review', idle: 'idle' };
+    const DOT_STATE = { waiting: 'asking', working: 'running', quiet: 'quiet', failed: 'failed', unseen: 'review', idle: 'idle' };
     const paintDot = (dot, summary) => {
       if (dot) dot.dataset.state = DOT_STATE[stateOf(summary)] ?? 'idle';
     };
@@ -8678,12 +8715,65 @@ __ICON__
       }
       paintFolderRail();
       paintFocus();
+      paintGlance();
     };
 
     /** A chat that is gone from the drive rather than filed away: its row,
      *  its card, its pane and everything this page remembers of it go too.
      *  Archiving hides a chat and keeps it; this is for the one case where
      *  there was never anything to keep. */
+    // ---- Glance: the one fact that wants you most, on the bar. A question
+    // waiting, then work going on, then results to read; the words are the
+    // runtime's, so the Drive and the phone will say it the same way.
+    // Made here rather than written in the file: everything it says is the
+    // summaries', so none of it is the page's to keep. After Filter, so it
+    // sits in the bar's open middle, before the meters.
+    const glanceEl = document.createElement('button');
+    glanceEl.type = 'button';
+    glanceEl.className = 'glance';
+    glanceEl.setAttribute('data-marble-transient', '');
+    glanceEl.disabled = true;
+    glanceEl.innerHTML = '<span class="dot" data-state="idle" aria-hidden="true"></span><span class="glance-lead">Nothing working</span><span class="glance-sub"></span>';
+    if (filterBox) filterBox.after(glanceEl);
+    else $('.topbar')?.append(glanceEl);
+    const paintGlance = () => {
+      const lib = statusLib();
+      if (!glanceEl.isConnected || !lib?.glance) return;
+      const { lead } = lib.glance(summaries.values());
+      const said = lead.count ? `${lead.count} ${lead.words}` : lead.words;
+      glanceEl.dataset.lead = lead.state;
+      glanceEl.dataset.chat = lead.chat ?? '';
+      glanceEl.disabled = !lead.chat;
+      glanceEl.querySelector('.dot').dataset.state = DOT_STATE[lead.state] ?? 'idle';
+      glanceEl.querySelector('.glance-lead').textContent = said;
+      glanceEl.querySelector('.glance-sub').textContent = lead.chat ? lead.sub : '';
+      // The chat's line goes below desk width; the tip keeps it, and says
+      // what a press does.
+      glanceEl.title = lead.chat ? `${lead.sub} · press to open it` : '';
+      glanceEl.setAttribute('aria-label', lead.chat ? `${said}. ${lead.sub}. Open it` : said);
+    };
+    glanceEl.addEventListener('click', () => {
+      const id = glanceEl.dataset.chat;
+      if (!id) return;
+      const view = document.body.getAttribute('data-view') || 'library';
+      if (view === 'board') openBoardPanel();
+      // Deck has no pane of its own at desk width; List shows the thread.
+      if (view === 'deck' && !narrowView.matches) setView('library');
+      open(id);
+    });
+    // A chat goes quiet with nothing arriving to say so: every half minute
+    // the working ones are asked again, and any whose state moved is
+    // repainted everywhere it shows.
+    const sweepQuiet = () => {
+      for (const summary of summaries.values()) {
+        if (!summary.running) continue;
+        const el = nodes.get(summary.id);
+        if (el && el.dataset.state !== stateOf(summary)) upsert(summary);
+      }
+      paintGlance();
+    };
+    paintGlance();
+
     const forget = (id) => {
       if (!id) return;
       const slot = slotOf(id);
@@ -8701,6 +8791,7 @@ __ICON__
       }
       paintFolderRail();
       paintFocus();
+      paintGlance();
     };
 
     const undoable = (turns) => {
@@ -9731,7 +9822,11 @@ __ICON__
         if (summary) el.querySelector('.age').textContent = age(summary.updatedAt);
       }
     };
-    setInterval(() => { if (document.visibilityState === 'visible') paintAges(); }, 30_000);
+    setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      paintAges();
+      sweepQuiet();
+    }, 30_000);
 
     // ---- Back by the edge. 1:1 from the left edge; commit by the sign of
     // the velocity at release, and the pane leaves the way it came.
