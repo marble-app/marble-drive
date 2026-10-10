@@ -66,6 +66,7 @@ export function doorEnv({ lease = { home: 'pc', epoch: 3, since: null }, maxDriv
     GITHUB_CLIENT_ID: 'github-client',
     GITHUB_CLIENT_SECRET: 'github-secret',
     MAX_DRIVES: maxDrives,
+    DOOR_SPRITE_URL: 'https://door-sprite.example',
     ...vars,
   };
   return env;
@@ -78,6 +79,7 @@ export function fakeProviders({ google = {}, github = {} } = {}) {
   const fetchImpl = async (input, init = {}) => {
     const url = new URL(String(input));
     calls.push({ url: url.href, method: init.method ?? 'GET', body: init.body ? String(init.body) : null, headers: new Headers(init.headers) });
+    if (url.origin === 'https://door-sprite.example') return new Response('', { status: 202 });
     const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
     if (url.href === 'https://oauth2.googleapis.com/token') {
       const form = new URLSearchParams(String(init.body));

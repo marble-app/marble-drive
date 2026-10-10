@@ -321,6 +321,10 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
     if (path === '/name') {
       if (!session) return signedOut();
       if (!session.account.mayMake) return await onward(session, dir);
+      // Without the door sprite a drive would wait in the queue for ever.
+      if (!env.DOOR_SPRITE_URL) {
+        return pages.problem({ title: 'Drives can’t be made yet', text: 'Bryan hasn’t switched on making drives. Your invite still works; try again later.', status: 503, action: { href: '/account', label: 'Your account' } });
+      }
       if (method === 'GET') return pages.nameDrive({});
       if (method === 'POST') {
         if (!sameOrigin(request)) return crossSite();
