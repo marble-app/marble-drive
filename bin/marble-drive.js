@@ -215,6 +215,9 @@ async function serve() {
     } else {
       console.log('[drive] gated — the secret is exchanged for a cookie at /gate');
     }
+    if (drive.door?.configured) {
+      console.log(`[drive] door: a pass from marbledrive.app opens it as ${config.doorName}; the passphrase is ${config.gateMode === 'tools' ? 'for scripts and 127.0.0.1 only' : 'still offered too'}`);
+    }
 
     if (!config.backupDir && !config.backupCommand) {
       console.log('[drive] no backups — set MARBLE_DRIVE_BACKUP_DIR or MARBLE_DRIVE_BACKUP_CMD');
