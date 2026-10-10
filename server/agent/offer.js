@@ -5,8 +5,8 @@
 // suggestions written for *this* element: a small model reads the element's
 // own markup — from the store, never the page's copy — and answers with
 // three things a person might want done to it, plus the idea the Automate it,
-// Make it interactive and Make it visual actions should start from, and what
-// Try variations should vary.
+// Make it alive, Make it interactive and Make it visual actions should start
+// from, and what Try variations should vary.
 //
 // The same plumbing as the chat namer (namer.js): the installed CLI on the
 // login, never a key, a hard timeout, and no answer is not an error. The page
@@ -42,10 +42,11 @@ export function offerPrompt({ title = '', html = '', words = '' }) {
     ...(said ? ['', 'They selected these words in it:', '"""', said, '"""'] : []),
     '',
     'Reply with ONLY a JSON object, no prose and no code fence:',
-    '{"suggestions": ["…", "…", "…"], "automatic": "…", "interactive": "…", "visual": "…", "variations": "…"}',
+    '{"suggestions": ["…", "…", "…"], "automatic": "…", "alive": "…", "interactive": "…", "visual": "…", "variations": "…"}',
     '',
     '- suggestions: three short requests, each under 60 characters, written as the person would type them, specific to this content (not generic advice like "improve it").',
     '- automatic: one short phrase for what could happen here by itself or at the press of a button, e.g. "a Fill button that looks up the authors from the title".',
+    '- alive: one short phrase for what it could gather and keep up to date by itself on a schedule, with how often, e.g. "every morning, add new invitations from my email notes".',
     '- interactive: one short phrase for how it could be acted on rather than read, e.g. "click a status to flip it".',
     '- visual: one short phrase for how it could be shown as a picture rather than read, e.g. "the due dates as dots on a timeline".',
     '- variations: three ways three versions of it could differ, as one short phrase, e.g. "as a card, compact, or title first".',
@@ -75,6 +76,8 @@ export function readOffer(raw) {
     automatic: clean(value.automatic, 90),
     interactive: clean(value.interactive, 90),
   };
+  const alive = clean(value.alive, 110);
+  if (alive) read.alive = alive;
   const visual = clean(value.visual, 90);
   if (visual) read.visual = visual;
   const variations = clean(value.variations, 70);

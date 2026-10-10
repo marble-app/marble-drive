@@ -125,6 +125,7 @@ test('setAttr is checked by name and by value', () => {
   assert.equal(set('ONMOUSEOVER', 'alert(1)'), SAYS.markup);
   assert.equal(set('x><script>alert(1)</script', ''), SAYS.markup);
   assert.equal(set('data-marble-run', 'tidy up'), SAYS.markup);
+  assert.equal(set('data-marble-paused', null), SAYS.markup, 'a shared link neither holds nor lets go of the owner\'s schedule');
   assert.equal(set('data-marble-id', 'title'), SAYS.markup);
   assert.equal(set('srcdoc', '<p>x</p>'), SAYS.markup);
   assert.equal(set('href', 'javascript:alert(1)'), SAYS.address);

@@ -57,3 +57,8 @@ test('the idea Make it visual starts from is read when the model writes one', ()
   assert.equal('visual' in readOffer('{"suggestions": ["Add the venue"]}'), false, 'none written, none kept');
 });
 
+test('the idea Make it alive starts from is read when the model writes one', () => {
+  assert.match(offerPrompt({ html: '<p>Hi</p>' }), /"alive": "…"/);
+  const read = readOffer('{"suggestions": ["Add the venue"], "alive": "every morning, add new invitations from my notes"}');
+  assert.equal(read.alive, 'every morning, add new invitations from my notes');
+});

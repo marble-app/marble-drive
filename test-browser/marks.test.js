@@ -380,7 +380,7 @@ test('the line Describe borrows offers the actions for what is marked, without S
   await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder.includes('a box around q1'));
   const acts = field(page).locator('.marble-line-chip');
   await acts.first().waitFor();
-  assert.deepEqual(await acts.evaluateAll((els) => els.map((el) => el.dataset.act ?? 'suggestion')), ['variations', 'automate', 'interactive', 'visual']);
+  assert.deepEqual(await acts.evaluateAll((els) => els.map((el) => el.dataset.act ?? 'suggestion')), ['variations', 'automate', 'alive', 'interactive', 'visual']);
   await words(page).click();
   await acts.filter({ hasText: 'Make it visual' }).click();
   assert.equal(await words(page).textContent(), 'Make what is marked visual: a chart or diagram of what it shows');

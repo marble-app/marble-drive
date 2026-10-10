@@ -22,7 +22,9 @@ No level can, ever:
 - point an address (`href`, `src`, `srcset` …) anywhere but `http(s)`, `mailto`,
   `tel`, a path on this host, or a `data:image/`;
 - add an automation (`data-marble-run`, `-scope`, `-on`), which would start one
-  of the owner's agents when pressed;
+  of the owner's agents when pressed, or pause or let go of one on a schedule
+  (`data-marble-paused`), which decides whether the owner's agents run by
+  themselves;
 - change, move or remove a `<script>`, or any element that holds one;
 - rewrite an element's `data-marble-id`, or reuse one the file already has;
 - send markup that is unfinished (an open quote, tag or comment) or that closes

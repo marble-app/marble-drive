@@ -40,12 +40,19 @@ const RUNNABLE = `<!doctype html><html><head><title>Reading list</title></head>
 <tr data-marble-id="r2"><td data-marble-id="c1">Generative Agents <button data-marble-id="fill" data-marble-run="script:quiet Look it up by its title and fill the rest." data-marble-scope="r2" data-marble-on="press">Fill</button></td><td data-marble-id="c2">—</td></tr>
 </tbody></table></body></html>`;
 
+// An automation that is alive: it runs by itself every morning (server/alive.js).
+const ALIVE = `<!doctype html><html><head><title>Ai2 notes</title></head>
+<body data-marble-id="b"><section data-marble-id="s"><h2 data-marble-id="h">Progress</h2>
+<button data-marble-id="go" data-marble-run="script:quiet Gather what is new about Ai2 and update Progress." data-marble-scope="s" data-marble-on="daily 07:00">Update now</button>
+<span data-marble-id="when">Updates every morning</span>
+<button data-marble-id="hold" data-marble-pause="go" aria-pressed="false">Pause</button></section></body></html>`;
+
 // The Drive's own listing: the document the drive lands on (config.home).
 const DRIVE = `<!doctype html><html><head><title>Drive</title>
 <style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; max-width: 480px; }</style></head>
 <body data-marble-id="b"><h1 data-marble-id="h">Drive</h1><p data-marble-id="p">Everything on this drive.</p></body></html>`;
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { garden: GARDEN, Agents: AGENTS, runnable: RUNNABLE, drive: DRIVE } });
+const host = await startDrive({ scripts: SCRIPTS, documents: { garden: GARDEN, Agents: AGENTS, runnable: RUNNABLE, alive: ALIVE, drive: DRIVE } });
 test.after(() => host.close());
 
 // A reset drive keeps its conversations, and this layer rebuilds a callout
@@ -704,6 +711,33 @@ test('a data-marble-run button starts an agent with its brief, aimed at its elem
   assert.equal(run.context.target, 'runnable');
   assert.deepEqual(run.context.selection, ['r2'], 'the scope it names');
   assert.equal(await page.evaluate((cid) => window.marble.agent.attending(cid), run.id), true, 'pressed here, so followed here');
+});
+
+test('an alive trigger runs now when pressed, and Pause holds it in the file', async () => {
+  const page = await open('alive');
+  await page.getByRole('button', { name: 'Update now' }).click();
+  const run = await until(page, async () => {
+    for (const s of await window.marble.agent.conversations()) {
+      const turn = (await window.marble.agent.conversation(s.id)).turns?.[0];
+      if (turn?.prompt) return { prompt: turn.prompt, context: turn.context };
+    }
+    return null;
+  });
+  assert.match(run.prompt, /Gather what is new about Ai2/);
+  assert.deepEqual(run.context.selection, ['s']);
+
+  await page.getByRole('button', { name: 'Pause' }).click();
+  assert.equal(await page.locator('[data-marble-id="go"]').getAttribute('data-marble-paused'), '');
+  assert.equal(await page.locator('[data-marble-id="hold"]').getAttribute('aria-pressed'), 'true');
+  // Filed, not just drawn: the file the host schedules from says so.
+  for (let i = 0; i < 50 && !(await host.drive.store.read('alive')).includes('data-marble-paused'); i += 1) await page.waitForTimeout(100);
+  assert.match(await host.drive.store.read('alive'), /data-marble-paused/);
+  await page.reload();
+  await page.locator('[data-marble-id="go"]').waitFor();
+  assert.equal(await page.locator('[data-marble-id="go"]').getAttribute('data-marble-paused'), '', 'still paused after a reload');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  assert.equal(await page.locator('[data-marble-id="go"]').getAttribute('data-marble-paused'), null, 'let go');
+  assert.equal(await page.locator('[data-marble-id="hold"]').getAttribute('aria-pressed'), 'false');
 });
 
 test('on the Drive\'s own page, ⌘J with nothing under the pointer opens the chat, not a line', async () => {

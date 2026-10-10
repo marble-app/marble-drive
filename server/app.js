@@ -55,6 +55,7 @@ import { createTypesafeHandler } from './typesafe/routes.js';
 import { createGenuiHandler } from './genui/routes.js';
 import { watchDrive } from './watch.js';
 import { createDaily } from './daily.js';
+import { createAlive } from './alive.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -696,6 +697,8 @@ export async function createDrive(config, { log = console, agentProviders = null
   let agents = null;
   // The run the host starts once a day (server/daily.js), once agents are up.
   let daily = null;
+  // Automations that run on a schedule (server/alive.js, Make it alive).
+  let alive = null;
   // The console (server/console): on only where MARBLE_DRIVE_CONSOLE says so.
   let consoleApp = null;
   // Publish (server/git.js): on only where MARBLE_DRIVE_GIT says so.
@@ -798,6 +801,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     // chance to start a day that came due while it slept: the sprite pauses
     // again before a minute timer would fire.
     daily?.nudge();
+    alive?.nudge();
 
     try {
       // The gate, and the two things that have to be reachable through it: the
@@ -1522,6 +1526,18 @@ export async function createDrive(config, { log = console, agentProviders = null
       ],
       log,
     });
+    if (config.alive !== false) {
+      alive = createAlive({
+        store,
+        zone: config.dayZone,
+        start: agents.startRun,
+        conversations: async () => [
+          ...(await agents.store.conversations()),
+          ...(await agents.store.conversations({ archived: true })),
+        ],
+        log,
+      });
+    }
   }
 
   const consoleWhy = consoleAllowed(config);
@@ -1929,6 +1945,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       consoleApp?.close();
       stopBackups();
       daily?.stop();
+      alive?.stop();
       watcher.close();
       channels.close();
       // Event streams are open by design and keep-alive sockets are open by

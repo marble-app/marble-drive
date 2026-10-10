@@ -312,8 +312,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
 
   /** What the day button does, without a page: a conversation on the drive's
    *  default agent, named, and sent one prompt aimed at `target`. For work the
-   *  host starts on its own (server/daily.js). */
-  async function startRun({ prompt, target, title = null, project = null }) {
+   *  host starts on its own (server/daily.js, server/alive.js), which may
+   *  aim it at elements of the target as a selection would. */
+  async function startRun({ prompt, target, title = null, project = null, selection = [] }) {
     const settings = await store.settings();
     const made = await startConversation({ provider: await runnableDefault(settings), project });
     if (made.error) throw Object.assign(new Error(made.error), { status: made.status });
@@ -324,7 +325,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     }
     const turn = await runner.send(id, {
       prompt,
-      context: { viewing: null, target: parsePath(target, { allowRoot: false }), selection: [], also: [] },
+      context: { viewing: null, target: parsePath(target, { allowRoot: false }), selection: selection.map(String), also: [] },
     });
     return { id, turn };
   }

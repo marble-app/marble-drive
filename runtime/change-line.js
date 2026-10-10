@@ -24,7 +24,7 @@
 //     rather than folding into a send that can only fail.
 //   - While words are being written, a quiet row under them offers what the
 //     thing could become, as the card's offer did (agent-offer.js): two
-//     suggestions written for it, and the five actions. A suggestion fills
+//     suggestions written for it, and the six actions. A suggestion fills
 //     the line; an action drafts its words; nothing is sent until ⏎. Lent
 //     to Describe mode, the line keeps the actions for what is marked.
 //   - ⇧⏎ (or ⌥⏎) breaks the line. Esc puts the line away and keeps its words
@@ -194,7 +194,7 @@
 
     /* What the thing could become, while words are written: the words it
        could be told on the left, each led by the drawn corner arrow, and the
-       five actions on the right as icon and word. All are bare text until
+       six actions on the right as icon and word. All are bare text until
        reached for, as context is: a hover lays a well under one, a press
        deepens it, nothing has a border. Two rows at most (fitChips). */
     .marble-line-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; margin: 0 0 0 -8px; }
@@ -610,7 +610,7 @@
     // ------------------------------------------------------------ the offer
     // What the thing could become, under the words while they are written:
     // its kind's two suggestions (then the ones the host writes for it), and
-    // the five actions, each as the card's offer had them (agent-offer.js).
+    // the six actions, each as the card's offer had them (agent-offer.js).
 
     const offering = () => globalThis.marbleOffer;
 
@@ -732,7 +732,7 @@
       if (rows() <= 2) return;
       const sugs = all.filter((c) => c.hasAttribute('data-sug'));
       const act = (id) => all.find((c) => c.dataset.act === id);
-      const order = [...sugs.slice(1).reverse(), act('sketch'), act('visual'), act('interactive'), act('automate'), sugs[0], act('variations')];
+      const order = [...sugs.slice(1).reverse(), act('sketch'), act('visual'), act('interactive'), act('alive'), act('automate'), sugs[0], act('variations')];
       for (const c of order.filter(Boolean)) {
         if (rows() <= 2) break;
         c.hidden = true;
