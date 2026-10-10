@@ -134,6 +134,10 @@ const RUNTIME = {
   // uses it. Served to every document; injected only when agents run here.
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
   'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
+  // How the chats are doing, in words and numbers: a chat's state with Quiet,
+  // a step in plain words, lanes, collisions, pace. One module, so every view
+  // that says it says it the same way (the host imports it too).
+  'agent-status.js': () => path.join(REPO, 'runtime', 'agent-status.js'),
   'agent-folders.js': () => path.join(REPO, 'runtime', 'agent-folders.js'),
   'agent-phone.js': () => path.join(REPO, 'runtime', 'agent-phone.js'),
   // What a chat's progress card says, read by the card and by the host.
@@ -396,6 +400,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="${runtimeUrl('agent.js')}" data-marble-transient></script>`;
       // The card's words, before the card that says them.
       tags += `\n<script src="${runtimeUrl('agent-words.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-status.js')}" data-marble-transient></script>`;
       // Custom meta skips the drawer mount in runtime/agent-ui.js, not this script —
       // Agents.mrbl still needs <marble-conversation> without a second launcher.
       tags += `\n<script src="${runtimeUrl('agent-ui.js')}" data-marble-transient></script>`;
