@@ -296,3 +296,13 @@ test('DOOR_PUBLIC_KEYS: a pass signed by a key named there is accepted, and one 
   w.env.DOOR_PUBLIC_KEYS = `k1:${w.env.keys.spki} k0:${older.spki}`;
   assert.equal((await ask()).status, 200);
 });
+
+test('with the Directory down, bryan is still routed by its lease, and a drive known only to the Directory says it cannot be found', async () => {
+  const w = await world();
+  w.env.DIRECTORY = { idFromName: (n) => n, get: () => ({ fetch: async () => new Response('down', { status: 500 }) }) };
+  forgetLeases();
+  const bryan = await route(new Request('https://bryan.marbledrive.app/a/x'), w.env, { fetchImpl: w.fetchImpl });
+  assert.equal(bryan.status, 200);
+  const ana = await route(new Request('https://ana.marbledrive.app/a/x'), w.env, { fetchImpl: w.fetchImpl });
+  assert.equal(ana.status, 503);
+});
