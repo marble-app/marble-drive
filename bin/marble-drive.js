@@ -122,7 +122,10 @@ async function provisioner() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'marble-door-'));
   const keysFile = path.join(dir, 'door-keys');
   fs.writeFileSync(keysFile, `${keys}\n`, { mode: 0o600 });
-  const script = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'tools', 'sprite-provision.sh');
+  // sprite-provision.sh deploys through sprite-deploy.sh, which wants a git
+  // checkout with ../marble beside it, so on the door sprite this names the
+  // script in that checkout (docs/ACCOUNTS.md, "The door sprite").
+  const script = process.env.MARBLE_PROVISION_SCRIPT || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'tools', 'sprite-provision.sh');
   const runner = scriptRunner({ script, keysFile, org: process.env.MARBLE_PROVISION_ORG || 'marble-drive' });
   // A sprite pauses about a second after its last connection; a drive takes
   // minutes to make, so the work holds it up until it is done.
@@ -138,7 +141,7 @@ async function provisioner() {
     },
   });
   const port = Number(process.env.PORT || 8080);
-  await p.serve(port);
+  await p.serve(port, process.env.HOST || '0.0.0.0');
   console.log(`[door] provisioner listening on ${port}; poke it at POST /poke`);
   p.drain().catch((err) => console.error(`[door] ${err.message}`));
 }

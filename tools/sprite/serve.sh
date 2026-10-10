@@ -18,7 +18,9 @@
 # agent turn raises its own so it goes first (server/agent/first-to-go.js).
 #
 # With MARBLE_HUB_ENV set it asks tools/home-mode.mjs before every start, so a
-# host whose lease moved (it exits 75) comes back as standby.
+# host whose lease moved (it exits 75) comes back as standby. With
+# MARBLE_SERVE_COMMAND=provisioner (the door sprite's sprite.env) it keeps the
+# provisioner up instead of a drive.
 set -uo pipefail
 
 NODE="${MARBLE_SERVE_NODE:-$(command -v node)}"
@@ -48,7 +50,9 @@ while :; do
   # serves the drive or stands by (tools/home-mode.mjs). Every other drive has
   # no MARBLE_HUB_ENV and always serves.
   mode=serve
-  if [[ -n "${MARBLE_HUB_ENV:-}" ]]; then
+  # The door sprite runs the provisioner instead of a drive (server/provisioner.js).
+  [[ "${MARBLE_SERVE_COMMAND:-}" == provisioner ]] && mode=provisioner
+  if [[ $mode == serve && -n "${MARBLE_HUB_ENV:-}" ]]; then
     mode="$("$NODE" tools/home-mode.mjs 2>>"$CRASH_LOG" || echo standby)"
     [[ "$mode" == serve || "$mode" == standby ]] || mode=standby
   fi
