@@ -111,6 +111,12 @@ turn that link off.
 
 ## The address a link is written at
 
+A link is the drive's, not an account's. When the edge guards a drive
+(`worker/src/router.js`, [ACCOUNTS.md](ACCOUNTS.md)), it lets `/s/<token>` and
+any request carrying the `marble_share` cookie through without a pass, and the
+drive judges them exactly as below; everything else without the owner's pass is
+sent to sign in before it reaches the drive.
+
 A link is written against `MARBLE_DRIVE_PUBLIC_URL` when the drive has one
 (`server/config.js`; an http(s) origin, anything after it dropped), and
 against the address the owner has the drive open at otherwise. A drive at home

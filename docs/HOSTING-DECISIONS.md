@@ -618,6 +618,34 @@ then as completed, not failed. A full Claude turn gets `BASH_MAX_TIMEOUT_MS` of
 behind it, as it does behind any running turn; Interrupt still cuts in, and
 ends the run.
 
+### 31. Identity at the edge, a sprite per person
+
+**Asked 2026-10-10.** The owner wants people to make their own accounts and
+drives, sign in with Google or GitHub, and a second factor, instead of him
+running `sprite-provision.sh` and copying a passphrase into a message.
+
+**Chose** ([the spec](superpowers/specs/2026-10-10-accounts-and-sign-in-design.md)).
+One accounts service at `marbledrive.app`, in the Worker that is already the
+front door, with its data in a Durable Object: it is always on (a sign-in never
+waits for a sprite to wake), it already sees every request, and it is the one
+place OAuth callbacks can be registered. A sign-up makes a sprite of its own,
+as a tester's drive is made, by a small door sprite running the same script.
+A sign-in reaches a drive as a pass signed with Ed25519, which the drive checks
+with public keys only, so a drive's agent can read its settings and still never
+make a pass for any drive. The edge checks first, so a stranger never wakes a
+sprite; the drive checks again, because its sprite URL and tunnel can be
+reached without the edge.
+
+**Rejected.** A multi-tenant host (G2's plan): every agent turn would need a
+sandbox of its own first. A Google client on every drive: each would need its
+own redirect registered by hand. Cloudflare Access: 50 people on the free tier,
+no sign-up, and its screens. A hosted identity product: everyone's identity in
+someone else's database, for what `fetch` and WebCrypto already do.
+
+**Cost.** One more sprite (the door's, asleep between sign-ups), the Workers
+Paid plan once drives' live updates come through the edge, and a passphrase
+kept on every drive as the key for scripts and the desk.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |

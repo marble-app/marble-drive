@@ -548,6 +548,45 @@ names and taking over a drive on a request are not built.
   <name> mac-<name>.marbledrive.app` and `install <name>` on the Mac (any name
   but `bryan` goes to port 4402, as `home.sh`).
 
+### Accounts and the door
+
+Built 2026-10-10 on the `accounts` branch, **not switched on**: no Worker
+secrets, no OAuth apps, no wildcard route and no door sprite exist yet. How to
+turn it on, every setting, and the day-to-day commands are in
+[ACCOUNTS.md](ACCOUNTS.md); the design is
+[the spec](superpowers/specs/2026-10-10-accounts-and-sign-in-design.md).
+
+- **The pieces.** The Worker gains a third job, the door (`worker/src/door/`):
+  the Directory (a Durable Object of people, invites, drives, sessions and the
+  audit log), Google and GitHub sign-in, the pages at `marbledrive.app`, and
+  the passes. With `DOOR_SIGNING_KEY` unset none of it runs. For a drive the
+  Directory gives an owner, the router checks the owner's pass before it
+  proxies, and answers strangers itself, so they never wake the sprite; share
+  links and a script's bearer go through for the drive to judge. Each drive
+  checks the same pass again (`server/door.js`), and a door sprite runs
+  `marble-drive provisioner` to make the drives people ask for.
+- **A drive made by sign-up** is sprite `d-<name>`, label `marble-user`, so
+  `sprite-deploy.sh --all` includes it. Its `sprite.env` has a random
+  passphrase nobody was shown, the door settings, and `MARBLE_DRIVE_GATE=tools`.
+
+**Runbooks.**
+
+- *A drive's making failed.* Its page says which step and that you will finish
+  it; `node tools/door.mjs drives` shows `failed at <step>`. The door sprite's
+  log (`sprite exec -s door -- tail ~/app/crash/crashes.log`, and the service's
+  own output) has the script's error. Finish it with `--resume` or remove it
+  with `--remove` (ACCOUNTS.md, "Day to day").
+- *The signing key is lost or out.* Make a new pair, `DOOR_KEY_ID` to a new id,
+  the new private half into `DOOR_SIGNING_KEY`, and the new public half added to
+  every drive's `MARBLE_DOOR_KEYS` (deploy them). If the old key leaked, do not
+  keep it in `DOOR_OLD_KEYS` or any drive's list: every pass it signed stops
+  working at once and its people sign in again. Nothing else holds it.
+- *Someone's session must end.* They can sign out everywhere from their account
+  page. For you to do it: hold their drive (`node tools/door.mjs hold <name>`),
+  which the edge refuses within 30 seconds; a pass reaching the drive straight
+  through its sprite URL lasts at most 12 hours, so for a drive that must close
+  now, take `MARBLE_DOOR_*` out of its `sprite.env` and deploy.
+
 ## The console
 
 **Console** is a document in the owner's drive (`/a/Console`): every drive and
