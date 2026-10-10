@@ -33,3 +33,11 @@ test('the brief names the skill for a full agent and the guide for a documents a
   assert.match(docs, /read_guide "Persistence" and "Affordances"/);
   assert.doesNotMatch(docs, /check_document|affordance_script/);
 });
+
+test('the brief says where someone is looking is not a change', () => {
+  for (const capability of ['full', 'documents']) {
+    const brief = marbleWay(capability);
+    assert.match(brief, /data-marble-look="off"/);
+    assert.match(brief, /\{ look: true \}/);
+  }
+});
