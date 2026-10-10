@@ -418,6 +418,16 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       return json(res, 200, { ...(await listReview({ store, docPath, read: readSource })), now: Date.now() });
     }
 
+    // Every chat's turns since a time, in one request, so the day's lanes and
+    // the pages two chats changed at once are not asked for chat by chat.
+    // `paths=1` adds the pages each turn changed. `now` is the host's clock.
+    if (route === '/agent/turns' && method === 'GET') {
+      const since = Number(url.searchParams.get('since'));
+      if (!url.searchParams.get('since') || !Number.isFinite(since)) return json(res, 400, { error: 'since is required, in milliseconds' });
+      const turns = await store.turnsSince(since, { paths: url.searchParams.get('paths') === '1' });
+      return json(res, 200, { turns, now: Date.now() });
+    }
+
     if (route === '/agent/setup' && method === 'GET') return json(res, 200, await setupState());
     if (route === '/agent/setup' && method === 'POST') {
       if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
