@@ -11,7 +11,7 @@ every change a link files in `server/share-policy.js`.
 | Level | Can | Cannot |
 |---|---|---|
 | **Read only** (`view`) | open the page and see every change as it happens | file any change, not even an id |
-| **Read & write** (`edit`) | change what the page offers to change: anything under an element with an affordance marker (`data-marble-editable`, `-add`, `-sortable`, `-removable`, `-toggle`, `-choose` …), and the element a control points at with `data-marble-of` | change anything else, or add a `<style>` |
+| **Read & write** (`edit`) | change what the page offers to change: anything under an element with an affordance marker (`data-marble-editable`, `-rich`, `-add`, `-sortable`, `-removable`, `-toggle`, `-choose` …; the list is `MARKERS`, and a test fails when Marble's affordances or a starter wire one it lacks), and the element a control points at with `data-marble-of` | change anything else, or add a `<style>` |
 | **Read, write & modify** (`modify`) | change any part of the page: rewrite, add or remove sections, restructure, restyle | touch the page's code |
 
 No level can, ever:
