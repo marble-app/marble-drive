@@ -534,22 +534,25 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
 
     async read_document(input, turn) {
       const { docPath, source } = await readable(input);
-      const ledger = ledgerFor(turn.conversationId, docPath);
+      // A reader that is not a turn (server/connector) has nothing to edit
+      // with and no end to clear its look, so it is not remembered or drawn.
+      const ledger = turn.quiet ? new Map() : ledgerFor(turn.conversationId, docPath);
       const ids = Array.isArray(input.ids) && input.ids.length ? input.ids.map(String) : null;
       const client = turn?.conversationId ? `agent:${turn.conversationId}` : 'agent';
+      const look = turn.quiet ? () => {} : onLook ?? (() => {});
 
       // Small enough to hand over whole, which is also the one read that makes
       // every element in the document known.
       if (!ids && source.length <= READ_BUDGET) {
         const known = hashesOf(source);
         for (const [id, h] of known) ledger.set(id, h);
-        onLook?.(docPath, [...known.keys()], client, { phase: 'reading', turn: turn.id });
+        look(docPath, [...known.keys()], client, { phase: 'reading', turn: turn.id });
         return { path: docPath, whole: true, source };
       }
 
       const slices = collectSlices(source, ids ?? topLevelIds(source), { budget: READ_BUDGET });
       remember(ledger, source, slices);
-      onLook?.(docPath, slices.map((slice) => slice.id), client, { phase: 'reading', turn: turn.id });
+      look(docPath, slices.map((slice) => slice.id), client, { phase: 'reading', turn: turn.id });
       return {
         path: docPath,
         whole: false,

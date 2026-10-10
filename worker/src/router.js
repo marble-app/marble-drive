@@ -91,6 +91,10 @@ async function readDrive(env, name, now) {
 const enterUrl = (name, url) => `https://${APEX}/enter?${new URLSearchParams({ drive: name, to: returnPath(url.pathname + url.search) })}`;
 const wantsHtml = (request) => (request.headers.get('accept') ?? '').includes('text/html');
 const SHARE_LINK = /^\/s\/[A-Za-z0-9_-]+$/;
+/** Claude's and ChatGPT's way in (server/connector): their servers hold no
+ *  pass, and the drive judges each of these itself. The Allow page is not
+ *  here: that one is the owner's, in a browser, and signs in like any page. */
+const CONNECTOR = /^\/(mcp|oauth\/(register|token)|\.well-known\/(oauth-protected-resource|oauth-authorization-server)(\/mcp)?|\.well-known\/openid-configuration)$/;
 const carriesShare = (request) => /(?:^|;\s*)marble_share=/.test(request.headers.get('cookie') ?? '');
 
 /** Send someone without a pass to sign in: a page to the door, anything else a 401. */
@@ -145,6 +149,7 @@ async function guard(request, env, { name, record, url, now }) {
   if ((SHARE_LINK.test(url.pathname) && request.method === 'GET') || carriesShare(request)) return {};
   // A script with the drive's passphrase as a bearer: the drive judges that too.
   if (request.headers.get('authorization')) return {};
+  if (CONNECTOR.test(url.pathname)) return {};
   return { response: signInFirst(request, name, url) };
 }
 

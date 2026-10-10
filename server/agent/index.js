@@ -38,6 +38,9 @@ const BROWSER = path.resolve(HERE, '..', '..', 'bin', 'marble-browser-mcp.js');
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const ANY_HOST = new Set(['0.0.0.0', '::']);
 
+const READS = new Set(['list_documents', 'read_document']);
+const CONNECTOR_READER = Object.freeze({ id: 'connector', conversationId: 'connector', quiet: true });
+
 export function agentsAllowed(config) {
   if (!config.agents) return { ok: false, why: 'MARBLE_DRIVE_AGENTS is not set' };
   if (config.multiTenant) return { ok: false, why: 'agents are for one owner, and this host is multi-tenant' };
@@ -333,6 +336,10 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     handle: routes.handle,
     startRun: routes.startRun,
     handleTools: routes.handleTools,
+    /** Reading, for a door that is not a turn (server/connector): the same
+     *  tools an agent reads with, under a reader of their own, so what they
+     *  hand over is what an agent would be shown. Nothing that writes. */
+    read: (name, input) => (READS.has(name) ? tools.call(name, input, CONNECTOR_READER) : { error: `no tool "${name}"` }),
     watchdog: (docPath, sha) => runner.watchdog(docPath, sha),
     documentTouched: (docPath, sha) => runner.documentTouched(docPath, sha),
     running: () => runner.running(),

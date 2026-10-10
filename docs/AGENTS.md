@@ -390,6 +390,42 @@ and appends — see `test/agent-permissions.test.js`.
 Prefer a rule to a bigger hammer. Raising the mode to `bypassPermissions`
 removes the classifier and every other check with it.
 
+## From Claude or ChatGPT: the connector
+
+`MARBLE_DRIVE_CONNECTOR=1` makes the drive an MCP server at `/mcp`
+(`server/connector/`), so Claude (Settings → Connectors → Add custom
+connector) or ChatGPT (developer mode connectors) can be given the drive's
+address, `https://<drive>/mcp`. Off unless asked for; refused on a
+multi-tenant host and on a host with no passphrase or door.
+
+- **Signing in** is OAuth 2.1: the client finds the drive's metadata
+  (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`),
+  registers itself (`/oauth/register`), and sends the owner to
+  `/oauth/authorize`. That page is behind the gate like any other, so the
+  passphrase or the Marble Drive sign-in proves it is the owner, and asks one
+  question: Allow or Don't allow. Codes need PKCE (S256), are good once and for
+  a minute; access tokens last an hour, refresh tokens 90 days and are good
+  once. `.marble/connector.json` holds clients and grants, with tokens only as
+  hashes. `/connector` lists the apps let in, with a Turn off for each, which
+  ends every token that app holds.
+- **The tools** are reading (`list_documents`, `read_document`, the agents'
+  own read tools under a reader that leaves no look and no ledger) and running
+  chats (`list_chats`, `read_chat`, `start_chat`, `send_to_chat`,
+  `answer_question`, `stop_chat`). A change to a document is made by a chat,
+  never by the connector: the chat has the ledger, undo, live patching and the
+  check. A chat started from here is an ordinary chat on the drive's default
+  agent, with that agent's full power, and shows in the drawer and on the Agents
+  page (`/a/Agents?open=<id>`, the link each result carries).
+- **Waiting:** `start_chat`, `send_to_chat` and `answer_question` wait up to
+  `wait_seconds` (45 by default, 240 at most) for the turn to end or ask
+  something, then answer with where it got to. A longer job keeps running;
+  `read_chat` picks it up.
+- **The edge:** the marbledrive.app Worker passes `/mcp`, `/oauth/register`,
+  `/oauth/token` and the two `.well-known` documents through without a pass,
+  for the drive to judge. `/oauth/authorize` signs in like any page.
+- **Transport:** Streamable HTTP with JSON answers only: one POST per message
+  (or a batch), no SSE stream, no session id.
+
 ## Blocked and failed are different
 
 A tool that was refused and a tool that exited 1 both arrive as

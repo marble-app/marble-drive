@@ -219,6 +219,10 @@ export function loadConfig(env = process.env) {
     // process on this machine acting for whoever got through the gate. See
     // docs/AGENTS.md.
     agents: bool('MARBLE_DRIVE_AGENTS', false),
+    // The drive as an MCP server for Claude and ChatGPT (server/connector):
+    // /mcp, with an OAuth sign-in the owner says yes to. Off unless asked for,
+    // and never on a host without a gate or on one shared by many.
+    connector: bool('MARBLE_DRIVE_CONNECTOR', false),
     agentProvider: str('MARBLE_DRIVE_AGENT_PROVIDER', 'claude-subscription'),
     // One switch that holds every provider down to the 2026-09-16 boundary,
     // whatever each adapter declares. The rollback, if a full turn goes wrong.
