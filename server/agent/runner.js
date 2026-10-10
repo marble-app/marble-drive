@@ -698,9 +698,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         if (awake.now() - turn.lastProgress < limits.stallMs) return;
         // An answer that is in, waiting on background work that has gone
         // quiet (a dev server, a hung run): the turn did what it was asked,
-        // so it ends as it would have, not as a failure.
-        if (turn.done && turn.background > 0) {
-          if (turn.stdinOpen && !turn.endingIdle) {
+        // so it ends as it would have, not as a failure. Only a process whose
+        // stdin the runner holds can be ended this way; one handed its prompt
+        // on a closed stdin falls to the stall rule below, or nothing would
+        // ever end its turn.
+        if (turn.done && turn.background > 0 && turn.stdinOpen) {
+          if (!turn.endingIdle) {
             turn.endingIdle = true;
             log.log(`[agents] ${turn.id}: background work idle for ${Math.round(limits.stallMs / 1000)} s after the answer; ending the turn`);
             endInput(turn);

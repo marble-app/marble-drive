@@ -1451,6 +1451,21 @@ test('background work gone quiet after the answer ends the turn as completed, no
   await runner.close();
 });
 
+// The runner cannot end by closing stdin a process it never held stdin for;
+// waiting on its background work for good would leave the turn running forever.
+test('background work gone quiet under a process handed a closed stdin still ends the turn', async () => {
+  const closed = createFakeProvider({ scripts: { idle: [{ say: 'started the server' }, { bg: 'start', id: 'server' }, { done: true }, { hang: true }] } });
+  const spawn = closed.spawn.bind(closed);
+  closed.spawn = (opts) => ({ ...spawn(opts), stdinOpen: false });
+  const { store, runner } = await setup({ providerMap: new Map([['fake', closed]]), limits: { settleMs: 50, killGraceMs: 50, stallMs: 400 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:idle', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'failed');
+  assert.match(turn.error, /stalled/);
+  await runner.close();
+});
+
 test('a process the runner had to stop after its result still succeeded', async () => {
   const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50 } });
   const { id } = await store.createConversation({ provider: 'fake' });
