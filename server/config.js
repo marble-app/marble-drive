@@ -8,6 +8,8 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import { parseDoorKeys } from './door.js';
+
 /** An http(s) origin, or null: a path or a query on it would only mislead. */
 function originOf(value) {
   if (!value) return null;
@@ -98,6 +100,18 @@ export function loadConfig(env = process.env) {
     secret: str('MARBLE_DRIVE_SECRET', null),
     cookieName: str('MARBLE_DRIVE_COOKIE', 'marble_drive'),
     sessionCookie: str('MARBLE_DRIVE_SESSION_COOKIE', 'marble_session'),
+    // The door (server/door.js): people sign in at marbledrive.app, and the
+    // edge hands their browser a pass this drive checks with public keys.
+    // All three set, or the door is not there and the gate decides alone.
+    // A malformed key list stops the boot, naming the setting, not its value.
+    doorKeys: parseDoorKeys(str('MARBLE_DOOR_KEYS', null)),
+    doorName: str('MARBLE_DOOR_NAME', null),
+    doorOwner: str('MARBLE_DOOR_OWNER', null),
+    // `on`: the passphrase form and the door, as before. `tools`: browsers come
+    // in by the door; the passphrase is still a bearer for scripts and still
+    // opens the drive at 127.0.0.1, but not through a tunnel or the edge.
+    // Anything else is `on`, so a typo never locks anyone out.
+    gateMode: /^tools$/i.test(str('MARBLE_DRIVE_GATE', 'on')) ? 'tools' : 'on',
     sessionDays: num('MARBLE_DRIVE_SESSION_DAYS', 30),
     secureCookie: bool('MARBLE_DRIVE_SECURE_COOKIE', str('NODE_ENV', '') === 'production'),
     // The address other people reach this drive at, when it is not the one
