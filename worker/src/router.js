@@ -172,7 +172,9 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
     try {
       record = await readDrive(env, name, now);
     } catch {
-      return lost();
+      // A drive in DRIVES is still routed by its lease, and its own host still
+      // checks who is asking; any other drive cannot be found without this.
+      if (!inTable) return lost();
     }
   }
   if (record?.state === 'removed') record = null;
