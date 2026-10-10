@@ -66,6 +66,14 @@ test('a host that dies is started again, and the exit is written down', async ()
   await k.exited;
 });
 
+test('the door sprite keeps the provisioner up instead of a drive', async () => {
+  const k = await keeper({ env: { MARBLE_SERVE_COMMAND: 'provisioner' } });
+  assert.ok(await until(async () => (await k.lines('starts')).length === 2));
+  assert.match((await k.lines('starts'))[0], /bin\/marble-drive\.js provisioner$/);
+  k.child.kill('SIGTERM');
+  await k.exited;
+});
+
 test('a stop reaches the host and ends the loop without a restart', async () => {
   const k = await keeper();
   assert.ok(await until(async () => (await k.lines('starts')).length === 2));
