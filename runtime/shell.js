@@ -67,8 +67,8 @@
   // in Describe and Build makes what is marked; off, Describe is a mode you
   // turn on and the ⌘J line sends it to the chat.
   const BUILD_MODES = [
-    ['on', 'On', 'Apps open with the tools out. Mark it up, press Build.'],
-    ['off', 'Off', 'Describe is a mode you turn on, and the chat makes the change.'],
+    ['on', 'On', 'Turn it on in an app to mark it up and press Build. Out of it, you type only where the app is made for writing.'],
+    ['off', 'Off', 'Describe is a mode you turn on, the chat makes the change, and all text stays editable.'],
   ];
   const buildMode = () => { try { return localStorage.getItem('marble-build') === 'off' ? 'off' : 'on'; } catch { return 'on'; } };
   const BUILTIN = [

@@ -94,7 +94,7 @@ __ICON__
   svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 
   [data-marble-editable] { outline: none; border-radius: var(--r-text); transition: background var(--t-fast) var(--snap); }
-  [data-marble-editable]:hover, [data-marble-editable]:focus-within { background: var(--accent-soft); }
+  [data-marble-editable]:not([contenteditable="false"]):hover, [data-marble-editable]:not([contenteditable="false"]):focus-within { background: var(--accent-soft); }
   [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
   /* Keyboard focus is its own state: one ring, everywhere a key can land. */
   :focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }

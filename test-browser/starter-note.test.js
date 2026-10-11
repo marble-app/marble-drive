@@ -140,7 +140,7 @@ test('one note is the editing host, and opening it files nothing', async () => {
   const source = await filed(page);
   // Every one of these is derived or page-only, so none may be carried by an
   // element in the file — the names themselves are all over the stylesheet.
-  assert.ok(!/contenteditable=/.test(source));
+  assert.ok(!/<[a-z][^>]*\scontenteditable=/i.test(source), 'no element carries contenteditable');
   assert.ok(!/class="[^"]*marble-/.test(source), 'a derived class is not a fact about a note');
   // The rail's own container is in the file; nothing it is filled with is.
   assert.ok(!/class="row"/.test(source), 'the rail is a reading, not a copy');

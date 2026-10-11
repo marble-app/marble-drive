@@ -33,6 +33,7 @@ export const buildsSomething = (...texts) => texts.some((text) => BUILDS.test(St
 const COMMON = [
   '- The file is the state. Anything a person can change in what you build (words they type, a box they check, a choice, an order, a row they add) changes the page and is filed with window.marble.op, so it is still there after a reload. Nothing that should last lives only in a script variable, localStorage or a shadow root.',
   '- Words stay words. Text that was editable stays editable (data-marble-editable), and text you add is editable too. Never redraw it from script, or put it in an image, a canvas or an SVG label.',
+  '- Outside build mode a bare data-marble-editable is locked: headings, labels and copy only change in build mode. Mark the places a person writes in normal use (a note, a cell, a card, a field) with data-marble-editable="write", or put data-marble-write on the container that holds them (a grid, a list of cards) so rows added there take typing too. An editable with a placeholder (data-ph) is writable already.',
   '- Keep every data-marble-id you were given. Change elements in place; never remove one to insert its replacement.',
   '- Where someone is looking is not a change. A step, an expand and a choose that switches views are looking: someone in by a share link moves them in their own tab, at any level, and only the owner\'s are saved. Mark a choose that records an answer or a status data-marble-look="off", and file a view your own script switches with window.marble.op(op, { look: true }).',
 ];

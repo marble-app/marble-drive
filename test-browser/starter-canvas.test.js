@@ -452,7 +452,7 @@ test('nothing that belongs to the page reaches the file', async () => {
 
   const source = await filed(page);
   assert.ok(!/class="[^"]*marble-/.test(source), 'a derived class is not a fact about a note');
-  assert.ok(!/contenteditable=/.test(source));
+  assert.ok(!/<[a-z][^>]*\scontenteditable=/i.test(source), 'no element carries contenteditable');
   assert.ok(!/tabindex=/.test(source));
   assert.ok(!/aria-expanded=/.test(source));
   // The stylesheet names the library's chrome; no element may carry it.

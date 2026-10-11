@@ -229,7 +229,7 @@ __ICON__
   [data-marble-editable]:empty { min-height: 1.2em; }
   /* Only under a pointer that hovers: a finger leaves the last thing it
      touched "hovered", and the tint stayed behind on it. */
-  @media (hover: hover) { [data-marble-editable]:hover { background: var(--accent-soft); } }
+  @media (hover: hover) { [data-marble-editable]:not([contenteditable="false"]):hover { background: var(--accent-soft); } }
   [data-marble-editable]:focus {
     background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
   }
@@ -329,7 +329,7 @@ __ICON__
     <p class="lede" data-marble-id="__ID__" data-marble-editable>A card’s column is the column it sits in and nothing else. Drag one across and you have moved it in the file.</p>
   </header>
 
-  <div class="cols" data-marble-id="__ID__">
+  <div class="cols" data-marble-id="__ID__" data-marble-write>
 
     <section class="col" data-marble-id="__ID__">
       <header class="col-head" data-marble-id="__ID__">

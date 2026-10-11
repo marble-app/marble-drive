@@ -1,5 +1,6 @@
-// Build mode: no chat. A new app is a place you go to, Describe is on from the
-// start, the marks are kept on the host, and Build hands them to one agent
+// Build mode: no chat. A new app is a place you go to, an app left in build
+// mode opens in it (and one nobody has built here opens in normal use), the
+// marks are kept on the host, and Build hands them to one agent
 // that builds in the open. Every build is kept, and can be paused, stopped
 // and gone back to.
 import assert from 'node:assert/strict';
@@ -141,7 +142,23 @@ const noteOn = async (page, id, text) => {
   await page.waitForFunction((words) => fetch(`/agent/builds?path=${encodeURIComponent(window.marble.app)}`).then((r) => r.json()).then((s) => s.marks.some((m) => m.text === words)), text);
 };
 
-test('every app starts in Describe: the toolbar is up, no ring, no notice, full size', async () => {
+test('an app nobody has built here opens in normal use, and turning build mode on is kept for it', async () => {
+  await closePages();
+  await host.reset();
+  const { page, errors } = await host.newPage({ build: 'closed' });
+  pages.push(page);
+  await page.goto(`${host.base}/a/Reviews`);
+  await page.waitForFunction(() => Boolean(window.marbleBuild?.state() && window.marbleWriting));
+  assert.equal(await page.evaluate(() => window.marbleMarks.describing), false);
+  assert.equal(await page.evaluate(() => window.marbleWriting.locked), true);
+  await page.evaluate(() => window.marbleMarks.setDescribing(true));
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marbleBuild?.state()));
+  assert.equal(await page.evaluate(() => window.marbleMarks.describing), true, 'left in build mode, it opens in it');
+  assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
+});
+
+test('an app left in build mode opens in it: the toolbar is up, no ring, no notice, full size', async () => {
   const { page, errors } = await open();
   assert.equal(await page.evaluate(() => window.marbleMarks.describing), true);
   await bar(page).waitFor();

@@ -167,7 +167,7 @@ __ICON__
   .fold:active { transform: scale(.92); }
 
   [data-marble-editable] { outline: none; border-radius: var(--r-text); }
-  [data-marble-editable]:hover { background: color-mix(in srgb, var(--card) 55%, transparent); }
+  [data-marble-editable]:not([contenteditable="false"]):hover { background: color-mix(in srgb, var(--card) 55%, transparent); }
   [data-marble-editable]:focus-visible {
     outline: none; background: var(--card);
     box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
@@ -252,7 +252,7 @@ __ICON__
 </header>
 
 <main class="frame" data-marble-id="__ID__" aria-label="Board">
-  <div class="board" data-marble-id="__ID__" id="board" data-marble-canvas>
+  <div class="board" data-marble-id="__ID__" id="board" data-marble-canvas data-marble-write>
 
     <!-- Before the notes, not after them. Undoing a delete puts the note back
          before the next addressable sibling, and a transient div has no id to

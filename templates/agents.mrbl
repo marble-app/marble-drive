@@ -90,7 +90,7 @@ __ICON__
     display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
   }
   [data-marble-editable] { outline: none; border-radius: 4px; transition: background var(--t-fast) var(--snap); }
-  [data-marble-editable]:hover, [data-marble-editable]:focus-within { background: var(--accent-soft); }
+  [data-marble-editable]:not([contenteditable="false"]):hover, [data-marble-editable]:not([contenteditable="false"]):focus-within { background: var(--accent-soft); }
   [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
   button { font: inherit; }
   button, .conv {

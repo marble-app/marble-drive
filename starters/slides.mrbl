@@ -179,7 +179,7 @@ __ICON__
   .tri { width: 0; height: 0; margin-left: .1rem; border: .3rem solid transparent; border-right-width: 0; border-left-color: currentColor; }
 
   [data-marble-editable] { outline: none; border-radius: var(--r-text); overflow-wrap: anywhere; transition: background var(--t-fast) var(--snap); }
-  [data-marble-editable]:hover, [data-marble-editable]:focus { background: var(--accent-soft); }
+  [data-marble-editable]:not([contenteditable="false"]):hover, [data-marble-editable]:focus { background: var(--accent-soft); }
   /* An empty editable has no line box and so nowhere to put a caret: a heading
      is one Backspace away from being untypable without this. The prompt goes on
      ::after, behind the caret rather than in front of it. */
@@ -205,7 +205,7 @@ __ICON__
   [data-present] .head,
   [data-present] .slide > :not(.frame) { visibility: hidden; }
   [data-present] .face::after, [data-present] .frame::after { content: none; }
-  [data-present] [data-marble-editable]:hover { background: none; }
+  [data-present] [data-marble-editable]:not([contenteditable="false"]):hover { background: none; }
   .hud {
     position: fixed; z-index: 70; left: 0; right: 0; bottom: max(.9rem, env(safe-area-inset-bottom));
     display: none; align-items: center; justify-content: space-between; padding-inline: max(1rem, env(safe-area-inset-left));
@@ -266,7 +266,7 @@ __ICON__
     <p class="lede" data-marble-id="__ID__" data-marble-editable>One slide is one section. Drag a slide by its handle to reorder the deck — the numbers follow on their own — and press Present when it is ready for a room.</p>
   </header>
 
-  <ol class="slides" data-marble-id="__ID__" data-marble-sortable="slides">
+  <ol class="slides" data-marble-id="__ID__" data-marble-sortable="slides" data-marble-write>
     <li class="slide" data-marble-id="__ID__" data-marble-removable data-kind="title">
       <div class="frame"><div class="face">
         <h2 data-marble-id="__ID__" data-marble-editable>__TITLE__</h2>

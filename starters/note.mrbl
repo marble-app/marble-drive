@@ -129,7 +129,7 @@ __ICON__
   /* An empty editable has no line box and so nowhere to put a caret: the name
      is one Backspace away from being untypable without this. */
   [data-marble-editable]:empty::before { content: "\feff"; }
-  [data-marble-editable]:hover { background: var(--paper-3); }
+  [data-marble-editable]:not([contenteditable="false"]):hover { background: var(--paper-3); }
   [data-marble-editable]:focus { background: var(--paper-3); }
   :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 
