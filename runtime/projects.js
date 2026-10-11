@@ -949,7 +949,8 @@
         return rank(a) - rank(b) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
       });
       const busy = chats.filter((c) => c.running || c.asking).length;
-      const blk = block(busy ? 'Working now' : 'Chats');
+      // Working first, then waiting, unread and the rest by when.
+      const blk = block(busy ? `Chats · ${busy} working` : 'Chats');
       const shown = chats.slice(0, Math.max(6, busy));
       if (!shown.length) blk.append(x('p', 'x-note', 'No chats yet. Ask below to start one in this project.'));
       for (const c of shown) {
