@@ -224,6 +224,11 @@ export function loadConfig(env = process.env) {
     // and never on a host without a gate or on one shared by many.
     connector: bool('MARBLE_DRIVE_CONNECTOR', false),
     agentProvider: str('MARBLE_DRIVE_AGENT_PROVIDER', 'claude-subscription'),
+    // Starter credit (docs/ACCOUNTS.md): the credit proxy's address and this
+    // drive's own token for it, written by the door when it makes the drive.
+    // With both, Claude can run as claude-credit before anyone brings a key.
+    creditUrl: str('MARBLE_CREDIT_URL', null),
+    creditToken: str('MARBLE_CREDIT_TOKEN', null),
     // One switch that holds every provider down to the 2026-09-16 boundary,
     // whatever each adapter declares. The rollback, if a full turn goes wrong.
     agentPower: str('MARBLE_DRIVE_AGENT_POWER', ''),

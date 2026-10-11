@@ -1223,7 +1223,7 @@
     }
     slideThumb(track, { animate: false });
   };
-  const PICKER_PROVIDER_ORDER = ['claude-subscription', 'codex', 'cursor', 'claude-api'];
+  const PICKER_PROVIDER_ORDER = ['claude-subscription', 'claude-credit', 'codex', 'cursor', 'claude-api'];
   const sortProviders = (list) => {
     const rank = (id) => {
       const index = PICKER_PROVIDER_ORDER.indexOf(id);
