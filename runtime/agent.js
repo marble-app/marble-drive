@@ -275,6 +275,8 @@
       // Can this drive run an agent: Claude or Codex, signed in or on a key.
       // And a key itself, checked with Anthropic or OpenAI before it is kept.
       setup: () => ask('/agent/setup'),
+      // Not now on the first-visit popup, kept for the drive.
+      setupLater: () => ask('/agent/setup/later', { method: 'POST' }),
       connectClaude: (key) => ask('/agent/setup', { method: 'POST', body: { key } }),
       connectAgent: (provider, key) => ask('/agent/setup', { method: 'POST', body: { provider, key } }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),

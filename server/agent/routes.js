@@ -193,7 +193,10 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     };
     const offers = [...(hasClaude ? ['claude'] : []), ...(codex.installed ? ['codex'] : [])];
     const ready = (hasClaude && (key || login)) || codex.signedIn;
-    return { needed: offers.length > 0 && !ready, login, key, claudeAuth: claudeAuth(settings), offers, codex };
+    // `later`: someone on this drive said Not now to the first-visit popup.
+    // Kept for the drive, so a new tab or another device does not ask again;
+    // the popup still opens when someone asks for it (runtime/agent-ui.js).
+    return { needed: offers.length > 0 && !ready, later: Boolean(settings.setupLater), login, key, claudeAuth: claudeAuth(settings), offers, codex };
   };
 
   /** POST /agent/setup for Codex: the key checked with OpenAI and kept, and
@@ -211,7 +214,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     const settings = await store.settings();
     const current = isClaude(settings.defaultProvider) ? activeClaude(settings) : settings.defaultProvider;
     const runs = (await detectAll()).find((p) => p.id === current)?.signedIn;
-    if (!runs) await store.saveSettings({ defaultProvider: CODEX });
+    await store.saveSettings({ setupLater: null, ...(runs ? {} : { defaultProvider: CODEX }) });
     return [200, { ...(await setupState()), checked: verdict === 'ok' }];
   }
 
@@ -552,6 +555,10 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     }
 
     if (route === '/agent/setup' && method === 'GET') return json(res, 200, await setupState());
+    if (route === '/agent/setup/later' && method === 'POST') {
+      await store.saveSettings({ setupLater: new Date().toISOString() });
+      return json(res, 200, await setupState());
+    }
     if (route === '/agent/setup' && method === 'POST') {
       if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
       const body = await readJson(req, maxBody);
@@ -567,7 +574,8 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       await keys.write({ anthropic: key });
       detected = null;
       const current = (await store.settings()).defaultProvider;
-      await store.saveSettings({ claudeAuth: 'api', ...(isClaude(current) ? { defaultProvider: CLAUDE.api } : {}) });
+      // Connected: should it ever stop running, the first visit asks again.
+      await store.saveSettings({ claudeAuth: 'api', setupLater: null, ...(isClaude(current) ? { defaultProvider: CLAUDE.api } : {}) });
       return json(res, 200, { ...(await setupState()), checked: verdict === 'ok' });
     }
 
