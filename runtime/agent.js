@@ -279,6 +279,8 @@
       connectAgent: (provider, key) => ask('/agent/setup', { method: 'POST', body: { provider, key } }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
+      // Starter credit: whose, how much is used. `fresh` asks the proxy now.
+      credit: ({ fresh = false } = {}) => ask(fresh ? '/agent/credit?fresh=1' : '/agent/credit'),
       // Whether this drive can hear and speak, and how it was set to.
       voice: () => ask('/agent/voice'),
       // An OpenAI key for voice, checked with OpenAI before it is kept.

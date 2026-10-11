@@ -1224,6 +1224,21 @@
     slideThumb(track, { animate: false });
   };
   const PICKER_PROVIDER_ORDER = ['claude-subscription', 'claude-credit', 'codex', 'cursor', 'claude-api'];
+  // Starter credit (docs/ACCOUNTS.md). Connect your Claude is the sheet that
+  // signs a drive in to its person's own Claude plan; whatever draws it
+  // listens for this event and calls preventDefault. Answers whether it did.
+  const connectClaude = () => !document.dispatchEvent(new CustomEvent('marble:connect-claude', { cancelable: true }));
+  const dollars = (n) => {
+    const v = Math.max(0, Number(n) || 0);
+    return Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`;
+  };
+  /** "On Bryan's starter credit", or without a name when the drive has none. */
+  const creditWhose = (credit) => (credit?.by ? `On ${credit.by}\u2019s starter credit` : 'On starter credit');
+  const creditUsed = (credit) => (credit?.known ? `${dollars(credit.spent)} of ${dollars(credit.cap)} used` : 'How much is used can\u2019t be read right now.');
+  // Said once on this drive, the first time less than a dollar is left.
+  const CREDIT_LOW_SAID = 'marble-credit-low-said';
+  // At zero the sheet opens by itself, once a page: the note stays for later.
+  let creditSheetOpened = false;
   const sortProviders = (list) => {
     const rank = (id) => {
       const index = PICKER_PROVIDER_ORDER.indexOf(id);
@@ -4382,6 +4397,13 @@
               <button type="button" class="usage-leave quiet">Leave it</button>
             </div>
           </div>
+          <div class="usage-note credit-note" hidden>
+            <p class="credit-note-text"></p>
+            <div class="actions">
+              <button type="button" class="credit-connect">Connect your Claude</button>
+              <button type="button" class="credit-leave quiet">Not now</button>
+            </div>
+          </div>
           <div class="queued" hidden data-combine="0">
             <div class="queued-bar" hidden role="group" aria-label="How queued prompts are sent">
               <button type="button" class="queued-individually" aria-pressed="true">Send individually</button>
@@ -4476,6 +4498,12 @@
       this.detailButton.addEventListener('click', () => writeDetail(readDetail() === 'simple' ? 'technical' : 'simple'));
       this.onDetail = () => this.paintDetail();
       this.paintDetail();
+      this.creditNote = root.querySelector('.credit-note');
+      this.creditNoteText = root.querySelector('.credit-note-text');
+      root.querySelector('.credit-connect').addEventListener('click', () => {
+        if (!connectClaude()) window.marble?.agent?.openSettings?.('settings');
+      });
+      root.querySelector('.credit-leave').addEventListener('click', () => this.hideCreditNote());
       this.usageSwitch.addEventListener('click', () => this.switchFromUsage());
       this.usageLeave.addEventListener('click', () => this.leaveUsage());
       this.dispatchEl = root.querySelector('.dispatch');
@@ -6991,6 +7019,7 @@
       this.turns.clear();
       this.usageLeft = new Set();
       this.hideUsageNote();
+      this.hideCreditNote();
       this.prompts.clear();
       this.live = null;
       this.lastAsk = null;
@@ -7280,6 +7309,8 @@
           this.endLive();
           this.finish(turn, event);
           if (event.type === 'turn.failed' && event.usageStopped && this.failoverMode() === 'pause' && !this.backfilling) this.showUsageNote(event);
+          if (event.type === 'turn.failed' && event.creditUsedUp && !this.backfilling) this.creditUsedUp();
+          if (event.type === 'turn.completed' && this.meta?.provider === 'claude-credit' && !this.backfilling) this.checkCreditLeft();
           break;
         case 'turn.undone':
           this.undone(turn, event);
@@ -7545,6 +7576,41 @@
     hideUsageNote() {
       if (this.usageNote) this.usageNote.hidden = true;
       this.usageAsk = null;
+    }
+
+    /** Starter credit, in the composer's line: used up, with the sheet
+     *  opened once; or under a dollar left, said once on this drive. */
+    showCreditNote(text) {
+      if (!this.creditNote) return;
+      this.creditNoteText.textContent = text;
+      this.creditNote.hidden = false;
+    }
+
+    hideCreditNote() {
+      if (this.creditNote) this.creditNote.hidden = true;
+    }
+
+    creditUsedUp() {
+      this.showCreditNote('Starter credit used up. Connect your Claude to keep going.');
+      if (!creditSheetOpened) {
+        creditSheetOpened = true;
+        connectClaude();
+      }
+    }
+
+    async checkCreditLeft() {
+      try {
+        if (localStorage.getItem(CREDIT_LOW_SAID)) return;
+      } catch { /* private mode: said at most once a page */ }
+      let credit = null;
+      try {
+        credit = await this.api?.credit?.({ fresh: true });
+      } catch {
+        return;
+      }
+      if (!credit?.active || !credit.low) return;
+      try { localStorage.setItem(CREDIT_LOW_SAID, '1'); } catch { /* private mode */ }
+      this.showCreditNote(`Under a dollar of ${credit.by ? `${credit.by}\u2019s ` : ''}starter credit left.`);
     }
 
     switchFromUsage() {
@@ -8859,6 +8925,13 @@
     .claude-auth label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
     .claude-key { grid-column: 2; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
     .claude-key[hidden] { display: none; }
+    /* Starter credit: whose it is and how much is used, then the two ways
+       off it. Quiet until it matters, so no colour and no meter. */
+    .claude-credit { grid-column: 2; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+    .claude-credit[hidden] { display: none; }
+    .claude-credit p { margin: 0; }
+    .claude-credit .credit-used { color: var(--muted); font-size: 12px; }
+    .credit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; }
     .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
     .project { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
     .project code { font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
@@ -9335,9 +9408,13 @@
     }
 
     /** Claude signs in with the Claude login or an API key: one agent, one
-     *  switch. The key field shows only while "API key" is on. */
+     *  switch. The key field shows only while "API key" is on. A drive the
+     *  door gave starter credit has a third way, and while it is on, the line
+     *  says whose credit and how much of it is used. */
     claudeSwitch(settings) {
-      const auth = settings.claudeAuth === 'api' ? 'api' : 'login';
+      const credit = settings.credit ?? null;
+      const ways = [...(credit ? [['credit', 'Starter credit']] : []), ['login', 'Claude login'], ['api', 'API key']];
+      const auth = ways.some(([value]) => value === settings.claudeAuth) ? settings.claudeAuth : 'login';
       const group = document.createElement('div');
       group.className = 'claude-auth';
       group.setAttribute('role', 'radiogroup');
@@ -9346,7 +9423,17 @@
       key.className = 'claude-key';
       key.append(this.keyRow('anthropic', 'Claude API key', settings.keys?.anthropic));
       key.hidden = auth !== 'api';
-      for (const [value, text] of [['login', 'Claude login'], ['api', 'API key']]) {
+      const onCredit = credit ? this.creditLine(credit, () => choose('api')) : null;
+      if (onCredit) onCredit.hidden = auth !== 'credit';
+      const radios = new Map();
+      const choose = (value) => {
+        const radio = radios.get(value);
+        if (radio) radio.checked = true;
+        key.hidden = value !== 'api';
+        if (onCredit) onCredit.hidden = value !== 'credit';
+        if (value === 'api') key.querySelector('input')?.focus();
+      };
+      for (const [value, text] of ways) {
         const label = document.createElement('label');
         const radio = document.createElement('input');
         radio.type = 'radio';
@@ -9355,11 +9442,33 @@
         radio.checked = value === auth;
         radio.addEventListener('change', () => {
           key.hidden = value !== 'api';
+          if (onCredit) onCredit.hidden = value !== 'credit';
         });
+        radios.set(value, radio);
         label.append(radio, document.createTextNode(text));
         group.append(label);
       }
-      return [group, key];
+      return onCredit ? [group, onCredit, key] : [group, key];
+    }
+
+    /** "On Bryan's starter credit · $3.90 of $5 used", with the two ways off
+     *  it: the person's own Claude plan, or a key. */
+    creditLine(credit, useKey) {
+      const line = h('div', 'claude-credit');
+      line.append(h('p', 'credit-whose', creditWhose(credit)), h('p', 'credit-used', creditUsed(credit)));
+      const actions = h('div', 'credit-actions');
+      const connect = h('button', '', 'Connect your Claude');
+      connect.type = 'button';
+      connect.addEventListener('click', () => {
+        // Nothing drew the sheet: the key is the other way in.
+        if (!connectClaude()) useKey();
+      });
+      const instead = h('button', 'link', 'Use an API key instead');
+      instead.type = 'button';
+      instead.addEventListener('click', useKey);
+      actions.append(connect, instead);
+      line.append(actions);
+      return line;
     }
 
     keyRow(name, label, set, { field = `key-${name}` } = {}) {
@@ -9645,6 +9754,9 @@
     }
 
     present(state) {
+      // Starter credit used up: the way on is the person's own Claude, in
+      // its sheet. The key field is for when nothing draws one.
+      if (state.credit?.usedUp && connectClaude()) return;
       const offers = (Array.isArray(state.offers) ? state.offers : ['claude']).filter((id) => SETUP_AGENTS[id]);
       this.offers = offers.length ? offers : ['claude'];
       this.choice.hidden = this.offers.length < 2;
