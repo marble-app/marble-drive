@@ -35,7 +35,34 @@ ${await composeScript(['editable'])}
 </body></html>
 `;
 
-const host = await startDrive({ documents: { groceries: LIST }, env: { MARBLE_DRIVE_SECRET: SECRET } });
+// A page that wires its own editable and never tells the carrier that
+// contenteditable is page-only, then files its list whole.
+const OWN = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Shelf</title></head>
+<body data-marble-id="b"><main data-marble-id="m">
+  <h1 data-marble-id="t" data-marble-editable>Shelf</h1>
+  <button data-marble-id="go" type="button">File it</button>
+</main>
+<script>
+  document.querySelector('[data-marble-editable]').setAttribute('contenteditable', 'true');
+  document.querySelector('[data-marble-id="go"]').addEventListener('click', () => {
+    const main = document.querySelector('[data-marble-id="m"]');
+    main.insertAdjacentHTML('beforeend', '<p>' + 'Filed' + ' at last</p>');
+    window.marble.op({ type: 'setInner', id: 'm', html: window.marble.source.inner(main) });
+  });
+</script>
+</body></html>
+`;
+
+const SCRIPTS = {
+  retitle: [
+    { call: 'read_document', args: { path: 'groceries' } },
+    { call: 'apply_ops', args: { path: 'groceries', note: 'rename', ops: [{ type: 'setText', id: 'title', text: 'Market' }] } },
+    { say: 'Renamed it.' },
+  ],
+};
+
+const host = await startDrive({ documents: { groceries: LIST, shelf: OWN }, scripts: SCRIPTS, env: { MARBLE_DRIVE_SECRET: SECRET } });
 test.after(() => host.close());
 
 const pages = [];
@@ -169,4 +196,32 @@ test('an edit link writes only in the writing areas; a modify link keeps every e
   const other = await visitor(me, 'modify');
   assert.equal(await other.page.evaluate(() => Boolean(window.marbleWriting)), false);
   assert.equal(await editable(other.page, 'title'), 'plaintext-only');
+});
+
+test('a page that wires its own editables never files the lock', async () => {
+  await host.reset();
+  const { page } = await owner({ doc: 'shelf' });
+  await page.waitForFunction(() => window.marbleWriting.locked);
+  assert.equal(await editable(page, 't'), 'false');
+  await page.locator('[data-marble-id="go"]').click();
+  const read = async () => (await host.drive.store.read('shelf')) ?? '';
+  assert.ok(await until(async () => /<p>Filed at last<\/p>/.test(await read())), 'the page filed its list');
+  assert.doesNotMatch(await read(), /contenteditable=/);
+});
+
+test('an agent changes locked text as before', async () => {
+  await host.reset();
+  const { page } = await owner();
+  await page.waitForFunction(() => window.marbleWriting.locked && Boolean(window.marble.agent));
+  await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await new Promise((resolve) => {
+      const off = agent.on(id, (event) => { if (event.type === 'turn.completed') { off(); resolve(); } });
+      agent.send(id, { prompt: 'script:retitle' });
+    });
+  });
+  assert.ok(await until(async () => /data-marble-editable>Market<\/h1>/.test(await file())), 'the agent\'s op is filed');
+  assert.ok(await until(async () => (await textOf(page, 'title')) === 'Market'), 'and lands on the open page');
+  assert.equal(await editable(page, 'title'), 'false', 'still locked');
 });

@@ -53,11 +53,25 @@
   const was = new WeakMap();
   let locked = false;
 
+  // The affordance script tells the carrier contenteditable is page-only, but
+  // a page that wires its editables itself may not, and then a row it files
+  // with insert or setInner would carry the lock's "false" into the file,
+  // locked for good. Said by the first lock, so a page this never touches
+  // keeps its own say.
+  let told = false;
+  const tell = () => {
+    if (told) return;
+    told = true;
+    if (window.marble?.pageOnly) window.marble.pageOnly('contenteditable');
+    else addEventListener('marble:ready', (event) => event.detail?.pageOnly?.('contenteditable'), { once: true });
+  };
+
   const lockOne = (el) => {
     if (!el.hasAttribute('data-marble-editable') || writable(el) || el.closest(`[${TRANSIENT}]`)) return;
     const value = el.getAttribute('contenteditable');
     // Not wired yet: the page's script will set it, and the watch below hears it.
     if (value === null || value === 'false') return;
+    tell();
     was.set(el, value);
     if (el === document.activeElement || el.contains(document.activeElement)) document.activeElement.blur();
     el.setAttribute('contenteditable', 'false');
