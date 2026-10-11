@@ -92,7 +92,9 @@ export function createProvisioner({ directoryUrl, adminToken, run, log = console
         log.error(`[provisioner] ${name}: no starter credit (the door answered ${res.status})`);
         return null;
       }
-      const { token } = await res.json();
+      const { token, credit } = await res.json();
+      // An invite with --credit 0: this drive is made without credit.
+      if (credit?.cap === 0) return null;
       return /^mdc_[0-9a-f]{48}$/.test(token ?? '') ? { url: new URL('/_credit', directoryUrl).href, token } : null;
     } catch (err) {
       log.error(`[provisioner] ${name}: no starter credit (${err.message})`);

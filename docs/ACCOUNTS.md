@@ -174,6 +174,117 @@ In the spec's order: `t-bryan` first, then `bryan`, then the testers.
    cookie), and still works at `127.0.0.1` and as `Authorization: Bearer` for
    scripts. Taking the lines out puts the drive back as it was.
 
+## Starter credit
+
+A new drive's agent runs on a capped budget the owner pays for, so it works
+before anyone brings a key. The owner's Anthropic key never reaches a drive:
+it is a Worker secret. Each drive gets a token of its own, and its Claude Code
+talks to the credit proxy at `https://marbledrive.app/_credit` with that token
+as its key. The proxy checks the token, checks the drive's spend against its
+cap, passes the request on to Anthropic with the owner's key, and streams the
+answer back. On the way out it reads the usage, prices it by model, and adds
+the cost to the drive's total in the Directory. At the cap it answers a 402
+that the drive shows as "Starter credit used up", with Connect your Claude.
+
+There are two caps. Each drive has its own in the Directory ($5 unless set
+otherwise). The key's Console workspace has a monthly spend limit, so a bug in
+the first can never spend past the second.
+
+| Piece | Where |
+|---|---|
+| The proxy, the price table, reading usage from a stream | `worker/src/credit.js` |
+| Each drive's token (as a hash), cap and spend | `worker/src/door/directory.js`, `credit:` records |
+| The default cap, `DEFAULT_CREDIT_USD` | `worker/src/door/directory.js` |
+| Claude Code pointed at the proxy | the `claude-credit` provider, `server/agent/providers/claude.js` |
+| The line in Agents › Settings › Claude, and the chat's notes | `runtime/agent-ui.js`; the balance through `server/agent/credit.js` |
+| Minting a token when a drive is made | `server/provisioner.js`, `tools/sprite-provision.sh --credit-file` (door) or `--credit` (by hand) |
+| The owner's view of it | `node tools/door.mjs credit` |
+
+Like the door, nothing changes until it is configured. With no
+`CREDIT_ANTHROPIC_KEY` on the Worker, every `/_credit` path is a 404 and the
+door sprite makes drives without credit, as before. A drive without
+`MARBLE_CREDIT_URL` and `MARBLE_CREDIT_TOKEN` has no `claude-credit` agent and
+behaves exactly as it did. Credit does not need the door to be on: a drive
+made by hand can use it.
+
+### To turn it on
+
+1. **An Anthropic workspace for credit.** In the Anthropic Console, Settings,
+   Workspaces, make one called `marble-credit`. Give it a monthly spend limit
+   of $5 times the most drives you will allow on credit (with `MAX_DRIVES` at
+   10, that is $50), so the worst month is a number you chose. Make one API
+   key in it. Nothing else uses this workspace.
+2. **The key into the Worker**, never into a file a drive can read:
+   `cd worker && npx wrangler@latest secret put CREDIT_ANTHROPIC_KEY`, and
+   paste it at the prompt.
+3. **The admin token.** The credit admin routes use `DOOR_ADMIN_TOKEN`, the
+   same as the door's (step 1 of "To turn it on" above). Set it even if the
+   door itself stays off.
+4. **Deploy the Worker**: `cd worker && npx wrangler@latest deploy`. The
+   `marbledrive.app/*` route it already has carries `/_credit`.
+5. **Check**: `node tools/door.mjs credit` answers "No drive has starter
+   credit yet." rather than "starter credit is off".
+
+### Giving a drive credit
+
+- **A drive the door makes** gets it by itself: the door sprite mints its
+  token before making it, and `sprite-provision.sh` writes
+  `MARBLE_CREDIT_URL` and `MARBLE_CREDIT_TOKEN` into its `sprite.env` and makes
+  `claude-credit` its agent. `invite --credit <dollars>` gives the drive an
+  invite makes a different amount; with `--credit 0` it is made without
+  credit, and its person brings a key or their own Claude.
+- **A new drive made by hand**: `tools/sprite-provision.sh ana --credit`. It
+  mints the token with `door.mjs` (so it needs `door.env`) and the note it
+  prints says there is nothing to set up.
+- **A drive that already exists**, such as `t-irene`:
+
+  ```sh
+  node tools/door.mjs credit mint t-irene --by Bryan --write /tmp/t-irene-credit.env
+  sprite exec -o marble-drive -s t-irene --file /tmp/t-irene-credit.env:/tmp/credit.env -- \
+    sh -c 'cat /tmp/credit.env >> ~/.config/marble-drive/sprite.env && rm /tmp/credit.env'
+  rm /tmp/t-irene-credit.env
+  tools/sprite-deploy.sh t-irene
+  ```
+
+  A drive with no key and no Claude login of its own goes on credit when it
+  restarts. One already on a key or a login stays on it, and has Starter
+  credit to choose in Agents settings.
+
+`--by` is the name in "On Bryan's starter credit". Unset, it is the owner
+account's first name; with neither, the line says "On starter credit".
+
+### Day to day
+
+| To | Run |
+|---|---|
+| See each drive's spend and cap | `node tools/door.mjs credit` |
+| Change a drive's cap | `node tools/door.mjs credit cap <name> <dollars>` |
+| Give a drive its spend back | `node tools/door.mjs credit reset <name>` |
+| Stop a drive's token | `node tools/door.mjs credit off <name>` (mint again to turn it back on) |
+| A new token for a drive (the old one stops) | `node tools/door.mjs credit mint <name>` |
+
+The audit log (`node tools/door.mjs log`) has `credit-minted`, `credit-set`,
+`credit-revoked`, and `credit-used-up` at the moment a drive reaches its cap.
+
+### What the proxy passes, and what it prices
+
+It passes only what Claude Code needs: `POST /v1/messages` (the one that
+costs), `POST /v1/messages/count_tokens`, and `GET /v1/models`. Batches, files
+and anything else are a 404, so a drive cannot spend outside the count. It
+sends on `content-type`, `accept`, `anthropic-version`, `anthropic-beta`, the
+SDK's own `x-stainless-*` headers and the user agent; never the drive's
+token, its cookies, or Cloudflare's headers.
+
+Prices are dollars per million tokens, one table in `worker/src/credit.js`
+(`PRICES`), matched on the model id the answer names. Cache writes are 1.25
+times input for five minutes and 2 times for an hour, cache reads have their
+own column, fast mode is double, and a web search is a cent. A model the table
+does not know is priced as the dearest row, so it can only be overcounted.
+Update the table when Anthropic's prices change.
+
+Spend is counted after an answer finishes, so a drive at $4.99 can finish one
+more request past its cap. The workspace's monthly limit is what bounds that.
+
 ## Day to day
 
 | To | Run |
@@ -196,16 +307,19 @@ In the spec's order: `t-bryan` first, then `bryan`, then the testers.
 | Worker var | `DOOR_KEY_ID` | the key id the edge signs with (`k1`) |
 | Worker var | `MAX_DRIVES` | how many drives sign-up may make, claimed drives aside (10) |
 | Worker var | `DOOR_SPRITE_URL` | the door sprite, poked when a drive is asked for |
+| Worker secret | `CREDIT_ANTHROPIC_KEY` | the starter credit workspace's one key. Without it starter credit is off |
 | Worker var | `DOOR_PUBLIC_KEYS` | the public keys a pass may be signed with, as in `MARBLE_DOOR_KEYS`; unset, derived from the signing key |
 | drive `sprite.env` | `MARBLE_DOOR_KEYS` | `<kid>:<base64 SPKI>` entries separated by spaces |
 | drive `sprite.env` | `MARBLE_DOOR_NAME`, `MARBLE_DOOR_OWNER` | the name a pass must be for, and the account it must name |
 | drive `sprite.env` | `MARBLE_DRIVE_GATE` | `on` (the default) or `tools` |
+| drive `sprite.env` | `MARBLE_CREDIT_URL`, `MARBLE_CREDIT_TOKEN` | the credit proxy (`https://marbledrive.app/_credit`) and the drive's own token for it |
 | door sprite `sprite.env` | `MARBLE_SERVE_COMMAND=provisioner`, `DOOR_URL`, `DOOR_ADMIN_TOKEN`, `MARBLE_DOOR_KEYS`, `MARBLE_PROVISION_SCRIPT` | above |
 
 ## Not in phase 1
 
 Two-step sign-in (passkeys, an authenticator app, recovery codes) and the rule
-that the owner must have it; Console's People view; per-drive monthly budgets;
+that the owner must have it; Console's People view; per-drive monthly budgets
+(starter credit is a cap that does not reset by itself);
 deleting an account from the account page; a drive kept ready so sign-up takes
 seconds; `marbledrive.app` on the Public Suffix List; sprite URLs made private
 behind the edge; email links. The spec's "Phases" table has them in order.

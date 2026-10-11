@@ -13,7 +13,7 @@ import { doorEnv, fakeProviders } from './fixtures/door-env.js';
 beforeEach(() => forgetLeases());
 const quiet = { log() {}, error() {} };
 
-async function door(names = ['ana'], vars = {}) {
+async function door(names = ['ana'], vars = {}, inviteBody = {}) {
   const env = doorEnv(vars);
   const google = { sub: '1', email: 'ana@example.com', name: 'Ana' };
   const fake = fakeProviders({ google });
@@ -24,7 +24,7 @@ async function door(names = ['ana'], vars = {}) {
   const admin = async (method, path, body) =>
     (await fetchImpl(`https://marbledrive.app/_door${path}`, { method, headers: { authorization: `Bearer ${env.DOOR_ADMIN_TOKEN}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
   for (const [i, name] of names.entries()) {
-    const code = (await admin('POST', '/invite', {})).link.split('/join/')[1];
+    const code = (await admin('POST', '/invite', inviteBody)).link.split('/join/')[1];
     google.sub = String(i + 1);
     const b = browser(env, { fetchImpl: fake.fetchImpl, ip: `198.51.100.${i + 1}` });
     await signInWith(b, 'google', { invite: code, fake });
@@ -228,4 +228,12 @@ test('scriptRunner hands the credit over in a private file, never in argv, and r
   assert.equal(during.text, `MARBLE_CREDIT_URL=https://marbledrive.app/_credit\nMARBLE_CREDIT_TOKEN=${token}\n`);
   assert.equal(during.mode, 0o600);
   assert.equal(fs.existsSync(during.file), false, 'gone once the script is done');
+});
+
+test('an invite with no credit makes a drive without it', async () => {
+  const d = await door(['ana'], { CREDIT_ANTHROPIC_KEY: 'sk-ant-owner' }, { credit: 0 });
+  const seen = [];
+  const p = createProvisioner({ directoryUrl: 'https://marbledrive.app', adminToken: d.env.DOOR_ADMIN_TOKEN, fetchImpl: d.fetchImpl, log: quiet, run: script((job) => { seen.push(job); return ['url: https://d-ana-abc.sprites.app']; }) });
+  assert.deepEqual(await p.once(), { made: 'ana' });
+  assert.equal(seen[0].credit, undefined);
 });
