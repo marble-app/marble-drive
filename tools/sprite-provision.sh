@@ -2,10 +2,10 @@
 # A Marble Drive of their own for one tester, on a Fly Sprite
 # (docs/superpowers/specs/2026-09-23-a-sprite-per-tester-design.md).
 #
-#   tools/sprite-provision.sh <person> [--agent api|subscription] [--key-file <path>] [--org <org>] [--local]
+#   tools/sprite-provision.sh <person> [--agent api|subscription] [--key-file <path>] [--credit] [--org <org>] [--local]
 #   tools/sprite-provision.sh --resume <person> [--org <org>] [--local]   finish one that stopped part way
 #   tools/sprite-provision.sh --remove <person> [--org <org>]
-#   tools/sprite-provision.sh --door <name> --account <id> --keys <file> [--org <org>] [--local]
+#   tools/sprite-provision.sh --door <name> --account <id> --keys <file> [--credit-file <file>] [--org <org>] [--local]
 #                                  a drive the door asked for (the door sprite runs this)
 #   tools/sprite-provision.sh --resume <name> --door <name> --account <id> --keys <file>
 #   tools/sprite-provision.sh --remove <name> --door <name>
@@ -16,6 +16,11 @@
 # one with --key-file, or the tester adds theirs in Agents settings;
 # `subscription` uses the Claude login you give it in its console. Nothing of
 # yours is copied to the sprite except, with --key-file, that one key.
+# --credit puts its agents on starter credit (docs/ACCOUNTS.md, "Starter
+# credit"): `node tools/door.mjs credit mint t-<person>` makes the drive a
+# token, and the proxy's address and that token go into its settings. Your
+# Anthropic key stays in the Worker. --credit-file is the same for the door
+# sprite, which mints the token itself and hands it over in a file.
 #
 # --door: the drive someone asked for at marbledrive.app (docs/superpowers/
 # specs/2026-10-10-accounts-and-sign-in-design.md). Sprite d-<name>, label
@@ -32,7 +37,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ORG=marble-drive AGENT=api KEY_FILE="" REMOVE=0 RESUME=0 PERSON="" DEPLOY_FLAGS=()
-DOOR="" ACCOUNT="" KEYS_FILE=""
+DOOR="" ACCOUNT="" KEYS_FILE="" CREDIT=0 CREDIT_FILE=""
 # What deploys a release to the sprite; a test points this at a stub.
 DEPLOY="${MARBLE_SPRITE_DEPLOY:-$HERE/sprite-deploy.sh}"
 ROSTER_DIR="$HOME/.config/marble-drive"
@@ -54,6 +59,8 @@ while [[ $# -gt 0 ]]; do
     --door) DOOR=${2:?}; shift 2 ;;
     --account) ACCOUNT=${2:?}; shift 2 ;;
     --keys) KEYS_FILE=${2:?}; shift 2 ;;
+    --credit) CREDIT=1; shift ;;
+    --credit-file) CREDIT_FILE=${2:?}; shift 2 ;;
     -h|--help) usage ;;
     -*) usage ;;
     *) [[ -z "$PERSON" ]] || usage; PERSON=$1; shift ;;
@@ -64,6 +71,9 @@ done
 [[ "$AGENT" == api || "$AGENT" == subscription ]] || die "--agent is api or subscription"
 [[ -z "$KEY_FILE" || "$AGENT" == api ]] || die "--key-file is for --agent api"
 [[ -z "$KEY_FILE" || -r "$KEY_FILE" ]] || die "cannot read $KEY_FILE"
+[[ $CREDIT == 0 || ( "$AGENT" == api && -z "$KEY_FILE" ) ]] || die "--credit is instead of --agent subscription and --key-file"
+[[ $CREDIT == 0 || -z "$CREDIT_FILE" ]] || die "give --credit or --credit-file, not both"
+[[ -z "$CREDIT_FILE" || -r "$CREDIT_FILE" ]] || die "cannot read $CREDIT_FILE"
 
 SLUG="$(printf '%s' "$PERSON" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | sed 's/^-*//; s/-*$//')"
 [[ -n "$SLUG" ]] || die "\"$PERSON\" has nothing a sprite name can use"
@@ -144,6 +154,23 @@ finish() {
 }
 trap finish EXIT
 
+# Starter credit's two settings, minted and checked before anything is made.
+CREDIT_LINES=""
+if [[ $CREDIT == 1 && $RESUME == 0 ]]; then
+  say "minting $SPRITE a starter credit token (not printed)"
+  node "$HERE/door.mjs" credit mint "$SPRITE" --write "$WORK/credit.env" >/dev/null || die "could not mint a credit token; is starter credit on? (node tools/door.mjs credit)"
+  CREDIT_FILE="$WORK/credit.env"
+fi
+if [[ -n "$CREDIT_FILE" ]]; then
+  CREDIT_URL="$(sed -n 's/^MARBLE_CREDIT_URL=//p' "$CREDIT_FILE")"
+  CREDIT_TOKEN="$(sed -n 's/^MARBLE_CREDIT_TOKEN=//p' "$CREDIT_FILE")"
+  # https, or a door on this machine (a test's).
+  [[ ( "$CREDIT_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9/_-]*$ || "$CREDIT_URL" =~ ^http://(127\.0\.0\.1|localhost):[0-9]+/[A-Za-z0-9/_-]*$ ) \
+     && "$CREDIT_TOKEN" =~ ^mdc_[0-9a-f]{48}$ ]] \
+    || die "the credit file is MARBLE_CREDIT_URL=<https URL> and MARBLE_CREDIT_TOKEN=mdc_<48 hex>"
+  CREDIT_LINES="MARBLE_CREDIT_URL=$CREDIT_URL"$'\n'"MARBLE_CREDIT_TOKEN=$CREDIT_TOKEN"
+fi
+
 if [[ $RESUME == 1 ]]; then
   # Everything up to its settings happened; take what it already has.
   CREATED=1
@@ -163,6 +190,8 @@ PASSPHRASE="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 24)"
 [[ ${#PASSPHRASE} -eq 24 ]] || die "could not make a passphrase"
 PROVIDER=claude-api
 [[ "$AGENT" == subscription ]] && PROVIDER=claude-subscription
+[[ -z "$CREDIT_LINES" ]] || PROVIDER=claude-credit
+
 
 say "giving $SPRITE its own settings"
 umask 077
@@ -171,6 +200,8 @@ umask 077
   echo "MARBLE_DRIVE_SECRET=$PASSPHRASE"
   echo "MARBLE_DRIVE_SECURE_COOKIE=1"
   echo "MARBLE_DRIVE_AGENT_PROVIDER=$PROVIDER"
+  # Starter credit: Claude Code is pointed at the proxy, with this drive's token.
+  [[ -z "$CREDIT_LINES" ]] || echo "$CREDIT_LINES"
   if [[ -n "$DOOR" ]]; then
     # The door: its public keys, the name a pass must be for, and the account
     # it must name. `tools` keeps the passphrase off the browser: nobody was
@@ -251,6 +282,8 @@ if [[ "$AGENT" == subscription ]]; then
   echo "Agents are ready to use."
 elif [[ -n "$KEY_FILE" ]]; then
   echo "Agents are set up with an API key for you."
+elif [[ -n "$CREDIT_LINES" ]]; then
+  echo "Agents run on starter credit to begin with, so there is nothing to set up."
 else
   echo "To use agents: open Agents, then Settings; Claude is set to \"API key\" — paste your Anthropic API key there."
 fi

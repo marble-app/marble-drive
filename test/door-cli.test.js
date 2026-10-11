@@ -13,20 +13,20 @@ import { doorEnv } from './fixtures/door-env.js';
 
 beforeEach(() => forgetLeases());
 
-async function rig({ mode = 0o600 } = {}) {
-  const env = doorEnv();
+async function rig({ mode = 0o600, vars = {} } = {}) {
+  const env = doorEnv(vars);
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'door-cli-'));
   const settingsPath = path.join(dir, 'door.env');
   await fsp.writeFile(settingsPath, `# the door\nDOOR_URL=https://marbledrive.app\nDOOR_ADMIN_TOKEN=${env.DOOR_ADMIN_TOKEN}\n`, { mode });
   await fsp.chmod(settingsPath, mode);
-  const fetchImpl = (input, init) => route(new Request(input, init), env);
+  const fetchImpl = (input, init) => route(new Request(input, init), env, { fetchImpl: async () => new Response('{}', { status: 200 }) });
   const run = async (...argv) => {
     const out = [];
     const err = [];
     const code = await main(argv, { settingsPath, fetchImpl, out: (l) => out.push(l), err: (l) => err.push(l) });
     return { code, out: out.join('\n'), err: err.join('\n') };
   };
-  return { env, run, settingsPath };
+  return { env, run, settingsPath, dir };
 }
 
 test('invite prints its link once; invites lists it without the code', async () => {
@@ -101,4 +101,48 @@ test('a wrong token is said plainly', async () => {
   const res = await r.run('drives');
   assert.equal(res.code, 1);
   assert.match(res.err, /refused the admin token/);
+});
+
+test('credit mint gives a drive made by hand its two settings, once; credit lists it without the token', async () => {
+  const r = await rig({ vars: { CREDIT_ANTHROPIC_KEY: 'sk-ant-owner' } });
+  const minted = await r.run('credit', 'mint', 't-ana', '--cap', '5', '--by', 'Bryan');
+  assert.equal(minted.code, 0, minted.err);
+  assert.match(minted.out, /t-ana has \$5\.00 of starter credit/);
+  assert.match(minted.out, /^MARBLE_CREDIT_URL=https:\/\/marbledrive\.app\/_credit$/m);
+  const token = /^MARBLE_CREDIT_TOKEN=(mdc_[0-9a-f]{48})$/m.exec(minted.out)?.[1];
+  assert.ok(token, minted.out);
+
+  const listed = await r.run('credit');
+  assert.equal(listed.code, 0, listed.err);
+  assert.match(listed.out, /t-ana\s+\$0\.00 of \$5\.00\s+Bryan\s+on/);
+  assert.ok(!listed.out.includes(token));
+
+  assert.match((await r.run('credit', 'cap', 't-ana', '8')).out, /\$0\.00 of \$8\.00 used/);
+  assert.equal((await r.run('credit', 'off', 't-ana')).code, 0);
+  assert.match((await r.run('credit')).out, /t-ana.*off/);
+});
+
+test('credit mint --write writes the settings at mode 600 and does not print the token', async () => {
+  const r = await rig({ vars: { CREDIT_ANTHROPIC_KEY: 'sk-ant-owner' } });
+  const file = path.join(r.dir, 'credit.env');
+  const minted = await r.run('credit', 'mint', 'ana', '--write', file);
+  assert.equal(minted.code, 0, minted.err);
+  assert.ok(!/mdc_/.test(minted.out));
+  const text = await fsp.readFile(file, 'utf8');
+  assert.match(text, /^MARBLE_CREDIT_URL=https:\/\/marbledrive\.app\/_credit\nMARBLE_CREDIT_TOKEN=mdc_[0-9a-f]{48}\n$/);
+  assert.equal((await fsp.stat(file)).mode & 0o777, 0o600);
+});
+
+test('with credit off, credit says so', async () => {
+  const r = await rig();
+  const res = await r.run('credit', 'mint', 'ana');
+  assert.equal(res.code, 1);
+  assert.match(res.err, /starter credit is off: the Worker has no CREDIT_ANTHROPIC_KEY/);
+});
+
+test('invite --credit gives the drive it makes its own amount', async () => {
+  const r = await rig();
+  assert.equal((await r.run('invite', '--credit', '10')).code, 0);
+  const listed = await route(new Request('https://marbledrive.app/_door/invites', { headers: { authorization: `Bearer ${r.env.DOOR_ADMIN_TOKEN}` } }), r.env);
+  assert.equal((await listed.json()).invites[0].credit, 10);
 });
