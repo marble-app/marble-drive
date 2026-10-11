@@ -38,6 +38,10 @@ const openai = http.createServer(async (req, res) => {
     res.writeHead(401, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ error: { message: `Incorrect API key provided: ${req.headers.authorization}` } }));
   }
+  if (req.url === '/v1/models') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ object: 'list', data: [] }));
+  }
   if (req.url === '/v1/audio/transcriptions') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ text: 'hello there' }));
@@ -313,4 +317,19 @@ test('no response from a voice route carries the key', async () => {
     await (await raw('POST', '/agent/voice/transcribe', { body: clip(), headers: { 'Content-Type': 'audio/webm' } })).text(),
   ];
   for (const body of bodies) assert.ok(!body.includes(KEY));
+});
+
+test('a key given for voice is checked with OpenAI, then kept where Codex keeps it', async () => {
+  const { api } = await makeDrive({ key: null });
+  const wrong = await api('POST', '/agent/voice/key', { key: 'sk-proj-wrong-do-not-echo' });
+  assert.equal(wrong.status, 400);
+  assert.deepEqual(wrong.body, { error: "OpenAI didn't accept that key. Check that it was copied whole." });
+  assert.equal((await api('GET', '/agent/voice')).body.available, false);
+  assert.equal((await api('POST', '/agent/voice/key', { key: 'sk-ant-api03-x' })).status, 400);
+  const good = await api('POST', '/agent/voice/key', { key: KEY });
+  assert.equal(good.status, 200);
+  assert.equal(good.body.checked, true);
+  assert.ok(!good.text.includes(KEY));
+  assert.equal((await api('GET', '/agent/voice')).body.available, true);
+  assert.equal((await api('GET', '/agent/settings')).body.keys.openai, true);
 });

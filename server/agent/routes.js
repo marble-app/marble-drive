@@ -76,6 +76,7 @@ const INTENT_BODY = 64 * 1024; // bytes a page's words and outline come in, at m
 const CLIP_MAX_BYTES = 4 * 1024 * 1024;
 const CLIP_TYPES = new Set(['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/wav']);
 const SPOKEN_MAX_CHARS = 2000;
+const TURN_ENDS = new Set(['turn.completed', 'turn.failed', 'turn.cancelled', 'turn.interrupted']);
 const KEYWORDS_MAX = 40;
 const SAMPLE = 'This is how replies will sound. Talk, and I will answer like this.';
 const CLIP_TOO_LONG = 'That was too long to send. Keep a clip under two minutes.';
@@ -388,12 +389,16 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     const turn = await store.turn(turnId);
     if (!turn) return json(res, 404, { error: `no turn "${turnId}"` });
     const asked = runner.openAsks().some((ask) => ask.turn === turnId);
-    if ((turn.status === 'queued' || turn.status === 'running') && !asked) return json(res, 409, { error: 'the turn is still running' });
-    const events = await store.events(turn.conversationId);
-    const last = [...events].reverse().find((event) => event.turn === turnId && event.type === 'text');
-    const status = asked ? 'running' : turn.status;
-    const text = status === 'failed' ? String(turn.error ?? '') : String(last?.text ?? '');
-    const words = speakable(text, { status, asked }).slice(0, SPOKEN_MAX_CHARS);
+    const events = (await store.events(turn.conversationId)).filter((event) => event.turn === turnId);
+    // The page asks the moment it hears the turn end, which can be a breath
+    // before the stored turn says so: the closing event is the answer then.
+    const ending = [...events].reverse().find((event) => TURN_ENDS.has(event.type));
+    const running = (turn.status === 'queued' || turn.status === 'running') && !ending;
+    if (running && !asked) return json(res, 409, { error: 'the turn is still running' });
+    const last = [...events].reverse().find((event) => event.type === 'text');
+    const status = asked && running ? 'running' : ending ? ending.type.slice('turn.'.length) : turn.status;
+    const text = status === 'failed' ? String(ending?.error ?? turn.error ?? '') : String(last?.text ?? '');
+    const words = speakable(text, { status, asked: asked && running }).slice(0, SPOKEN_MAX_CHARS);
     return speakInto(res, words, voiceSettings((await store.settings()).voice).voice);
   }
 
@@ -687,6 +692,21 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     // A clip in, its words out. The clip is the raw body, held in memory for
     // this request only and forwarded to OpenAI; nothing of it is written.
     if (route === '/agent/voice/transcribe' && method === 'POST') return transcribeClip(req, res, url);
+
+    // The OpenAI key, given in Settings › Voice: checked as Codex's is, and
+    // kept in the same place, because it is the same key.
+    if (route === '/agent/voice/key' && method === 'POST') {
+      if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
+      const body = await readJson(req, maxBody);
+      const key = typeof body.key === 'string' ? body.key.trim() : '';
+      if (!key || /\s/.test(key)) return json(res, 400, { error: 'Paste the whole key. It starts with sk-.' });
+      if (key.startsWith('sk-ant-')) return json(res, 400, { error: "That's an Anthropic key. Voice needs an OpenAI one." });
+      const verdict = await checkOpenAIKey(key, { baseURL: openaiBase });
+      if (verdict === 'rejected') return json(res, 400, { error: "OpenAI didn't accept that key. Check that it was copied whole." });
+      await keys.write({ openai: key });
+      detected = null;
+      return json(res, 200, { checked: verdict === 'ok', available: true });
+    }
 
     // A fixed sentence in the voice asked for, for Settings › Voice.
     if (route === '/agent/voice/sample' && method === 'POST') {
