@@ -138,6 +138,10 @@ const RUNTIME = {
   'console.css': () => path.join(REPO, 'runtime', 'console.css'),
   'console-charts.js': () => path.join(REPO, 'runtime', 'console-charts.js'),
   'console-features.js': () => path.join(REPO, 'runtime', 'console-features.js'),
+  // The Projects page (templates/projects.mrbl): the views drawn around the
+  // projects its file holds.
+  'projects.js': () => path.join(REPO, 'runtime', 'projects.js'),
+  'projects.css': () => path.join(REPO, 'runtime', 'projects.css'),
   // Agents, when they are on: the client for /agent/* and the drawer that
   // uses it. Served to every document; injected only when agents run here.
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
@@ -487,6 +491,14 @@ export async function createDrive(config, { log = console, agentProviders = null
     }
     if (agents) tags += `\n<script src="${runtimeUrl('agent-work.js')}" data-marble-transient></script>`;
     if (agents) tags += `\n<script src="${runtimeUrl('agent-run.js')}" data-marble-transient></script>`;
+    // The Projects page's look and behaviour, only on that page: its file
+    // holds the owner's projects, and the views drawn around them ship with
+    // every release instead of being merged into it (runtime/projects.js).
+    // After agent-run.js, which wires the page's morning run.
+    if (/<meta\s+name="marble-projects"/i.test(source)) {
+      tags += `\n<link rel="stylesheet" href="${runtimeUrl('projects.css')}" data-marble-transient>`;
+      tags += `\n<script src="${runtimeUrl('projects.js')}" data-marble-transient></script>`;
+    }
     // After the callout, whose handle both tools hand their ids to, and after
     // agent-ui.js, whose tray is the only place these tools are reachable from
     // — a register nobody answers takes the layer back down.

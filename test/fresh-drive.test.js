@@ -9,7 +9,7 @@ import test from 'node:test';
 
 const { createDrive } = await import('../server/app.js');
 const { loadConfig } = await import('../server/config.js');
-const { seedAgents, seedDesignDonts, seedDesignSystem, seedDrive, seedStartHere } = await import('../server/seed.js');
+const { seedAgents, seedDesignDonts, seedDesignSystem, seedDrive, seedProjects, seedStartHere } = await import('../server/seed.js');
 const { PLUGIN_DIR, listSkills, skillDirs } = await import('../server/agent/skills.js');
 
 const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-fresh-'));
@@ -18,13 +18,14 @@ const drive = await createDrive(loadConfig({ MARBLE_DRIVE_ROOT: root }), { log: 
 await seedStartHere(drive.store);
 await seedDrive(drive.store);
 await seedAgents(drive.store);
+await seedProjects(drive.store);
 await seedDesignSystem(drive.store);
 await seedDesignDonts(drive.store);
 const port = await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', () => resolve(drive.server.address().port)));
 test.after(() => drive.close());
 
-test('the seeded Start here, Drive, Agents, Design System and Design Don\'ts pages name nobody\'s folders', async () => {
-  for (const doc of ['start-here', 'drive', 'Agents', 'System/Design System', "System/Design Don'ts"]) {
+test('the seeded Start here, Drive, Agents, Projects, Design System and Design Don\'ts pages name nobody\'s folders', async () => {
+  for (const doc of ['start-here', 'drive', 'Agents', 'Projects', 'System/Design System', "System/Design Don'ts"]) {
     const source = await drive.store.read(doc);
     assert.ok(source, `${doc} was seeded`);
     assert.doesNotMatch(source, /Bryan/, `${doc} names the owner`);
