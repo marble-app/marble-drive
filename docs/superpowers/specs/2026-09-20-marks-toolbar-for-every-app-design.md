@@ -92,17 +92,43 @@ checked against the code, not assumed.
    marks wear `var(--accent-ink)` with the violet carry as fallback, and paper
    comes from `var(--card, var(--paper))`. Dark mode is per document, so
    nothing here consults `prefers-color-scheme`.
-8. **Only the carrier surface.** The layer depends on `data-marble-id`,
-   `marble.app`, `marble.agent`, the `marble:ops` event and the callout's two
-   custom events. Nothing app-specific. That is what lets it ride to upstream
-   Marble the way the callout would.
+8. **The carrier surface, and one neighbour.** The layer depends on
+   `data-marble-id`, `marble.app`, `marble.agent` — `select`, `context` and
+   `storage`, the wrapped `localStorage` every runtime file here goes through
+   rather than touching storage raw — the `marble:ops` event and the callout's
+   two custom events. Nothing app-specific, which is what would let it ride to
+   upstream Marble the way the callout would. It has exactly one dependency
+   past that surface, and it is on a sibling layer rather than on any
+   document: the drawer. The toolbar shares a corner with
+   `marble-agent-drawer`'s launcher and steps aside for its panel, so it
+   reaches through that element's shadow root for four names otherwise
+   private to it — `.launcher`, `.panel`, `data-pinned`, `data-open-state` —
+   and it has to be injected after the drawer for that shadow root to exist
+   at all. A drive with the drawer off still gets a toolbar, in a corner it
+   then has to itself. But renaming any of those four breaks a rule about the
+   corner with nothing to say why, so the injection order is held by an
+   assertion in `test/agent-http.test.js` and the launcher's own CSS carries
+   a line saying the toolbar measures it.
 
 ## 5. Design
 
 ### 5.1 The toolbar
 
-One round button, 40px, at the bottom right by default, inset 16px from the
-page's own edges. It carries the comment-bubble glyph the callout handle uses,
+One round button, 40px, at the bottom right by default, resting just above the
+drawer's launcher where the two share a corner. They are siblings there, not
+rivals — one opens a conversation, the other marks the page up for one — and
+siblings stand in one column: where the launcher is in the corner, the toolbar
+takes its horizontal inset from the launcher's measured box and centres on it,
+rather than from an inset of its own. Its own inset, 16px from the page's own
+edges, is for the corners it occupies alone. That is not tidiness. The
+launcher sits at `calc(20px + env(safe-area-inset-right))` and the callout's
+no-anchor fallback at 12px, so three constants would put three pieces of
+corner chrome at three insets: a staircase on a desktop, and on a phone in
+landscape, where the inset is about 44px, not even the same column — the
+toolbar would land beside the launcher, partly under the display cutout, and
+the rule that stacks them would never fire. Measuring the launcher inherits
+its safe-area handling for nothing. It carries the
+comment-bubble glyph the callout handle uses,
 so the two say the same thing: *ask an agent about this*. A count of draft
 marks sits on it as a small badge when there are any.
 
@@ -153,8 +179,11 @@ corner and the existing summon flow (card, chips, which chat answers)
 continues unchanged. Select therefore leaves no stored mark; it is pick mode
 drawn with a rectangle. A Select with nothing under it clears the selection.
 
-The mode ends on release. Holding the tool button for a beat, or double
-clicking it, pins the mode so several rectangles can be drawn; Escape unpins.
+The mode ends on release. Double clicking the tool button pins the mode so
+several rectangles can be drawn; Escape unpins. A hold was going to pin it
+too, and is not here: one gesture is enough where there is a pointer, and the
+case a hold would really serve is touch, which has a problem of its own that
+this design has not solved — §11.
 
 ### 5.3 Comment: a note pinned to an element
 
@@ -260,11 +289,13 @@ re-brief from what they see.
 One rule for the layer, drawn from the callout: things arrive and leave, they
 never blink. Enter and exit use `@starting-style` with
 `transition-behavior: allow-discrete`, 180ms, the callout's curve. Only
-`transform` and `opacity` animate on the compositor. The toolbar's expand and
-its corner spring are the two exceptions above, and both are documented
-there. Under `prefers-reduced-motion`, every spring and slide becomes a
-cross-fade, the press scale stays, and the marquee outline still updates per
-frame because it is feedback, not motion.
+`transform` and `opacity` animate on the compositor for anything that moves;
+a hover or pressed tint on a small control is paint over a negligible area,
+not motion, and is allowed. The toolbar's expand and its corner spring are
+the two exceptions above, and both are documented there. Under
+`prefers-reduced-motion`, every spring and slide becomes a cross-fade, the
+press scale stays, and the marquee outline still updates per frame because
+it is feedback, not motion.
 
 ## 6. Decisions made here, and why
 
@@ -294,6 +325,17 @@ frame because it is feedback, not motion.
 - **Corner drag with a spring, and nothing else springs.** The one thing a
   person throws is the toolbar. Every other motion here is a state change
   with no momentum behind it, so it settles without bounce.
+- **The corner was not empty.** The drawer's launcher already lived in the
+  bottom right; the toolbar stacks above it rather than claiming a different
+  corner, so the corner now reads bottom-up as launcher, toolbar, and —
+  later — a callout that has nothing left to point at.
+- **The toolbar measures the launcher rather than matching it.** Its inset is
+  the drawer's to change and already carries the safe area; copying the
+  number here would be two constants to keep in step, and one of them would
+  be wrong on the first phone held sideways. Measuring costs a
+  `getBoundingClientRect` at rest and buys the whole stack, at the price of a
+  dependency on another layer's private names — which is why §4.8 now names
+  it instead of claiming a purity the code does not have.
 
 ## 7. Components and boundaries
 
@@ -363,3 +405,12 @@ Three phases, each usable on its own:
 - Phone sketching beyond what the overlay gives; on a phone Send hands to the
   drawer as the callout does.
 - Readings beyond box, arrow and ink.
+- Panning with one finger while a tool mode is active; pinch still works, and
+  the way out is the tool button, which sits above the overlay — until a
+  rectangle is actually being drawn, because the strip collapses out of the
+  way on the first press. Mid-drag the way out is Escape, or letting go and
+  then tapping the tool again.
+- Pinning a mode from a touchscreen. Double-clicking the tool pins it, and a
+  double tap on a 36px button is what the browser reads as double-tap-to-zoom;
+  a hold is the obvious answer and is phase 2's to design, together with the
+  rest of what a phone needs from this toolbar.
