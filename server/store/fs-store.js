@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 
 import {
   bytesOf,
@@ -33,6 +34,7 @@ import {
   DOC_EXT,
   PathError,
   docKey,
+  isValidPath,
   joinPath,
   parsePath,
   resolveUnder,
@@ -40,11 +42,53 @@ import {
   titleize,
 } from '../paths.js';
 import { createBlobs } from './blobs.js';
+import { dataUri as markUri } from '../favicon.js';
 
 const HIDDEN = /^\./;
 
+// Folders, then documents, then everything else: the order a Drive shows a
+// folder in, and the order a tile draws its cells in. One of these, because
+// the trash draws the same cells from the same order.
+const KIND_RANK = { folder: 0, doc: 1, file: 2 };
+
+/** The extension, lowercased, without the dot. `''` for a name that has none —
+ *  and for `Makefile`, whose only dot is nowhere, not at position zero. */
+export const extOf = (name) => {
+  const at = String(name).lastIndexOf('.');
+  return at < 1 ? '' : name.slice(at + 1).toLowerCase().slice(0, 16);
+};
+
 const titleOf = (source, fallback) =>
   source.match(/<title>([^<]*)<\/title>/i)?.[1].trim() || fallback;
+
+// The day a document says it is about, or null for the documents that are not
+// about a day — which is most of them. A file name is the usual place to put a
+// date, but a name is free to become a title instead, and then the date has
+// nowhere else to live. So a document that cares states it in its own head and
+// the Drive believes the document over the filename.
+const dayOf = (source) =>
+  source.match(
+    /<meta[^>]+name="(?:day|newsletter):date"[^>]+content="(\d{4}-\d{2}-\d{2})"/i,
+  )?.[1] ?? null;
+
+// The icon a document draws for itself, when it is its own: a data URI in its
+// head, because a .mrbl is one file (server/favicon.js). The marble every new
+// document starts with says nothing about which one this is, so it is left
+// out, and so is anything but a picture, or one too big to be an icon.
+const MARKS = new Set([markUri('doc'), markUri('drive')]);
+const ICON_MAX = 8 * 1024;
+const iconOf = (source) => {
+  const end = source.search(/<\/head>/i);
+  const head = end < 0 ? source.slice(0, 65536) : source.slice(0, end);
+  for (const tag of head.match(/<link\b[^>]*>/gi) ?? []) {
+    if (!/\brel=["']?(?:shortcut )?icon\b/i.test(tag)) continue;
+    const href = tag.match(/\bhref=(?:"([^"]*)"|'([^']*)')/i);
+    const uri = href?.[1] ?? href?.[2] ?? '';
+    if (uri.startsWith('data:image/') && uri.length <= ICON_MAX && !MARKS.has(uri)) return uri;
+    return null;
+  }
+  return null;
+};
 
 // What a .mrbl document is worth measuring in — how much of it a hand or a model
 // can address. Kept identical to Marble's own count so two hosts agree.
@@ -75,6 +119,107 @@ export function createFsStore({ root }) {
     return exists(fileOf(parsePath(docPath, { allowRoot: false })));
   }
 
+  /**
+   * The bytes of a file that is not a document — what `list({files:true})`
+   * turned up. Its path carries its extension, so unlike every other read here
+   * nothing is appended to it.
+   *
+   * Refuses a `.mrbl`: a document is served as the app it is, and a second way
+   * to get at its source would be a second answer to what opening it means.
+   *
+   * `open()` rather than the bytes, because a drive is allowed to hold a 400 MB
+   * video and a store that reads one into a Buffer to answer a GET is a store
+   * that falls over on the file it was asked for.
+   */
+  async function readRaw(filePath) {
+    const clean = parsePath(filePath, { allowRoot: false });
+    if (clean.endsWith(DOC_EXT)) throw new PathError('a .mrbl is a document, not a file');
+    const at = abs(clean);
+    const info = await fsp.stat(at).catch(() => null);
+    if (!info || !info.isFile()) return null;
+    const { name } = splitPath(clean);
+    return {
+      path: clean,
+      name,
+      ext: extOf(name),
+      bytes: info.size,
+      modified: info.mtimeMs,
+      // Where it is on this disk, for the one reader that needs a path rather
+      // than a stream: the thumbnailer hands the file to the system's own.
+      at,
+      // `{start, end}` is a byte range, inclusive, the way HTTP says it — a
+      // song is played by seeking into it, not by reading it from the top.
+      open: (range) => fs.createReadStream(at, range),
+    };
+  }
+
+  /**
+   * A file that is not a document, written from a stream — the song dropped
+   * beside the mashup, the cover image beside the zine. The body is streamed to
+   * disk rather than collected, for the same reason `readRaw` answers with
+   * `open()`: an album of WAVs is a normal thing to drag in.
+   *
+   * Written beside its destination under a hidden name and then linked into
+   * place, so a half-arrived upload is never listed, and linked rather than
+   * renamed so that a name somebody took in the meantime is refused instead of
+   * replaced. Picking a free name is the caller's job.
+   */
+  async function putFile(filePath, input, { limit = Infinity } = {}) {
+    const clean = parsePath(filePath, { allowRoot: false });
+    if (clean.endsWith(DOC_EXT)) throw new PathError('a .mrbl is a document, not a file');
+    const at = abs(clean);
+    const dir = path.dirname(at);
+    await fsp.mkdir(dir, { recursive: true });
+    const part = path.join(dir, `.${path.basename(at)}.${process.pid}.${Date.now()}.part`);
+    let bytes = 0;
+    try {
+      await pipeline(
+        input,
+        async function* (source) {
+          for await (const chunk of source) {
+            bytes += chunk.length;
+            if (bytes > limit) {
+              const err = new Error(`that file is larger than ${limit} bytes`);
+              err.status = 413;
+              throw err;
+            }
+            yield chunk;
+          }
+        },
+        fs.createWriteStream(part, { flags: 'wx' }),
+      );
+      await fsp.link(part, at);
+    } catch (err) {
+      if (err.code === 'EEXIST') throw new PathError(`"${clean}" is already there`);
+      throw err;
+    } finally {
+      await fsp.rm(part, { force: true });
+    }
+    return { path: clean, bytes };
+  }
+
+  /**
+   * A file that arrived somewhere else on this volume (an upload assembled in
+   * `.marble/uploads/`), linked into place. The same rules as `putFile`: not a
+   * document, and a name somebody took in the meantime is refused, never
+   * replaced. The source is removed once the file is in place.
+   */
+  async function placeFile(filePath, from) {
+    const clean = parsePath(filePath, { allowRoot: false });
+    if (clean.endsWith(DOC_EXT)) throw new PathError('a .mrbl is a document, not a file');
+    const at = abs(clean);
+    await fsp.mkdir(path.dirname(at), { recursive: true });
+    try {
+      await fsp.link(from, at);
+    } catch (err) {
+      if (err.code === 'EEXIST') throw new PathError(`"${clean}" is already there`);
+      throw err;
+    }
+    await fsp.rm(from, { force: true });
+    const info = await fsp.stat(at);
+    return { path: clean, bytes: info.size };
+  }
+
   async function hasFolder(folderPath) {
     const at = abs(parsePath(folderPath));
     return fsp
@@ -83,25 +228,65 @@ export function createFsStore({ root }) {
       .catch(() => false);
   }
 
+  /** Something is there and it is neither a document nor a folder — the third
+   *  kind, whose path carries its own extension. Answers false rather than
+   *  throwing for a path the grammar refuses, because every caller is asking
+   *  "is this one of those" and not "is this legal". */
+  async function hasFile(filePath) {
+    try {
+      const clean = parsePath(filePath, { allowRoot: false });
+      if (clean.endsWith(DOC_EXT)) return false;
+      const info = await fsp.stat(abs(clean)).catch(() => null);
+      return Boolean(info?.isFile());
+    } catch {
+      return false;
+    }
+  }
+
+  // What a document says about itself (its title, its day, how many nodes it
+  // has, its own icon) costs reading all of it, and a tree asks for every document each time
+  // a page draws its sidebar: fifty megabytes for a drive of a hundred
+  // documents. So it is kept per file until the file changes. The stat is
+  // still taken every time and is what says so: a write through the host, an
+  // agent's editor or a copy from Finder each move the change time.
+  const facts = new Map();
+
+  async function factsOf(file, info) {
+    const was = facts.get(file);
+    if (was && was.mtimeMs === info.mtimeMs && was.ctimeMs === info.ctimeMs && was.size === info.size) return was;
+    const source = await fsp.readFile(file, 'utf8').catch(() => null);
+    if (source === null) {
+      facts.delete(file);
+      return null;
+    }
+    const next = { mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, size: info.size, title: titleOf(source, null), day: dayOf(source), nodes: nodesOf(source), icon: iconOf(source) };
+    facts.set(file, next);
+    return next;
+  }
+
   async function stat(docPath) {
     const clean = parsePath(docPath, { allowRoot: false });
     const file = fileOf(clean);
-    const [info, source] = await Promise.all([
-      fsp.stat(file).catch(() => null),
-      fsp.readFile(file, 'utf8').catch(() => null),
-    ]);
-    if (!info || source === null) return null;
+    const info = await fsp.stat(file).catch(() => null);
+    const known = info?.isFile() ? await factsOf(file, info) : null;
+    if (!known) {
+      facts.delete(file);
+      return null;
+    }
     const { parent, name } = splitPath(clean);
+    const { icon } = known;
     return {
       kind: 'doc',
       path: clean,
       name,
       folder: parent,
-      title: titleOf(source, titleize(name)),
-      nodes: nodesOf(source),
+      title: known.title ?? titleize(name),
+      day: known.day,
+      nodes: known.nodes,
       bytes: info.size,
       modified: info.mtimeMs,
       created: info.birthtimeMs || info.ctimeMs,
+      ...(icon ? { icon } : {}),
     };
   }
 
@@ -109,53 +294,88 @@ export function createFsStore({ root }) {
    * Every document and every folder under `folder`, newest first. Flat by
    * design: the tree is composed from this rather than walked twice, so there
    * is one traversal and one place that decides what is hidden.
+   *
+   * `files` adds the third kind: everything in the folder that is not a
+   * Marble document and not a folder — the bibliography beside the paper, the
+   * cover images, the JSON a script reads. They are off by default because
+   * every caller that says "documents" means documents, and on for `tree()`,
+   * which is what a Drive draws a folder from. A folder that holds them and
+   * says nothing about them is a folder that loses them.
    */
-  async function list({ folder = '', recursive = true } = {}) {
+  async function list({ folder = '', recursive = true, files = false } = {}) {
     const base = parsePath(folder);
-    const out = [];
 
+    // Every entry of a folder at once, and every folder under it at once: a
+    // drive of two thousand files is two thousand stats, and one after the
+    // other they were most of what a tree cost. Each folder's entries come
+    // back in the order it read them, so the result is the same as walking
+    // one at a time.
     async function walk(relative) {
       const here = abs(relative);
       const entries = await fsp.readdir(here, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        if (HIDDEN.test(entry.name)) continue;
+      // Before the dotfiles are dropped: a folder with its own `.git` (a
+      // directory, or a file in a worktree) is a repository, and the tree says
+      // so here because the entries are already in hand (server/git.js).
+      const repo = entries.some((entry) => entry.name === '.git');
+      const each = await Promise.all(entries.map(async (entry) => {
+        if (HIDDEN.test(entry.name)) return [];
         const child = joinPath(relative, entry.name);
         if (entry.isDirectory()) {
-          const info = await fsp.stat(path.join(here, entry.name)).catch(() => null);
-          out.push({
+          const [info, inside] = await Promise.all([
+            fsp.stat(path.join(here, entry.name)).catch(() => null),
+            recursive ? walk(child) : [],
+          ]);
+          return [{
             kind: 'folder',
             path: child,
             name: entry.name,
             folder: relative,
             title: titleize(entry.name),
             modified: info?.mtimeMs ?? 0,
-          });
-          if (recursive) await walk(child);
-          continue;
+            ...(inside.repo ? { repo: true } : {}),
+          }, ...inside];
         }
-        if (!entry.name.endsWith(DOC_EXT)) continue;
-        const docPath = child.slice(0, -DOC_EXT.length);
         // A name the grammar refuses is a file somebody put there by hand. It
         // is not addressable, so it is not listed — but it is not deleted or
         // complained about either, because it is their folder.
-        try {
-          parsePath(docPath, { allowRoot: false });
-        } catch {
-          continue;
+        if (!entry.name.endsWith(DOC_EXT)) {
+          if (!files || !isValidPath(child)) return [];
+          const info = await fsp.stat(path.join(here, entry.name)).catch(() => null);
+          if (!info) return [];
+          // The path of a file keeps its extension, because that *is* its
+          // address — `atlas.json` and `atlas.md` are two files, and a
+          // document's path drops `.mrbl` only because every document has it.
+          return [{
+            kind: 'file',
+            path: child,
+            name: entry.name,
+            folder: relative,
+            title: entry.name,
+            ext: extOf(entry.name),
+            bytes: info.size,
+            modified: info.mtimeMs,
+          }];
         }
+        const docPath = child.slice(0, -DOC_EXT.length);
+        if (!isValidPath(docPath)) return [];
         const info = await stat(docPath);
-        if (info) out.push(info);
-      }
+        return info ? [info] : [];
+      }));
+      const found = each.flat();
+      if (repo) found.repo = true;
+      return found;
     }
 
-    await walk(base);
+    const out = await walk(base);
     return out.sort((a, b) => b.modified - a.modified);
   }
 
-  /** The same entries, nested. Folders carry `children`; documents are leaves. */
-  async function tree({ folder = '' } = {}) {
+  /** The same entries, nested. Folders carry `children`; documents and files
+   *  are leaves. `files: false` leaves the files out, for a caller that only
+   *  draws folders and documents (the shell's sidebar). */
+  async function tree({ folder = '', files = true } = {}) {
     const base = parsePath(folder);
-    const flat = await list({ folder: base, recursive: true });
+    const flat = await list({ folder: base, recursive: true, files });
 
     const folders = new Map();
     folders.set(base, { kind: 'folder', path: base, name: splitPath(base).name, folder: splitPath(base).parent, title: base === '' ? 'My Drive' : titleize(splitPath(base).name), children: [] });
@@ -168,10 +388,11 @@ export function createFsStore({ root }) {
       const parent = folders.get(entry.folder) ?? folders.get(base);
       parent.children.push(entry.kind === 'folder' ? folders.get(entry.path) : entry);
     }
-    // Folders before documents, each newest first — the order a Drive shows.
+    // Folders, then documents, then everything else, each newest first — the
+    // order a Drive shows, and the order of how much the folder is about them.
     const order = (node) => {
       node.children.sort((a, b) =>
-        a.kind === b.kind ? b.modified - a.modified : a.kind === 'folder' ? -1 : 1,
+        a.kind === b.kind ? b.modified - a.modified : KIND_RANK[a.kind] - KIND_RANK[b.kind],
       );
       for (const child of node.children) if (child.kind === 'folder') order(child);
     };
@@ -228,6 +449,8 @@ export function createFsStore({ root }) {
    *
    * The history follows the document. It is keyed by path, so a move that left
    * the snapshots behind would be a rename that quietly costs you your undo.
+   * A file that is not a document has no history to follow — the drive is not
+   * its editor — so for that kind this is only the rename.
    */
   async function move(fromPath, toPath) {
     const from = parsePath(fromPath, { allowRoot: false });
@@ -237,8 +460,11 @@ export function createFsStore({ root }) {
 
     const isDoc = await has(from);
     const isFolder = !isDoc && (await hasFolder(from));
-    if (!isDoc && !isFolder) throw new PathError(`nothing at "${from}"`);
-    if ((await has(to)) || (await hasFolder(to))) throw new PathError(`"${to}" already exists`);
+    const isFile = !isDoc && !isFolder && (await hasFile(from));
+    if (!isDoc && !isFolder && !isFile) throw new PathError(`nothing at "${from}"`);
+    if ((await has(to)) || (await hasFolder(to)) || (await hasFile(to))) {
+      throw new PathError(`"${to}" already exists`);
+    }
 
     const source = isDoc ? fileOf(from) : abs(from);
     const target = isDoc ? fileOf(to) : abs(to);
@@ -246,7 +472,7 @@ export function createFsStore({ root }) {
     await fsp.rename(source, target);
 
     if (isDoc) await renameHistory(from, to);
-    else {
+    else if (isFolder) {
       // Every document under the folder moved with it.
       for (const entry of await list({ folder: to, recursive: true })) {
         if (entry.kind !== 'doc') continue;
@@ -254,7 +480,7 @@ export function createFsStore({ root }) {
         await renameHistory(was, entry.path);
       }
     }
-    return { from, to, moved: true, kind: isDoc ? 'doc' : 'folder' };
+    return { from, to, moved: true, kind: isDoc ? 'doc' : isFolder ? 'folder' : 'file' };
   }
 
   // The history of a document is an index file and a directory of blobs, both
@@ -287,14 +513,18 @@ export function createFsStore({ root }) {
     const clean = parsePath(docPath, { allowRoot: false });
     const isDoc = await has(clean);
     const isFolder = !isDoc && (await hasFolder(clean));
-    if (!isDoc && !isFolder) throw new PathError(`nothing at "${clean}"`);
+    const isFile = !isDoc && !isFolder && (await hasFile(clean));
+    if (!isDoc && !isFolder && !isFile) throw new PathError(`nothing at "${clean}"`);
 
     const id = `${Date.now().toString(36)}-${shaOf(clean).slice(0, 8)}`;
     await fsp.mkdir(trashDir, { recursive: true });
+    // A folder and a plain file both keep their bytes under the bare id; only a
+    // document gets an extension, because `.mrbl` is the one this store adds
+    // back on the way in. The journal is what says which is which.
     const target = path.join(trashDir, isDoc ? `${id}${DOC_EXT}` : id);
     await fsp.rename(isDoc ? fileOf(clean) : abs(clean), target);
 
-    const entry = { id, t: Date.now(), path: clean, kind: isDoc ? 'doc' : 'folder' };
+    const entry = { id, t: Date.now(), path: clean, kind: isDoc ? 'doc' : isFolder ? 'folder' : 'file' };
     await fsp.appendFile(trashLog, `${JSON.stringify(entry)}\n`);
     return entry;
   }
@@ -314,7 +544,52 @@ export function createFsStore({ root }) {
         // A truncated last line is what an interrupted append looks like.
       }
     }
-    return [...entries.values()].reverse();
+    return Promise.all([...entries.values()].reverse().map(describe));
+  }
+
+  /**
+   * A journal line says where something came from. A row also has to say what
+   * it *is* — how big, how many nodes, what is inside — and until it did, a
+   * trashed folder drew as "empty", which reads as "restoring this gives you
+   * back nothing". The bytes are still sitting under `.marble/trash/<id>`, so
+   * this is a question the store can answer; it just has to walk a tree that
+   * is deliberately outside the addressable one.
+   *
+   * A folder reports kinds and a count rather than children, on purpose.
+   * Nothing in the trash has an address, so handing back child paths would be
+   * handing the Drive a list of links to nowhere. Nine kinds, because nine is
+   * what a tile has room for.
+   */
+  async function describe(entry) {
+    const at = path.join(trashDir, entry.kind === 'doc' ? `${entry.id}${DOC_EXT}` : entry.id);
+    const { name } = splitPath(entry.path);
+
+    if (entry.kind === 'doc') {
+      const [info, source] = await Promise.all([
+        fsp.stat(at).catch(() => null),
+        fsp.readFile(at, 'utf8').catch(() => null),
+      ]);
+      return {
+        ...entry,
+        bytes: info?.size ?? 0,
+        nodes: source === null ? 0 : nodesOf(source),
+        title: source === null ? titleize(name) : titleOf(source, titleize(name)),
+      };
+    }
+
+    if (entry.kind === 'file') {
+      const info = await fsp.stat(at).catch(() => null);
+      return { ...entry, bytes: info?.size ?? 0, ext: extOf(name) };
+    }
+
+    const inside = await fsp.readdir(at, { withFileTypes: true }).catch(() => []);
+    const kinds = inside
+      .filter((child) => !HIDDEN.test(child.name))
+      .map((child) =>
+        child.isDirectory() ? 'folder' : child.name.endsWith(DOC_EXT) ? 'doc' : 'file',
+      )
+      .sort((a, b) => KIND_RANK[a] - KIND_RANK[b]);
+    return { ...entry, items: kinds.length, kinds: kinds.slice(0, 9) };
   }
 
   async function untrash(id, { to = null } = {}) {
@@ -324,7 +599,7 @@ export function createFsStore({ root }) {
     let target = parsePath(to ?? entry.path, { allowRoot: false });
     // Something else may have taken the name in the meantime. Restoring beside
     // it beats refusing, and beats overwriting by a very long way.
-    if ((await has(target)) || (await hasFolder(target))) {
+    if ((await has(target)) || (await hasFolder(target)) || (await hasFile(target))) {
       const { parent, name } = splitPath(target);
       target = joinPath(parent, `${name} restored ${new Date(entry.t).toISOString().slice(0, 10)}`);
     }
@@ -362,8 +637,12 @@ export function createFsStore({ root }) {
     blobs,
     ready,
     read,
+    readRaw,
+    putFile,
+    placeFile,
     has,
     hasFolder,
+    hasFile,
     stat,
     list,
     tree,

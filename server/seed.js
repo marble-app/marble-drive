@@ -1,19 +1,26 @@
-// What a brand new drive has in it.
+// What a brand new drive has in it after the host seeds it.
 //
-// Exactly one document, and it is the Drive itself. Not because a drive should
-// arrive full, but because the alternative is a host that serves a folder with
-// nothing in it and an address that 404s — and because the Drive being an
-// ordinary document in the drive is the claim this whole repo is making. You
-// can rename it, edit it, or throw it away; the host falls back to whatever
-// else is there.
+// Start here first, then the Drive document, the Agents library, the Chat
+// app, the Board, and the Design System and its Don'ts in a System folder —
+// each written once, the first time the host sees the drive without it.
+// Not because a drive should arrive full, but because the alternative is a host
+// that serves a folder with nothing in it and an address that 404s — and because
+// the Drive being an ordinary document in the drive is the claim this whole repo
+// is making. You can rename either, edit it, or throw it away; the host falls
+// back to whatever else is there.
 
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { appById, currentSource, versionId } from './app-lineage.js';
+import { readManifest, writeManifest } from './app-updates.js';
 import { link as iconLink } from './favicon.js';
-import { composeScript } from './gallery.js';
+import { build as buildStarter, composeScript, STARTERS } from './gallery.js';
 import { titleize } from './paths.js';
+import { START_HERE } from './start-here.js';
+
+export { START_HERE };
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -36,10 +43,179 @@ export async function buildDrive({ name = 'drive', title = 'My Drive' } = {}) {
     .replace('__SCRIPT__', `<script>\n${script}\n</script>`);
 }
 
-/** Written only if it is not there. A drive that rewrote its own Drive on every
- *  boot would be a drive you cannot change. */
+/**
+ * Seed an app page once. Written only if it is not there — a drive that
+ * rewrote its own Drive on every boot would be a drive you cannot change —
+ * and only the first time: `.marble/apps.json` remembers what was seeded and
+ * where, so a Console moved into a folder, or a Chat thrown away, stays where
+ * its owner put it instead of coming back at the top on the next start. The
+ * version it was built from is remembered too, which is the base
+ * server/app-updates.js merges from when the template moves on.
+ */
+async function seedOnce(store, appId, name, build, { before = [] } = {}) {
+  const manifest = await readManifest(store.marbleDir);
+  const known = manifest.seeded[appId];
+  if (known) return { seeded: false, path: known };
+  // Where an earlier release seeded it: a drive from before the manifest that
+  // has it there keeps it there, rather than getting a second copy.
+  for (const earlier of before) {
+    if (earlier === name || !(await store.has(earlier))) continue;
+    manifest.seeded[appId] = earlier;
+    await writeManifest(store.marbleDir, manifest);
+    return { seeded: false, path: earlier };
+  }
+  if (!(await store.has(name))) {
+    await store.write(name, await build(), { label: 'seeded' });
+    const source = currentSource(appById(appId));
+    if (source !== null) manifest.docs[name] = { app: appId, version: versionId(source), at: new Date().toISOString() };
+    manifest.seeded[appId] = name;
+    await writeManifest(store.marbleDir, manifest);
+    return { seeded: true, path: name };
+  }
+  // A drive from before the manifest: what is there is what was seeded.
+  manifest.seeded[appId] = name;
+  await writeManifest(store.marbleDir, manifest);
+  return { seeded: false, path: name };
+}
+
 export async function seedDrive(store, { name = 'drive', title = 'My Drive' } = {}) {
-  if (await store.has(name)) return { seeded: false, path: name };
-  await store.write(name, await buildDrive({ name, title }), { label: 'seeded' });
+  return seedOnce(store, 'drive', name, () => buildDrive({ name, title }));
+}
+
+/** The Agents library page — custom chrome, so the drawer does not mount on it. */
+export async function buildAgents({ name = 'Agents', title = 'Agents' } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'agents.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedAgents(store, { name = 'Agents', title = 'Agents' } = {}) {
+  return seedOnce(store, 'agents', name, () => buildAgents({ name, title }));
+}
+
+/** The Chat app — a plain chatbot over the same conversations Agents runs.
+ *  It is also a starter in the gallery (`starters/chat.mrbl`), so the one every
+ *  drive is seeded with and one made from Templates are the same build. */
+export async function buildChat({ name = 'Chat', title = 'Chat' } = {}) {
+  return buildStarter('chat', { name: title || name });
+}
+
+export async function seedChat(store, { name = 'Chat', title = 'Chat' } = {}) {
+  return seedOnce(store, 'chat', name, () => buildChat({ name, title }));
+}
+
+/** The Board — the whiteboard where the board is the prompt. The third way to
+ *  ask, beside Chat and Agents, and like Chat a gallery starter too. */
+export async function seedBoard(store, { name = 'Board' } = {}) {
+  if (!STARTERS.some((starter) => starter.id === 'whiteboard')) return { seeded: false, path: null };
+  return seedOnce(store, 'whiteboard', name, () => buildStarter('whiteboard', { name }));
+}
+
+/** The design system: the tokens, type, motion and parts the drive's own apps
+ *  are drawn with, drawn with them. A page to look at, and the page the
+ *  marble-drive:design-system skill sends an agent to before it styles
+ *  anything — so a drive that changes a token here changes what gets built.
+ *  Its script is its own, like the Agents page's, so nothing is composed in. */
+export async function buildDesignSystem({ title = 'Design system' } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'design-system.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+/** The folder a new drive keeps the pages that are for its agents more than
+ *  for its person. `.marble/apps.json` records where each one went, which is
+ *  where the design-system skill and the agents' instructions look. */
+export const SYSTEM_FOLDER = 'System';
+
+export async function seedDesignSystem(store, { name = `${SYSTEM_FOLDER}/Design System`, title = 'Design system' } = {}) {
+  return seedOnce(store, 'design-system', name, () => buildDesignSystem({ title }), { before: ['Design System'] });
+}
+
+/** The design system's other half: what the drive's apps refuse — the tells
+ *  that make a page look generated, the fingernail border first, each painted
+ *  beside what the system does instead, and a scan to run before shipping.
+ *  The same skill sends an agent here after the Design System. */
+export async function buildDesignDonts({ title = "Design don'ts" } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'design-donts.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedDesignDonts(store, { name = `${SYSTEM_FOLDER}/Design Don'ts`, title = "Design don'ts" } = {}) {
+  return seedOnce(store, 'design-donts', name, () => buildDesignDonts({ title }), { before: ["Design Don'ts"] });
+}
+
+/** Projects: the drive's work grouped by what it is for, beside Agents. Its
+ *  file holds only the owner's projects; the views are the host's
+ *  (runtime/projects.js), so like the Console it never needs patching for
+ *  them, and a new drive starts with no projects and its chats' suggestions. */
+export async function buildProjects({ title = 'Projects' } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'projects.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedProjects(store, { name = 'Projects', title = 'Projects' } = {}) {
+  return seedOnce(store, 'projects', name, () => buildProjects({ title }));
+}
+
+/** The Console: every drive, from one page. Only where the console is on
+ *  (admin-p2); its code is the host's (runtime/console.js), so the file is a
+ *  place, not a program, and never needs patching. */
+export async function buildConsole({ title = 'Console' } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'console.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedConsole(store, { name = 'Console', title = 'Console' } = {}) {
+  return seedOnce(store, 'console', name, () => buildConsole({ title }));
+}
+
+// ---------------------------------------------------------------- Start here
+
+/** Start here: the first page a new drive opens on. Three things to try, and
+ *  a question whose answer becomes the person's first document. An ordinary
+ *  document with the affordances its markers need composed in, like a starter. */
+export async function buildStartHere({ title = 'Start here' } = {}) {
+  const [template, script] = await Promise.all([
+    fsp.readFile(path.join(REPO, 'templates', 'start-here.mrbl'), 'utf8'),
+    composeScript(['editable', 'state', 'history', 'status']),
+  ]);
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId())
+    .replace('__SCRIPT__', () => `<script>\n${script}\n</script>`);
+}
+
+/**
+ * Start here, for a new drive only, and before anything else is written: a
+ * drive that already has documents, or has had pages seeded into it, is
+ * someone's already, and is not handed a page about getting started. Whether
+ * it was written or passed over is remembered, so deleting the page is final.
+ */
+export async function seedStartHere(store, { name = START_HERE, title = 'Start here' } = {}) {
+  const manifest = await readManifest(store.marbleDir);
+  if (Object.hasOwn(manifest.seeded, 'start-here')) return { seeded: false, path: manifest.seeded['start-here'] };
+  const fresh = !Object.keys(manifest.seeded).length && !(await store.list({ recursive: true })).some((e) => e.kind === 'doc');
+  if (!fresh) {
+    manifest.seeded['start-here'] = null;
+    await writeManifest(store.marbleDir, manifest);
+    return { seeded: false, path: null };
+  }
+  await store.write(name, await buildStartHere({ title }), { label: 'seeded' });
+  manifest.seeded['start-here'] = name;
+  await writeManifest(store.marbleDir, manifest);
   return { seeded: true, path: name };
 }

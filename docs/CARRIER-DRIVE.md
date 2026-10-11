@@ -38,6 +38,8 @@ The `k-tree` card is explicit that this is the shape of the change:
 | `marble.drive.restore(id, to)` | |
 | `marble.drive.weigh(path)` | bytes, nodes, and how much of it is base64 |
 | `marble.drive.downloadHref(path)` | one self-contained file, blobs inlined |
+| `marble.drive.fileHref(path)` | where a `kind: 'file'` entry lives — the one address in the drive that is not a document's, so its path carries its extension |
+| `marble.drive.git.status(path, {fetch})` / `.publish(path, {message})` | a folder that is its own git repository: branch, upstream, what changed and how, the last commit and its GitHub link, and with `fetch` what GitHub has that it lacks; Publish commits (with `message`, or the automatic one) and pushes. Only where the drive has `MARBLE_DRIVE_GIT` on, and 404 everywhere else. A page opens the Publish popover with `dispatchEvent(new CustomEvent('marble:publish', {detail: {path}}))`, naming no route |
 | `marble.drive.on(event, fn)` | `created`, `changed`, `moved`, `trashed`, `restored`, `removed`, or `'*'` |
 | `marble.drive.resolveBlobs(root)` | resolve `data-marble-blob` to a source. Registered already; exposed for a document that inserts markup itself |
 | `marble.drive.client` | this page's id, so the Drive can ignore its own echoes |
@@ -47,6 +49,22 @@ The `k-tree` card is explicit that this is the shape of the change:
 **A document still names no route.** Every fetch in `runtime/drive.js` is the
 host's, not the file's. `templates/drive.mrbl` contains no path, and there is a
 test that says so.
+
+**The host decides what a file is safe to render.** `fileHref` hands back an
+address and nothing else. Whether the bytes behind it come back as a picture you
+look at or a download you save is the host's call, made against a short
+allowlist of types — because a file served under a type the browser executes is
+a script running on the drive's own origin with the drive's own cookie. A
+document asking for the href is deliberately not making that call, and could not
+make it correctly if it wanted to.
+
+**A site's own paths resolve beside it.** A document that is also a website
+names its files from the root, the way the site will be served:
+`/thumbnails/a.png`. When no route of the host's answers a path like that, the
+host reads it from the folder of the document that asked (the browser names it in
+`Referer`), then from that folder's `public/`, and serves it the way
+`fileHref` would. A link with `rel="noreferrer"` does not say who asked, so it
+finds nothing.
 
 **The blob resolution is page-only.** A document whose heavy bytes have been
 extracted carries `data-marble-blob="<hash>"` and a placeholder `src`. The
@@ -73,3 +91,45 @@ entitled to edit.
 
 Until then this file is the specification, and `runtime/drive.js` is the only
 implementation.
+
+## `marble.agent`
+
+Injected (with `runtime/agent-ui.js`, the drawer) only when the host runs agents — see [AGENTS.md](AGENTS.md). Its absence is the answer to "can I talk to an agent here".
+
+| call | |
+|---|---|
+| `marble.agent.providers()` | `[{id, label, installed, signedIn, detail, default, defaultModel, models, efforts}]` |
+| `marble.agent.settings()` / `.saveSettings(patch)` | `{defaultProvider, models, efforts, keys}` — `keys` is `{anthropic, cursor}` booleans, never the values |
+| `marble.agent.skills()` | `[{id, name, description}]` — bodies stay on disk |
+| `marble.agent.conversations({archived})` / `.conversation(id)` | summaries / `{meta, turns, events}` |
+| `marble.agent.start({provider, model, effort, handoffFrom})` | → conversation id |
+| `marble.agent.update(id, patch)` | model, effort, title, archived, reviewed |
+| `marble.agent.send(id, {prompt, target, viewing, selection, also})` | missing context comes from `context()` |
+| `marble.agent.cancel(turn)` / `.undo(turn)` / `.dequeue(turn)` | |
+| `marble.agent.archive(id, bool)` / `.markReviewed(id)` / `.handoff(id, provider)` | |
+| `marble.agent.restore(path, sha)` | the watchdog's restore point |
+| `marble.agent.on(id \| '*', fn)` | a conversation's events (replayed, then live) / summaries; returns unsubscribe |
+| `marble.agent.context()` | `{viewing, target, selection, also}` — viewing is this page; target is the aimed document, or this page if none; `also` is extra documents in view, not extra writable targets. `selection` is every addressed element the text selection intersects, coalesced upward so a fully covered container travels as itself, in document order. It survives focus moving into transient chrome, and the collapse that such a focus change causes |
+| `marble.agent.select(ids)` | for documents with their own selection model; `null` clears |
+
+`marble.collab`, set by `runtime/collab.js`, exposes `tapeTarget(els)` — the
+smallest common ancestor of a set of elements, or `null` when only `<html>` or
+`<body>` contains them — and `phaseLabel({phase, note})`, the construction
+zone's `Agent · <clause>` text. The callout layer (`runtime/agent-callout.js`)
+hangs its card and its handle with them, so a card and a zone agree about
+where the work is. A document may read them; it should not rely on more.
+
+The callout layer also listens for, and dispatches, four events. Chrome that
+wants to take one calls `preventDefault()` on the cancelable ones:
+`marble-callout:summon` (on `window`, cancelable — the drawer offers ⌘J here
+when a selection exists), `marble-callout:open` `{id}` (on `document`,
+cancelable — the zone label's *Open chat* offers itself to a callout first),
+`marble-callout:reviewed` `{id}` (clears that conversation's trail), and
+`marble-callout:docked` / `marble-callout:undocked` `{id}` (hide and restore
+that zone's own label).
+| `marble.agent.aim(path, {also}?)` | the writable target while you stay on this page; `null` clears. Drive's listing `pick()` calls this so a picked document is what a turn writes, without opening it |
+| `marble.agent.current()` / `.remember(id)` | the conversation that follows you between pages |
+| `marble.agent.open(id)` / `.close()` | ask the drawer |
+| `marble.agent.openSettings()` | default agent, model, and API keys |
+
+A document that draws its own agent interface says `<meta name="marble-agent" content="custom">`: the host still injects `agent-ui.js` so `<marble-conversation>` is available, but the drawer does not mount.

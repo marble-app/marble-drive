@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { STARTERS, build, composeScript, list } from '../server/gallery.js';
+import { STARTERS, build, composeScript, list, preview } from '../server/gallery.js';
 import { createBlobs } from '../server/store/blobs.js';
 import { extract, flatten } from '../server/flatten.js';
 import fsp from 'node:fs/promises';
@@ -9,11 +9,48 @@ import os from 'node:os';
 import path from 'node:path';
 
 
-test('seven starters, each with a blurb somebody could choose from', () => {
-  assert.deepEqual(list().map((s) => s.id), ['doc', 'sheet', 'slides', 'board', 'canvas', 'paper', 'latex']);
+test('ten starters, each with a blurb somebody could choose from', () => {
+  // The order is by family — write, structure, present, publish — because the
+  // grid the page draws groups by adjacency and nothing else.
+  assert.deepEqual(list().map((s) => s.id), ['doc', 'note', 'chat', 'whiteboard', 'sheet', 'board', 'canvas', 'slides', 'paper', 'latex']);
   for (const starter of list()) {
     assert.ok(starter.title && starter.blurb && starter.accent);
   }
+});
+
+test('every starter carries what a card needs to be recognised without prose', () => {
+  const byAccent = new Map();
+  for (const starter of list()) {
+    assert.match(starter.accent, /^#[0-9a-f]{6}$/, `${starter.id} has a hex accent`);
+    assert.ok(starter.hint.length > 10, `${starter.id} has a placeholder for the brief`);
+    assert.equal(starter.ideas.length, 3, `${starter.id} offers three ideas`);
+    for (const idea of starter.ideas) {
+      assert.ok(idea.length > 10 && idea.length < 120, `an idea of ${starter.id} is chip-sized`);
+    }
+    byAccent.set(starter.accent, [...(byAccent.get(starter.accent) ?? []), starter.id]);
+  }
+  // Exactly one colour is shared, and deliberately: paper and latex are one
+  // document with two projects in it.
+  assert.deepEqual([...byAccent.values()].filter((ids) => ids.length > 1), [['paper', 'latex']]);
+});
+
+test('a preview is the starter with nothing left in it that could run', async () => {
+  const source = await preview('latex');
+  assert.match(source, /^<!doctype html>/);
+  assert.ok(!/<script/i.test(source), 'no script survives');
+  // The typesetter is most of this starter; the preview is a picture of it.
+  assert.ok(source.length < 120_000, `stripped to ${source.length} bytes`);
+  for (const [, body] of source.matchAll(/<pre\b[^>]*>([\s\S]*?)<\/pre>/g)) {
+    assert.ok(body.length <= 1200, `a pre came through at ${body.length}`);
+  }
+});
+
+test('a preview is built once', async () => {
+  assert.equal(await preview('board'), await preview('board'));
+});
+
+test('a starter nobody has has no preview', async () => {
+  await assert.rejects(() => preview('telekinesis'), (err) => err.status === 404);
 });
 
 test('the affordances are composed out of the Marble package, not copied', async () => {
@@ -25,12 +62,15 @@ test('the affordances are composed out of the Marble package, not copied', async
   assert.match(script.trimEnd(), /\}\)\(\);$/);
 });
 
-test('the drive overrides Marble\'s sortable with one a finger can use', async () => {
+test('composed sortable is pointer-driven and wires a child adopted into an existing list', async () => {
   const script = await composeScript(['sortable']);
   assert.match(script, /pointerdown/);
   assert.match(script, /touch-action: none/);
-  // And no trace of the drag-and-drop path it replaces.
+  // A finger never fires dragstart; Marble's sortable does not use it.
   assert.ok(!script.includes('dragstart'));
+  // Newly inserted items are adopted as themselves. The sortable attribute
+  // lives on the parent list, so wiring has to look up as well as down.
+  assert.match(script, /parentElement\?\.closest\('\[data-marble-sortable\]'\)/);
 });
 
 test('an unknown part is a build error, not a silently empty document', async () => {
@@ -56,7 +96,9 @@ for (const starter of STARTERS) {
     // every op after this one addressable.
     const ids = [...markup.matchAll(/data-marble-id="([^"]+)"/g)].map((m) => m[1]);
     assert.equal(new Set(ids).size, ids.length, 'ids are unique');
-    assert.ok(ids.length > 5, 'the document is actually addressable');
+    // The empty app (Build mode's) is its body, main and name until the
+    // first build fills it.
+    assert.ok(ids.length > (starter.id === 'app' ? 2 : 5), 'the document is actually addressable');
 
     // A starter that names a route would be a document that only opens here.
     assert.ok(!/\/(ops|intent|docs|events|drive)\?/.test(source), 'names no route');

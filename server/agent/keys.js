@@ -1,0 +1,82 @@
+// API keys the person set in the Agents settings panel.
+//
+// They are not conversation data and they are not in the drive: backups copy
+// `.marble/`, and a key in settings.json would ride along. This file lives
+// next to the host (`.agent-keys.local`, gitignored) or wherever
+// `MARBLE_DRIVE_AGENT_KEYS` points. GET never returns the values, only whether
+// a key is set. Mode 600 so a shared machine does not leak them as a world-readable file.
+
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+
+// The name a key is saved under, and the variable its CLI reads. Codex's is
+// CODEX_API_KEY: `codex exec` ignores OPENAI_API_KEY. `claude` is not an API
+// key but the long-lived token `claude setup-token` gives for the person's
+// own Claude plan (server/agent/claude-signin.js); the Claude login provider
+// runs on it when it is set.
+const FIELDS = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  claude: 'CLAUDE_CODE_OAUTH_TOKEN',
+  cursor: 'CURSOR_API_KEY',
+  openai: 'CODEX_API_KEY',
+};
+
+const empty = () => Object.fromEntries(Object.keys(FIELDS).map((name) => [name, undefined]));
+
+const readFile = (file) => {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Object.fromEntries(Object.keys(FIELDS).map((name) => [name, typeof parsed[name] === 'string' ? parsed[name] : undefined]));
+  } catch (err) {
+    if (err.code === 'ENOENT') return empty();
+    throw err;
+  }
+};
+
+export function createKeyStore({ file }) {
+  let cache = null;
+
+  const current = () => {
+    if (!cache) cache = readFile(file);
+    return cache;
+  };
+
+  async function write(patch) {
+    const next = { ...current() };
+    for (const name of Object.keys(FIELDS)) {
+      if (!Object.hasOwn(patch, name)) continue;
+      const value = typeof patch[name] === 'string' ? patch[name].trim() : '';
+      if (value) next[name] = value;
+      else delete next[name];
+    }
+    cache = next;
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+    const body = `${JSON.stringify(Object.fromEntries(Object.keys(FIELDS).map((name) => [name, next[name]])), null, 2)}\n`;
+    await fsp.writeFile(tmp, body, { mode: 0o600 });
+    await fsp.rename(tmp, file);
+    await fsp.chmod(file, 0o600);
+  }
+
+  const flags = async () => {
+    const data = current();
+    return Object.fromEntries(Object.keys(FIELDS).map((name) => [name, Boolean(data[name])]));
+  };
+
+  const asEnv = () => {
+    const data = current();
+    const env = {};
+    for (const [name, envName] of Object.entries(FIELDS)) {
+      if (data[name]) env[envName] = data[name];
+    }
+    return env;
+  };
+
+  /** One key's value, for the host's own calls (server/agent/voice): never
+   *  sent to a page, never logged, never put in argv. */
+  const value = (name) => (Object.hasOwn(FIELDS, name) ? current()[name] ?? null : null);
+
+  return { write, flags, asEnv, value, file };
+}

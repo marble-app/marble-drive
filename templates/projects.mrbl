@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Projects">
+<!-- Projects: the drive's work grouped by what it is for. This file holds
+     only what the owner says about their work: each project's name, its one
+     sentence, how much it matters, its dates and what it lives in. Everything
+     that can be counted (chats, what is running, which weeks were busy) is
+     read live from the host, and the views are drawn around these elements by
+     runtime/projects.js and runtime/projects.css, which the host injects here
+     so they ship with every release instead of being merged into this file.
+     Design: Notes and Sketches/App Designs/Projects design. -->
+<meta name="marble-projects" content="1">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* Only what the page must be before its own sheet arrives: the paper, in
+     both schemes, so the first frame is not a white flash. */
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; background: light-dark(#fafaf7, #16181a); }
+</style>
+</head>
+<body data-marble-id="__ID__">
+<main data-marble-id="__ID__" data-projects data-view="gallery" data-sort="ranked" data-zoom="quarter">
+  <div data-marble-id="prj-list" class="prj-list"></div>
+  <ul data-marble-id="prj-declined" class="prj-declined"></ul>
+  <p data-marble-id="prj-runline" class="prj-run">
+    <button data-marble-id="prj-run" type="button" data-marble-run="Bring the projects in this list up to date. Each project is an article.project; its members (ul.p-members) name the folders and documents it lives in (data-kind and data-path), the code checkouts it uses (data-kind=&quot;code&quot;, data-runs-in) and chats filed in it by hand (data-chat). The drive's chats are in .marble/agents/*/meta.json, each with a target document, a project (where it ran), a title and times. For each project that had chats or edits since yesterday: rewrite its p.p-sentence as one plain sentence of under twenty words saying what the work is doing now, unless that sentence has data-by=&quot;you&quot;. Then, at most twice per project, when a folder or document clearly belongs to it and is in no project yet, add a suggestion as an li in its ol.p-suggest with data-kind (doc or folder), data-path, and a short reason as its text, unless its kind:path is a data-key in ul.prj-declined. Change nothing else." data-marble-scope="prj-list" data-marble-on="daily 07:00">Update now</button>
+    <button data-marble-id="prj-pause" type="button" data-marble-pause="prj-run">Pause</button>
+  </p>
+</main>
+</body>
+</html>

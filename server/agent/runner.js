@@ -1,0 +1,1558 @@
+// Turns: queued, run one at a time per conversation, streamed into the store
+// as they happen, and ended one way or another — never left running with
+// nobody watching.
+//
+// The runner knows nothing about any particular CLI. A provider says how to
+// start one and how to read a line of what it prints; the runner owns
+// everything else: the queue, the process, the token that lets the process's
+// MCP bridge call back in, cancellation, stalls, and what the store says
+// afterwards.
+
+import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import readline from 'node:readline';
+
+import { createAwakeClock, createProgress } from '../awake.js';
+import { createDrawer } from './drawer.js';
+import '../../runtime/agent-words.js';
+import { collectSlices, shaOf } from '../engine.js';
+import { effectiveCapability } from './capability.js';
+import { pickEnv } from './env.js';
+import { MAX_HOP, MAX_SENDS, clampSeconds, pickTarget, renderMessages, validateText } from './messages.js';
+import { MESSAGING_INSTRUCTIONS } from './instructions.js';
+import { firstToGo } from './first-to-go.js';
+import { buildsSomething, marbleWay } from './marble-way.js';
+import {
+  CLAUDE_PROVIDERS,
+  CONTINUE,
+  STAY,
+  continuedLabel,
+  handoffLane,
+  handoffModel,
+  matchEffort,
+  usageBrief,
+  usageHandoffDue,
+} from './usage-failover.js';
+
+// What a chat's progress card says, shared with the card itself.
+const words = globalThis.marbleAgentWords;
+
+const SELECTION_BUDGET = 6_000;
+const STDERR_TAIL = 4_000;
+
+/** Cursor's "Cannot use this model" answer continues with every model id.
+ *  The sentence before "Available models" is the failure. The list is not. */
+export function clipFailure(text) {
+  const raw = String(text ?? '').trim();
+  const at = raw.search(/Available models:/i);
+  const clipped = (at > 0 ? raw.slice(0, at) : raw).trim().replace(/[.:]\s*$/, '');
+  if (!clipped) return '';
+  return clipped.length > 500 ? `${clipped.slice(0, 500)}…` : clipped;
+}
+// How long closing the host waits for its running turns to write their end.
+const CLOSE_GRACE_MS = 5_000;
+// How long a result has to stand unchallenged before the runner acts on it,
+// and how long a process gets once its last background work has ended: the
+// CLI takes that work's report as a new message, and says so within moments.
+// Both are `limits` a host can set; these are the fallbacks. While background
+// work is still out, no clock ends the turn (armEnd).
+const SETTLE_MS = 500;
+const DRAINED_SETTLE_MS = 5_000;
+const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
+// A prompt said aloud, whose reply will be read aloud (server/agent/voice).
+// The host still cleans what it speaks (speakable.js); this asks for words
+// that need no cleaning.
+const SPOKEN_NOTE = "They said this aloud, and your reply will be read aloud to them. Start your reply at once. Keep it to one to three short sentences that sound right spoken: no lists, headings, tables, code, links, file paths or ids. Say what you did or found and anything you need from them; the page and the chat already show the work, so don't walk through it. A transcription can mishear a name: if a word doesn't fit, take the nearest document or term that does.";
+const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
+
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, browserPass = null, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, drawProgress = null, awake = createAwakeClock(), progress = createProgress() }) {
+  const live = new Map(); // turnId → live turn
+  const order = []; // turnIds, in the order they were sent
+  const tokens = new Map(); // token → live turn
+  let closed = false;
+
+  const runningTurns = () => [...live.values()].filter((t) => t.status === 'running');
+
+  const ownsPath = (turn, docPath) =>
+    turn.target === docPath
+    || turn.writable.has(docPath)
+    || turn.touched.has(docPath)
+    || turn.origins.has(docPath);
+  function liveFor(conversationId) {
+    return [...live.values()].filter((t) => t.conversationId === conversationId);
+  }
+  function queuedFor(conversationId) {
+    return order.map((id) => live.get(id)).filter((t) => t && t.conversationId === conversationId && t.status === 'queued');
+  }
+  function batchDispatch(turns) {
+    if (turns.some((t) => t.dispatch === 'interrupt')) return 'interrupt';
+    if (turns.some((t) => t.dispatch === 'steer')) return 'steer';
+    return 'queue';
+  }
+
+  // Every publish for a conversation — a stored event's, or a raw delta's —
+  // goes through this one chain, in the order it was called, the same way
+  // the store itself serializes appends. Without it, a delta (published the
+  // instant it arrives) can race ahead of the text event that logically
+  // came first but is still waiting on its own disk write.
+  const publishChains = new Map();
+  function chained(conversationId, task) {
+    const next = (publishChains.get(conversationId) ?? Promise.resolve()).then(task, task);
+    publishChains.set(conversationId, next.catch(() => {}));
+    return next;
+  }
+
+  // messageId → { hop, from, to } for every message this host has sent. The
+  // hop cap reads the parent from here; a parent minted before a restart is
+  // unknown and starts a fresh thread, which is the lenient side to err on.
+  const threads = new Map();
+
+  /** Take this conversation's inbox *for a turn that can act on it*, or hand
+   *  it straight back.
+   *
+   *  Three takers share one inbox — a turn starting (composePrompt), a parked
+   *  wait, and a delivery turn — and the rule they all serve is that a message
+   *  is delivered exactly once and never lost. A turn that is already
+   *  `finishing` cannot act on anything: its process is going away, so a batch
+   *  handed to it becomes a tool result nobody reads and an inbox that reads
+   *  empty to finish()'s own check. So: take, and if this turn is finishing by
+   *  then (or writing the `message` events fails), put the batch back in order
+   *  and report nothing. finish() then queues a delivery turn for it.
+   *
+   *  What a turn did receive is remembered on it (`turn.inbound`): that is the
+   *  thread a reply belongs to when the agent forgets `inReplyTo`. */
+  async function takeFor(turn, delivered) {
+    const messages = await store.takeInbox(turn.conversationId);
+    if (!messages.length) return [];
+    const handBack = async () => {
+      for (const m of messages) await store.appendInbox(turn.conversationId, m);
+      return [];
+    };
+    if (turn.finishing) return handBack();
+    try {
+      for (const m of messages) {
+        await emit(turn, { type: 'message', messageId: m.id, from: m.from, fromTitle: (await store.conversation(m.from))?.title ?? null, text: m.text, about: m.about, delivered });
+      }
+    } catch (err) {
+      log.error(`[agents] ${err.message}`);
+      return handBack();
+    }
+    turn.inbound = [...(turn.inbound ?? []), ...messages];
+    return messages;
+  }
+
+  async function recordSent(turn, message, receiver, delivered) {
+    if (!turn.id) return; // a synthetic turn in a test has no transcript to write
+    await emit(turn, {
+      type: 'message.sent',
+      messageId: message.id,
+      to: message.to,
+      toTitle: receiver.title,
+      text: message.text,
+      about: message.about,
+      inReplyTo: message.inReplyTo,
+      delivered,
+    });
+  }
+
+  async function emit(turn, event) {
+    return chained(turn.conversationId, async () => {
+      const stored = await store.appendEvent(turn.conversationId, { turn: turn.id, ...event });
+      const meta = await store.conversation(turn.conversationId);
+      publish(turn.conversationId, stored, meta ? await store.summary(turn.conversationId) : null);
+      return stored;
+    });
+  }
+
+  // ------------------------------------------------------------------ the row
+
+  /** A chat's row says what its card says (runtime/agent-words.js): each
+   *  event the card follows moves the line, and a new line is written ahead
+   *  of the event that moved it, so the summary published with that event
+   *  carries it. A new sentence is not news about the chat, so it does not
+   *  move the chat up a list sorted by when it last changed. Once the turn
+   *  is finishing, the end line is finish()'s to write. */
+  function tell(turn, event) {
+    const activity = words.noteLine(turn.line, event);
+    if (!activity || activity === turn.activity) return;
+    turn.activity = activity;
+    chained(turn.conversationId, () => (turn.finishing ? null : store.updateConversation(turn.conversationId, { activity }, { touch: false })))
+      .catch((err) => log.error(`[agents] ${err.message}`));
+  }
+
+  // ------------------------------------------------------------------ drawing
+  //
+  // A small model draws each turn's progress widget from its steps, as they
+  // happen and once at the end (drawer.js; how it draws is the
+  // drawing-progress skill). Null when the host does not draw.
+  const drawer = drawProgress ? createDrawer({ draw: drawProgress, emit, log }) : null;
+
+  // ------------------------------------------------------------------ naming
+  //
+  // The name a chat wears is a placeholder until this runs: the first sixty
+  // characters of the prompt. Once the turn is over there is a question and
+  // an answer to read, so a small model is asked for a real title.
+  //
+  // Fire-and-forget, after the turn has already ended: naming spawns a CLI of
+  // its own, and no turn should be held open a second longer for the sake of
+  // a label. Once per conversation per host — a name that could not be got is
+  // not worth asking for again at the end of every turn.
+  const naming = new Set();
+  async function nameIfUnnamed(turn) {
+    if (!nameConversation) return; // a host that does not name chats
+    const id = turn.conversationId;
+    if (naming.has(id)) return;
+    const meta = await store.conversation(id);
+    if (!meta?.titleAuto) return; // named by the person, or nothing to replace
+    naming.add(id);
+    const title = await nameConversation({ prompt: turn.prompt, reply: turn.said.join('\n\n'), log });
+    if (!title) return;
+    // Renamed while we were asking: what the person typed outranks this.
+    const still = await store.conversation(id);
+    if (!still?.titleAuto || still.title !== meta.title) return;
+    await store.updateConversation(id, { title, titleAuto: false });
+    publish(id, { type: 'meta' }, await store.summary(id));
+  }
+
+  /** finish(), wherever it's called from, never throws — a store error at the
+   *  end of a turn is logged, not left for whatever fire-and-forget caller
+   *  (the child's `close` handler, mainly) to crash on. */
+  function safeFinish(turn, outcome) {
+    return finish(turn, outcome).catch((err) => log.error(`[agents] ${err.message}`));
+  }
+
+  /** The project a conversation works in, resolved now rather than at
+   *  creation: a project removed or moved later fails the next turn with a
+   *  plain reason instead of running somewhere else. */
+  async function resolveProject(meta) {
+    const id = meta.project || 'drive';
+    const project = projects ? await projects.find(id) : { id: 'drive', name: 'Drive', path: driveRoot, builtIn: true };
+    if (!project) throw new Error(`project "${id}" is not registered — pick another project for this conversation`);
+    // A host without a drive root (a bare runner in a test) has nothing to check.
+    if (project.path) {
+      try {
+        if (!(await fsp.stat(project.path)).isDirectory()) throw new Error('not a directory');
+      } catch {
+        throw new Error(`the project directory ${project.path} is missing`);
+      }
+    }
+    return project;
+  }
+
+  /** Where a document opens in this host: `/a/` and its path, without .mrbl. */
+  const pageUrl = (docPath) => `${origin()}/a/${String(docPath).split('/').map(encodeURIComponent).join('/')}`;
+
+  async function composePrompt(turn, meta, project) {
+    const context = turn.context;
+    const kind = project.id === 'drive' ? 'drive' : 'project';
+    let body = Array.isArray(turn.bundle)
+      ? turn.bundle.map((text, i) => `${i + 1}. ${text}`).join('\n')
+      : turn.prompt;
+    if (turn.dispatch === 'steer' && turn.behind) {
+      body = `${STEER_NOTE}\n\n${body}`;
+    }
+    const lines = [body, '', '---'];
+    if (context.surface === 'chat') {
+      // The Chat app is the window the words came through, not their subject.
+      // Its document is still the one a tool may write, because the host needs
+      // one; the line says not to, unless the app itself is what is asked about.
+      lines.push(
+        'Context from Marble Drive:',
+        `- Sent from the Chat app ("${context.target}"). This is a conversation: answer in your reply, and leave that document alone unless they ask you to change the app itself.`,
+      );
+    } else if (kind === 'drive') {
+      lines.push(
+        'Context from Marble Drive:',
+        `- The person is viewing: ${context.viewing ?? context.target}`,
+        `- The document you may edit: ${context.target}`,
+      );
+      if (context.also?.length) lines.push(`- Also in view: ${context.also.join(', ')}`);
+      // The address the host serves it at, which is not its path on disk.
+      if (turn.capability === 'full') lines.push(`- In your browser it is at: ${pageUrl(context.viewing ?? context.target)}`);
+    } else {
+      // A project agent may edit anything in its project; the document is
+      // where the person was, not a constraint.
+      const viewing = context.viewing ?? context.target;
+      lines.push(
+        `Sent from Marble Drive. The person was viewing the document "${viewing}" (on disk at ${path.join(driveRoot ?? '', `${viewing}.mrbl`)}) when they sent this. Marble's document tools can read and edit it; use them only if the request is about that document.`,
+      );
+    }
+    if (context.spoken) lines.push(`- ${SPOKEN_NOTE}`);
+    if (context.selectionSource) lines.push('- They selected these elements:', '', context.selectionSource);
+    // What the page added to the ask without showing it, and the Marble way
+    // for any ask that builds (marble-way.js). Neither is part of the message
+    // the chat shows; both are part of what the agent is asked to do.
+    if (context.brief) lines.push('', context.brief);
+    if (kind === 'drive' && context.surface !== 'chat' && buildsSomething(turn.prompt, context.brief, ...(turn.bundle ?? []))) {
+      lines.push('', marbleWay(turn.capability));
+    }
+    const others = runningTurns().filter((t) => t.id !== turn.id && t.project?.id === project.id).length;
+    if (others) {
+      lines.push('', `${others} other agent conversation(s) are running in this project right now. Do not stash, reset, check out or discard changes you did not make.`);
+    }
+    // Messages that arrived while this conversation was busy or asleep ride in
+    // on whatever turn starts next, so no message waits for a person. Kept on
+    // the turn too: if this turn never gets to act on them — cancelled before
+    // its process spawns, the host closing, `start()` throwing below — finish()
+    // hands them back to the inbox rather than losing them.
+    const arrived = await takeFor(turn, 'inbox');
+    turn.arrived = arrived;
+    if (arrived.length) {
+      lines.push('', 'Messages that arrived while you were away:', '', renderMessages(arrived, await titlesOf(arrived.map((m) => m.from))));
+    }
+    if (await hasPeers(turn.conversationId, project.id)) lines.push('', MESSAGING_INSTRUCTIONS);
+    if (meta.handoffFrom && turn.n === 1) {
+      const brief = await handoffBrief(meta.handoffFrom);
+      if (brief) lines.unshift(`This continues an earlier conversation. What happened there:\n\n${brief}\n\n---\n`);
+    }
+    if (turn.usageHandoff) {
+      const events = (await store.events(turn.conversationId)).filter((event) => event.turn !== turn.id);
+      const earlier = (await store.turns(turn.conversationId)).some((item) => item.usageHandoff && item.id !== turn.id);
+      const brief = usageBrief(events, turn.usageError, { afterCursor: earlier });
+      if (brief) lines.unshift(`${brief}\n\n---\n`);
+    }
+    return lines.join('\n');
+  }
+
+  async function handoffBrief(fromId) {
+    const events = (await store.events(fromId)).filter((e) =>
+      ['user', 'text', 'ops.applied'].includes(e.type),
+    );
+    const lines = events.slice(-12).map((e) =>
+      e.type === 'user' ? `Person: ${e.text}` : e.type === 'text' ? `Agent: ${e.text}` : `(edited ${e.count} element(s) in ${e.path})`,
+    );
+    return lines.join('\n').slice(-8_000);
+  }
+
+  async function titlesOf(ids) {
+    const titles = new Map();
+    for (const id of new Set(ids)) {
+      const meta = await store.conversation(id);
+      if (meta) titles.set(id, { title: meta.title, provider: meta.provider });
+    }
+    return titles;
+  }
+
+  async function projectPeers(conversationId, projectId) {
+    const all = await store.conversations({ archived: false });
+    return all.filter((c) => c.id !== conversationId && (c.project ?? 'drive') === projectId);
+  }
+
+  const hasPeers = async (conversationId, projectId) => (await projectPeers(conversationId, projectId)).length > 0;
+
+  async function send(conversationId, { prompt, context, dispatch, from = null, ahead = false, usageHandoff = false, usageError = null }) {
+    const meta = await store.conversation(conversationId);
+    if (!meta) throw Object.assign(new Error(`no conversation "${conversationId}"`), { status: 404 });
+    if (!context?.target) throw Object.assign(new Error('a turn needs context.target'), { status: 400 });
+    dispatch = DISPATCH.has(dispatch) ? dispatch : 'queue';
+    const behind = liveFor(conversationId).some((t) => t.status === 'queued' || t.status === 'running');
+
+    const frozen = { viewing: context.viewing ?? null, target: context.target, selection: context.selection ?? [] };
+    if (context.surface === 'chat') frozen.surface = 'chat';
+    if (context.spoken === true) frozen.spoken = true;
+    if (typeof context.brief === 'string' && context.brief.trim()) frozen.brief = context.brief.trim();
+    const also = [...new Set((Array.isArray(context.also) ? context.also : []).map((item) => String(item).trim()).filter(Boolean))]
+      .filter((doc) => doc !== frozen.target && doc !== frozen.viewing);
+    if (also.length) frozen.also = also;
+    if (frozen.selection.length) {
+      const source = await readDocument(frozen.target).catch(() => null);
+      if (source) {
+        frozen.selectionSource = collectSlices(source, frozen.selection, { budget: SELECTION_BUDGET })
+          .map((s) => s.html)
+          .join('\n\n');
+      }
+    }
+
+    const record = await store.createTurn(conversationId, { prompt: String(prompt ?? ''), context: frozen, dispatch, behind, usageHandoff });
+    let ended;
+    const turn = {
+      id: record.id,
+      n: record.n,
+      conversationId,
+      prompt: record.prompt,
+      dispatch: record.dispatch,
+      behind: record.behind,
+      bundle: record.bundle,
+      context: frozen,
+      target: frozen.target,
+      writable: new Set([frozen.target]),
+      undo: [],
+      status: 'queued',
+      token: null,
+      child: null,
+      cancelled: null,
+      // Aborted when the turn is stopped or ends: what a tool started for it
+      // (fan_out's workers) stops with it rather than outliving it.
+      abort: new AbortController(),
+      provider: null,
+      project: null, // resolved at start; the cwd of a full turn
+      asks: new Map(), // requestId → { closed }: prompts the process is waiting on
+      calls: new Set(), // callIds of the process's own tool calls with no result yet
+      holdStall: null,
+      resumeStall: null,
+      resume: null, // the provider session this turn was started to resume
+      done: null,
+      settle: null, // the timer that ends a turn whose result has arrived and whose process has gone quiet
+      background: 0, // pieces of background work the CLI is carrying past its own result
+      lingered: false, // true once the runner stopped a process that had already said its piece
+      usage: null,
+      applied: 0,
+      watchdog: false,
+      // docPath → the restore point taken before this turn first changed it.
+      // First write wins: undo wants where the document started, not its last step.
+      touched: new Map(),
+      // path → sha of the document as this turn found it. A later file write's
+      // `prior` is post-ops if the turn already filed ops, which is the wrong
+      // restore; undo wants this instead.
+      origins: new Map(),
+      stderr: '',
+      said: [], // the agent's own text, for naming the chat
+      line: words.createLine(), // what the turn's card says, followed through its events (runtime/agent-words.js)
+      activity: null, // the line last written to the conversation
+      timers: [],
+      inflight: new Set(), // tool-call promises the bridge is still waiting on
+      sent: 0, // messages this turn has sent; capped
+      waiter: null, // resolve() of a wait_for_reply parked on this turn
+      from, // { conversation, title, provider, messageId, hop } when a message started this turn
+      usageHandoff,
+      usageError,
+      arrived: null, // messages composePrompt() took from the inbox; handed back in finish() if this turn never got to act on them
+      inbound: null, // every message this turn has actually received, in order; a reply without `inReplyTo` threads off the last one from that conversation
+      finishing: false, // true once finish() has started; new tool calls are refused
+      ended: new Promise((resolve) => { ended = resolve; }), // settles once the turn has left the runner
+      endTurn: () => ended(),
+      // Undo records are written as each batch applies, in the order they
+      // applied, not only when the turn ends: a crash, or a host closing
+      // under it, would otherwise leave applied ops nobody can take back.
+      undoSaved: Promise.resolve(),
+      onEvent: (event) => {
+        // Kept for the namer: what the agent actually said, which is half of
+        // what a good title is made of. Capped — a title needs a paragraph,
+        // not a transcript.
+        if (event.type === 'text' && event.text && turn.said.length < 4) turn.said.push(String(event.text));
+        if (event.type === 'ops.applied') turn.applied += event.count;
+        if (event.type === 'ops.applied' || event.type === 'document.changed') {
+          // Written as each batch or write lands, in order, not only when the
+          // turn ends: a crash would otherwise leave changes nobody can take
+          // back. `restores` is where the document started, so undo of a
+          // document written both ways is one restore, not a restore and a
+          // replay.
+          const record = {
+            steps: [...turn.undo],
+            restores: [...turn.touched].map(([docPath, sha]) => ({ path: docPath, sha })),
+          };
+          turn.undoSaved = turn.undoSaved
+            .then(() => store.saveUndo(turn.id, record))
+            .catch((err) => log.error(`[agents] ${err.message}`));
+        }
+        drawer?.note(turn, event);
+        tell(turn, event);
+        // The end of a long result is for the drawer, which reads a test
+        // run's counts there; the transcript keeps its short summary.
+        const { tail: _tail, ...stored } = event;
+        emit(turn, stored).catch((err) => log.error(`[agents] ${err.message}`));
+      },
+    };
+
+    const originSource = await readDocument(frozen.target).catch(() => null);
+    if (originSource != null) turn.origins.set(frozen.target, shaOf(originSource));
+
+    // Only listed once its `user`/`turn.queued` events are actually stored —
+    // otherwise a pump() running concurrently (another turn on the same
+    // conversation finishing right now) could start this one and store
+    // `turn.started` before the events that are supposed to precede it.
+    await emit(turn, {
+      type: 'user',
+      text: turn.prompt,
+      context: { viewing: frozen.viewing, target: frozen.target, selection: frozen.selection, also: frozen.also ?? [] },
+      ...(frozen.spoken ? { spoken: true } : {}),
+      ...(from ? { from } : {}),
+    });
+    await emit(turn, { type: 'turn.queued', dispatch: turn.dispatch });
+    live.set(turn.id, turn);
+    if (ahead) {
+      const idx = order.findIndex((id) => {
+        const other = live.get(id);
+        return other && other.id !== turn.id && other.conversationId === conversationId && other.status === 'queued';
+      });
+      if (idx === -1) order.push(turn.id);
+      else order.splice(idx, 0, turn.id);
+    } else {
+      order.push(turn.id);
+    }
+    // A usage handoff is its own turn. Folding it into a combined queue would
+    // bury Continue inside the person's waiting prompt, and an interrupt
+    // dispatch would try to cancel the turn that is still finishing.
+    const effective = usageHandoff || !meta.queueCombine ? turn.dispatch : batchDispatch(queuedFor(conversationId));
+    if (effective === 'interrupt') {
+      const running = liveFor(conversationId).find((t) => t.status === 'running' && t.id !== turn.id);
+      if (running) await cancel(running.id);
+    }
+    await pump();
+    return { turnId: turn.id, status: turn.status };
+  }
+
+  /** Start a turn on an idle conversation carrying the messages in its inbox.
+   *  Returns the send result, or null when the conversation is gone, has no
+   *  document to work in, or another caller already claimed the inbox (two
+   *  `startDelivery`s can race for the same idle conversation — finish()'s
+   *  fire-and-forget check and a concurrent `deliver` — and only the one that
+   *  actually takes messages may start a turn; the other must not fall back
+   *  to the `messages` it was handed, or that batch is delivered twice). */
+  async function startDelivery(conversationId, messages, fallbackTarget = null) {
+    const meta = await store.conversation(conversationId);
+    if (!meta) return null;
+    const taken = await store.takeInbox(conversationId);
+    if (!taken.length) return null; // someone else already took these
+    // Everything about this turn is read from what was actually taken, not
+    // from the `messages` the caller happened to hold: the batch may be
+    // longer (another message landed first) or simply a different one.
+    const handBack = async () => {
+      for (const m of taken) await store.appendInbox(conversationId, m);
+      return null;
+    };
+    const first = taken[0];
+    const target = pickTarget({ receiver: meta, about: first.about, senderTarget: fallbackTarget });
+    if (!target) {
+      log.error(`[agents] a message for ${conversationId} has no document to start a turn in; left in its inbox`);
+      return handBack();
+    }
+    const sender = await store.conversation(first.from);
+    // A conversation that exists only because someone wrote to it has no name
+    // yet. Say where it came from, so the board is not a row of blank titles.
+    if (!meta.title) {
+      await store.updateConversation(conversationId, { title: `Message from ${sender?.title || first.from}`, titleAuto: true });
+    }
+    try {
+      return await send(conversationId, {
+        prompt: renderMessages(taken, await titlesOf(taken.map((m) => m.from))),
+        context: { target },
+        // `messageId` and `hop` are the thread this turn is an answer to: a
+        // reply that forgets `inReplyTo` still counts against the hop cap.
+        from: {
+          conversation: first.from,
+          title: sender?.title ?? null,
+          provider: sender?.provider ?? null,
+          messageId: first.id,
+          hop: first.hop ?? 0,
+        },
+      });
+    } catch (err) {
+      // The batch is out of the inbox and no turn will carry it. Put it back
+      // before the throw reaches whoever asked for the delivery.
+      await handBack();
+      throw err;
+    }
+  }
+
+  async function pump() {
+    if (closed) return;
+    for (const turnId of [...order]) {
+      // 0 is no cap: a conversation still runs one turn at a time, but
+      // how many conversations run at once is the person's business.
+      if (limits.maxRunning > 0 && runningTurns().length >= limits.maxRunning) return;
+      const turn = live.get(turnId);
+      if (!turn || turn.status !== 'queued') continue;
+      if (runningTurns().some((t) => t.conversationId === turn.conversationId)) continue;
+      await start(turn);
+    }
+  }
+
+  function look(turn, extra = {}) {
+    if (!onLook || !turn?.target) return;
+    const { ids: idsOverride, ...meta } = extra;
+    const ids = Object.hasOwn(extra, 'ids')
+      ? idsOverride
+      : (Array.isArray(turn.context?.selection) ? turn.context.selection.map(String) : []);
+    try {
+      onLook(turn.target, ids, `agent:${turn.conversationId}`, Object.keys(meta).length ? meta : undefined);
+    } catch (err) {
+      log.error(`[agents] ${err.message}`);
+    }
+  }
+
+  async function mergeQueued(conversationId) {
+    if (!(await store.conversation(conversationId)).queueCombine) return;
+    const waiting = queuedFor(conversationId).filter((turn) => !turn.usageHandoff);
+    if (waiting.length < 2) return;
+    const survivor = waiting[0];
+    survivor.bundle = waiting.map((t) => t.prompt);
+    survivor.dispatch = batchDispatch(waiting);
+    await store.updateTurn(survivor.id, { bundle: survivor.bundle, dispatch: survivor.dispatch });
+    for (const extra of waiting.slice(1)) {
+      live.delete(extra.id);
+      const idx = order.indexOf(extra.id);
+      if (idx !== -1) order.splice(idx, 1);
+      await emit(extra, { type: 'turn.combined' });
+      await store.updateTurn(extra.id, { status: 'combined', finishedAt: Date.now() });
+    }
+  }
+
+  async function start(turn) {
+    await mergeQueued(turn.conversationId);
+    if (!live.has(turn.id) || turn.status !== 'queued') return;
+    turn.status = 'running';
+    // The moment the turn's base is taken: a person's edits before it are
+    // history the turn reads; edits after it are concurrent with its writes.
+    turn.startedAt = Date.now();
+    try {
+      const meta = await store.conversation(turn.conversationId);
+      const provider = providers.get(meta.provider);
+      await store.updateTurn(turn.id, { status: 'running', startedAt: turn.startedAt });
+      await store.updateConversation(turn.conversationId, {
+        running: true,
+        activity: turn.from ? `Message from ${turn.from.title || turn.from.conversation}` : `Working on ${turn.target}`,
+      });
+      await emit(turn, { type: 'turn.started', provider: meta.provider });
+      look(turn, { phase: 'working', stage: 'start', turn: turn.id, prompt: String(turn.prompt ?? '').slice(0, 300) });
+
+      if (!provider) return safeFinish(turn, { status: 'failed', error: `no provider "${meta.provider}"` });
+      turn.provider = provider;
+      turn.resume = meta.providerSession ?? null;
+
+      turn.token = crypto.randomBytes(32).toString('hex');
+      tokens.set(turn.token, turn);
+      const workspace = path.join(workdir, turn.conversationId);
+      await fsp.mkdir(workspace, { recursive: true });
+      const capability = effectiveCapability(provider, { power });
+      turn.capability = capability;
+      const project = await resolveProject(meta);
+      turn.project = project;
+      const kind = project.id === 'drive' ? 'drive' : 'project';
+      const mcp = {
+        command: process.execPath,
+        args: [bridgePath],
+        env: { MARBLE_DRIVE_URL: origin(), MARBLE_AGENT_TOKEN: turn.token },
+      };
+      const profile = path.join(workspace, 'browser-profile');
+      const browser = capability === 'full' && browserPath
+        ? {
+            command: process.execPath,
+            args: [browserPath],
+            env: {
+              MARBLE_BROWSER_PROFILE: profile,
+              MARBLE_BROWSER_ORIGIN: origin(),
+              ...(browserPass ? { MARBLE_BROWSER_PASS: browserPass() } : {}),
+            },
+          }
+        : null;
+      if (browser) await fsp.rm(profile, { recursive: true, force: true });
+      await provider.prepare?.({ workspace, mcp, browser, meta, skills, capability, kind, project });
+      const prompt = await composePrompt(turn, meta, project);
+
+      // Cancel (or a host shutdown) can land anywhere in the awaits above,
+      // before there is any child to kill. Check here, the last point before
+      // a process would actually start, rather than leave it running unwanted.
+      if (turn.cancelled) return safeFinish(turn, turn.cancelled);
+      if (closed) return safeFinish(turn, { status: 'cancelled', error: 'host closing' });
+
+      const base = { ...pickEnv(process.env), ...mcp.env };
+      const spec = provider.spawn({
+        workspace,
+        mcp,
+        prompt,
+        resume: meta.providerSession,
+        model: meta.model,
+        effort: meta.effort,
+        mode: meta.mode,
+        // A CLI that takes its MCP servers as flags (Codex) needs the browser
+        // here; one that reads a config file got it in prepare.
+        browser,
+        env: base,
+        capability,
+        kind,
+        project,
+        cwd: capability === 'full' ? project.path : null,
+      });
+
+      // The runner builds the environment, not the provider: a provider that
+      // returns none gets the allowlist rather than Node's default of
+      // everything this host has, and the drive's secret never goes, whoever
+      // asks for it.
+      const env = { ...base, ...(spec.env ?? {}) };
+      delete env.MARBLE_DRIVE_SECRET;
+      // The drive may sit inside the app's own checkout (it does on a
+      // development machine). An agent working in the drive must not find that
+      // repository: git's search stops at the drive's parent, so a `git status`
+      // there is "not a git repository" and a commit cannot land in the app.
+      // A registered project is somewhere git work belongs, and keeps it.
+      if (capability === 'full' && project?.builtIn && project.path) env.GIT_CEILING_DIRECTORIES = path.dirname(project.path);
+      else delete env.GIT_CEILING_DIRECTORIES;
+
+      // A full agent's own tools are confined to its working directory, so the
+      // working directory is the boundary: the drive for a full turn, the empty
+      // workspace for every other. The seam below is where an OS sandbox goes
+      // when one is written (spec §10.1); until then it is null and this is a
+      // plain spawn.
+      const cwd = spec.cwd ?? workspace;
+      // When the machine runs out of memory, the kernel takes the turn before
+      // the host (server/agent/first-to-go.js).
+      const launch = firstToGo(sandbox ? sandbox({ command: spec.command, args: spec.args, cwd }) : spec);
+      const child = spawn(launch.command, launch.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      turn.child = child;
+      child.stdin.on('error', () => {});
+      // A provider that answers prompts mid-turn keeps stdin open; finish()
+      // closes it. Every other CLI reads to EOF before it starts.
+      turn.stdinOpen = Boolean(spec.stdinOpen);
+      if (spec.stdinOpen) child.stdin.write(spec.stdin ?? '');
+      else child.stdin.end(spec.stdin ?? '');
+
+      const state = {};
+      // Stalled means no progress in time the machine was awake. Progress is
+      // output, or growth in the CPU time and I/O of the turn's processes (a
+      // long job is often one silent command); awake time, because a paused
+      // sprite freezes this process and its overdue timers fire the moment it
+      // wakes. A turn waiting on the person, or on another agent, is paused,
+      // not stalled; `pausedSince` is also what keep-awake reads.
+      const openAsks = () => [...turn.asks.values()].filter((a) => !a.closed).length;
+      turn.lastProgress = awake.now();
+      turn.pausedSince = null;
+      let lastSample = null;
+      const resetStall = () => {
+        turn.lastProgress = awake.now();
+        if (!openAsks()) turn.pausedSince = null;
+      };
+      turn.holdStall = () => {
+        if (turn.pausedSince === null) turn.pausedSince = awake.now();
+      };
+      turn.resumeStall = resetStall;
+      const checkStall = () => {
+        if (turn.finishing || turn.pausedSince !== null) return;
+        const measured = progress.sample(child.pid);
+        if (measured !== null && measured !== lastSample) {
+          if (lastSample !== null) turn.lastProgress = awake.now();
+          lastSample = measured;
+        }
+        if (awake.now() - turn.lastProgress < limits.stallMs) return;
+        // An answer that is in, waiting on background work that has gone
+        // quiet (a dev server, a hung run): the turn did what it was asked,
+        // so it ends as it would have, not as a failure. Only a process whose
+        // stdin the runner holds can be ended this way; one handed its prompt
+        // on a closed stdin falls to the stall rule below, or nothing would
+        // ever end its turn.
+        if (turn.done && turn.background > 0 && turn.stdinOpen) {
+          if (!turn.endingIdle) {
+            turn.endingIdle = true;
+            log.log(`[agents] ${turn.id}: background work idle for ${Math.round(limits.stallMs / 1000)} s after the answer; ending the turn`);
+            endInput(turn);
+          }
+          return;
+        }
+        stop(turn, { status: 'failed', error: `stalled — no output and no work for ${Math.round(limits.stallMs / 1000)} s` });
+      };
+      const stallCheck = setInterval(checkStall, Math.max(50, Math.min(60_000, Math.floor(limits.stallMs / 4))));
+      stallCheck.unref?.();
+      turn.timers.push(() => clearInterval(stallCheck));
+      // A cap is opt-in. A person stops a turn; a timer does not.
+      if (limits.maxMs > 0) {
+        const cap = setTimeout(() => stop(turn, { status: 'cancelled', error: `took longer than ${Math.round(limits.maxMs / 60000)} min` }), limits.maxMs);
+        cap.unref?.();
+        turn.timers.push(() => clearTimeout(cap));
+      }
+
+      readline.createInterface({ input: child.stdout }).on('line', (line) => {
+        if (!line.trim()) return;
+        resetStall();
+        // Still talking: whatever end a result proposed earlier is withdrawn.
+        clearTimeout(turn.settle);
+        store.appendRaw(turn.id, line).catch(() => {});
+        let events = [];
+        try {
+          events = provider.parse(line, state);
+        } catch {
+          return;
+        }
+        for (const event of events) handle(turn, event);
+      });
+      child.stderr.on('data', (chunk) => {
+        const text = String(chunk);
+        turn.stderrHead = `${turn.stderrHead ?? ''}${text}`.slice(0, 500);
+        turn.stderr = (turn.stderr + text).slice(-STDERR_TAIL);
+      });
+      child.on('error', (err) => {
+        turn.stderr = err.message;
+      });
+      child.on('close', (code) => {
+        // A process the runner stopped because it would not leave after its
+        // own result did not fail; it had already delivered the turn.
+        const ok = (code === 0 || turn.lingered) && turn.done?.ok !== false;
+        safeFinish(turn, turn.cancelled ?? {
+          status: ok ? 'completed' : 'failed',
+          // A provider that knows how its CLI says what went wrong reads
+          // stderr itself; the first lines are often someone else's log.
+          error: ok ? null : turn.done?.error ?? (clipFailure(turn.provider?.failure?.(turn.stderr) || turn.stderrHead || turn.stderr) || `exited with ${code}`),
+        });
+      });
+    } catch (err) {
+      return safeFinish(turn, { status: 'failed', error: err.message });
+    }
+  }
+
+  /** The CLI's own list of skills, kept per provider so the composer's `/`
+   *  menu shows what the terminal would. Descriptions come from the
+   *  initialize reply; names alone from init keep an older description. */
+  function recordCatalog(turn, event) {
+    const provider = turn.provider?.id;
+    if (!provider || !Array.isArray(event.skills) || !event.skills.length) return;
+    store.settings().then((settings) => {
+      const old = new Map((settings.skills?.[provider] ?? []).map((s) => [s.id, s]));
+      const next = event.skills.map((s) => ({ id: s.id, name: s.name ?? s.id, description: s.description || old.get(s.id)?.description || '' }));
+      return store.saveSettings({ skills: { ...(settings.skills ?? {}), [provider]: next } });
+    }).catch((err) => log.error(`[agents] ${err.message}`));
+  }
+
+  /** Close the process's stdin — what makes a CLI reading stream-json leave —
+   *  and see that it actually leaves. */
+  function endInput(turn) {
+    if (!turn.stdinOpen) return;
+    try {
+      turn.child?.stdin?.end();
+    } catch {
+      // Already gone.
+    }
+    const linger = setTimeout(() => {
+      turn.lingered = true;
+      turn.child?.kill('SIGTERM');
+      const hard = setTimeout(() => turn.child?.kill('SIGKILL'), limits.killGraceMs);
+      hard.unref?.();
+      turn.timers.push(() => clearTimeout(hard));
+    }, limits.killGraceMs * 3);
+    linger.unref?.();
+    turn.timers.push(() => clearTimeout(linger));
+  }
+
+  /** Take up a result's proposal to end the turn: if the process says nothing
+   *  more for the settle window, close its stdin. One still carrying
+   *  background work is not ended at all. A backgrounded test run is silent
+   *  for as long as it runs, and closing stdin under it ends the CLI and the
+   *  run with it, so the agent never hears how it went. The CLI wakes itself
+   *  when the work ends; the stall rule ends a wait whose work has gone
+   *  quiet. `drained` is the proposal standing again once that work is done. */
+  function armEnd(turn, { drained = false } = {}) {
+    if (!turn.stdinOpen) return; // a CLI handed its prompt on a closed stdin leaves by itself
+    clearTimeout(turn.settle);
+    // Nor while one of its own commands runs: background work can end in the
+    // middle of a silent foreground one, after a result.
+    if (turn.background > 0 || turn.calls.size) return;
+    const wait = drained ? (limits.drainedSettleMs ?? DRAINED_SETTLE_MS) : (limits.settleMs ?? SETTLE_MS);
+    turn.settle = setTimeout(() => endInput(turn), wait);
+    turn.settle.unref?.();
+  }
+
+  function handle(turn, event) {
+    switch (event.type) {
+      case 'session':
+        store.updateConversation(turn.conversationId, { providerSession: event.id }).catch(() => {});
+        return;
+      case 'catalog':
+        recordCatalog(turn, event);
+        return;
+      case 'ask': {
+        const kind = event.tool === 'AskUserQuestion' ? 'question' : 'permission';
+        const request = { ...event, kind };
+        const since = Date.now();
+        turn.asks.set(event.requestId, { closed: false, request, since });
+        turn.holdStall?.();
+        // Waiting on you is the row's news: the question, or that it needs your OK.
+        turn.activity = words.noteLine(turn.line, request);
+        chained(turn.conversationId, () => store.updateConversation(turn.conversationId, { asking: true, activity: turn.activity }))
+          .then(async () => {
+            await emit(turn, request);
+            drawer?.note(turn, request);
+            publishAsk('ask', { conversation: turn.conversationId, turn: turn.id, requestId: event.requestId, request, since });
+          })
+          .catch((err) => log.error(`[agents] ${err.message}`));
+        return;
+      }
+      case 'text.delta':
+        chained(turn.conversationId, () => {
+          publish(turn.conversationId, { turn: turn.id, ...event });
+        });
+        return;
+      case 'tool.call':
+        turn.calls.add(event.callId);
+        turn.onEvent(event);
+        return;
+      case 'tool.result':
+        turn.calls.delete(event.callId);
+        turn.onEvent(event);
+        return;
+      case 'text':
+        turn.onEvent(event);
+        return;
+      case 'usage':
+        turn.usage = { ...event };
+        delete turn.usage.type;
+        return;
+      case 'done':
+        turn.done = event;
+        // Nothing is in flight once the CLI has printed a result; a call
+        // whose result never came cannot hold the end off.
+        turn.calls.clear();
+        // A result only *proposes* the end. A CLI prints one before it has
+        // read the prompt at all when it has a queued notification to flush,
+        // and prints one and keeps working when it has answered while a
+        // subagent still runs. Acting on the first one closed stdin under a
+        // process that was mid-sentence and killed it seconds later.
+        armEnd(turn);
+        return;
+      // Background work — a subagent, a backgrounded command — that the CLI's
+      // own result does not wait for. The turn is over when that work has
+      // drained and the process has nothing more to say, not before.
+      case 'background':
+        turn.background = Number(event.pending) || 0;
+        if (turn.background === 0 && turn.done) armEnd(turn, { drained: true });
+        return;
+      default:
+    }
+  }
+
+  const writeControl = (turn, requestId, response) => {
+    try {
+      turn.child?.stdin?.write(`${JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } })}\n`);
+    } catch {
+      // The process is gone; finish() voids the ask.
+    }
+  };
+
+  /** Close every open ask: deny it to the process (if asked to) and void it in the log. */
+  async function voidAsks(turn, why, { deny = false } = {}) {
+    for (const [requestId, ask] of turn.asks) {
+      if (ask.closed) continue;
+      ask.closed = true;
+      // Only noted: every caller is ending the turn, whose end line is next.
+      words.noteLine(turn.line, { type: 'ask.void', requestId });
+      if (deny) writeControl(turn, requestId, { behavior: 'deny', message: `Turn ${why} from Marble` });
+      await emit(turn, { type: 'ask.void', requestId, why });
+      publishAsk('ask.resolved', { conversation: turn.conversationId, requestId });
+    }
+  }
+
+  /** Ask a running process to stop, and make sure it does — or, if it hasn't
+   *  spawned yet, just record the outcome: `start` checks it before spawning
+   *  and finishes the turn instead of launching a process nobody wants. */
+  function stop(turn, outcome) {
+    if (turn.cancelled) return;
+    turn.cancelled = outcome;
+    turn.abort.abort();
+    if (!turn.child) return;
+    voidAsks(turn, 'cancelled', { deny: true }).catch((err) => log.error(`[agents] ${err.message}`));
+    turn.child.kill('SIGTERM');
+    const kill = setTimeout(() => turn.child.kill('SIGKILL'), limits.killGraceMs);
+    kill.unref?.();
+    turn.timers.push(() => clearTimeout(kill));
+  }
+
+  async function finish(turn, { status, error = null }) {
+    // `finishing` — not `status` — is the once-only guard: the turn stays
+    // `status: 'running'`, and so stays counted by runningTurns(), for this
+    // entire function. Flip status away from 'running' any earlier and
+    // pump() reads the conversation's slot (or a capped host's slot) as free
+    // while this turn is still draining an in-flight tool call or writing
+    // its own outcome — letting the next turn start, run, and finish first,
+    // so that when this turn's finish() finally gets to its own
+    // store.updateConversation, that (by-then-stale) write lands last and
+    // clobbers the next turn's fresher one.
+    if (turn.finishing) return;
+    turn.finishing = true;
+    clearTimeout(turn.settle);
+    for (const clear of turn.timers) clear();
+    turn.waiter?.(); // a wait parked on this turn returns now; the tool call is in `inflight` and drains below
+    await voidAsks(turn, 'ended').catch((err) => log.error(`[agents] ${err.message}`));
+    try {
+      turn.child?.stdin?.end();
+    } catch {
+      // Already gone.
+    }
+    // A call still waiting on work it started (fan_out's workers) stops
+    // that work now: nobody is going to read what it would have made.
+    turn.abort.abort();
+    // Waited for here, rather than before: `turn.v5` (what apply_ops's
+    // `prepare` tallies as each batch lands) is only complete once every
+    // in-flight call has actually returned, and the zone this clears is the
+    // same frame that carries its tally.
+    if (turn.inflight.size) await Promise.allSettled([...turn.inflight]);
+    const v5 = turn.v5 ?? { parts: new Set(), added: new Set(), removed: new Set() };
+    const changed = [...v5.parts].filter((id) => !v5.added.has(id) && !v5.removed.has(id)).length;
+    look(turn, {
+      ids: [],
+      stage: 'end',
+      turn: turn.id,
+      // `failed`: groups of a fan out whose workers failed and whose parts
+      // never landed after all — said, 0 included, whenever the turn fanned
+      // out, so a page counting on its own knows the host's answer.
+      done: { status, changed, added: v5.added.size, removed: v5.removed.size, ...(v5.fanout ? { failed: v5.failed ?? 0 } : {}) },
+    });
+
+    // Compute everything up front: the stored turn, the conversation, and
+    // the closing event all carry the same values.
+    const finishedAt = Date.now();
+    const outcome = turn.watchdog
+      ? 'watchdog'
+      : status === 'completed'
+        ? turn.applied ? 'changes' : 'done'
+        : status;
+    const applied = turn.applied;
+    // A CLI that has deleted the session this turn resumed will refuse every
+    // later resume the same way. Forget it, so the next message starts fresh
+    // instead of failing again; retrying this one is the person's call.
+    let lostSession = false;
+    if (status === 'failed' && turn.resume && error) {
+      try {
+        lostSession = Boolean(turn.provider?.lostSession?.(error));
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
+    }
+    if (lostSession) {
+      error = `${error} — the provider no longer has this conversation's session; the next message starts a new one`;
+    }
+    // Starter credit spent (worker/src/credit.js): said in the drive's words,
+    // and marked so the page can offer Connect your Claude. Not a usage
+    // window, so nothing is handed off.
+    let creditOut = false;
+    if (status === 'failed' && error && typeof turn.provider?.creditUsedUp === 'function') {
+      try {
+        creditOut = Boolean(turn.provider.creditUsedUp(error));
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
+    }
+    if (creditOut) error = 'Starter credit used up.';
+    let usageMark = null;
+    let pendingHandoff = false;
+    if (!lostSession && !creditOut && status === 'failed') {
+      const meta = await store.conversation(turn.conversationId);
+      if (usageHandoffDue({ provider: turn.provider?.id, usageLane: meta?.usageLane, error })) {
+        const ready = await cursorReadiness(meta);
+        const grokNext = meta?.usageLane === 'model';
+        if (meta?.failover === 'pause') {
+          usageMark = {
+            usageStopped: true,
+            canSwitch: ready.ok,
+            ...(ready.ok ? (grokNext ? { next: 'grok' } : {}) : { stay: ready.suffix }),
+          };
+          if (!ready.ok) error = `${error} ${ready.suffix}`;
+        } else if (ready.ok) {
+          pendingHandoff = true;
+        } else {
+          error = `${error} ${ready.suffix}`;
+        }
+      }
+    }
+    // The row ends on what the card ends on; a turn with no card says what it always did.
+    const endLine = words.endLine(turn.line, status, { error });
+    try {
+      try {
+        await turn.undoSaved;
+        if (turn.undo.length || turn.touched.size) {
+          await store.saveUndo(turn.id, {
+            steps: [...turn.undo],
+            restores: [...turn.touched].map(([docPath, sha]) => ({ path: docPath, sha })),
+          });
+        }
+        await store.updateConversation(turn.conversationId, {
+          ...(lostSession ? { providerSession: null } : {}),
+          running: false,
+          asking: false,
+          activity: endLine || (status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status),
+          lastOutcome: outcome,
+          lastFinishedAt: finishedAt,
+          // Kept on the conversation, so its summary still says what it last
+          // did after the host restarts (store.summary).
+          ...(store.lastStep?.(turn.conversationId) ? { lastStep: store.lastStep(turn.conversationId) } : {}),
+        });
+        await emit(turn, { type: `turn.${status}`, applied, ...(error ? { error } : {}), ...(usageMark ?? {}), ...(creditOut ? { creditUsedUp: true } : {}) });
+      } finally {
+        // The terminal status is the LAST store write. Anyone polling the
+        // turn (tests, GET /agent/conversations/:id, the UI) treats a
+        // terminal status as "done — read the rest now", so the undo record,
+        // the conversation's outcome, and the closing event must already be
+        // there when it appears. It is still written if one of those failed,
+        // so the stored turn is not left reading `running` forever.
+        await store.updateTurn(turn.id, {
+          status,
+          finishedAt,
+          error,
+          applied,
+          usage: turn.usage,
+          ...(usageMark ? { usageStopped: true, canSwitch: usageMark.canSwitch } : {}),
+          ...(creditOut ? { creditUsedUp: true } : {}),
+        });
+      }
+    } finally {
+      // Whatever happened above — success, or one of those store writes
+      // throwing — the turn must actually leave the runner. Skip this and a
+      // failed write stores nothing but the in-memory turn stays forever
+      // `status: 'running'`, permanently holding its conversation's slot
+      // hostage, with nothing left to sweep it.
+      // Switch before this turn lets go of the slot, so a prompt already
+      // queued cannot start on Claude in the gap.
+      if (pendingHandoff) {
+        try {
+          await handoffUsage(turn.conversationId, { error });
+        } catch (err) {
+          log.error(`[agents] ${err.message}`);
+        }
+      }
+      turn.status = status;
+      if (turn.token) tokens.delete(turn.token);
+      live.delete(turn.id);
+      // The turn's own record is the last thing written, after the closing
+      // event and its summary went out. Said once more now it is final, so a
+      // page that asks what is left to review on hearing it (GET
+      // /agent/review, runtime/change-review.js) finds the turn there.
+      try {
+        publish(turn.conversationId, { type: 'meta' }, await store.summary(turn.conversationId));
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
+      // The writer is done: whatever the host remembers it touching is no
+      // longer being worked on. Told after the turn has left the runner, so
+      // the host cannot see a still-running turn with nothing to its name.
+      try {
+        onFinish?.(turn.conversationId);
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
+      nameIfUnnamed(turn).catch((err) => log.error(`[agents] naming ${turn.conversationId}: ${err.message}`));
+      drawer?.end(turn, status).catch((err) => log.error(`[agents] drawing ${turn.conversationId}: ${err.message}`));
+      const idx = order.indexOf(turn.id);
+      if (idx !== -1) order.splice(idx, 1);
+      // This turn took the inbox in composePrompt() but never got to act on
+      // it — cancelled before its process spawned, the host closing, `start()`
+      // throwing before spawn. Hand the messages back rather than lose them;
+      // the check just below then queues a delivery turn for them (or, when
+      // `closed`, the next boot recovers them).
+      if (!turn.child && turn.arrived?.length) {
+        for (const m of turn.arrived) await store.appendInbox(turn.conversationId, m);
+        turn.arrived = null;
+      }
+      // Anything that arrived for this conversation while it was running and
+      // was not taken by a wait rides in on a delivery turn. At most one: the
+      // next turn to start takes the whole inbox. A turn already queued here
+      // is that next turn — starting a delivery turn as well would race it
+      // for the inbox and leave the conversation with one turn too many.
+      if (!closed && !liveFor(turn.conversationId).length) {
+        store.inbox(turn.conversationId)
+          .then((pending) => (pending.length ? startDelivery(turn.conversationId, pending, turn.target) : null))
+          .catch((err) => log.error(`[agents] ${err.message}`));
+      }
+      turn.endTurn();
+      await pump().catch((err) => log.error(`[agents] ${err.message}`));
+    }
+  }
+
+  async function dequeue(turnId) {
+    const turn = live.get(turnId);
+    if (!turn || turn.status !== 'queued') return false;
+    live.delete(turnId);
+    const idx = order.indexOf(turnId);
+    if (idx !== -1) order.splice(idx, 1);
+    // Same rule as finish(): the terminal status is written last.
+    await emit(turn, { type: 'turn.removed' });
+    await store.updateTurn(turnId, { status: 'removed', finishedAt: Date.now() });
+    // The removed turn was the one that would have carried this
+    // conversation's inbox in at start. If nothing live is left to do it, a
+    // delivery turn does — the same fire-and-forget check finish() makes.
+    if (!closed && !liveFor(turn.conversationId).length) {
+      store.inbox(turn.conversationId)
+        .then((pending) => (pending.length ? startDelivery(turn.conversationId, pending, turn.target) : null))
+        .catch((err) => log.error(`[agents] ${err.message}`));
+    }
+    return true;
+  }
+
+  async function cancel(turnId) {
+    const turn = live.get(turnId);
+    if (!turn || turn.finishing) return false;
+    if (turn.status === 'queued') return dequeue(turnId);
+    stop(turn, { status: 'cancelled', error: null });
+    return true;
+  }
+
+  async function patchQueued(turnId, { prompt, dispatch } = {}) {
+    const turn = live.get(turnId);
+    if (!turn || turn.status !== 'queued') {
+      throw Object.assign(new Error('turn is not queued'), { status: 409 });
+    }
+    if (prompt !== undefined) {
+      const next = String(prompt).trim();
+      if (!next) throw Object.assign(new Error('prompt is empty'), { status: 400 });
+      turn.prompt = next;
+      await store.updateTurn(turnId, { prompt: next });
+      await emit(turn, { type: 'user.edited', text: next });
+    }
+    if (dispatch !== undefined) {
+      if (!DISPATCH.has(dispatch)) throw Object.assign(new Error('bad dispatch'), { status: 400 });
+      turn.dispatch = dispatch;
+      await store.updateTurn(turnId, { dispatch });
+      await emit(turn, { type: 'turn.dispatch', dispatch });
+      const meta = await store.conversation(turn.conversationId);
+      const effective = meta.queueCombine ? batchDispatch(queuedFor(turn.conversationId)) : turn.dispatch;
+      if (effective === 'interrupt') {
+        const running = liveFor(turn.conversationId).find((t) => t.status === 'running');
+        if (running) await cancel(running.id);
+        await pump();
+      }
+    }
+    return store.turn(turnId);
+  }
+
+  async function kick(conversationId) {
+    const meta = await store.conversation(conversationId);
+    if (!meta?.queueCombine) return;
+    const effective = batchDispatch(queuedFor(conversationId));
+    if (effective === 'interrupt') {
+      const running = liveFor(conversationId).find((t) => t.status === 'running');
+      if (running) await cancel(running.id);
+    }
+    await pump();
+  }
+
+  const handoffInflight = new Map();
+
+  async function cursorReadiness(meta) {
+    const cursor = providers.get('cursor');
+    if (!cursor?.detect) return { ok: false, suffix: STAY.signedOut };
+    let detected = null;
+    try {
+      detected = await cursor.detect();
+    } catch {
+      detected = null;
+    }
+    if (!detected?.signedIn) return { ok: false, suffix: STAY.signedOut };
+    if (typeof cursor.listModels !== 'function') return { ok: false, suffix: STAY.unreadable };
+    let models;
+    try {
+      models = await cursor.listModels();
+    } catch {
+      return { ok: false, suffix: STAY.unreadable };
+    }
+    if (!Array.isArray(models)) return { ok: false, suffix: STAY.unreadable };
+    const family = handoffModel(models, { model: meta?.model, usageLane: meta?.usageLane });
+    if (!family) return { ok: false, suffix: meta?.usageLane === 'model' ? STAY.noFurther : STAY.noGrok };
+    return { ok: true, family, lane: handoffLane(family) };
+  }
+
+  async function performHandoff(conversationId, error) {
+    const meta = await store.conversation(conversationId);
+    if (!meta) throw Object.assign(new Error(`no conversation "${conversationId}"`), { status: 404 });
+    const turns = await store.turns(conversationId);
+    const hops = turns.filter((item) => item.usageHandoff && item.status !== 'removed');
+    const latest = hops.at(-1);
+    // A handoff turn that is itself finishing is the one that just stopped.
+    // It is still `running` in memory until finish() lets it go, and it must
+    // not count as a Continue already in flight — that is what blocks the
+    // hop from the same model on to Grok.
+    const liveContinue = liveFor(conversationId).find((item) => (
+      item.usageHandoff && !item.finishing && (item.status === 'queued' || item.status === 'running')
+    ));
+    if (liveContinue) return { turnId: liveContinue.id, status: liveContinue.status };
+    if (latest && latest.status !== 'failed') return { turnId: latest.id, status: latest.status };
+    if (meta.usageLane === 'grok' && latest) return { turnId: latest.id, status: latest.status };
+    const onClaude = CLAUDE_PROVIDERS.has(meta.provider);
+    const onModelHop = meta.provider === 'cursor' && meta.usageLane === 'model';
+    if (!onClaude && !onModelHop) {
+      throw Object.assign(new Error('this chat is not on Claude'), { status: 409 });
+    }
+    const ready = await cursorReadiness(meta);
+    if (!ready.ok) throw Object.assign(new Error(ready.suffix), { status: 409 });
+    const effort = matchEffort(meta.effort, ready.family);
+    const label = continuedLabel(ready.family.label, effort);
+    const failed = [...turns].reverse().find((item) => item.status === 'failed');
+    const context = failed?.context;
+    if (!context?.target) throw Object.assign(new Error('the handoff could not be started'), { status: 409 });
+    await store.updateConversation(conversationId, {
+      provider: 'cursor',
+      model: ready.family.id,
+      effort: effort || null,
+      providerSession: null,
+      usageLane: ready.lane,
+      activity: `Continuing on ${label}`,
+    });
+    const carrier = { id: failed?.id ?? conversationId, conversationId };
+    try {
+      await emit(carrier, { type: 'usage.continued', label });
+    } catch (err) {
+      log.error(`[agents] ${err.message}`);
+    }
+    try {
+      return await send(conversationId, {
+        prompt: CONTINUE,
+        context,
+        dispatch: 'queue',
+        ahead: true,
+        usageHandoff: true,
+        usageError: error ?? failed?.error ?? null,
+      });
+    } catch (err) {
+      await store.updateConversation(conversationId, { activity: 'the handoff could not be started' }).catch(() => {});
+      throw err;
+    }
+  }
+
+  function handoffUsage(conversationId, options = {}) {
+    const inflight = handoffInflight.get(conversationId);
+    if (inflight) return inflight;
+    const run = performHandoff(conversationId, options.error ?? null).finally(() => {
+      if (handoffInflight.get(conversationId) === run) handoffInflight.delete(conversationId);
+    });
+    handoffInflight.set(conversationId, run);
+    return run;
+  }
+
+  return {
+    async boot() {
+      await store.interruptUnfinished();
+      // A host that stopped with messages waiting delivers them now.
+      for (const c of await store.conversations({ archived: false })) {
+        const pending = await store.inbox(c.id);
+        if (pending.length) await startDelivery(c.id, pending).catch((err) => log.error(`[agents] ${err.message}`));
+      }
+    },
+
+    send,
+
+    handoffUsage,
+
+    cancel,
+
+    dequeue,
+
+    patchQueued,
+
+    kick,
+
+    turnForToken: (token) => tokens.get(token) ?? null,
+
+    /** The person's answer to a prompt the process is waiting on. */
+    async answer(turnId, requestId, response) {
+      const turn = live.get(turnId);
+      if (!turn || turn.status !== 'running' || turn.finishing) throw Object.assign(new Error('the turn is not running'), { status: 409 });
+      const ask = turn.asks.get(requestId);
+      if (!ask) throw Object.assign(new Error(`no ask "${requestId}" on this turn`), { status: 404 });
+      if (ask.closed) throw Object.assign(new Error('this ask was already answered'), { status: 409 });
+      ask.closed = true;
+      writeControl(turn, requestId, response);
+      tell(turn, { type: 'ask.answered', requestId, response });
+      const stillOpen = [...turn.asks.values()].some((a) => !a.closed);
+      if (!stillOpen) await store.updateConversation(turn.conversationId, { asking: false });
+      await emit(turn, { type: 'ask.answered', requestId, response });
+      publishAsk('ask.resolved', { conversation: turn.conversationId, requestId });
+      if (!stillOpen) turn.resumeStall?.();
+      return true;
+    },
+
+    /** Every ask a running turn is waiting on, across conversations. Derived
+     *  from the live turns; nothing is stored for it. */
+    openAsks: () => {
+      const out = [];
+      for (const turn of live.values()) {
+        for (const [requestId, ask] of turn.asks) {
+          if (ask.closed) continue;
+          out.push({ conversation: turn.conversationId, turn: turn.id, requestId, request: ask.request, since: ask.since });
+        }
+      }
+      return out.sort((a, b) => a.since - b.since);
+    },
+
+    /** The other conversations in this turn's project, with what each is
+     *  doing right now. The caller is omitted; archived ones too. */
+    async peers(turn) {
+      const meta = await store.conversation(turn.conversationId);
+      const projectId = turn.project?.id ?? meta?.project ?? 'drive';
+      const others = await projectPeers(turn.conversationId, projectId);
+      const statusOf = (c) => {
+        const running = runningTurns().find((t) => t.conversationId === c.id);
+        if (running?.waiter) return 'waiting';
+        if (running && [...running.asks.values()].some((a) => !a.closed)) return 'asking';
+        if (running) return 'running';
+        if ([...live.values()].some((t) => t.conversationId === c.id && t.status === 'queued')) return 'queued';
+        return 'idle';
+      };
+      return {
+        agents: others
+          .sort((x, y) => (y.lastInteractedAt ?? 0) - (x.lastInteractedAt ?? 0))
+          .map((c) => ({ id: c.id, title: c.title, provider: c.provider, target: c.target, status: statusOf(c), activity: c.activity, lastFinishedAt: c.lastFinishedAt })),
+      };
+    },
+
+    /** Send a message from this turn's conversation. Every refusal is a
+     *  returned reason; nothing here throws at an agent. */
+    async deliver(turn, { to, text, about = null, inReplyTo = null }) {
+      const badText = validateText(text);
+      if (badText) return { error: badText };
+      if (typeof to !== 'string' || !to) return { error: 'to is required' };
+      if (to === turn.conversationId) return { error: 'you cannot message yourself' };
+      const receiver = await store.conversation(to);
+      if (!receiver) return { error: `no conversation "${to}"` };
+      if (receiver.archived) return { error: `conversation "${to}" is archived` };
+      const sender = await store.conversation(turn.conversationId);
+      const projectId = turn.project?.id ?? sender?.project ?? 'drive';
+      if ((receiver.project ?? 'drive') !== projectId) return { error: `conversation "${to}" is in another project` };
+      if ((turn.sent ?? 0) >= MAX_SENDS) return { error: `this turn has already sent ${MAX_SENDS} messages` };
+      // What thread is this a reply to? The named parent if this host still
+      // remembers it; failing that, what this turn itself received from the
+      // conversation it is answering — the message that started the turn, or
+      // one that arrived during it. Without that fallback an agent that never
+      // passes `inReplyTo` restarts at hop 0 every time and two of them can
+      // answer each other forever.
+      const named = inReplyTo ? threads.get(inReplyTo) : null; // unknown (host restarted) starts a fresh thread
+      const received = [
+        ...(turn.from?.messageId ? [{ id: turn.from.messageId, from: turn.from.conversation, hop: turn.from.hop ?? 0 }] : []),
+        ...(turn.inbound ?? []),
+      ];
+      const parent = named ?? [...received].reverse().find((m) => m.from === to) ?? null;
+      let hop = 0;
+      if (parent) {
+        hop = (parent.hop ?? 0) + 1;
+        if (hop > MAX_HOP) return { error: `this thread is ${MAX_HOP} replies deep; start a new message if there is something new to say` };
+      }
+      const cleanAbout = about && typeof about.path === 'string' && about.path
+        ? { path: about.path, ...(Array.isArray(about.ids) ? { ids: about.ids.map(String) } : {}) }
+        : null;
+      const message = store.createMessage({ from: turn.conversationId, to, text, about: cleanAbout, inReplyTo, hop });
+      threads.set(message.id, { hop, from: message.from, to });
+      turn.sent = (turn.sent ?? 0) + 1;
+
+      await store.appendInbox(to, message);
+      const running = runningTurns().find((t) => t.conversationId === to);
+      const queued = [...live.values()].some((t) => t.conversationId === to && t.status === 'queued');
+      let delivered;
+      if (running?.waiter) {
+        delivered = 'live';
+        running.waiter();
+      } else if (running || queued) {
+        delivered = 'inbox';
+      } else {
+        let started = null;
+        try {
+          started = await startDelivery(to, [message], turn.target);
+        } catch (err) {
+          // The turn could not be started, but the message is safely in the
+          // inbox (startDelivery puts back whatever it took): the receiver
+          // reads it at its next turn, or at the next boot. The sender is told
+          // it was queued rather than handed a failure it cannot act on.
+          log.error(`[agents] ${err.message}`);
+        }
+        delivered = started ? 'turn' : 'inbox';
+      }
+      await recordSent(turn, message, receiver, delivered);
+      return { messageId: message.id, delivered, to: { id: to, title: receiver.title } };
+    },
+
+    /** Park this turn until a message arrives or the clamp runs out. The
+     *  stall timer is held, as it is for an open ask. */
+    async wait(turn, seconds) {
+      const ms = clampSeconds(seconds) * 1000;
+      const early = await takeFor(turn, 'live');
+      if (early.length) return { messages: early };
+      // takeFor() handed the batch back because this turn is already ending;
+      // parking now would hang finish() until the clamp ran out, for a result
+      // nobody will read.
+      if (turn.finishing) return { timeout: true };
+      turn.holdStall?.();
+      let timer;
+      const woke = await new Promise((resolve) => {
+        turn.waiter = () => {
+          turn.waiter = null; // a deliver racing the timeout must not report `live` to a turn that already gave up
+          resolve(true);
+        };
+        timer = setTimeout(() => {
+          turn.waiter = null;
+          resolve(false);
+        }, ms);
+        timer.unref?.();
+      });
+      clearTimeout(timer);
+      // finish() may have woken this wait (turn.waiter?.() in its cleanup) —
+      // in which case the turn is already ending and a fresh stall timer here
+      // would outlive it. Only re-arm the stall when this turn is still going.
+      if (!turn.finishing) turn.resumeStall?.();
+      if (!woke) return { timeout: true };
+      // A wait can also be woken by finish() (`turn.waiter?.()` in its
+      // cleanup). takeFor() hands the batch back in that case and this
+      // reports a timeout, so the messages ride in on a delivery turn instead
+      // of vanishing into a dying process.
+      const messages = await takeFor(turn, 'live');
+      return messages.length ? { messages } : { timeout: true };
+    },
+
+    async callTool(token, name, input) {
+      const turn = tokens.get(token);
+      if (!turn || turn.finishing) return null;
+      const call = tools.call(name, input, turn);
+      turn.inflight.add(call);
+      try {
+        return await call;
+      } finally {
+        turn.inflight.delete(call);
+      }
+    },
+
+    watchdog(docPath, sha) {
+      for (const turn of runningTurns()) {
+        if (turn.capability === 'full') continue;
+        if (docPath && !ownsPath(turn, docPath)) continue;
+        turn.watchdog = true;
+        turn.onEvent({ type: 'watchdog', path: docPath, sha });
+      }
+    },
+
+    /** A document changed on disk without this host writing it.
+     *
+     *  A `full` turn has its own file tools, so while one is running this is
+     *  almost always that turn: it is recorded as the turn's work, with the
+     *  restore point just taken, rather than flagged. A `documents` turn writes
+     *  only through ops, so a change under it is what the watchdog was written
+     *  for and is left to it.
+     *
+     *  Two full turns must not share a write. Claim the turn that already
+     *  owns the path (target, created docs, earlier writes). If only one full
+     *  turn is running, it can write anywhere, so it still claims. Otherwise
+     *  leave the change unclaimed — a sibling conversation is not a writer.
+     *
+     *  Returns the claiming conversation id, or null.
+     *
+     *  The cost, accepted in spec §6 for a single full turn: your own edit
+     *  during that turn is filed under it. You do not lose it — it is in the
+     *  turn's change list with its restore point. */
+    documentTouched(docPath, sha) {
+      const full = runningTurns().filter((turn) => turn.capability === 'full');
+      const pick = full.find((turn) => ownsPath(turn, docPath)) ?? (full.length === 1 ? full[0] : null);
+      if (!pick) return null;
+      if (!pick.touched.has(docPath)) {
+        pick.touched.set(docPath, pick.origins.get(docPath) ?? sha);
+      }
+      pick.onEvent({ type: 'document.changed', path: docPath, sha: pick.touched.get(docPath) });
+      return pick.conversationId;
+    },
+
+    running: runningTurns,
+
+    /** Running turns end as cancelled, with their outcome written, before
+     *  this resolves — a serve that exits right after would otherwise leave
+     *  them reading `running` until the next boot calls them interrupted.
+     *  Queued turns stay queued on disk, and that boot interrupts them. A
+     *  turn that cannot finish within the grace period is left to it. */
+    async close() {
+      closed = true;
+      const ending = runningTurns().map((turn) => {
+        turn.cancelled ??= { status: 'cancelled', error: 'host closing' };
+        turn.abort.abort();
+        turn.child?.kill('SIGKILL');
+        return turn.ended;
+      });
+      if (!ending.length) return;
+      let timer;
+      const grace = new Promise((resolve) => {
+        timer = setTimeout(resolve, CLOSE_GRACE_MS);
+      });
+      await Promise.race([Promise.allSettled(ending), grace]);
+      clearTimeout(timer);
+    },
+  };
+}

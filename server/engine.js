@@ -13,15 +13,16 @@
 // the only file that changes.
 //
 // Resolved by file URL rather than by package specifier on purpose: the package
-// exports `./patcher` and little else today, and a file URL is not filtered by
-// an exports map. `@bdhmin/marble/package.json` *is* exported, which is what
-// gives us the package root to resolve against.
+// exports `./patcher` and `./collab`, but the carrier, history, and doctor are
+// still reached as files. `@bdhmin/marble/package.json` *is* exported, which is
+// what gives us the package root to resolve against.
 
+import { fileURLToPath } from 'node:url';
 const ROOT = new URL('./', import.meta.resolve('@bdhmin/marble/package.json'));
 
 const load = (relative) => import(new URL(relative, ROOT).href);
 
-const [patcher, guard, history, ops, intent, providers, scaffold, doctor] = await Promise.all([
+const [patcher, guard, history, ops, intent, providers, scaffold, doctor, collab] = await Promise.all([
   load('server/patcher.js'),
   load('server/guard.js'),
   load('server/history.js'),
@@ -30,14 +31,15 @@ const [patcher, guard, history, ops, intent, providers, scaffold, doctor] = awai
   load('server/providers/index.js'),
   load('bin/scaffold.js'),
   load('scripts/doctor.js'),
+  load('server/collab.js'),
 ]);
 
 /** Absolute path to a file inside the Marble package — the carrier, the
  *  affordance library, the starter template. Read, never imported: these are
  *  served to a browser or spliced into a new document as text. */
-export const enginePath = (relative) => new URL(relative, ROOT).pathname;
+export const enginePath = (relative) => fileURLToPath(new URL(relative, ROOT)); // decoded: the Mac's app folder has a space in it
 
-export const { applyOp, applyOps, knownIds } = patcher;
+export const { applyOp, applyOps, indexIds, knownIds, parseSource, sliceOf } = patcher;
 export const { guardOps } = guard;
 export const {
   bytesOf,
@@ -49,8 +51,10 @@ export const {
   shaOf,
   writeAtomic,
 } = history;
-export const { OP_TYPES } = ops;
-export const { resolveIntent } = intent;
+export const { OP, OP_TYPES } = ops;
+// The agent tools read and check with the same functions the intent layer
+// does: an agent is a third writer, not a second opinion about what an op is.
+export const { collectSlices, repairOps, resolveIntent, validateOps } = intent;
 export const { chooseProvider, loadProvider } = providers;
 // The cut-point reader for `lib/affordances.js`. The gallery composes starters
 // out of those parts rather than keeping a fourth copy of them.
@@ -58,3 +62,4 @@ export const { readParts } = scaffold;
 // The format's own invariants, asked of a document arriving from outside. The
 // alternative was a second opinion written here, which would drift.
 export const { examine } = doctor;
+export const { classifyOverlap, createTouched, diffSources, forkAlt, idsOfOps, mergeOps, mergeWrite } = collab;

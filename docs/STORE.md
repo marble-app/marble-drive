@@ -16,16 +16,18 @@ the root. Every method that takes one validates it through
 ```
 ready()                              make whatever the store needs to exist
 read(path)              → string|null
+readRaw(path)           → {path,name,ext,bytes,open()}|null   a file, not a document
 has(path)               → boolean         a document is there
 hasFolder(path)         → boolean         a folder is there
+hasFile(path)           → boolean         something that is neither is there
 stat(path)              → entry|null
-list({folder,recursive})→ entry[]         flat, newest first, folders included
-tree({folder})          → folder node with `children`
+list({folder,recursive,files}) → entry[]  flat, newest first, folders included
+tree({folder})          → folder node with `children`, files included
 write(path, source, {label, ops}) → {path, bytes, sha}
 mark(path, source, label)                 a restore point for a state nobody replaced
 create(path, source)                      refuses to overwrite
 mkdir(path)
-move(from, to)                            documents and folders; history follows
+move(from, to)                            all three kinds; history follows a document
 trash(path)             → {id, path, kind}
 listTrash()             → entry[]
 untrash(id, {to})
@@ -44,6 +46,37 @@ An `entry` is what a Drive shows:
 
 `kind: "folder"` entries carry `path`, `name`, `folder`, `title`, `modified` —
 and `children` when they come from `tree()`.
+
+## The third kind
+
+A folder holds the work and it also holds what the work needed: the
+bibliography beside the paper, the cover images, the JSON a script reads.
+Those are `kind: "file"`.
+
+```json
+{ "kind": "file", "path": "paper/refs.bib", "name": "refs.bib",
+  "folder": "paper", "title": "refs.bib", "ext": "bib",
+  "bytes": 4210, "modified": 1787407475468 }
+```
+
+Two things about them are deliberate.
+
+**The path keeps the extension.** A document's path drops `.mrbl` because every
+document has it, so it carries no information; `paper/refs.bib` and
+`paper/refs.json` are two different files and the extension *is* the address.
+
+**`list()` leaves them out unless asked.** Every caller that says "documents"
+means documents — `/docs` is the carrier's surface and it would be wrong to
+answer it with a `.bib`. `tree()` passes `files: true`, because a tree is what a
+Drive draws a folder from, and a folder that holds a file and says nothing about
+it is a folder that loses it.
+
+`move()` and `trash()` take all three kinds. `readRaw()` hands back an `open()`
+rather than the bytes, because a drive is allowed to hold a 400 MB video and a
+store that buffers one to answer a GET is a store that falls over on the file it
+was asked for. It refuses a `.mrbl`: a document is served as the app it is, and
+a second way to reach its source would be a second answer to what opening it
+means.
 
 ## What the filesystem implementation does with it
 

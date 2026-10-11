@@ -67,6 +67,46 @@ docker compose up -d
 
 The image holds the host; the drive is a volume. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
+On a Mac you keep the drive on, run it under launchd instead of in a terminal
+window — it has no terminal to be hung up on when an ssh session ends, comes
+back on its own if it ever stops, and starts again at login:
+
+```
+macos/launchd/daemon.sh install     # or: npm run daemon -- install
+macos/launchd/daemon.sh status
+macos/launchd/daemon.sh logs        # ~/Library/Logs/marble-drive/serve.log
+```
+
+`server/` changes still need a restart: `macos/launchd/daemon.sh restart`.
+
+## What is in the repository, and what is not
+
+The repository is the host: the code that serves a drive, the templates and
+starters it seeds one from, the tests, and the tools in `tools/` that keep it
+honest. Cloning it gives you an empty drive and everything needed to fill one.
+
+What it does not carry, on purpose:
+
+- **Your drive.** `drive/` is gitignored. A change to a document is saved the
+  moment it is made — that is what the drive is for — and `.marble/` under it is
+  the history. There is nothing to commit after editing a document.
+- **Your skills and settings.** A skill you make, or have an agent make, lives
+  in your drive at `drive/.claude/skills/`, and the drive's own choices (which
+  folders wear a colour, which document `/today` opens) in
+  `drive/.marble/drive.json`. The app's own agent skills ship in
+  `agent-plugin/` and reach every agent turn wherever the drive is.
+- **This machine.** `.env`, `.claude/settings.local.json`, `.codex/`, `.sprite`,
+  `test-results/`, worktrees.
+
+Agents working in your drive cannot reach this repository's git: their turns
+run with `GIT_CEILING_DIRECTORIES` at the drive's parent, so nothing done in the
+drive becomes a commit here.
+- **What a session leaves behind.** `scratchpad/` and `.superpowers/`. A script
+  worth keeping moves to `tools/`; the rest is never read back.
+
+A test that checks one of your own documents lives beside that document, in the
+drive, and is run by hand — the suite in `test/` runs on temporary drives only.
+
 ## Reading it
 
 | | |

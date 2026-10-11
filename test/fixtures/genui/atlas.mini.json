@@ -1,0 +1,2209 @@
+{
+ "about": "Mini atlas for genui tests, cut from atlas.json (2026-09-15T17:08:17.626Z). Regenerate with tools/genui-mini-atlas.mjs.",
+ "entries": [
+  {
+   "id": "overview-detail",
+   "name": "Overview–detail",
+   "level": "pattern",
+   "archetype": "browse-collections",
+   "def": "An overview of many items, each shown through a few key attributes, paired with a detail view that shows many or all attributes of a selected item.",
+   "relations": {
+    "uses": [
+     "card",
+     "modal-dialog",
+     "popover",
+     "tooltip",
+     "split-pane",
+     "tabs",
+     "view-switcher",
+     "filter-controls",
+     "sort-control"
+    ],
+    "specializes": [
+     "browse-collections"
+    ],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Content",
+     "q": "Is information shown in the overview, the detail view or both, and how are overview attributes abstracted from detail attributes?",
+     "subs": [
+      {
+       "name": "Attribute is shown…",
+       "key": "attributePlacement",
+       "sel": "many",
+       "vars": [
+        [
+         "In overview only",
+         "An attribute that exists only as an overview representation",
+         ""
+        ],
+        [
+         "In detail view only",
+         "Present only once the item is opened",
+         ""
+        ],
+        [
+         "In both views",
+         "Repeated in overview and detail, interactive elements included",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Overview abstractions",
+       "key": "abstraction",
+       "sel": "many",
+       "vars": [
+        [
+         "Graphic",
+         "Encoded into a visual mark",
+         ""
+        ],
+        [
+         "Style",
+         "Encoded into the item’s styling",
+         ""
+        ],
+        [
+         "Summary",
+         "A generated précis of the detail",
+         ""
+        ],
+        [
+         "Category",
+         "A label standing for the detail",
+         ""
+        ],
+        [
+         "Sum or average",
+         "Aggregated from detail values",
+         ""
+        ],
+        [
+         "Minimum or maximum",
+         "An extreme of detail values",
+         ""
+        ],
+        [
+         "Ranking or order",
+         "Position encodes a computed rank",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Long text in the overview",
+       "key": "truncation",
+       "sel": "one",
+       "vars": [
+        [
+         "Ellipsis",
+         "Cut short with …",
+         ""
+        ],
+        [
+         "Fade-out gradient",
+         "Faded towards the cut",
+         ""
+        ],
+        [
+         "Full text",
+         "Nothing cut",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Composition",
+     "q": "How are multiple overviews and detail views connected?",
+     "subs": [
+      {
+       "name": "Relationships",
+       "key": "relationship",
+       "sel": "one",
+       "vars": [
+        [
+         "One-to-one",
+         "One overview opens one kind of detail view",
+         ""
+        ],
+        [
+         "Many overviews to one detail view",
+         "Several overviews of the same items or scopes",
+         ""
+        ],
+        [
+         "One overview to many detail views",
+         "Different detail views opened from one overview",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Recursion",
+       "key": "recursion",
+       "sel": "many",
+       "vars": [
+        [
+         "None",
+         "Views do not nest",
+         ""
+        ],
+        [
+         "Overview inside detail view",
+         "A detail view contains another overview",
+         ""
+        ],
+        [
+         "Detail views in between",
+         "An intermediate detail view opens a fuller one",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Linking across overviews",
+       "key": "linking",
+       "sel": "one",
+       "vars": [
+        [
+         "Independent",
+         "Overviews do not react to each other",
+         ""
+        ],
+        [
+         "Synchronized navigation",
+         "Selecting in one overview navigates the other",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Layout",
+     "q": "How are overviews and detail views arranged, how are items organized, and how many details are open?",
+     "subs": [
+      {
+       "name": "Overview–detail arrangement",
+       "key": "openIn",
+       "sel": "one",
+       "vars": [
+        [
+         "Side-by-side",
+         "Both views visible together",
+         ""
+        ],
+        [
+         "New page",
+         "Detail replaces the page",
+         ""
+        ],
+        [
+         "Replace",
+         "Detail swaps into the overview’s place",
+         ""
+        ],
+        [
+         "In-place",
+         "Detail expands inside the overview",
+         ""
+        ],
+        [
+         "Pop-up",
+         "A modal overlay",
+         ""
+        ],
+        [
+         "Popover",
+         "Anchored to the item",
+         ""
+        ],
+        [
+         "Tooltip",
+         "On hover or click, small and transient",
+         ""
+        ],
+        [
+         "Picture-in-picture",
+         "Detail floats over the overview",
+         ""
+        ],
+        [
+         "Side menu",
+         "Overview as a menu beside the detail",
+         ""
+        ],
+        [
+         "Table of contents",
+         "Overview as a contents list",
+         ""
+        ],
+        [
+         "Under overview",
+         "Detail stacked below",
+         ""
+        ],
+        [
+         "Above overview",
+         "Detail stacked above",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Overview layout",
+       "key": "overviewType",
+       "sel": "many",
+       "vars": [
+        [
+         "List",
+         "",
+         ""
+        ],
+        [
+         "Grid",
+         "",
+         ""
+        ],
+        [
+         "Table",
+         "",
+         ""
+        ],
+        [
+         "Map",
+         "",
+         ""
+        ],
+        [
+         "Hierarchy",
+         "",
+         ""
+        ],
+        [
+         "Timeline",
+         "",
+         ""
+        ],
+        [
+         "Plot",
+         "",
+         ""
+        ],
+        [
+         "Canvas",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Detail views open",
+       "key": "detailMultiplicity",
+       "sel": "one",
+       "vars": [
+        [
+         "One at a time",
+         "Opening one closes another",
+         ""
+        ],
+        [
+         "Many at a time",
+         "Several detail views stay open",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Invocation",
+     "q": "What opens a detail view, from which part of the item, and how does a person get back?",
+     "subs": [
+      {
+       "name": "Opened by",
+       "key": "openBy",
+       "sel": "many",
+       "vars": [
+        [
+         "Click",
+         "",
+         ""
+        ],
+        [
+         "Hover",
+         "",
+         ""
+        ],
+        [
+         "Back button",
+         "Returns from a replacing or floating detail",
+         ""
+        ],
+        [
+         "Custom event",
+         "Any hook the developer defines",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Opened from",
+       "key": "openFrom",
+       "sel": "one",
+       "vars": [
+        [
+         "Whole item",
+         "The entire item view is the target",
+         ""
+        ],
+        [
+         "Specific attribute",
+         "Only one attribute opens it",
+         ""
+        ],
+        [
+         "Several attributes, several details",
+         "Each attribute opens its own detail",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Scope of attributes",
+     "q": "Do attributes describe one item, or the whole collection?",
+     "subs": [
+      {
+       "name": "Attribute scope",
+       "key": "attributeScope",
+       "sel": "many",
+       "vars": [
+        [
+         "Per item",
+         "Each item carries its own values",
+         ""
+        ],
+        [
+         "Per collection",
+         "Aggregates across items in the overview",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "card",
+   "name": "Card",
+   "level": "component",
+   "archetype": "browse-collections",
+   "def": "A bounded container that summarizes one item; the most common item view inside overviews.",
+   "relations": {
+    "uses": [
+     "badge",
+     "menu"
+    ],
+    "specializes": [],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Card content",
+     "q": "What goes on the card?",
+     "subs": [
+      {
+       "name": "Media",
+       "key": "media",
+       "sel": "one",
+       "vars": [
+        [
+         "None",
+         "",
+         ""
+        ],
+        [
+         "Top image",
+         "",
+         ""
+        ],
+        [
+         "Side thumbnail",
+         "",
+         ""
+        ],
+        [
+         "Full-bleed background",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Actions",
+       "key": "actions",
+       "sel": "one",
+       "vars": [
+        [
+         "None",
+         "The card only opens",
+         ""
+        ],
+        [
+         "One primary action",
+         "",
+         ""
+        ],
+        [
+         "Action row",
+         "",
+         ""
+        ],
+        [
+         "Overflow menu",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Form",
+     "q": "What shape and weight does the card take?",
+     "subs": [
+      {
+       "name": "Shape",
+       "key": "shape",
+       "sel": "one",
+       "vars": [
+        [
+         "Vertical",
+         "",
+         ""
+        ],
+        [
+         "Horizontal",
+         "",
+         ""
+        ],
+        [
+         "Compact tile",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Container style",
+       "key": "style",
+       "sel": "one",
+       "vars": [
+        [
+         "Elevated",
+         "",
+         ""
+        ],
+        [
+         "Filled",
+         "",
+         ""
+        ],
+        [
+         "Outlined",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Target",
+     "q": "Which part of the card opens the item?",
+     "subs": [
+      {
+       "name": "Tap target",
+       "key": "target",
+       "sel": "one",
+       "vars": [
+        [
+         "Whole card",
+         "",
+         ""
+        ],
+        [
+         "Title only",
+         "",
+         ""
+        ],
+        [
+         "Separate targets per attribute",
+         "Thumbnail opens a gallery, title opens the page",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "inbox",
+   "name": "Inbox",
+   "level": "pattern",
+   "archetype": "communicate",
+   "def": "A list of messages or requests awaiting attention, each opened, acted on and cleared.",
+   "relations": {
+    "uses": [
+     "bulk-actions",
+     "filter-controls",
+     "split-pane",
+     "badge",
+     "undo",
+     "toast",
+     "tag-input"
+    ],
+    "specializes": [
+     "overview-detail",
+     "communicate"
+    ],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Organization",
+     "q": "How are messages sorted into places, and grouped?",
+     "subs": [
+      {
+       "name": "Organization",
+       "key": "organization",
+       "sel": "one",
+       "vars": [
+        [
+         "Folders",
+         "",
+         ""
+        ],
+        [
+         "Labels",
+         "",
+         ""
+        ],
+        [
+         "Automatic categories",
+         "",
+         ""
+        ],
+        [
+         "Split inboxes by rule",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Message grouping",
+       "key": "grouping",
+       "sel": "one",
+       "vars": [
+        [
+         "Individual messages",
+         "",
+         ""
+        ],
+        [
+         "Conversation threads",
+         "",
+         ""
+        ],
+        [
+         "Bundles",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Reading arrangement",
+     "q": "Where does a message open, and how dense is the list?",
+     "subs": [
+      {
+       "name": "Reading pane",
+       "key": "openIn",
+       "sel": "one",
+       "vars": [
+        [
+         "Side-by-side",
+         "",
+         ""
+        ],
+        [
+         "Under overview",
+         "",
+         ""
+        ],
+        [
+         "Replace",
+         "",
+         ""
+        ],
+        [
+         "New page",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Row density",
+       "key": "density",
+       "sel": "one",
+       "vars": [
+        [
+         "Compact",
+         "",
+         ""
+        ],
+        [
+         "Default",
+         "",
+         ""
+        ],
+        [
+         "Comfortable",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Triage model",
+     "q": "What does clearing a message mean?",
+     "subs": [
+      {
+       "name": "Triage",
+       "key": "triage",
+       "sel": "one",
+       "vars": [
+        [
+         "Read and file",
+         "",
+         ""
+        ],
+        [
+         "Archive to zero",
+         "",
+         ""
+        ],
+        [
+         "Snooze until later",
+         "",
+         ""
+        ],
+        [
+         "Assign to a teammate",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Row attributes",
+     "q": "What does each row show?",
+     "subs": [
+      {
+       "name": "Attributes",
+       "key": "rowAttributes",
+       "sel": "many",
+       "vars": [
+        [
+         "Sender",
+         "",
+         ""
+        ],
+        [
+         "Subject",
+         "",
+         ""
+        ],
+        [
+         "Snippet",
+         "",
+         ""
+        ],
+        [
+         "Attachment chips",
+         "",
+         ""
+        ],
+        [
+         "Labels",
+         "",
+         ""
+        ],
+        [
+         "Generated summary or deadline",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Prioritization",
+     "q": "Who decides what matters first?",
+     "subs": [
+      {
+       "name": "Priority",
+       "key": "priority",
+       "sel": "one",
+       "vars": [
+        [
+         "Chronological",
+         "",
+         ""
+        ],
+        [
+         "Importance markers",
+         "",
+         ""
+        ],
+        [
+         "Focused and Other",
+         "",
+         ""
+        ],
+        [
+         "Priority sections",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Deferral",
+     "q": "How can a message come back later?",
+     "subs": [
+      {
+       "name": "Deferral",
+       "key": "deferral",
+       "sel": "many",
+       "vars": [
+        [
+         "None",
+         "",
+         ""
+        ],
+        [
+         "Snooze",
+         "",
+         ""
+        ],
+        [
+         "Scheduled send",
+         "",
+         ""
+        ],
+        [
+         "Follow-up nudges",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "dashboard",
+   "name": "Dashboard",
+   "level": "pattern",
+   "archetype": "monitor",
+   "def": "Several metrics and states on one view, arranged to be scanned at a glance and drilled into.",
+   "relations": {
+    "uses": [
+     "stat-tile",
+     "filter-controls",
+     "date-picker",
+     "badge",
+     "drawer"
+    ],
+    "specializes": [
+     "monitor",
+     "overview-detail"
+    ],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Widgets and purpose",
+     "q": "What goes on the dashboard, and what is it for?",
+     "subs": [
+      {
+       "name": "Widget types",
+       "key": "widgets",
+       "sel": "many",
+       "vars": [
+        [
+         "KPI tiles",
+         "",
+         ""
+        ],
+        [
+         "Time-series charts",
+         "",
+         ""
+        ],
+        [
+         "Tables",
+         "",
+         ""
+        ],
+        [
+         "Maps",
+         "",
+         ""
+        ],
+        [
+         "Status lists",
+         "",
+         ""
+        ],
+        [
+         "Narrative text",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Purpose",
+       "key": "purpose",
+       "sel": "one",
+       "vars": [
+        [
+         "Strategic decisions",
+         "",
+         ""
+        ],
+        [
+         "Operational decisions",
+         "",
+         ""
+        ],
+        [
+         "Organizational awareness",
+         "",
+         ""
+        ],
+        [
+         "Motivation and learning",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Arrangement",
+     "q": "How are widgets placed, and how many?",
+     "subs": [
+      {
+       "name": "Arrangement",
+       "key": "arrangement",
+       "sel": "one",
+       "vars": [
+        [
+         "Fixed grid",
+         "",
+         ""
+        ],
+        [
+         "Free-form canvas",
+         "",
+         ""
+        ],
+        [
+         "Single scrolling column",
+         "",
+         ""
+        ],
+        [
+         "Story layout",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Density",
+       "key": "density",
+       "sel": "one",
+       "vars": [
+        [
+         "A few glanceable tiles",
+         "",
+         ""
+        ],
+        [
+         "Dense wall",
+         "",
+         ""
+        ],
+        [
+         "Adaptive",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Linking",
+     "q": "How do widgets affect each other?",
+     "subs": [
+      {
+       "name": "Linking",
+       "key": "linking",
+       "sel": "one",
+       "vars": [
+        [
+         "Independent",
+         "",
+         ""
+        ],
+        [
+         "Global filters",
+         "",
+         ""
+        ],
+        [
+         "Cross-filtering",
+         "Clicking a mark filters the rest",
+         ""
+        ],
+        [
+         "Drill-through",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Refresh",
+     "q": "How current is it?",
+     "subs": [
+      {
+       "name": "Refresh",
+       "key": "refresh",
+       "sel": "one",
+       "vars": [
+        [
+         "Static snapshot",
+         "",
+         ""
+        ],
+        [
+         "Periodic refresh",
+         "",
+         ""
+        ],
+        [
+         "Live stream",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Alerting",
+     "q": "How does it call attention to change?",
+     "subs": [
+      {
+       "name": "Alerting",
+       "key": "alerting",
+       "sel": "one",
+       "vars": [
+        [
+         "None",
+         "",
+         ""
+        ],
+        [
+         "Threshold colours",
+         "",
+         ""
+        ],
+        [
+         "Alerts on panels",
+         "",
+         ""
+        ],
+        [
+         "Event annotations on charts",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Ownership",
+     "q": "Whose dashboard is it?",
+     "subs": [
+      {
+       "name": "Ownership",
+       "key": "ownership",
+       "sel": "one",
+       "vars": [
+        [
+         "Personal",
+         "",
+         ""
+        ],
+        [
+         "Shared read-only",
+         "",
+         ""
+        ],
+        [
+         "Team-editable",
+         "",
+         ""
+        ],
+        [
+         "Forkable copies",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "stat-tile",
+   "name": "Stat tile",
+   "level": "component",
+   "archetype": "monitor",
+   "def": "A compact tile showing one key number with its context: label, change and trend.",
+   "relations": {
+    "uses": [
+     "badge"
+    ],
+    "specializes": [],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Context",
+     "q": "What gives the number meaning?",
+     "subs": [
+      {
+       "name": "Context",
+       "key": "context",
+       "sel": "many",
+       "vars": [
+        [
+         "Label",
+         "",
+         ""
+        ],
+        [
+         "Change vs previous period",
+         "",
+         ""
+        ],
+        [
+         "Target",
+         "",
+         ""
+        ],
+        [
+         "Sparkline",
+         "",
+         ""
+        ],
+        [
+         "Benchmark",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Change encoding",
+     "q": "How is change drawn?",
+     "subs": [
+      {
+       "name": "Encoding",
+       "key": "encoding",
+       "sel": "one",
+       "vars": [
+        [
+         "Number only",
+         "",
+         ""
+        ],
+        [
+         "Signed change with arrow",
+         "",
+         ""
+        ],
+        [
+         "Sparkline",
+         "",
+         ""
+        ],
+        [
+         "Bullet chart against target",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Time window",
+     "q": "Over what period?",
+     "subs": [
+      {
+       "name": "Window",
+       "key": "window",
+       "sel": "one",
+       "vars": [
+        [
+         "Fixed",
+         "",
+         ""
+        ],
+        [
+         "Follows the dashboard filter",
+         "",
+         ""
+        ],
+        [
+         "Chosen per tile",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Drill-down",
+     "q": "What is behind the number?",
+     "subs": [
+      {
+       "name": "Drill-down",
+       "key": "drill",
+       "sel": "one",
+       "vars": [
+        [
+         "None",
+         "",
+         ""
+        ],
+        [
+         "Open a detail chart",
+         "",
+         ""
+        ],
+        [
+         "Breakdown on hover",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "chart",
+   "name": "Chart",
+   "level": "pattern",
+   "archetype": "analyze",
+   "def": "A visual encoding of data values as marks and channels so a person can see distributions, comparisons and trends.",
+   "relations": {
+    "uses": [
+     "tooltip",
+     "filter-controls",
+     "stat-tile"
+    ],
+    "specializes": [
+     "analyze"
+    ],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Mark encoding",
+     "q": "What marks and channels carry the data?",
+     "subs": [
+      {
+       "name": "Mark type",
+       "key": "markType",
+       "sel": "one",
+       "vars": [
+        [
+         "Points",
+         "",
+         ""
+        ],
+        [
+         "Bars",
+         "",
+         ""
+        ],
+        [
+         "Lines",
+         "",
+         ""
+        ],
+        [
+         "Areas",
+         "",
+         ""
+        ],
+        [
+         "Arcs",
+         "",
+         ""
+        ],
+        [
+         "Cells",
+         "",
+         ""
+        ],
+        [
+         "Glyphs",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Channels used",
+       "key": "channels",
+       "sel": "many",
+       "vars": [
+        [
+         "Position",
+         "",
+         ""
+        ],
+        [
+         "Length",
+         "",
+         ""
+        ],
+        [
+         "Colour hue or value",
+         "",
+         ""
+        ],
+        [
+         "Size",
+         "",
+         ""
+        ],
+        [
+         "Shape",
+         "",
+         ""
+        ],
+        [
+         "Opacity",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Scale and axes",
+     "q": "How is the value space laid out?",
+     "subs": [
+      {
+       "name": "Scale",
+       "key": "scale",
+       "sel": "one",
+       "vars": [
+        [
+         "Linear",
+         "",
+         ""
+        ],
+        [
+         "Logarithmic",
+         "",
+         ""
+        ],
+        [
+         "Ordinal or band",
+         "",
+         ""
+        ],
+        [
+         "Time",
+         "",
+         ""
+        ],
+        [
+         "Radial",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Facet or small multiples",
+       "key": "faceting",
+       "sel": "one",
+       "vars": [
+        [
+         "Single plot",
+         "",
+         ""
+        ],
+        [
+         "Small multiples",
+         "",
+         ""
+        ],
+        [
+         "Layered series",
+         "",
+         ""
+        ],
+        [
+         "Dual axis",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Mark interrogation",
+     "q": "How does a person inspect a mark?",
+     "subs": [
+      {
+       "name": "Inspect by",
+       "key": "inspectBy",
+       "sel": "many",
+       "vars": [
+        [
+         "Hover tooltip",
+         "",
+         ""
+        ],
+        [
+         "Click to select",
+         "",
+         ""
+        ],
+        [
+         "Brush a region",
+         "",
+         ""
+        ],
+        [
+         "Cross-filter linked views",
+         "",
+         ""
+        ],
+        [
+         "Click-through to source rows",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Encoding authorship",
+     "q": "Who chooses the encoding?",
+     "subs": [
+      {
+       "name": "Authorship",
+       "key": "authorship",
+       "sel": "one",
+       "vars": [
+        [
+         "Author-specified",
+         "",
+         ""
+        ],
+        [
+         "Builder UI",
+         "",
+         ""
+        ],
+        [
+         "Recommended chart type",
+         "",
+         ""
+        ],
+        [
+         "Generated from a question",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Annotation and emphasis",
+     "q": "How are findings called out on the chart?",
+     "subs": [
+      {
+       "name": "Annotation",
+       "key": "annotation",
+       "sel": "many",
+       "vars": [
+        [
+         "None",
+         "",
+         ""
+        ],
+        [
+         "Reference lines",
+         "",
+         ""
+        ],
+        [
+         "Callout labels",
+         "",
+         ""
+        ],
+        [
+         "Story points",
+         "",
+         ""
+        ],
+        [
+         "Automated insight captions",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Responsive encoding",
+     "q": "How does the chart change with space and density?",
+     "subs": [
+      {
+       "name": "Adaptation",
+       "key": "adaptation",
+       "sel": "one",
+       "vars": [
+        [
+         "Fixed desktop chart",
+         "",
+         ""
+        ],
+        [
+         "Reflow for narrow screens",
+         "",
+         ""
+        ],
+        [
+         "Aggregate when dense",
+         "",
+         ""
+        ],
+        [
+         "Switch mark type by size",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wizard",
+   "name": "Wizard",
+   "level": "pattern",
+   "archetype": "enter-data",
+   "def": "A multi-step flow that breaks a complex task into ordered screens, often branching on earlier answers.",
+   "relations": {
+    "uses": [
+     "stepper",
+     "progress-indicator",
+     "text-field",
+     "choice-control"
+    ],
+    "specializes": [
+     "form"
+    ],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Sequence",
+     "q": "How do steps connect, and can the task be resumed?",
+     "subs": [
+      {
+       "name": "Sequence",
+       "key": "sequence",
+       "sel": "one",
+       "vars": [
+        [
+         "Fixed linear",
+         "",
+         ""
+        ],
+        [
+         "Branching",
+         "Later steps depend on answers",
+         ""
+        ],
+        [
+         "Task list",
+         "Sections in any order",
+         ""
+        ],
+        [
+         "Adaptive skipping",
+         "Known answers skip steps",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Resumability",
+       "key": "resume",
+       "sel": "one",
+       "vars": [
+        [
+         "One sitting",
+         "",
+         ""
+        ],
+        [
+         "Save and return",
+         "",
+         ""
+        ],
+        [
+         "Automatic resume",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Progress",
+     "q": "How is progress shown?",
+     "subs": [
+      {
+       "name": "Progress",
+       "key": "progress",
+       "sel": "one",
+       "vars": [
+        [
+         "None",
+         "",
+         ""
+        ],
+        [
+         "Stepper with titles",
+         "",
+         ""
+        ],
+        [
+         "Percentage bar",
+         "",
+         ""
+        ],
+        [
+         "Task list with status",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Step density",
+     "q": "How much is asked per step?",
+     "subs": [
+      {
+       "name": "Density",
+       "key": "density",
+       "sel": "one",
+       "vars": [
+        [
+         "One thing per page",
+         "",
+         ""
+        ],
+        [
+         "Grouped questions",
+         "",
+         ""
+        ],
+        [
+         "Whole sections",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Presentation",
+     "q": "Where does the wizard live?",
+     "subs": [
+      {
+       "name": "Presentation",
+       "key": "presentation",
+       "sel": "one",
+       "vars": [
+        [
+         "Full page",
+         "",
+         ""
+        ],
+        [
+         "Modal",
+         "",
+         ""
+        ],
+        [
+         "Inline accordion",
+         "",
+         ""
+        ],
+        [
+         "Conversational",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Review",
+     "q": "Can everything be reviewed before committing?",
+     "subs": [
+      {
+       "name": "Review",
+       "key": "review",
+       "sel": "one",
+       "vars": [
+        [
+         "No review",
+         "",
+         ""
+        ],
+        [
+         "Summary page with change links",
+         "",
+         ""
+        ],
+        [
+         "Running summary",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Assistance",
+     "q": "Does the system help answer?",
+     "subs": [
+      {
+       "name": "Assistance",
+       "key": "assistance",
+       "sel": "one",
+       "vars": [
+        [
+         "None",
+         "",
+         ""
+        ],
+        [
+         "Recommended answers",
+         "",
+         ""
+        ],
+        [
+         "Interview that fills steps",
+         "A conversation completes the flow",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "form",
+   "name": "Form",
+   "level": "pattern",
+   "archetype": "enter-data",
+   "def": "A set of labelled fields that collects structured data and submits it together.",
+   "relations": {
+    "uses": [
+     "text-field",
+     "choice-control",
+     "date-picker",
+     "file-upload",
+     "autocomplete",
+     "banner"
+    ],
+    "specializes": [
+     "enter-data"
+    ],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Field layout",
+     "q": "How are labels and fields arranged?",
+     "subs": [
+      {
+       "name": "Label placement",
+       "key": "labels",
+       "sel": "one",
+       "vars": [
+        [
+         "Top-aligned",
+         "",
+         ""
+        ],
+        [
+         "Left-aligned",
+         "",
+         ""
+        ],
+        [
+         "Floating label",
+         "",
+         ""
+        ],
+        [
+         "Placeholder as label",
+         "Disappears on typing",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Columns",
+       "key": "columns",
+       "sel": "one",
+       "vars": [
+        [
+         "Single column",
+         "",
+         ""
+        ],
+        [
+         "Multiple columns",
+         "",
+         ""
+        ],
+        [
+         "Sentence form",
+         "Fields inside a sentence",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Grouping",
+     "q": "How are fields grouped?",
+     "subs": [
+      {
+       "name": "Grouping",
+       "key": "grouping",
+       "sel": "one",
+       "vars": [
+        [
+         "Flat",
+         "",
+         ""
+        ],
+        [
+         "Sections with headings",
+         "",
+         ""
+        ],
+        [
+         "Collapsible optional sections",
+         "",
+         ""
+        ],
+        [
+         "Split across pages",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Validation",
+     "q": "When and how are problems shown?",
+     "subs": [
+      {
+       "name": "Timing",
+       "key": "timing",
+       "sel": "one",
+       "vars": [
+        [
+         "On submit",
+         "",
+         ""
+        ],
+        [
+         "On leaving a field",
+         "",
+         ""
+        ],
+        [
+         "While typing",
+         "",
+         ""
+        ],
+        [
+         "Asynchronous check",
+         "",
+         ""
+        ]
+       ]
+      },
+      {
+       "name": "Error presentation",
+       "key": "errors",
+       "sel": "many",
+       "vars": [
+        [
+         "Inline under the field",
+         "",
+         ""
+        ],
+        [
+         "Summary linking to fields",
+         "",
+         ""
+        ],
+        [
+         "Field highlight",
+         "",
+         ""
+        ],
+        [
+         "Toast",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Prefill",
+     "q": "What arrives already filled?",
+     "subs": [
+      {
+       "name": "Prefill",
+       "key": "prefill",
+       "sel": "one",
+       "vars": [
+        [
+         "Blank",
+         "",
+         ""
+        ],
+        [
+         "Smart defaults",
+         "",
+         ""
+        ],
+        [
+         "Browser autofill",
+         "",
+         ""
+        ],
+        [
+         "Extracted from a document",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Help",
+     "q": "What helps a person answer?",
+     "subs": [
+      {
+       "name": "Help",
+       "key": "help",
+       "sel": "many",
+       "vars": [
+        [
+         "None",
+         "",
+         ""
+        ],
+        [
+         "Hint text",
+         "",
+         ""
+        ],
+        [
+         "Format examples",
+         "",
+         ""
+        ],
+        [
+         "Tooltip help",
+         "",
+         ""
+        ],
+        [
+         "Why we ask",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Commit",
+     "q": "How is the form saved?",
+     "subs": [
+      {
+       "name": "Commit",
+       "key": "commit",
+       "sel": "one",
+       "vars": [
+        [
+         "Submit button",
+         "",
+         ""
+        ],
+        [
+         "Autosave per field",
+         "",
+         ""
+        ],
+        [
+         "Save draft",
+         "",
+         ""
+        ],
+        [
+         "Review page before submit",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "stepper",
+   "name": "Stepper",
+   "level": "component",
+   "archetype": "navigate",
+   "def": "A visual trail of ordered steps showing how far a person has come and, often, letting them move between steps.",
+   "relations": {
+    "uses": [],
+    "specializes": [],
+    "neighbors": []
+   },
+   "dims": [
+    {
+     "name": "Navigation rule",
+     "q": "Can a person move freely between steps?",
+     "subs": [
+      {
+       "name": "Rule",
+       "key": "rule",
+       "sel": "one",
+       "vars": [
+        [
+         "Linear, locked",
+         "",
+         ""
+        ],
+        [
+         "Linear with back",
+         "",
+         ""
+        ],
+        [
+         "Free jump",
+         "",
+         ""
+        ],
+        [
+         "Branching",
+         "Later steps depend on answers",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Form",
+     "q": "How is it drawn?",
+     "subs": [
+      {
+       "name": "Form",
+       "key": "form",
+       "sel": "one",
+       "vars": [
+        [
+         "Horizontal",
+         "",
+         ""
+        ],
+        [
+         "Vertical with content",
+         "",
+         ""
+        ],
+        [
+         "Compact count",
+         "Step 2 of 5",
+         ""
+        ],
+        [
+         "Progress bar only",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Step states",
+     "q": "What states can a step show?",
+     "subs": [
+      {
+       "name": "States",
+       "key": "states",
+       "sel": "many",
+       "vars": [
+        [
+         "Current",
+         "",
+         ""
+        ],
+        [
+         "Completed",
+         "",
+         ""
+        ],
+        [
+         "Error",
+         "",
+         ""
+        ],
+        [
+         "Optional",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Step labels",
+     "q": "What does a step say?",
+     "subs": [
+      {
+       "name": "Labels",
+       "key": "labels",
+       "sel": "one",
+       "vars": [
+        [
+         "Numbers only",
+         "",
+         ""
+        ],
+        [
+         "Titles",
+         "",
+         ""
+        ],
+        [
+         "Titles with entered values",
+         "",
+         ""
+        ]
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

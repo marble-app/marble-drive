@@ -1,0 +1,68 @@
+/* The design system's tokens, as shipped in templates/design-system.mrbl.
+   A fallback for a drive without its Design System page: where the page
+   exists, read its :root instead, because its owner may have changed it.
+   test/agent-skills.test.js keeps this in step with the template. */
+:root {
+  color-scheme: light dark;
+  /* ---- ink. Three greys for text, and a fourth that exists only because
+     --faint does not clear 4.5:1 and a placeholder has to. */
+  --ink: light-dark(#111111, #e8e6e1);
+  --muted: light-dark(#5a5a5a, #a3a7ab);
+  --faint: light-dark(#8a8a8a, #71767a);
+  --placeholder: light-dark(#767676, #8d9296);
+  --line: light-dark(#e6e2d8, #272c30);
+  /* ---- paper. The interface is off-white; a document is white to the edge.
+     Each step back is structure, not content: a shelf the page sits on. */
+  --paper: light-dark(#fafaf7, #16181a);
+  --paper-2: light-dark(#f3f1ea, #1e2124);
+  --paper-3: light-dark(#eceae1, #262a2e);
+  --well: light-dark(#efece3, #101214);
+  --card: light-dark(#ffffff, #1c1f22);
+  --pane-rest: light-dark(#fafaf7, #16181a);
+  --pane-lit: light-dark(#f1efe6, #0e1012);
+  /* ---- the one accent. A dusty blue does all the accenting; after dark it
+     is the light colour of the pair, so what sits on it is the paper. */
+  --accent: light-dark(#9bb6cf, #7fa8c9);
+  --accent-soft: light-dark(#f1f5f8, #1d2932);
+  --accent-ink: light-dark(#738698, #9dc0dc);
+  /* ---- the two words the accent cannot say. */
+  --danger: light-dark(#b4533e, #e08a74);
+  --caution: light-dark(#a07a2c, #d9b25e);
+  /* ---- light catching a translucent bar: falls on paper, scratches a dark
+     screen, so the strength is a token and dark dims it. */
+  --edge-lit: light-dark(rgba(255,255,255,.4), rgba(255,255,255,.08));
+  /* ---- depth. Warm shadows on paper, black ones after dark — never a
+     color-mix on --ink, which glows white in the dark. */
+  --shadow: 0 1px 2px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.28)), 0 2px 4px light-dark(rgba(74,66,52,.03), rgba(0,0,0,.18));
+  --shadow-rest: 0 1px 2px light-dark(rgba(74,66,52,.06), rgba(0,0,0,.40)), 0 6px 16px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.28));
+  --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+  /* ---- shape. */
+  --r: 12px;        /* a card, a popover, a row menu */
+  --r-pane: 16px;   /* a pane on the well, the floating composer field */
+  --r-sheet: 14px;  /* a sheet, the New menu */
+  --r-sm: 8px;      /* a small control, an inline code chip */
+  --r-text: 4px;    /* editable text under the pointer */
+  --pill: 999px;
+  --pane-gap: 5px;  /* the gap is the divider */
+  --seam: 8px;
+  --bar-h: 2.25rem;
+  /* ---- motion. One family of curves: an ease-out that decelerates hard,
+     so the last third of a move is a quiet settle; a gentler one for colour
+     on rows and buttons; and a snap for the instant a press registers. */
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease: cubic-bezier(.22, .61, .36, 1);
+  --snap: cubic-bezier(.4, 0, .2, 1);
+  --t-fast: 110ms;
+  --t: 200ms;
+  --t-slow: 340ms;
+  --t-snap: 300ms;
+  --t-room: 520ms;
+  /* ---- type. The chrome is one sans at 14px/1.5. Documents read in a
+     serif; code in the machine's mono. No document names a webfont. */
+  --ui: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  /* ---- one drawn chevron, masked in currentColor, so a disclosure arrow
+     weighs what every other icon on the page weighs. */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}

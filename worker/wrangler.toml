@@ -1,0 +1,68 @@
+# worker/wrangler.toml
+# The lease Worker (docs/HOSTING.md, "The owner's drive on the Mac"), and the
+# front door at marbledrive.app (docs/HOSTING.md, "The front door").
+# Deploy: cd worker && npx wrangler@latest deploy
+# Its secrets: npx wrangler@latest secret put LEASE_TOKEN
+#              npx wrangler@latest secret put SPRITES_TOKEN   (optional; without
+#              it a drive at home on Fly redirects to its sprite URL)
+name = "marble-lease"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+# The lease API stays on workers.dev.
+workers_dev = true
+
+# Explicit names, never a wildcard: mac-<name>.marbledrive.app and
+# pc-<name>.marbledrive.app are a drive's Cloudflare tunnels and must not pass
+# through this Worker.
+routes = [
+  { pattern = "marbledrive.app/*", zone_name = "marbledrive.app" },
+  { pattern = "www.marbledrive.app/*", zone_name = "marbledrive.app" },
+  { pattern = "bryan.marbledrive.app/*", zone_name = "marbledrive.app" },
+  # The door (docs/ACCOUNTS.md, "To turn it on"): every drive name comes
+  # through here, so a drive made by sign-up needs no route of its own. Turn
+  # it on only after routes with no Worker for pc-bryan.marbledrive.app/* and
+  # mac-bryan.marbledrive.app/* are added in the dashboard and proven to keep
+  # the tunnels off this Worker.
+  # { pattern = "*.marbledrive.app/*", zone_name = "marbledrive.app" },
+]
+
+[vars]
+# Each drive's homes; its lease says which one it is at.
+DRIVES = '{"bryan":{"mac":"https://mac-bryan.marbledrive.app","pc":"https://pc-bryan.marbledrive.app","fly":"https://admin-p2-b3fwm.sprites.app"}}'
+# The door (worker/src/door/). Nothing here turns it on: it is on only once
+# the secret DOOR_SIGNING_KEY is set. Its other secrets, each with
+# `npx wrangler@latest secret put <NAME>`:
+#   DOOR_SIGNING_KEY      the Ed25519 private key, PKCS#8 in base64
+#   DOOR_ADMIN_TOKEN      for tools/door.mjs and the door sprite
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+# Starter credit (worker/src/credit.js, docs/ACCOUNTS.md "Starter credit") is
+# off until the secret CREDIT_ANTHROPIC_KEY is set: one key from an Anthropic
+# workspace with a monthly spend limit. It is not tied to the door.
+# The key id the edge signs with; a drive's MARBLE_DOOR_KEYS names it too.
+DOOR_KEY_ID = "k1"
+# How many drives sign-up may make before it says no (claimed drives aside).
+MAX_DRIVES = "10"
+# The door sprite's URL, which the door pokes when a drive is asked for.
+# DOOR_SPRITE_URL = "https://door-xxxx.sprites.app"
+# The public keys a pass may be signed with: the same line as a drive's
+# MARBLE_DOOR_KEYS ("<kid>:<base64 SPKI> …"). Unset, the edge derives its own.
+# DOOR_PUBLIC_KEYS = ""
+
+[[durable_objects.bindings]]
+name = "LEASE"
+class_name = "Lease"
+
+# The door's Directory (worker/src/door/directory.js): people, invites, drives
+# and sessions. Bound always; read only once DOOR_SIGNING_KEY is set, so with no
+# secrets this Worker behaves as it did before the door (docs/ACCOUNTS.md).
+[[durable_objects.bindings]]
+name = "DIRECTORY"
+class_name = "Directory"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Lease"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Directory"]

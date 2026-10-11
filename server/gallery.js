@@ -8,7 +8,7 @@
 //
 // A starter is markup in `starters/` plus a list of the affordance parts it
 // needs. The parts come out of Marble's `lib/affordances.js` at build time,
-// with `lib/affordances.drive.js` overriding by name — so a document leaves
+// with `lib/affordances.drive.js` able to override by name — so a document leaves
 // here carrying its own copy of every behaviour it has, and no starter is a
 // dependency on this host.
 //
@@ -40,17 +40,52 @@ const REPO = path.resolve(HERE, '..');
 
 // `shared` opens the closure and `tail` closes it, so neither is optional;
 // `grip` draws the handle that `sortable` and `removable` hang gestures on.
+//
+// Four of the starters shipped without `history`, which meant Mod+Z did nothing
+// in a sheet, a board, a canvas or a deck — the carrier was keeping a complete
+// inverse for every gesture and no key was bound to reach it. They all ask for
+// it now, and for `state`, because a checkable row, a switcher, a disclosure and
+// a counter are written once in the library and were being hand-rolled (or gone
+// without) in each of them. `canvas` also takes `resizable`: a note you can move
+// and cannot resize is half an answer to "where".
 const ALWAYS = ['shared', 'tail'];
 const NEEDS = { sortable: ['grip'], removable: ['grip'] };
 
 /**
  * The starters. Each is a different answer to "what is a document", which is
- * the point of shipping several rather than one good one — and the first five
+ * the point of shipping several rather than one good one — and the first six
  * are small enough to read in a sitting, because the first thing anyone does
  * with a starter is change it. The last two are not, and say why where they
  * stand: they carry a typesetter, and they carry the same one.
+ *
+ * Three fields exist for the gallery rather than for the build, and each is here
+ * rather than in the page because a new starter should arrive with its own:
+ *
+ *   - `accent`, out of the Drive's own folder palette, so a template and a
+ *     folder are coloured from one box of pencils. They were all one grey once,
+ *     which made the swatch on a card the only cue that distinguished nothing.
+ *     `paper` and `latex` share Walnut, because they are one document with two
+ *     projects in it and a card that said otherwise would be lying.
+ *   - `hint`, the placeholder in "what do you want to build?".
+ *   - `ideas`, three of them, concrete. An empty prompt field teaches nothing
+ *     about what a starter can become; three examples teach most of it.
+ *
+ * The order is by family — write, structure, present, publish — so the grid does
+ * the grouping and no heading has to.
  */
 export const STARTERS = [
+  {
+    // What New makes in Build mode (runtime/shell.js): an app with nothing in
+    // it yet but the drive's tokens and its name, which the first build fills.
+    // Not in the gallery: it is where an app starts, not a kind of document.
+    id: 'app',
+    title: 'Empty app',
+    blurb: 'An empty app. Mark up what you want on it and press Build.',
+    parts: ['editable', 'state', 'history'],
+    listed: false,
+    hint: 'A tracker for my review invitations',
+    ideas: [],
+  },
   {
     id: 'doc',
     title: 'Document',
@@ -66,35 +101,140 @@ export const STARTERS = [
     // edits them with setInner, which is the whole reason that attribute
     // exists rather than reusing this one.
     parts: ['editable', 'history', 'status'],
-    accent: '#738698',
+    accent: '#3d6b8a',
+    hint: 'A weekly research log, with a heading a week and room for links',
+    ideas: [
+      'A reading log: a section a paper, with my notes',
+      'A meeting note that opens with the decisions',
+      'A wiki page with its links down the left',
+    ],
+  },
+  {
+    id: 'note',
+    title: 'Note',
+    blurb: 'Notes, one at a time. The toolbar is the keys drawn out, and the list is a reading of the notes.',
+    // Several notes in the one file, with the open one an attribute on <body>.
+    // It is the other answer to "what is a document": not a page you compose, a
+    // place you put text. No ruler, no faces, no colours — but headings,
+    // bulleted, numbered and checked lists at four depths, quotes and rules, a
+    // toolbar that runs the same keys, rows you drag to reorder, and tables.
+    //
+    // Same three parts as `doc`, and for the same reasons: `editable` for the
+    // name in the rail, `history` for Mod+Z, `status` for the pill. The lines
+    // are not editable — they carry inline markup, so the document defines its
+    // own data-marble-rich and files them with setInner.
+    parts: ['editable', 'history', 'status'],
+    accent: '#7e91a3',
+    hint: 'A journal I keep adding to, newest at the top',
+    ideas: [
+      'A journal, a note a day, newest first',
+      'A scratchpad where each note carries a tag',
+      'A recipe book, ingredients above the method',
+    ],
+  },
+  {
+    id: 'chat',
+    title: 'Chat',
+    blurb: 'A chatbot, with its conversations down the side. It answers; it leaves the page alone.',
+    // The third answer in the writing family, and the one where most of the
+    // words are not yours: a thread with Claude, over the same conversations
+    // Agents runs, filtered to the ones this file started. Each copy talks
+    // only about its own, because the file's own path is the key — two chats
+    // made from this starter are two rooms, not two doors into one.
+    //
+    // `removable` is for the idea chips under the greeting; `editable` for the
+    // name in the rail; `history` so Mod+Z brings back a chip or a name. The
+    // threads are not the document's: they are drawn from the agent store
+    // every time the page opens, and archiving one is the agent's business.
+    parts: ['editable', 'removable', 'history', 'status'],
+    // Violet, the one colour not in the Drive's folder palette, and chosen for
+    // that: it is the colour an agent wears everywhere else in this drive, and
+    // this is the template that is nothing but one.
+    accent: '#7c5ca3',
+    hint: 'A tutor that quizzes me on whatever I paste in',
+    ideas: [
+      'A study buddy that asks me a question after each answer',
+      'A chat with a box above the thread for standing instructions',
+      'A chat that pins the answers I star into a notes column',
+    ],
+  },
+  {
+    id: 'whiteboard',
+    title: 'Whiteboard',
+    blurb: 'An endless board for sticky notes, sketches, pictures and documents, with Claude beside it. The board is the prompt.',
+    // The chat's sibling, for the ideas that are easier drawn than said: a
+    // canvas with no edges, and every message to Claude carries the board —
+    // a picture of it and a list of what is on it and where. Every drive is
+    // seeded with one, called Board.
+    //
+    // The board binds its own gestures and files its own ops through the
+    // carrier; the part it needs is `history`, for Mod+Z. `editable` rides
+    // along because the composed closure wants one addressable selector to
+    // address, and nothing on the board wears it. What it puts
+    // on the board from outside goes into "<name> media" beside the file,
+    // through `marble.drive`, so the board is a page of references.
+    parts: ['editable', 'history'],
+    // Raspberry, the one family nothing else here wears: sticky notes and ink
+    // are the whole of this one's look.
+    accent: '#b0507a',
+    hint: 'A board for planning an app, a section for each screen',
+    ideas: [
+      'A launch plan: a section a week, notes for each task',
+      'A mood board for a redesign, with screenshots and notes',
+      'A retro board: went well, went badly, try next',
+    ],
   },
   {
     id: 'sheet',
     title: 'Sheet',
     blurb: 'A grid of cells. Rows and columns are markup, so both are yours to change.',
-    parts: ['editable', 'sortable', 'removable', 'add', 'status'],
-    accent: '#738698',
-  },
-  {
-    id: 'slides',
-    title: 'Slides',
-    blurb: 'One section per slide, reordered by dragging, presented as it stands.',
-    parts: ['editable', 'sortable', 'removable', 'add', 'status'],
-    accent: '#738698',
+    parts: ['editable', 'sortable', 'removable', 'add', 'state', 'history', 'status'],
+    accent: '#2f6f5b',
+    hint: 'A budget with a column for the plan and one for what I spent',
+    ideas: [
+      'A reading list with status and rating columns',
+      'A budget that totals every column',
+      'A habit tracker: a row a week, a tick a day',
+    ],
   },
   {
     id: 'board',
     title: 'Board',
     blurb: 'Columns of cards. A card’s column is where it sits and nothing else.',
-    parts: ['editable', 'sortable', 'removable', 'add', 'status'],
-    accent: '#738698',
+    parts: ['editable', 'sortable', 'removable', 'add', 'state', 'history', 'status'],
+    accent: '#b45309',
+    hint: 'A sprint board with columns for triage, doing and shipped',
+    ideas: [
+      'A paper board: to read, reading, cited',
+      'A sprint board with a count on each column',
+      'A trip planner, a column a day',
+    ],
   },
   {
     id: 'canvas',
     title: 'Canvas',
     blurb: 'Notes placed anywhere. The position is an inline style on the note.',
-    parts: ['editable', 'canvas', 'removable', 'add', 'status'],
-    accent: '#738698',
+    parts: ['editable', 'canvas', 'resizable', 'removable', 'add', 'state', 'history', 'status'],
+    accent: '#6f8f7d',
+    hint: 'A mood board I can drag pictures and notes around on',
+    ideas: [
+      'A mind map, with lines drawn between the notes',
+      'A mood board with a swatch beside each note',
+      'A seating plan I can drag people around',
+    ],
+  },
+  {
+    id: 'slides',
+    title: 'Slides',
+    blurb: 'One section per slide, reordered by dragging, presented as it stands.',
+    parts: ['editable', 'sortable', 'removable', 'add', 'state', 'history', 'status'],
+    accent: '#c45c3e',
+    hint: 'A ten-minute talk, with a title slide and my notes under each one',
+    ideas: [
+      'A talk with speaker notes under each slide',
+      'A lecture deck with a progress bar',
+      'A pitch with one big number a slide',
+    ],
   },
   {
     id: 'paper',
@@ -105,7 +245,13 @@ export const STARTERS = [
     // and a button in the bar that rewrites the class option when a draft
     // needs to be one column instead of two.
     parts: ['editable', 'history', 'status'],
-    accent: '#738698',
+    accent: '#8b5e3c',
+    hint: 'A CHI submission with the sections I always write and my bibliography',
+    ideas: [
+      'A CHI paper with the sections stubbed',
+      'A UIST draft in one column, sent in two',
+      'A rebuttal, each point quoted above my answer',
+    ],
   },
   {
     id: 'latex',
@@ -122,7 +268,13 @@ export const STARTERS = [
     // document defines itself, because Marble's editable ends a line on Enter
     // and a source file needs Enter to mean a new line.
     parts: ['editable', 'history', 'status'],
-    accent: '#738698',
+    accent: '#8b5e3c',
+    hint: 'A problem set where every answer typesets on its own',
+    ideas: [
+      'A problem set with a macro for the answer boxes',
+      'A thesis chapter: a file a section',
+      'A one-page CV that typesets itself',
+    ],
   },
 ];
 
@@ -175,8 +327,40 @@ export async function composeScript(wanted) {
     .join('\n\n');
 }
 
+// A picture of a starter, which is the starter: the gallery shows the document
+// rather than describing it, because eight sentences of prose are eight things to
+// read and eight thumbnails are one glance. The page mounts this in the same
+// `sandbox=""` iframe the grid tiles use, so nothing in it can run — which is
+// what makes both transforms here free rather than lossy:
+//
+//   - **every `<script>` goes.** It is most of the payload — the latex starter
+//     carries a typesetter, and 934 KB becomes 50 KB — and none of it would have
+//     run behind an empty sandbox anyway.
+//   - **every `<pre>` is capped.** `paper` carries acmart.cls as a file in its
+//     project; forty lines of it and four thousand are the same grey rectangle at
+//     a fifth of scale.
+//
+// Built once per id, beside the parts cache and for the same reason: the starters
+// do not change while this host runs. Nothing is written — a preview is not a
+// document, and asking to see one must not leave one behind.
+const PREVIEW_PRE = 1200;
+const previews = new Map();
+
+export async function preview(id) {
+  if (previews.has(id)) return previews.get(id);
+  const source = (await build(id, { name: byId.get(id)?.title ?? id }))
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(
+      /(<pre\b[^>]*>)([\s\S]*?)(<\/pre>)/gi,
+      (_, open, body, close) => open + body.slice(0, PREVIEW_PRE) + close,
+    );
+  previews.set(id, source);
+  return source;
+}
+
 export const list = () =>
-  STARTERS.map(({ id, title, blurb, accent }) => ({ id, title, blurb, accent }));
+  STARTERS.filter((starter) => starter.listed !== false)
+    .map(({ id, title, blurb, accent, hint, ideas }) => ({ id, title, blurb, accent, hint, ideas }));
 
 // A fresh regex each time it is asked for. A shared one carries `lastIndex`
 // between a `test` and a `matchAll`, and the cost of that is one include

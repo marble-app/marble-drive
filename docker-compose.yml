@@ -13,7 +13,7 @@ services:
     build:
       context: .
       args:
-        MARBLE_PACKAGE: ${MARBLE_PACKAGE:-@bdhmin/marble@^0.1.2}
+        MARBLE_PACKAGE: ${MARBLE_PACKAGE:-@bdhmin/marble@^0.2.0}
     restart: unless-stopped
     ports:
       - "${PORT:-4400}:4400"

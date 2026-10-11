@@ -16,46 +16,68 @@ __ICON__
      is one hairline, so you can see where the margin is without being told you
      are filing something.
 
-     The palette is Marble's, with the one change every starter here makes: the
-     design system's --paper is off-white and belongs to the Drive, the
-     interface. A document is white to the edge. One dusty blue does all the
-     accenting, the same blue in every starter, because five colours would be
-     five claims and there is only one. */
+     The tokens below are the drive's design system — its colours as light/dark
+     pairs, its three radii, its two curves — with the one change every starter
+     here makes, written where it is made: the system's --paper is off-white and
+     belongs to the Drive, the interface, and a document is white to the edge.
+     When a token moves in the system, it moves here too. */
   :root {
-    --ink: #111111;
-    --muted: #5a5a5a;
-    --faint: #8a8a8a;
-    --line: #ddd9cf;
-    --paper: #ffffff;
-    --card: #ffffff;
-    --accent: #9bb6cf;
-    --accent-soft: #f1f5f8;
-    --accent-ink: #738698;
-    --radius: 3px;
+    /* Every colour is one pair. Dark is not a second stylesheet below this one:
+       it is the other half of the value, so a colour cannot be changed in one
+       scheme and left stale in the other. */
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    /* --faint does not clear 4.5:1, and a placeholder has to. */
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    /* The one change every starter here makes: the system's --paper is
+       off-white and belongs to the Drive, the interface. A document is white to
+       the edge, so the workspace and the page are both the system's --card. */
+    --paper: light-dark(#ffffff, #1c1f22);
+    --card: light-dark(#ffffff, #1c1f22);
+    /* One dusty blue does all the accenting, the same blue in every starter.
+       After dark it is the light half of the pair, so what sits on it is the
+       paper rather than the ink. */
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    /* The two words the accent cannot say. */
+    --danger: light-dark(#b4533e, #e08a74);
+    --caution: light-dark(#a07a2c, #d9b25e);
+    /* Selection is its own colour rather than the accent's palest tint: it has
+       to read across a whole page of text, not decorate one button. */
+    --select: light-dark(#d2e2f0, #2c4459);
+    /* Warm shadows on paper, black ones after dark — never a colour-mix on
+       --ink, which glows white in the dark. */
+    --shadow-rest: 0 1px 2px light-dark(rgba(74,66,52,.06), rgba(0,0,0,.40)), 0 6px 16px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.28));
+    --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+    /* Shape, in three sizes: a card or a popover, a control you press, and text
+       you can put a caret in. */
+    --r: 12px;
+    --r-sm: 8px;
+    --r-text: 4px;
+    --pill: 999px;
+    /* Motion: one ease-out that decelerates hard so the last third of a move is
+       a quiet settle, a gentler one for colour under a pointer, and two clocks.
+       Nothing here moves for longer than it takes to look at it. */
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --t-fast: 110ms;
+    --t: 200ms;
 
     /* Every face the two pickers can choose, written once. A document names no
        webfont: it declares net=none, so these are the faces already on the
-       machine, each with somewhere to fall back to. */
-    --f-avenir: "Avenir Next", Avenir, "Nunito Sans", system-ui, sans-serif;
-    --f-system: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+       machine, each with somewhere to fall back to. The first of them is the
+       machine's own, which is where a new document starts — a document should
+       open reading like the rest of the computer, not like a brand. */
+    --f-system: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --f-grotesk: "Helvetica Neue", Helvetica, "Arial Nova", Arial, sans-serif;
     --f-optima: Optima, "Gill Sans", "Gill Sans MT", Candara, sans-serif;
     --f-garamond: "Cormorant Garamond", "EB Garamond", Georgia, serif;
     --f-charter: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-    --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --ink: #e8e6e1;
-      --muted: #a3a7ab;
-      --faint: #71767a;
-      --line: #2f3438;
-      --paper: #1c1f22;
-      --card: #1c1f22;
-      --accent: #7fa8c9;
-      --accent-soft: #1d2932;
-      --accent-ink: #9dc0dc;
-    }
+    --f-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   }
 
   /* Which face the interface wears and which the notes wear are two facts, each
@@ -64,7 +86,6 @@ __ICON__
      below can be read straight off an ancestor — CSS has no way to reach
      sideways across the page for a value. Spelled out one line per face,
      because it has no way to look a name up in a list either. */
-  body[data-ui-font="avenir"]   { --ui: var(--f-avenir); }
   body[data-ui-font="system"]   { --ui: var(--f-system); }
   body[data-ui-font="grotesk"]  { --ui: var(--f-grotesk); }
   body[data-ui-font="optima"]   { --ui: var(--f-optima); }
@@ -72,7 +93,6 @@ __ICON__
   body[data-ui-font="charter"]  { --ui: var(--f-charter); }
   body[data-ui-font="mono"]     { --ui: var(--f-mono); }
 
-  body[data-doc-font="avenir"]   { --doc: var(--f-avenir); }
   body[data-doc-font="system"]   { --doc: var(--f-system); }
   body[data-doc-font="grotesk"]  { --doc: var(--f-grotesk); }
   body[data-doc-font="optima"]   { --doc: var(--f-optima); }
@@ -81,14 +101,49 @@ __ICON__
   body[data-doc-font="mono"]     { --doc: var(--f-mono); }
 
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  /* Every width answer is asked of the root rather than the window, because a
+     host that docks a panel beside this page shrinks <html> and leaves the
+     viewport where it was. */
+  html { container: doc / inline-size; }
+  html { height: 100%; }
+  /* The two halves of what a software keyboard does, written by the script
+     below and both 0 wherever there is no keyboard. --kb is the room it took
+     off the bottom; --vv-top is how far down the screen the strip you can
+     still see now begins, because the keyboard does not only cover the page,
+     it slides it. Between them the app is exactly that strip: the toolbar is
+     never above the top of it, and the flow's scroller — the last thing in
+     this column — ends at the top of the keyboard rather than behind it, which
+     is the whole of why the line you are typing stays in sight. */
   body {
-    margin: 0; display: flex; flex-direction: column; overflow: hidden;
+    height: calc(100% - var(--kb, 0px) - var(--vv-top, 0px));
+    margin: var(--vv-top, 0px) 0 0;
+    display: flex; flex-direction: column; overflow: hidden;
     background: var(--paper); color: var(--ink);
-    font: 13.5px/1.5 var(--ui, var(--f-avenir));
+    font: 14px/1.5 var(--ui, var(--f-system));
     -webkit-font-smoothing: antialiased;
   }
-  ::selection { background: var(--accent-soft); }
+  button { font: inherit; }
+  ::selection { background: var(--select); }
+
+  /* One ring, the same one, everywhere a key can land. A pointer gets the tint
+     instead — see .docname — because a ring under the mouse is noise. */
+  button:focus-visible, [data-marble-editable]:focus-visible, .pin:focus-visible,
+  .outline li:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  /* A press answers on the way down, not when the click arrives. The colour
+     changes below say which control it was; this says that the finger landed,
+     and it is the same nudge on every one of them. */
+  .tool:active:not([disabled]), .menu:active, .fonts .shut:active {
+    transform: scale(.94);
+    transition: transform var(--t-fast) var(--ease-out);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important; scroll-behavior: auto !important;
+    }
+  }
   .sprite { display: none; }
   .ico { width: 18px; height: 18px; fill: currentColor; display: block; }
   .caret { width: 13px; height: 13px; fill: currentColor; opacity: .55; flex: none; }
@@ -104,20 +159,27 @@ __ICON__
   .head { min-width: 0; flex: 1; }
   .docname {
     display: inline-block; padding: .05rem .3rem; margin-left: -.3rem;
-    border-radius: var(--radius); font-size: 1.05rem; line-height: 1.3;
+    border-radius: var(--r-text); font-size: 1.05rem; line-height: 1.3;
     outline: none; max-width: 30rem; overflow: hidden; white-space: nowrap;
     border: 1px solid transparent;
   }
   .docname:hover { background: var(--accent-soft); }
-  .docname:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  .docname:focus { background: var(--accent-soft); }
   .menus { display: flex; gap: .05rem; margin: .1rem 0 0 -.35rem; }
   .menu {
     appearance: none; border: 0; background: none; color: var(--faint);
-    padding: .15rem .35rem; border-radius: var(--radius);
+    padding: .15rem .35rem; border-radius: var(--r-sm);
     font: inherit; font-size: .78rem; cursor: pointer;
+    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
   }
   .menu:hover { color: var(--ink); background: var(--accent-soft); }
+  .menu:active { color: var(--accent-ink); background: var(--accent-soft); }
   .menu[data-open] { color: var(--accent-ink); background: var(--accent-soft); }
+  /* The one menu a phone has room for, and the tool that opens the rest of the
+     toolbar. Both exist in the file at every width and are shown at one — see
+     the phone block at the end of this stylesheet, which is the only place
+     that decides what a narrow page can afford. */
+  .menus .all, .tools .more { display: none; }
 
   .tools {
     flex: none; display: flex; align-items: center; gap: 1px; flex-wrap: wrap;
@@ -126,10 +188,12 @@ __ICON__
   .tool {
     appearance: none; border: 0; background: none; color: var(--muted);
     display: flex; align-items: center; justify-content: center; gap: .1rem;
-    height: 26px; min-width: 26px; padding: 0 .28rem; border-radius: var(--radius);
+    height: 26px; min-width: 26px; padding: 0 .28rem; border-radius: var(--r-sm);
     font: inherit; cursor: pointer;
+    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
   }
   .tool:hover { background: var(--accent-soft); color: var(--ink); }
+  .tool:active { background: var(--accent-soft); color: var(--accent-ink); }
   .tool[disabled] { opacity: .3; cursor: default; background: none; }
   .tool.marble-on { background: var(--accent-soft); color: var(--accent-ink); }
   .tool.wide { min-width: 5.6rem; justify-content: space-between; padding: 0 .2rem 0 .45rem; }
@@ -142,10 +206,22 @@ __ICON__
   .paint { flex-direction: column; gap: 0; padding-top: 2px; }
   .paint .letter { font-size: 12px; line-height: 12px; }
   .swatch { display: block; width: 15px; height: 3px; border-radius: 1px; background: currentColor; }
+  /* The aligner carries all four icons and shows the one that is true. Which
+     one that is cannot be a selector — CSS has no way to match a child against
+     an ancestor's value — so the script derives a marble- class onto the
+     button, and this is the static default for a page with no host at all. */
+  .aligner .ico { display: none; }
+  .aligner .g-left { display: block; }
+  .aligner[class*="marble-align-"] .g-left { display: none; }
+  .aligner.marble-align-left .g-left,
+  .aligner.marble-align-center .g-center,
+  .aligner.marble-align-right .g-right,
+  .aligner.marble-align-justify .g-justify { display: block; }
+
   .sizer { display: flex; align-items: center; gap: 1px; }
   .pt {
     width: 2.2rem; height: 23px; display: flex; align-items: center; justify-content: center;
-    border: 1px solid var(--line); border-radius: var(--radius); font-size: .8rem; color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--r-sm); font-size: .8rem; color: var(--ink);
   }
   .sep { width: 1px; height: 16px; background: var(--line); margin: 0 .35rem; flex: none; }
   .spring { flex: 1; }
@@ -165,15 +241,15 @@ __ICON__
   }
   .outline ol { list-style: none; margin: 0; padding: 0; }
   .outline li {
-    padding: .22rem .4rem; border-radius: var(--radius); cursor: pointer; color: var(--muted);
+    padding: .22rem .4rem; border-radius: var(--r-sm); cursor: pointer; color: var(--muted);
     font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .outline li:hover { background: var(--accent-soft); color: var(--accent-ink); }
+  .outline li:hover, .outline li:focus-visible { background: var(--accent-soft); color: var(--accent-ink); }
   .outline li.d2 { padding-left: 1.1rem; }
   .outline li.d3 { padding-left: 1.9rem; }
   .outline ol:empty::before {
     content: "Headings you write appear here."; display: block;
-    color: var(--faint); font-size: .78rem; line-height: 1.5;
+    color: var(--placeholder); font-size: .78rem; line-height: 1.5;
   }
 
   .scroll { flex: 1; overflow: auto; padding-bottom: 6rem; }
@@ -199,11 +275,17 @@ __ICON__
   .ruler .pin.l { left: calc(var(--ml, 1in) - 5.5px); }
   .ruler .pin.r { right: calc(var(--mr, 1in) - 5.5px); }
 
+  /* The sheet is one field, not a stack of them — see the script. What that
+     asks of the CSS is that the flow fill the page rather than stopping under
+     the last paragraph, so the white below the text is still somewhere the
+     caret can be put, and that the page say so with the cursor. */
   .page {
-    min-height: 10in; margin-bottom: 3rem;
+    min-height: 10in; margin-bottom: 3rem; position: relative;
+    display: flex; flex-direction: column; cursor: text;
     padding: var(--mt, 1in) var(--mr, 1in) var(--mb, 1in) var(--ml, 1in);
-    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r-sm);
   }
+  .flow { flex: 1; outline: none; }
 
   /* --------------------------------------------------------- the text itself
 
@@ -217,7 +299,7 @@ __ICON__
      the toolbar knows which is which by whether you have selected anything. */
 
   .flow > * {
-    margin: 0; outline: none; font-family: var(--doc, var(--f-avenir));
+    margin: 0; outline: none; font-family: var(--doc, var(--f-system));
     font-size: calc(var(--pt, 10.5) * 1pt); line-height: 1.55;
     white-space: pre-wrap; overflow-wrap: break-word;
   }
@@ -252,7 +334,7 @@ __ICON__
   .flow > [data-list] + [data-list] { padding-top: 2pt; }
   .flow > [data-list]::before {
     position: absolute; left: 0; width: .35in; text-align: right;
-    color: var(--faint); font-family: var(--doc, var(--f-avenir));
+    color: var(--faint); font-family: var(--doc, var(--f-system));
   }
   .flow > [data-list="bullet"]::before { content: "\2022"; }
   .flow > [data-list="number"] { counter-increment: item; }
@@ -260,9 +342,38 @@ __ICON__
 
   .flow > hr { border: 0; border-top: 1px solid var(--line); margin: 14pt 0; padding: 0; }
 
+  /* An empty paragraph is still a line you can stand on. A block with no
+     children gives the browser nothing to lay a line box out with, so it is
+     given one character that is not in the file and has no width. */
+  .flow > :empty::before { content: "\feff"; }
+
+  /* ------------------------------------------------- picking a paragraph up
+
+     The handle is the page's and never the file's: one of it, moved to
+     whichever block the pointer is beside. A bar the height of the paragraph
+     rather than a cluster of dots, because what you are taking hold of is the
+     whole paragraph and the bar is exactly as tall as it. The seam is where it
+     would land. */
+  .grip {
+    position: absolute; z-index: 2; appearance: none; padding: 0; border: 0;
+    width: 3px; margin-left: -15px; border-radius: 2px;
+    background: var(--line); opacity: 0; cursor: grab;
+    transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+  }
+  .grip[data-on] { opacity: .9; }
+  .grip:hover, .grip:focus-visible { background: var(--accent); opacity: 1; outline: none; }
+  .grip.marble-dragging { background: var(--accent-ink); opacity: 1; cursor: grabbing; }
+  @media (hover: none) { .grip[data-on] { width: 4px; opacity: .55; } }
+
+  .seam {
+    position: absolute; z-index: 2; display: none;
+    height: 2px; border-radius: 2px; background: var(--accent-ink);
+  }
+  .seam[data-on] { display: block; }
+
   /* The inline vocabulary, and the whole of it. Anything the editor cannot
      write here, it strips on the way into the file. */
-  .flow b, .flow strong { font-weight: 650; }
+  .flow b, .flow strong { font-weight: 600; }
   .flow i, .flow em { font-style: italic; }
   .flow u { text-decoration: underline; text-underline-offset: .13em; }
   .flow s { text-decoration: line-through; }
@@ -271,8 +382,11 @@ __ICON__
 
   .popup {
     position: fixed; z-index: 40; display: none; min-width: 11rem; padding: .35rem 0;
-    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-    box-shadow: 0 6px 22px rgba(17, 17, 17, .13); max-height: 70vh; overflow: auto;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow-rest); overflow: auto; overscroll-behavior: contain;
+    /* Never taller than the strip of screen the keyboard leaves; what does not
+       fit scrolls inside it. */
+    max-height: min(70vh, calc(var(--vv-h, 100dvh) - 16px));
   }
   .popup[data-open] { display: block; }
   .popup button {
@@ -281,12 +395,13 @@ __ICON__
     padding: .34rem .9rem .34rem 1.7rem; font: inherit; font-size: .82rem; text-align: left; cursor: pointer;
   }
   .popup button:hover { background: var(--accent-soft); }
+  .popup button:active { background: var(--accent-soft); color: var(--accent-ink); }
   .popup button[disabled] { opacity: .35; cursor: default; background: none; }
   .popup button[data-on]::before { content: "\2713"; position: absolute; left: .6rem; color: var(--accent-ink); }
   .popup .hint { color: var(--faint); font-size: .74rem; font-family: var(--f-mono); }
   .popup .swatches { display: grid; grid-template-columns: repeat(5, 1.4rem); gap: .3rem; padding: .45rem .85rem; }
   .popup .swatches i {
-    display: block; width: 1.4rem; height: 1.4rem; border-radius: var(--radius);
+    display: block; width: 1.4rem; height: 1.4rem; border-radius: var(--r-sm);
     border: 1px solid var(--line); cursor: pointer;
   }
   .popup .swatches i[data-on] { box-shadow: 0 0 0 2px var(--accent); }
@@ -299,10 +414,14 @@ __ICON__
 
   .fonts {
     position: fixed; z-index: 50; display: none;
-    left: var(--fx, auto); top: var(--fy, auto); right: var(--fr, 1.4rem); bottom: var(--fb, 1.4rem);
+    left: var(--fx, auto); top: var(--fy, auto); right: var(--fr, 1.4rem);
+    /* Where the card rests if nobody has dragged it: clear of the keyboard and
+       of the bar at the bottom of a phone. Drag it and --fb says where it
+       went, and a place somebody chose is not corrected. */
+    bottom: var(--fb, calc(1.4rem + var(--kb, 0px) + env(safe-area-inset-bottom, 0px)));
     width: 25rem; padding: 0 0 .6rem;
-    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-    box-shadow: 0 10px 34px rgba(17, 17, 17, .16);
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow-lift);
   }
   body[data-fonts="on"] .fonts { display: block; }
   .fonts header {
@@ -313,7 +432,7 @@ __ICON__
   .fonts h2 { margin: 0; font: 600 .68rem/1 var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
   .fonts .shut {
     appearance: none; margin-left: auto; border: 0; background: none; color: var(--faint);
-    width: 20px; height: 20px; border-radius: var(--radius); font: 15px/1 inherit; cursor: pointer;
+    width: 20px; height: 20px; border-radius: var(--r-sm); font: 15px/1 inherit; cursor: pointer;
   }
   .fonts .shut:hover { background: var(--accent-soft); color: var(--ink); }
   .fonts .two { display: grid; grid-template-columns: 1fr 1fr; }
@@ -325,11 +444,11 @@ __ICON__
   }
   .fonts button {
     appearance: none; position: relative; display: block; width: 100%; border: 0; background: none;
-    color: var(--ink); padding: .3rem .5rem .3rem 1.4rem; border-radius: var(--radius);
+    color: var(--ink); padding: .3rem .5rem .3rem 1.4rem; border-radius: var(--r-sm);
     font-size: .88rem; text-align: left; cursor: pointer;
   }
   .fonts button:hover { background: var(--accent-soft); }
-  .fonts [data-set-ui="avenir"],   .fonts [data-set-doc="avenir"]   { font-family: var(--f-avenir); }
+  .fonts button:active { background: var(--accent-soft); color: var(--accent-ink); }
   .fonts [data-set-ui="system"],   .fonts [data-set-doc="system"]   { font-family: var(--f-system); }
   .fonts [data-set-ui="grotesk"],  .fonts [data-set-doc="grotesk"]  { font-family: var(--f-grotesk); }
   .fonts [data-set-ui="optima"],   .fonts [data-set-doc="optima"]   { font-family: var(--f-optima); }
@@ -341,16 +460,14 @@ __ICON__
      straight off it rather than recomputed into the buttons — there is no
      second copy to go stale, and the card is right with no host at all. CSS
      cannot match a child against an ancestor, so it is spelled out once per
-     face: fourteen selectors, and no state. */
+     face: twelve selectors, and no state. */
   .fonts button::before { content: ""; position: absolute; left: .55rem; color: var(--accent-ink); }
-  body[data-ui-font="avenir"]    .fonts [data-set-ui="avenir"]::before,
   body[data-ui-font="system"]    .fonts [data-set-ui="system"]::before,
   body[data-ui-font="grotesk"]   .fonts [data-set-ui="grotesk"]::before,
   body[data-ui-font="optima"]    .fonts [data-set-ui="optima"]::before,
   body[data-ui-font="garamond"]  .fonts [data-set-ui="garamond"]::before,
   body[data-ui-font="charter"]   .fonts [data-set-ui="charter"]::before,
   body[data-ui-font="mono"]      .fonts [data-set-ui="mono"]::before,
-  body[data-doc-font="avenir"]   .fonts [data-set-doc="avenir"]::before,
   body[data-doc-font="system"]   .fonts [data-set-doc="system"]::before,
   body[data-doc-font="grotesk"]  .fonts [data-set-doc="grotesk"]::before,
   body[data-doc-font="optima"]   .fonts [data-set-doc="optima"]::before,
@@ -358,10 +475,17 @@ __ICON__
   body[data-doc-font="charter"]  .fonts [data-set-doc="charter"]::before,
   body[data-doc-font="mono"]     .fonts [data-set-doc="mono"]::before { content: "\2713"; }
 
+  /* A reading of the notes, floating over them. It is never pressed, so it
+     does not take a press — a thumb aiming at the word underneath gets the
+     word — and it is glass, so where it has to sit over prose the prose is
+     still there behind it. */
   .count {
-    position: fixed; left: 1rem; bottom: 1rem; z-index: 20;
-    padding: .25rem .6rem; border-radius: 999px; font-size: .74rem; color: var(--muted);
-    background: var(--card); border: 1px solid var(--line);
+    position: fixed; left: 1rem; z-index: 20; pointer-events: none;
+    bottom: calc(1rem + var(--kb, 0px) + env(safe-area-inset-bottom, 0px));
+    padding: .25rem .6rem; border-radius: var(--pill); font-size: .74rem; color: var(--muted);
+    background: color-mix(in srgb, var(--card) 76%, transparent);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border: 1px solid var(--line);
   }
   .count:empty { display: none; }
   body[data-outline="on"] .count { left: 14.5rem; }
@@ -372,17 +496,160 @@ __ICON__
     background: none; color: var(--faint); font: 400 .74rem/1.4 var(--f-mono); letter-spacing: .02em;
   }
   body .marble-status[data-state="saved"] { opacity: 1; }
-  body .marble-status[data-state="error"] { background: none; color: #b4544f; }
+  body .marble-status[data-state="error"] { background: none; color: var(--danger); }
 
-  @media (max-width: 58rem) {
+  /* The toolbar is drawn for a pointer. A finger is owed 44px, so it is asked
+     for by the pointer and not by the width — a narrow window is still a mouse. */
+  @media (pointer: coarse) {
+    .tool { height: 44px; min-width: 44px; }
+    .tool.wide { min-width: 7rem; }
+    .pt { height: 34px; }
+    .menu { padding: .45rem .5rem; min-height: 44px; }
+    .popup button, .fonts button { padding-top: .6rem; padding-bottom: .6rem; min-height: 44px; }
+    .fonts .shut { width: 44px; height: 44px; }
+    /* The page is one field, and iOS zooms the screen into any field set
+       under 16px the moment it takes the caret. The size it asks is the
+       field's own, not its paragraphs', so the flow is set at 16 and every
+       paragraph keeps the points the document gives it. */
+    .flow { font-size: 16px; }
+  }
+
+  @container doc (max-width: 58rem) {
     .outline { display: none; }
     body[data-outline="on"] .count { left: 1rem; }
     .page { min-height: 0; }
     .fonts { width: auto; left: 1rem; right: 1rem; }
   }
+
+  /* ------------------------------------------------------------- the phone
+     At 390px the chrome above the first word was 273px — six menus, five
+     wrapped rows of tools, and a ruler measuring inches on a screen four
+     inches wide. None of it was wrong, there was just no room for it.
+
+     So at this width the document takes the screen and the interface takes one
+     row: the five things a thumb reaches while writing, and one tool that
+     opens the other thirteen. Nothing is removed, and it all comes back the
+     moment the page is wide again — which is why the question goes to the
+     container: a docked panel makes a desktop this narrow with no phone in
+     it. */
+  @container doc (max-width: 34rem) {
+    /* Row one is what a thumb reaches. The rest is behind the ⋯, and it is
+       hidden rather than moved, so nothing here has a second home to keep in
+       step with the first. */
+    body:not([data-tools="on"]) .tools > :not([data-thumb]) { display: none; }
+    /* The ⋯ keeps its corner whether the toolbar is one row or three. A
+       control that moves the moment you press it is one you have to find
+       again, and the padding is the room it is standing in. */
+    .tools { position: relative; padding: .25rem 3rem .4rem .5rem; gap: .1rem; }
+    .tools .more { display: flex; position: absolute; top: .25rem; right: .4rem; }
+    .tools .more[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+    /* The spring pushes the last tool to the end of a one-row toolbar. On
+       three wrapped rows it pushes it onto a fourth. */
+    .tools .spring { display: none; }
+    .tool.wide { min-width: 0; flex: 1 1 4rem; max-width: 9rem; }
+
+    /* Six menus become one. The six are still in the file and still the same
+       six buttons — their names are read off them, a press deeper. */
+    .menus > :not(.all) { display: none; }
+    .menus .all { display: block; font-size: .82rem; padding: .3rem .45rem; }
+    .bar { padding: max(.5rem, env(safe-area-inset-top, 0px)) .7rem 0; gap: .5rem; align-items: center; }
+    .mark { display: none; }
+    .head { display: flex; align-items: center; gap: .3rem; }
+    /* The name is a field too, and under 16px a phone zooms into it. */
+    .docname { flex: 1; min-width: 0; font-size: 1rem; max-width: none; }
+    .menus { margin: 0; }
+    body .marble-status { top: auto; bottom: calc(1rem + var(--kb, 0px) + env(safe-area-inset-bottom, 0px)); right: 1rem; }
+
+    /* A ruler in inches on a four-inch screen measures nothing anybody can
+       use, and the margins it sets are the other half of the same problem: an
+       inch each side of 390px leaves 196px of text. The inches are still in
+       the file and still the page's, untouched — this is the one width that
+       does not draw them. */
+    .ruler { display: none; }
+    .page { padding: 1.1rem 1.15rem 2.5rem; border: 0; border-radius: 0; margin-bottom: 0; }
+    .scroll { padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+    .count { font-size: .7rem; }
+    .fonts { left: .6rem; right: .6rem; }
+    .fonts .two { grid-template-columns: 1fr; }
+    .fonts .col + .col { border-left: 0; border-top: 1px solid var(--line); }
+    .popup { min-width: 13rem; }
+    .menus .all { min-height: 44px; }
+
+    /* With the keyboard up the toolbar stands on it, where a thumb already
+       is, the way Notes and Notion put theirs: the body already ends where
+       the keys begin, so the foot of the column is the top of the keyboard.
+       Opened out with the ⋯, its extra rows grow up from there. The count and
+       the save note step up over it rather than sit on its buttons. */
+    html.marble-keys body:has(.flow:focus) > .tools {
+      order: 1; border-bottom: 0; border-top: 1px solid var(--line);
+      padding-bottom: .3rem;
+    }
+    html.marble-keys body:has(.flow:focus) .count,
+    html.marble-keys body:has(.flow:focus) .marble-status { bottom: calc(var(--kb, 0px) + 4.2rem); }
+    html.marble-keys body:has(.flow:focus) .scroll { padding-bottom: 2rem; }
+  }
+  /* A swipe past either end of the page stops at the page. */
+  .scroll { overscroll-behavior: contain; }
+
+  /* ---------------------------------------------------------------- on paper
+     A document that cannot be printed is a demo. This starter draws an 8.5in
+     page with a ruler setting its margins, and until this block there was no
+     way to get that onto one.
+
+     Everything belonging to the page rather than to the notes leaves — which
+     is what data-marble-transient already means, so the rule says it once —
+     along with the three pieces of chrome that are in the file because they
+     are this document's own interface. */
+  @media print {
+    /* Paper is white and ink is black whatever the screen was set to: a dark
+       scheme is a fact about a room at night, not about paper. */
+    :root {
+      color-scheme: light;
+      --paper: #ffffff;
+      --card: #ffffff;
+      --ink: #000000;
+      --muted: #333333;
+      --faint: #555555;
+      --line: #999999;
+      --select: transparent;
+    }
+    /* The only !important outside the reduced-motion block, and for the same
+       reason: this is not a rule arguing with another one, it is the whole of
+       the interface leaving the room. */
+    [data-marble-transient], .bar, .tools, .fonts { display: none !important; }
+
+    /* On screen this is a column that does not scroll with a pane inside it
+       that does. Paper has no viewport to fill and nothing to clip against, so
+       every box that was holding the screen together lets go. */
+    html, body, .work, .scroll, .pagebox, .page, .flow {
+      display: block; height: auto; max-width: none; overflow: visible;
+    }
+    .scroll { padding: 0; }
+
+    /* @page draws the margin at the top and bottom of every sheet, which one
+       padded box cannot do for a document that runs onto a second page. The
+       left and right stay on the page itself: those are the two the ruler
+       moves, they are inches in the file, and @page has no way to read them.
+       Change the paper here — `size: A4` — and the margins follow. */
+    @page { size: letter; margin: 1in 0; }
+    .page {
+      min-height: 0; margin: 0; border: 0; border-radius: 0;
+      padding: 0 var(--mr, 1in) 0 var(--ml, 1in); background: var(--paper);
+    }
+
+    /* A heading belongs with what it introduces and a list item is one thing,
+       so neither is allowed to be split or stranded. A paragraph is welcome to
+       break across sheets — that is what prose does on paper — but never for
+       one line, which is what orphans and widows are for. */
+    .flow { orphans: 2; widows: 2; }
+    .flow > h1, .flow > h2, .flow > h3, .flow > h4, .flow > .subtitle {
+      break-inside: avoid; break-after: avoid;
+    }
+    .flow > [data-list], .flow > hr { break-inside: avoid; }
+  }
 </style>
 </head>
-<body class="doc" data-marble-id="__ID__" data-outline="on" data-ruler="on" data-fonts="off" data-ui-font="avenir" data-doc-font="avenir">
+<body class="doc" data-marble-id="__ID__" data-outline="on" data-ruler="on" data-fonts="off" data-ui-font="system" data-doc-font="system">
 
 <svg class="sprite" data-marble-id="__ID__" aria-hidden="true" focusable="false"><defs>
   <g id="i-mark"><path d="M4 3h9l5 5v13H4z" opacity=".9"/><path d="M13 3v5h5z" opacity=".45"/></g>
@@ -398,6 +665,7 @@ __ICON__
   <g id="i-indent"><path d="M3 5h18v2H3zm8 4h10v2H11zm0 4h10v2H11zm-8 4h18v2H3zM4 9.4 8 12l-4 2.6z"/></g>
   <g id="i-clear"><path d="M4 5h12v2.6h-4.4l-1.2 4.4H7.7L8.9 7.6H4zm4.2 14 1.5-5.2h2.7L10.9 19zm7-5.6 1.3-1.3 1.7 1.7 1.7-1.7 1.3 1.3-1.7 1.7 1.7 1.7-1.3 1.3-1.7-1.7-1.7 1.7-1.3-1.3 1.7-1.7z"/></g>
   <g id="i-caret"><path d="M7 10h10l-5 5z"/></g>
+  <g id="i-more"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g>
 </defs></svg>
 
 <header class="bar" data-marble-id="__ID__">
@@ -405,63 +673,72 @@ __ICON__
     <svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-mark"/></svg>
   </span>
   <div class="head" data-marble-id="__ID__">
-    <span class="docname" data-marble-id="__ID__" data-marble-editable>__TITLE__</span>
-    <nav class="menus" data-marble-id="__ID__">
-      <button class="menu" data-marble-id="__ID__" data-menu="file">File</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="edit">Edit</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="view">View</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="insert">Insert</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="format">Format</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="tools">Tools</button>
+    <span class="docname" data-marble-id="__ID__" data-marble-editable aria-label="Document name">__TITLE__</span>
+    <nav class="menus" data-marble-id="__ID__" role="menubar" aria-label="Menus">
+      <button class="menu" data-marble-id="__ID__" data-menu="file" role="menuitem" aria-haspopup="menu" aria-expanded="false">File</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="edit" role="menuitem" aria-haspopup="menu" aria-expanded="false">Edit</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="view" role="menuitem" aria-haspopup="menu" aria-expanded="false">View</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="insert" role="menuitem" aria-haspopup="menu" aria-expanded="false">Insert</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="format" role="menuitem" aria-haspopup="menu" aria-expanded="false">Format</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="tools" role="menuitem" aria-haspopup="menu" aria-expanded="false">Tools</button>
+      <!-- The six above, one press deeper, for a width that has room for one.
+           It reads their names off them rather than saying them again here. -->
+      <button class="menu all" data-marble-id="__ID__" data-menu="all" role="menuitem" aria-haspopup="menu" aria-expanded="false">Menu</button>
     </nav>
   </div>
 </header>
 
-<div class="tools" data-marble-id="__ID__">
-  <button class="tool" data-marble-id="__ID__" data-cmd="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-undo"/></svg></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-redo"/></svg></button>
+<!-- data-thumb is what a thumb reaches while writing: undo, redo, the
+     paragraph style, bold, italic, and the ⋯ that opens the rest. They are the
+     only ones a phone shows unasked — see the phone block in the stylesheet —
+     and everything else is one press away at that width and in the row at
+     every other. -->
+<div class="tools" data-marble-id="__ID__" role="toolbar" aria-label="Formatting">
+  <button class="tool" data-marble-id="__ID__" data-thumb data-cmd="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-undo"/></svg></button>
+  <button class="tool" data-marble-id="__ID__" data-thumb data-cmd="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-redo"/></svg></button>
   <i class="sep" data-marble-id="__ID__"></i>
-  <button class="tool wide" data-marble-id="__ID__" data-pick="style" title="Paragraph style">
-    <span class="now" id="now-style" data-marble-transient>Body</span>
+  <button class="tool wide" data-marble-id="__ID__" data-thumb data-pick="style" title="Paragraph style" aria-haspopup="menu" aria-expanded="false">
+    <span class="now" id="now-style" data-marble-transient>Title</span>
     <svg class="caret" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-caret"/></svg>
   </button>
-  <button class="tool wide" data-marble-id="__ID__" data-pick="face" title="Font of the selected text">
-    <span class="now" id="now-face" data-marble-transient>Avenir Next</span>
+  <button class="tool wide" data-marble-id="__ID__" data-pick="face" title="Font of the selected text" aria-haspopup="menu" aria-expanded="false">
+    <span class="now" id="now-face" data-marble-transient>System</span>
     <svg class="caret" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-caret"/></svg>
   </button>
   <span class="sizer" data-marble-id="__ID__">
     <button class="tool step" data-marble-id="__ID__" data-cmd="smaller" title="Smaller" aria-label="Smaller">&#8722;</button>
-    <span class="pt" id="now-pt" data-marble-transient>10.5</span>
+    <span class="pt" id="now-pt" data-marble-transient>23</span>
     <button class="tool step" data-marble-id="__ID__" data-cmd="bigger" title="Bigger" aria-label="Bigger">+</button>
   </span>
   <i class="sep" data-marble-id="__ID__"></i>
-  <button class="tool" data-marble-id="__ID__" data-cmd="bold" title="Bold (Ctrl+B)"><span class="letter" data-marble-id="__ID__">B</span></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="italic" title="Italic (Ctrl+I)"><span class="letter i" data-marble-id="__ID__">I</span></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="underline" title="Underline (Ctrl+U)"><span class="letter u" data-marble-id="__ID__">U</span></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="strike" title="Strikethrough"><span class="letter s" data-marble-id="__ID__">S</span></button>
-  <button class="tool paint" data-marble-id="__ID__" data-pick="colour" title="Text colour">
+  <button class="tool" data-marble-id="__ID__" data-thumb data-cmd="bold" title="Bold (Ctrl+B)" aria-pressed="false"><span class="letter" data-marble-id="__ID__">B</span></button>
+  <button class="tool" data-marble-id="__ID__" data-thumb data-cmd="italic" title="Italic (Ctrl+I)" aria-pressed="false"><span class="letter i" data-marble-id="__ID__">I</span></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="underline" title="Underline (Ctrl+U)" aria-pressed="false"><span class="letter u" data-marble-id="__ID__">U</span></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="strike" title="Strikethrough" aria-pressed="false"><span class="letter s" data-marble-id="__ID__">S</span></button>
+  <button class="tool paint" data-marble-id="__ID__" data-pick="colour" title="Text colour" aria-haspopup="menu" aria-expanded="false">
     <span class="letter" data-marble-id="__ID__">A</span>
     <i class="swatch" id="now-fg" data-marble-transient></i>
   </button>
   <i class="sep" data-marble-id="__ID__"></i>
-  <button class="tool aligner" data-marble-id="__ID__" data-pick="align" title="Align">
+  <button class="tool aligner" data-marble-id="__ID__" data-pick="align" title="Align" aria-haspopup="menu" aria-expanded="false">
     <svg class="ico g-left" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-left"/></svg>
     <svg class="ico g-center" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-center"/></svg>
     <svg class="ico g-right" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-right"/></svg>
     <svg class="ico g-justify" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-justify"/></svg>
   </button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="bullet" title="Bulleted list"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-bullet"/></svg></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="number" title="Numbered list"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-number"/></svg></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="bullet" title="Bulleted list" aria-pressed="false"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-bullet"/></svg></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="number" title="Numbered list" aria-pressed="false"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-number"/></svg></button>
   <button class="tool" data-marble-id="__ID__" data-cmd="outdent" title="Less indent (Shift+Tab)"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-outdent"/></svg></button>
   <button class="tool" data-marble-id="__ID__" data-cmd="indent" title="More indent (Tab)"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-indent"/></svg></button>
   <button class="tool" data-marble-id="__ID__" data-cmd="clear" title="Clear formatting (Ctrl+\)"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-clear"/></svg></button>
   <i class="spring" data-marble-id="__ID__"></i>
-  <button class="tool" data-marble-id="__ID__" data-cmd="fonts" title="Fonts"><span class="letter" data-marble-id="__ID__">Aa</span></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="fonts" title="Fonts" aria-pressed="false"><span class="letter" data-marble-id="__ID__">Aa</span></button>
+  <button class="tool more" data-marble-id="__ID__" data-thumb data-cmd="more" title="More tools" aria-label="More tools" aria-expanded="false"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-more"/></svg></button>
 </div>
 
 <div class="work" data-marble-id="__ID__">
 
-  <aside class="outline" data-marble-transient>
+  <aside class="outline" data-marble-transient aria-label="Outline">
     <h2>Outline</h2>
     <ol id="outline-list"></ol>
   </aside>
@@ -483,8 +760,9 @@ __ICON__
 <p class="subtitle" data-marble-id="__ID__" data-marble-rich>Notes that are also the file they are kept in</p>
 <p data-marble-id="__ID__" data-marble-rich>There is no save button, because what you are reading is not a copy of these notes — it <i>is</i> the notes. Type into it and the bytes on disk change with you.</p>
 <h2 data-marble-id="__ID__" data-marble-rich>Writing</h2>
-<p data-marble-id="__ID__" data-marble-rich>Enter starts a new paragraph, splitting this one where the caret is. Backspace at the beginning joins it to the one above. The arrow keys walk from paragraph to paragraph the way they walk from line to line, and Ctrl+Shift+Up or Down carries a paragraph with them.</p>
-<p data-marble-id="__ID__" data-marble-rich>Select a few words and the toolbar acts on <b>exactly those words</b> — weight, slant, colour, face and size are written around the characters, so the file holds <i>this</i> and not a note about it. Select nothing and the same buttons act on the whole paragraph.</p>
+<p data-marble-id="__ID__" data-marble-rich>The page is one field rather than a column of boxes, which is what makes it behave like a page. Drag across a heading and the paragraphs under it and the selection follows you; <b>Ctrl+A</b> takes the whole document rather than whichever paragraph you happen to be standing in. Enter starts a new one, splitting this one where the caret is, and Backspace at the beginning joins it to the one above.</p>
+<p data-marble-id="__ID__" data-marble-rich>Select a few words and the toolbar acts on <b>exactly those words</b> — weight, slant, colour, face and size are written around the characters, so the file holds <i>this</i> and not a note about it. Select nothing and the same buttons act on the whole paragraph; select several and they act on all of them.</p>
+<p data-marble-id="__ID__" data-marble-rich>Rest the pointer beside a paragraph and a bar appears in the margin. Drag it and the paragraph goes where you put it — several of them, if a selection is what you took hold of. Ctrl+Shift+Up or Down does the same without leaving the keyboard.</p>
 <h3 data-marble-id="__ID__" data-marble-rich>Two kinds of property</h3>
 <p data-marble-id="__ID__" data-marble-rich data-list="bullet">The paragraph's own — its style, its alignment, whether it is a list item, how far it is indented — is one attribute on the block, so each change is one edit.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="bullet">The characters' own — <b>bold</b>, <i>italic</i>, <u>underline</u>, <s>struck through</s> — is inline markup, the way you would have written it by hand.</p>
@@ -507,23 +785,21 @@ __ICON__
   <div class="two" data-marble-id="__ID__">
     <div class="col" data-marble-id="__ID__">
       <span class="lbl" data-marble-id="__ID__" data-marble-editable>Interface</span>
-      <button data-marble-id="__ID__" data-set-ui="avenir">Avenir Next</button>
       <button data-marble-id="__ID__" data-set-ui="system">System</button>
       <button data-marble-id="__ID__" data-set-ui="grotesk">Helvetica Neue</button>
       <button data-marble-id="__ID__" data-set-ui="optima">Optima</button>
       <button data-marble-id="__ID__" data-set-ui="garamond">Cormorant</button>
       <button data-marble-id="__ID__" data-set-ui="charter">Charter</button>
-      <button data-marble-id="__ID__" data-set-ui="mono">JetBrains Mono</button>
+      <button data-marble-id="__ID__" data-set-ui="mono">Mono</button>
     </div>
     <div class="col" data-marble-id="__ID__">
       <span class="lbl" data-marble-id="__ID__" data-marble-editable>Document</span>
-      <button data-marble-id="__ID__" data-set-doc="avenir">Avenir Next</button>
       <button data-marble-id="__ID__" data-set-doc="system">System</button>
       <button data-marble-id="__ID__" data-set-doc="grotesk">Helvetica Neue</button>
       <button data-marble-id="__ID__" data-set-doc="optima">Optima</button>
       <button data-marble-id="__ID__" data-set-doc="garamond">Cormorant</button>
       <button data-marble-id="__ID__" data-set-doc="charter">Charter</button>
-      <button data-marble-id="__ID__" data-set-doc="mono">JetBrains Mono</button>
+      <button data-marble-id="__ID__" data-set-doc="mono">Mono</button>
     </div>
   </div>
 </aside>
@@ -534,20 +810,38 @@ __ICON__
 <script>
   // The editor's own behaviour.
   //
-  // Everything below is one of two things. A command changes the notes, and
-  // every one of them does the same two things in the same order: it moves the
-  // page, and it writes the same change down as an op, so the file and the
-  // screen never get to disagree. A derivation reads the notes and draws
-  // something transient from them — the outline, the word count, the labels and
-  // the lit buttons on the toolbar — and files nothing at all, because none of
-  // it is a fact the document keeps.
+  // The flow is ONE editing host, not a column of them. That is the whole
+  // difference between a page of text and a stack of boxes: Select All takes
+  // the document rather than the paragraph, a drag highlights across
+  // paragraphs, Backspace at a seam joins two of them, and the caret walks from
+  // one to the next because it never left the field it was in.
+  //
+  // What that costs is that the browser, not this file, decides what the markup
+  // looks like after a keystroke — it will split a paragraph, merge two, and
+  // paste a stylesheet if you let it. So nothing here trusts the DOM it gets
+  // back. Every change, whether the browser made it or a command below did,
+  // goes through the same three steps:
+  //
+  //   1. the page moves
+  //   2. normalise() puts the flow back into this document's vocabulary —
+  //      blocks it knows, one fresh id each, only the inline marks it can file
+  //   3. file() reads the flow against `shadow`, the last thing written down,
+  //      and the difference between the two *is* the ops
+  //
+  // So there is exactly one way a change reaches the file, and no command can
+  // move the screen without writing itself down: they are not two halves that
+  // have to agree, they are one step.
   //
   // The one affordance this document invents is data-marble-rich. The shared
   // `editable` is a setText affordance: it holds plain text and its whole
   // contents are replaced on every keystroke, which is right for a name in the
   // chrome and fatal to a <b> in the middle of a sentence. A rich block is
-  // edited with setInner instead, so the inline markup survives, and it says so
+  // filed with setInner instead, so the inline markup survives, and it says so
   // in its own attribute rather than pretending to be the other thing.
+  //
+  // A derivation — the outline, the word count, the lit buttons on the toolbar
+  // — reads the flow and files nothing at all, because none of it is a fact the
+  // document keeps.
   (() => {
     const begin = (marble) => {
       const $ = (sel) => document.querySelector(sel);
@@ -560,9 +854,27 @@ __ICON__
       const widget = $('#fonts');
       if (!flow) return;
 
-      // All four belong to the page. An open menu is not a fact about the
-      // notes, and neither is a greyed-out undo button.
-      marble.pageOnly('contenteditable', 'spellcheck', 'data-open', 'disabled');
+      const ID = 'data-marble-id';
+      const RICH = 'data-marble-rich';
+
+      // All of these belong to the page. An open menu is not a fact about the
+      // notes, neither is a greyed-out undo button, and neither is the field
+      // being typeable — the file is a document, not a session. The last four
+      // are the same rule for what a screen reader and the Tab key read: which
+      // tool is lit, which menu is open, whether the narrow toolbar is showing
+      // the rest of itself, and which button holds its one tab stop. Every one
+      // is derived from something else here, and a derivation is not a fact.
+      marble.pageOnly(
+        'contenteditable', 'spellcheck', 'autocapitalize', 'autocorrect', 'data-open', 'disabled',
+        'aria-pressed', 'aria-expanded', 'data-tools', 'tabindex',
+      );
+
+      flow.setAttribute('contenteditable', 'true');
+      flow.setAttribute('spellcheck', 'true');
+      // A phone keyboard asked for prose: a capital to start each sentence,
+      // and its corrections on.
+      flow.setAttribute('autocapitalize', 'sentences');
+      flow.setAttribute('autocorrect', 'on');
 
       // ------------------------------------------------------------ the styles
 
@@ -587,21 +899,33 @@ __ICON__
       }
 
       const FACES = [
-        ['avenir', 'Avenir Next'], ['system', 'System'], ['grotesk', 'Helvetica Neue'],
-        ['optima', 'Optima'], ['garamond', 'Cormorant'], ['charter', 'Charter'],
-        ['mono', 'JetBrains Mono'],
+        ['system', 'System'], ['grotesk', 'Helvetica Neue'], ['optima', 'Optima'],
+        ['garamond', 'Cormorant'], ['charter', 'Charter'], ['mono', 'Mono'],
       ];
       const ALIGN = [['left', 'Left'], ['center', 'Centre'], ['right', 'Right'], ['justify', 'Justify']];
+      // The ink a word can be written in: the page's own three greys and its
+      // accent, then danger and caution, then two the system does not name and
+      // a page of notes still wants.
       const INKS = ['', '#111111', '#5a5a5a', '#8a8a8a', '#738698',
-                    '#9bb6cf', '#b4544f', '#8a6d3b', '#5f7a52', '#7a5f7e'];
+                    '#9bb6cf', '#b4533e', '#a07a2c', '#5f7a52', '#7a5f7e'];
 
-      const isText = (el) => Boolean(el) && el.parentElement === flow && el.hasAttribute('data-marble-rich');
-      const firstBlock = () => [...flow.children].find(isText) ?? null;
+      // --------------------------------------------------------- the blocks
 
-      // The block the toolbar is talking about. It survives a click on the
-      // toolbar itself, which is why none of those buttons take focus.
-      let here = null;
-      const target = () => (isText(here) && here.isConnected ? here : (here = firstBlock()));
+      // The block vocabulary. A paragraph's style is its tag, so this list is
+      // also the list of tags the file is allowed to hold at the top of the
+      // flow; anything else the browser leaves there is turned into one.
+      const BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'HR']);
+
+      const blocks = () => [...flow.children];
+      const at = (el) => blocks().indexOf(el);
+      const isText = (el) => Boolean(el) && el.parentElement === flow && el.hasAttribute(RICH);
+
+      function blockOf(node) {
+        let el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        if (el === flow) return null;
+        while (el && el.parentElement !== flow) el = el.parentElement;
+        return isText(el) ? el : null;
+      }
 
       // ------------------------------------------------- the inline vocabulary
       //
@@ -644,6 +968,14 @@ __ICON__
             continue;
           }
 
+          // A mark inside the same mark says nothing twice, and wrapping a run
+          // that was already partly marked is the ordinary way to make one.
+          if (tag !== 'BR' && tag !== 'SPAN' && node.parentElement?.closest(tag)) {
+            node.replaceWith(...node.childNodes);
+            changed = true;
+            continue;
+          }
+
           for (const name of [...node.getAttributeNames()]) {
             if (name === 'style' && tag === 'SPAN') continue;
             node.removeAttribute(name);
@@ -668,61 +1000,414 @@ __ICON__
 
       // ---------------------------------------------------------- the caret
       //
-      // Offsets are counted in characters across the block's text nodes, so a
-      // caret survives the inline markup moving around underneath it.
+      // Offsets are counted in characters from the start of a block, and a
+      // block is counted by its place in the flow, so a mark survives both the
+      // inline markup moving around underneath it and the block being replaced
+      // by one with a different tag.
 
       const lineOf = (el) => {
         const cs = getComputedStyle(el);
         return parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3 || 16;
       };
 
-      function caretAt(el) {
-        const sel = getSelection();
-        if (!sel || !sel.rangeCount) return null;
-        const range = sel.getRangeAt(0);
-        if (!el.contains(range.startContainer)) return null;
-        const before = range.cloneRange();
+      function spot(node, offset) {
+        if (node === flow) {
+          const el = flow.children[Math.min(offset, Math.max(0, flow.children.length - 1))];
+          return el ? { at: at(el), offset: 0 } : null;
+        }
+        const el = blockOf(node);
+        if (!el) return null;
+        const before = document.createRange();
         before.selectNodeContents(el);
-        before.setEnd(range.startContainer, range.startOffset);
-        return before.toString().length;
+        try {
+          before.setEnd(node, offset);
+        } catch {
+          return null;
+        }
+        return { at: at(el), offset: before.toString().length };
       }
 
-      function place(el, at) {
-        el.focus();
+      function markRange() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return null;
+        const range = sel.getRangeAt(0);
+        const a = spot(range.startContainer, range.startOffset);
+        const b = sel.isCollapsed ? a : spot(range.endContainer, range.endOffset);
+        return a && b ? { a, b } : null;
+      }
+
+      function point(el, offset) {
         const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
         let seen = 0;
-        let node = null;
-        let into = 0;
         let last = null;
+        let node = null;
         while ((node = walk.nextNode())) {
-          last = node;
-          if (seen + node.length >= at) { into = at - seen; break; }
+          if (seen + node.length >= offset) return { node, offset: Math.max(0, offset - seen) };
           seen += node.length;
-          node = null;
+          last = node;
         }
+        return last ? { node: last, offset: last.length } : { node: el, offset: 0 };
+      }
+
+      const blockAt = (index) => flow.children[Math.max(0, Math.min(index, flow.children.length - 1))] ?? null;
+
+      function putRange(mark) {
+        if (!mark) return;
+        const head = blockAt(mark.a.at);
+        const tail = blockAt(mark.b.at);
+        if (!head || !tail) return;
+        const a = point(head, mark.a.offset);
+        const b = point(tail, mark.b.offset);
         const range = document.createRange();
-        if (node) range.setStart(node, Math.max(0, Math.min(into, node.length)));
-        else if (last) range.setStart(last, last.length);
-        else range.selectNodeContents(el);
-        range.collapse(true);
+        range.setStart(a.node, a.offset);
+        try {
+          range.setEnd(b.node, b.offset);
+        } catch {
+          range.collapse(true);
+        }
         const sel = getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
-        here = el;
+        flow.focus({ preventScroll: true });
       }
 
-      const loose = () => {
-        const sel = getSelection();
-        return !sel || !sel.isCollapsed;
+      const place = (el, offset) => {
+        const index = at(el);
+        if (index < 0) return;
+        putRange({ a: { at: index, offset }, b: { at: index, offset } });
       };
 
-      const inBlock = (el) => {
-        const sel = getSelection();
-        return Boolean(sel && sel.rangeCount && el && el.contains(sel.anchorNode));
+      const selectAll = () => {
+        const all = blocks();
+        if (!all.length) return;
+        const last = all[all.length - 1];
+        putRange({ a: { at: 0, offset: 0 }, b: { at: all.length - 1, offset: marble.text(last).length } });
       };
 
-      // ------------------------------------------------------ writing it down
+      // The part of a range that lies inside one block, as a range of its own.
+      function bite(el, range) {
+        const part = range.cloneRange();
+        const whole = document.createRange();
+        whole.selectNodeContents(el);
+        if (part.compareBoundaryPoints(Range.START_TO_START, whole) < 0) {
+          part.setStart(whole.startContainer, whole.startOffset);
+        }
+        if (part.compareBoundaryPoints(Range.END_TO_END, whole) > 0) {
+          part.setEnd(whole.endContainer, whole.endOffset);
+        }
+        return part;
+      }
 
+      function rangeIn(el, from, to) {
+        const a = point(el, from);
+        const b = point(el, to);
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        try {
+          range.setEnd(b.node, b.offset);
+        } catch {
+          range.setEnd(el, el.childNodes.length);
+        }
+        return range;
+      }
+
+      // The blocks a command is about: everything the selection touches, or the
+      // one the caret sits in, or — with the focus somewhere else entirely —
+      // the last one it was in.
+      let here = null;
+
+      function chosen() {
+        const all = blocks().filter(isText);
+        const fallback = () => (isText(here) && here.isConnected ? [here] : all.slice(0, 1));
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return fallback();
+        const range = sel.getRangeAt(0);
+        if (sel.isCollapsed) {
+          const one = blockOf(range.startContainer);
+          return one ? [one] : fallback();
+        }
+        let hit = all.filter((el) => range.intersectsNode(el));
+        // A selection that stops at the very top of a block has not reached
+        // into it, whatever intersectsNode says about the boundary.
+        const empty = (el) => marble.text(el).length > 0 && bite(el, range).toString().length === 0;
+        if (hit.length > 1 && empty(hit[0])) hit = hit.slice(1);
+        if (hit.length > 1 && empty(hit[hit.length - 1])) hit = hit.slice(0, -1);
+        return hit.length ? hit : fallback();
+      }
+
+      // What the caret is sitting in, which is what the toolbar reports.
+      function atCaret() {
+        const sel = getSelection();
+        const node = sel?.anchorNode;
+        const el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        return el && flow.contains(el) && el !== flow ? el : chosen()[0];
+      }
+
+      function spread() {
+        const el = chosen()[0];
+        if (!el) return false;
+        const sel = getSelection();
+        if (sel && sel.rangeCount && !sel.isCollapsed && flow.contains(sel.anchorNode)) return true;
+        const all = document.createRange();
+        all.selectNodeContents(el);
+        sel.removeAllRanges();
+        sel.addRange(all);
+        flow.focus({ preventScroll: true });
+        return true;
+      }
+
+      // --------------------------------------------------------- making blocks
+
+      // A new block is shaped from an existing one, so the paragraph's own
+      // properties carry forward the way they do in any editor.
+      function shape(from, key, inner) {
+        const style = styleNamed(key);
+        const el = document.createElement(style.tag);
+        if (from) for (const a of marble.clone(from).attributes) el.setAttribute(a.name, a.value);
+        el.removeAttribute('class');
+        if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+        if (style.cls) el.setAttribute('class', style.cls);
+        el.setAttribute(RICH, '');
+        el.setAttribute(ID, marble.newId());
+        el.innerHTML = '';
+        if (typeof inner === 'string') el.innerHTML = inner;
+        else if (inner) el.append(inner);
+        tidy(el);
+        return el;
+      }
+
+      // ------------------------------------------------------------- normalise
+      //
+      // The browser's idea of what it just did, turned back into this
+      // document's. Everything it can leave behind is answered here rather than
+      // guarded against upstream, because there is no upstream: a paste, a
+      // drag, a native Enter and an autocorrect all arrive as "the DOM is
+      // different now".
+
+      function normalise() {
+        let changed = false;
+        let loose = [];
+
+        const gather = () => {
+          if (!loose.length) return;
+          const p = document.createElement('p');
+          p.setAttribute(RICH, '');
+          p.setAttribute(ID, marble.newId());
+          loose[0].replaceWith(p);
+          p.append(...loose);
+          loose = [];
+          changed = true;
+        };
+
+        for (const node of [...flow.childNodes]) {
+          if (node.nodeType === Node.ELEMENT_NODE && BLOCKS.has(node.tagName)) {
+            gather();
+            continue;
+          }
+          // A block the vocabulary does not have — a <div> from a paste, a
+          // <blockquote> from a drag — keeps its words and loses its tag.
+          if (node.nodeType === Node.ELEMENT_NODE && getComputedStyle(node).display !== 'inline') {
+            gather();
+            const p = document.createElement('p');
+            p.setAttribute(RICH, '');
+            p.setAttribute(ID, marble.newId());
+            p.append(...node.childNodes);
+            node.replaceWith(p);
+            changed = true;
+            continue;
+          }
+          if (node.nodeType === Node.TEXT_NODE && !node.nodeValue.trim() && !loose.length) {
+            node.remove();
+            changed = true;
+            continue;
+          }
+          loose.push(node);
+        }
+        gather();
+
+        const seen = new Set();
+        for (const el of blocks()) {
+          if (el.tagName !== 'HR' && !el.hasAttribute(RICH)) {
+            el.setAttribute(RICH, '');
+            changed = true;
+          }
+          let id = marble.id(el);
+          const was = filed.get(id);
+          // A split paragraph is the same element twice, tag and id and all,
+          // so the second one to appear is the new one and takes a new name.
+          if (!id || seen.has(id) || (was && was.tag !== el.tagName)) {
+            id = marble.newId();
+            el.setAttribute(ID, id);
+            changed = true;
+          }
+          seen.add(id);
+          if (el.tagName !== 'HR' && tidy(el)) changed = true;
+        }
+
+        if (!blocks().length) {
+          const p = document.createElement('p');
+          p.setAttribute(RICH, '');
+          p.setAttribute(ID, marble.newId());
+          flow.append(p);
+          changed = true;
+        }
+        return changed;
+      }
+
+      const tidyUp = () => {
+        const mark = markRange();
+        if (normalise()) putRange(mark);
+      };
+
+      // --------------------------------------------------------- writing it down
+      //
+      // `shadow` is what the file says the flow is, as of the last op filed.
+      // Reading the flow against it is the only place an op about the text is
+      // ever made, so a command's whole job is to leave the page right.
+
+      let shadow = [];
+      let filed = new Map();
+
+      function readFlow() {
+        const next = blocks().map((el) => ({
+          id: marble.id(el),
+          tag: el.tagName,
+          outer: marble.source.outer(el),
+        }));
+        filed = new Map(next.map((b) => [b.id, b]));
+        return next;
+      }
+
+      const parse = (html) => {
+        const slot = document.createElement('template');
+        slot.innerHTML = html;
+        return slot.content.firstElementChild;
+      };
+
+      function changesTo(was, now) {
+        const ops = [];
+        const a = parse(was.outer);
+        const b = parse(now.outer);
+        if (!a || !b) return ops;
+        const names = new Set([...a.getAttributeNames(), ...b.getAttributeNames()]);
+        for (const name of names) {
+          if (name === ID) continue;
+          const value = b.getAttribute(name);
+          if (a.getAttribute(name) === value) continue;
+          ops.push({ type: 'setAttr', id: now.id, name, value });
+        }
+        if (a.innerHTML !== b.innerHTML) ops.push({ type: 'setInner', id: now.id, html: b.innerHTML });
+        return ops;
+      }
+
+      // The longest run of blocks that are already in the right order relative
+      // to one another. Everything outside it is what actually moved, which is
+      // the difference between "you dragged one paragraph up" and "every
+      // paragraph below it also changed place".
+      function settled(places) {
+        const ends = [];
+        const back = new Array(places.length).fill(-1);
+        for (let i = 0; i < places.length; i++) {
+          if (places[i] < 0) continue;
+          let lo = 0;
+          let hi = ends.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (places[ends[mid]] < places[i]) lo = mid + 1;
+            else hi = mid;
+          }
+          back[i] = lo > 0 ? ends[lo - 1] : -1;
+          ends[lo] = i;
+        }
+        const run = [];
+        let at = ends.length ? ends[ends.length - 1] : -1;
+        while (at >= 0) {
+          run.push(at);
+          at = back[at];
+        }
+        return new Set(run);
+      }
+
+      // The ops that carry one list of blocks to the other. Walked from the
+      // end, so every insert and every move can name the block that is already
+      // in its right place behind it.
+      function diff(prev, next) {
+        const parentId = marble.id(flow);
+        const was = new Map(prev.map((b) => [b.id, b]));
+        const now = new Set(next.map((b) => b.id));
+        const order = prev.filter((b) => now.has(b.id)).map((b) => b.id);
+        const places = next.map((b) => order.indexOf(b.id));
+        const stays = settled(places);
+        const ops = [];
+
+        for (const b of prev) if (!now.has(b.id)) ops.push({ type: 'remove', id: b.id });
+
+        for (let i = next.length - 1; i >= 0; i--) {
+          const b = next[i];
+          const after = i + 1 < next.length ? next[i + 1].id : null;
+          if (places[i] < 0) {
+            ops.push({ type: 'insert', html: b.outer, parentId, beforeId: after });
+            continue;
+          }
+          const older = was.get(b.id);
+          if (older.outer !== b.outer) ops.push(...changesTo(older, b));
+          if (!stays.has(i)) ops.push({ type: 'move', id: b.id, parentId, beforeId: after });
+        }
+        return ops;
+      }
+
+      // Typing files an op immediately, so the file is never behind the screen.
+      // Undo is coarser than that on purpose: one step per burst of typing
+      // rather than one per character. The burst opens on the first keystroke
+      // and closes when typing stops, when focus leaves, before any other
+      // command, and before Ctrl+Z — so there is never one in flight that undo
+      // does not know about.
+      let base = null;
+      let idle = null;
+
+      function settle() {
+        clearTimeout(idle);
+        const from = base;
+        base = null;
+        if (!from) return;
+        const redo = diff(from, shadow);
+        const undo = diff(shadow, from);
+        if (redo.length && undo.length) marble.record({ redo, undo });
+        marble.flush();
+      }
+
+      function file(burst) {
+        const from = shadow;
+        const next = readFlow();
+        const ops = diff(from, next);
+        if (!ops.length) return;
+        shadow = next;
+        for (const op of ops) marble.op(op, { immediate: !burst });
+        if (burst) {
+          base = base ?? from;
+          clearTimeout(idle);
+          idle = setTimeout(settle, 700);
+        } else {
+          const undo = diff(next, from);
+          if (undo.length) marble.record({ redo: ops, undo });
+        }
+        derive();
+      }
+
+      // A change made on purpose rather than one the browser made because a key
+      // was pressed: the burst is closed first, so it is its own step of undo.
+      function change(run) {
+        settle();
+        const mark = run();
+        tidyUp();
+        file(false);
+        if (mark) putRange(mark);
+        sync();
+      }
+
+      // An attribute on something that is not in the flow — the page, the font
+      // card, the body. Those are single facts, not text, and they are filed
+      // one at a time.
       function attr(el, name, value) {
         const id = el && marble.id(el);
         if (!id) return;
@@ -753,352 +1438,223 @@ __ICON__
         return kept.length ? kept.join('; ') : null;
       }
 
-      // ------------------------------------------------------- typing, filed
-      //
-      // A keystroke files a setInner immediately, so the file is never behind
-      // the screen. Undo is coarser than that on purpose: one step per burst of
-      // typing rather than one per character. The carrier only knows how to
-      // coalesce setText, so the grouping is kept here — opened on the first
-      // keystroke, closed when typing stops, when focus leaves, before any
-      // other command, and before Ctrl+Z, so there is never a burst in flight
-      // that undo does not know about.
-
-      let pending = null;
-      let held = null;
-      let idle = null;
-
-      function commit() {
-        clearTimeout(idle);
-        const open = pending;
-        pending = null;
-        if (!open) return;
-        const { el, prior } = open;
-        const id = el.isConnected && marble.id(el);
-        if (!id) return;
-        const html = marble.source.inner(el);
-        if (html === prior) return;
-        marble.record({
-          redo: [{ type: 'setInner', id, html }],
-          undo: [{ type: 'setInner', id, html: prior }],
-        });
-      }
-
-      function typed(el) {
-        const id = marble.id(el);
-        if (!id) return;
-        if (!pending || pending.el !== el) {
-          commit();
-          pending = { el, prior: held ?? marble.source.inner(el) };
-        }
-        const html = marble.source.inner(el);
-        held = html;
-        marble.op({ type: 'setInner', id, html });
-        clearTimeout(idle);
-        idle = setTimeout(commit, 700);
-      }
-
-      // A change this document makes on purpose, rather than one the browser
-      // made because a key was pressed: filed as its own step, against the
-      // markup as it was before.
-      function fileInner(el, prior) {
-        commit();
-        const id = marble.id(el);
-        const html = marble.source.inner(el);
-        held = html;
-        if (!id || html === prior) return;
-        marble.record({
-          redo: [{ type: 'setInner', id, html }],
-          undo: [{ type: 'setInner', id, html: prior }],
-        });
-        marble.op({ type: 'setInner', id, html }, { immediate: true });
-      }
-
-      // ---------------------------------------------------- the rich affordance
-
-      const wired = new WeakSet();
-
-      function wireRich(root) {
-        const all = [
-          ...(root.matches?.('[data-marble-rich]') ? [root] : []),
-          ...root.querySelectorAll('[data-marble-rich]'),
-        ];
-        for (const el of all) {
-          if (wired.has(el)) continue;
-          wired.add(el);
-          el.setAttribute('contenteditable', 'true');
-          el.spellcheck = false;
-
-          el.addEventListener('focus', () => {
-            held = marble.source.inner(el);
-          });
-          el.addEventListener('input', () => {
-            if (tidy(el)) place(el, caretAt(el) ?? 0);
-            typed(el);
-            derive();
-            sync();
-          });
-          el.addEventListener('blur', () => {
-            commit();
-            held = null;
-            marble.flush();
-          });
-          // A contenteditable will take whole documents if you let it. Plain
-          // text is what a note wants anyway, and it is the only paste that
-          // cannot put something in the file that nothing here can edit.
-          el.addEventListener('paste', (event) => {
-            event.preventDefault();
-            const text = event.clipboardData?.getData('text/plain') ?? '';
-            document.execCommand('insertText', false, text);
-          });
-        }
-      }
-
-      // A new block is shaped from an existing one, so the paragraph's own
-      // properties carry forward the way they do in any editor.
-      function shape(from, key, html) {
-        const style = styleNamed(key);
-        const el = document.createElement(style.tag);
-        if (from) for (const a of marble.clone(from).attributes) el.setAttribute(a.name, a.value);
-        el.removeAttribute('class');
-        if (!styleOn(el)) el.removeAttribute('style');
-        if (style.cls) el.setAttribute('class', style.cls);
-        el.setAttribute('data-marble-rich', '');
-        el.setAttribute('data-marble-id', marble.newId());
-        el.innerHTML = '';
-        if (typeof html === 'string') el.innerHTML = html;
-        else if (html) el.append(html);
-        tidy(el);
-        return el;
-      }
-
-      const before = (el) => (el?.nextElementSibling ? marble.id(el.nextElementSibling) : null);
-
       // ------------------------------------------------------- block commands
 
-      function restyle(el, key) {
-        if (!isText(el) || styleOf(el) === key) return el;
-        commit();
-        const parentId = marble.id(flow);
-        const oldId = marble.id(el);
-        const oldHtml = marble.source.outer(el);
-        const at = caretAt(el) ?? 0;
-
-        const made = shape(el, key, marble.source.inner(el));
-        const id = marble.id(made);
-        const insert = { type: 'insert', html: marble.source.outer(made), parentId, beforeId: oldId };
-        const remove = { type: 'remove', id: oldId };
-        marble.apply(insert);
-        marble.apply(remove);
-        marble.record({
-          redo: [insert, remove],
-          undo: [{ type: 'insert', html: oldHtml, parentId, beforeId: id }, { type: 'remove', id }],
+      const restyle = (key) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            if (styleOf(el) === key) continue;
+            el.replaceWith(shape(el, key, marble.source.inner(el)));
+          }
+          return mark;
         });
-        marble.op(insert);
-        marble.op(remove, { immediate: true });
-
-        const node = marble.byId(id);
-        if (node) place(node, at);
-        return node;
-      }
-
-      // Enter. The paragraph is cut at the caret and everything after it —
-      // markup included — becomes the next one.
-      function split(el) {
-        commit();
-        const sel = getSelection();
-        if (!sel || !sel.rangeCount) return;
-        const prior = marble.source.inner(el);
-
-        // Nothing in it and it is a list item: Enter leaves the list rather
-        // than making another empty one.
-        if (!marble.text(el) && el.hasAttribute('data-list')) return attr(el, 'data-list', null);
-
-        const tail = sel.getRangeAt(0).cloneRange();
-        tail.setEnd(el, el.childNodes.length);
-        const carried = tail.extractContents();
-
-        const parentId = marble.id(flow);
-        const id = marble.id(el);
-        const made = shape(el, 'body', carried);
-        const newId = marble.id(made);
-        tidy(el);
-        const cut = { type: 'setInner', id, html: marble.source.inner(el) };
-        const insert = { type: 'insert', html: marble.source.outer(made), parentId, beforeId: before(el) };
-        marble.apply(insert);
-        marble.record({
-          redo: [cut, insert],
-          undo: [{ type: 'remove', id: newId }, { type: 'setInner', id, html: prior }],
-        });
-        marble.op(cut);
-        marble.op(insert, { immediate: true });
-
-        const node = marble.byId(newId);
-        if (node) place(node, 0);
-      }
-
-      // Backspace at the start, or Delete at the end: two paragraphs become one.
-      function join(head, tail) {
-        commit();
-        const parentId = marble.id(flow);
-        const kept = marble.source.inner(head);
-        const at = marble.text(head).length;
-        const tailHtml = marble.source.outer(tail);
-        const beforeId = before(tail);
-
-        head.append(...tail.childNodes);
-        tidy(head);
-        const merge = { type: 'setInner', id: marble.id(head), html: marble.source.inner(head) };
-        const remove = { type: 'remove', id: marble.id(tail) };
-        marble.apply(remove);
-        marble.record({
-          redo: [merge, remove],
-          undo: [
-            { type: 'insert', html: tailHtml, parentId, beforeId },
-            { type: 'setInner', id: marble.id(head), html: kept },
-          ],
-        });
-        marble.op(merge);
-        marble.op(remove, { immediate: true });
-        place(head, at);
-      }
-
-      function drop(el) {
-        commit();
-        const op = { type: 'remove', id: marble.id(el) };
-        const back = marble.invert(op);
-        el.remove();
-        if (back) marble.record({ redo: [op], undo: [back] });
-        marble.op(op, { immediate: true });
-      }
-
-      function follow(el, made) {
-        commit();
-        const op = {
-          type: 'insert',
-          html: marble.source.outer(made),
-          parentId: marble.id(flow),
-          beforeId: before(el),
-        };
-        marble.apply(op);
-        marble.record({ redo: [op], undo: [{ type: 'remove', id: marble.id(made) }] });
-        marble.op(op, { immediate: true });
-        return marble.byId(marble.id(made));
-      }
-
-      function shift(el, dir) {
-        commit();
-        const kin = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
-        if (!kin) return;
-        const parentId = marble.id(flow);
-        const id = marble.id(el);
-        const was = before(el);
-        const beforeId = dir < 0 ? marble.id(kin) : before(kin);
-        const op = { type: 'move', id, parentId, beforeId };
-        marble.apply(op);
-        marble.record({ redo: [op], undo: [{ type: 'move', id, parentId, beforeId: was }] });
-        marble.op(op, { immediate: true });
-        el.focus();
-      }
 
       const alignOf = (el) => el?.getAttribute('data-align') ?? 'left';
       const listOf = (el) => el?.getAttribute('data-list') ?? null;
 
-      const listAs = (kind) => {
-        const el = target();
-        attr(el, 'data-list', listOf(el) === kind ? null : kind);
-      };
+      const setOn = (name, value) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            if (value === null) el.removeAttribute(name);
+            else el.setAttribute(name, value);
+          }
+          return mark;
+        });
 
-      function indent(dir) {
-        const el = target();
-        const now = Number(el?.getAttribute('data-indent') ?? 0);
-        const next = Math.max(0, Math.min(5, now + dir));
-        attr(el, 'data-indent', next ? String(next) : null);
+      const listAs = (kind) => setOn('data-list', listOf(chosen()[0]) === kind ? null : kind);
+      const alignAs = (value) => setOn('data-align', value === 'left' ? null : value);
+
+      const indent = (dir) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            const now = Number(el.getAttribute('data-indent') ?? 0);
+            const next = Math.max(0, Math.min(5, now + dir));
+            if (next) el.setAttribute('data-indent', String(next));
+            else el.removeAttribute('data-indent');
+          }
+          return mark;
+        });
+
+      // Enter. The paragraph is cut at the caret and everything after it —
+      // markup included — becomes the next one.
+      function split() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+        if (!sel.isCollapsed) document.execCommand('delete');
+        const range = getSelection().getRangeAt(0);
+        const el = blockOf(range.startContainer);
+        if (!el) return;
+
+        // Nothing in it and it is a list item: Enter leaves the list rather
+        // than making another empty one.
+        if (!marble.text(el) && el.hasAttribute('data-list')) return setOn('data-list', null);
+
+        settle();
+        const tail = range.cloneRange();
+        tail.setEnd(el, el.childNodes.length);
+        const made = shape(el, 'body', tail.extractContents());
+        el.after(made);
+        tidyUp();
+        file(false);
+        place(made, 0);
+        sync();
+      }
+
+      const follow = (made) =>
+        change(() => {
+          const all = chosen();
+          const last = all[all.length - 1];
+          if (last) last.after(made);
+          else flow.append(made);
+          return null;
+        });
+
+      const drop = (els) =>
+        change(() => {
+          for (const el of els) el.remove();
+          return null;
+        });
+
+      function shift(dir) {
+        const all = chosen();
+        if (!all.length) return;
+        const edge = dir < 0 ? all[0].previousElementSibling : all[all.length - 1].nextElementSibling;
+        if (!edge) return;
+        change(() => {
+          const mark = markRange();
+          if (dir < 0) for (const el of all) edge.before(el);
+          else for (const el of [...all].reverse()) edge.after(el);
+          return mark && {
+            a: { at: mark.a.at + dir, offset: mark.a.offset },
+            b: { at: mark.b.at + dir, offset: mark.b.offset },
+          };
+        });
       }
 
       // ------------------------------------------------ character commands
       //
-      // These act on what is selected, which is the whole point of them. With
-      // nothing selected there is no pending-format machine to consult, so the
+      // These act on what is selected, which is the whole point of them, and
+      // the selection is free to run across paragraphs now. With nothing
+      // selected there is no pending-format machine to consult, so the
       // paragraph is selected instead — the reading of "bold" that needs no
       // hidden state to explain it.
 
-      function onSelection(run) {
-        const el = target();
-        if (!el) return;
+      // execCommand is the only thing in any browser that knows how to *take* a
+      // tag off a partial selection, splitting and merging the runs on both
+      // edges. It is legacy and it has no replacement, so it is kept for that —
+      // and for nothing else, least of all for deciding which way a toggle goes.
+      const MARK = { bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikeThrough' };
+      const TAG = { bold: 'b', italic: 'i', underline: 'u', strike: 's' };
+
+      // Whether what is selected is already marked, asked of the markup the
+      // file holds rather than of the weight on the screen. A heading is heavy
+      // because it is a heading; queryCommandState cannot tell that from
+      // somebody having pressed Bold, so it answered "already bold" for every
+      // heading — and pressing Bold on one took a mark off text that never had
+      // it. Nothing here reads the computed style, because the file is the
+      // only place the answer lives.
+      function marked(name, els) {
+        const tag = TAG[name];
         const sel = getSelection();
-        if (!inBlock(el) || sel.isCollapsed) {
-          el.focus();
-          const all = document.createRange();
-          all.selectNodeContents(el);
-          sel.removeAllRanges();
-          sel.addRange(all);
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return false;
+        const range = sel.isCollapsed ? null : sel.getRangeAt(0);
+        let any = false;
+        for (const el of els ?? chosen()) {
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          let node = null;
+          while ((node = walk.nextNode())) {
+            if (!node.nodeValue.trim()) continue;
+            if (range && !range.intersectsNode(node)) continue;
+            any = true;
+            if (!node.parentElement?.closest(tag)) return false;
+          }
         }
-        const prior = marble.source.inner(el);
-        run(el, getSelection());
-        tidy(el);
-        fileInner(el, prior);
-        sync();
+        return any;
       }
 
-      // execCommand is the only thing in any browser that knows how to toggle a
-      // tag across a partial selection, splitting and merging the runs on both
-      // edges. It is legacy and it has no replacement; what it writes is
-      // filtered by tidy() before it reaches the file, which is what makes it
-      // safe to lean on.
-      const MARK = { bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikeThrough' };
+      // The runs of text the selection covers, block by block, counted in
+      // characters — measured before anything is cut, because cutting the first
+      // block invalidates a range held across the rest.
+      function runs() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return [];
+        const range = sel.getRangeAt(0);
+        return chosen()
+          .map((el) => {
+            const part = bite(el, range);
+            const lead = document.createRange();
+            lead.selectNodeContents(el);
+            lead.setEnd(part.startContainer, part.startOffset);
+            const from = lead.toString().length;
+            return { el, from, to: from + part.toString().length };
+          })
+          .filter((run) => run.to > run.from);
+      }
 
       const markUp = (name) =>
-        onSelection(() => {
-          document.execCommand('styleWithCSS', false, false);
-          document.execCommand(MARK[name], false, null);
+        change(() => {
+          if (!spread()) return null;
+          const mark = markRange();
+          if (marked(name)) {
+            document.execCommand('styleWithCSS', false, false);
+            document.execCommand(MARK[name], false, null);
+          } else {
+            // Putting a mark on is the half a document can do for itself, and
+            // the half that has to be right: it writes the tag this file uses,
+            // around exactly the characters that were selected.
+            for (const { el, from, to } of runs()) {
+              const range = rangeIn(el, from, to);
+              const held = document.createElement(TAG[name]);
+              held.append(range.extractContents());
+              range.insertNode(held);
+            }
+          }
+          return mark;
         });
 
       // Colour, face and size have no toggling command worth the name, so the
-      // selection is wrapped by hand and tidy() merges what it can.
+      // selection is wrapped by hand, one block at a time, and tidy() merges
+      // what it can.
       const dressUp = (prop, value) =>
-        onSelection((el, sel) => {
-          const range = sel.getRangeAt(0);
-
-          // Dressing the very same words twice should not stack wrappers. If
-          // the selection is exactly what one span already holds, the
-          // declaration joins that span — colour and face on one run of text
-          // are one span with two declarations, not one span inside another.
-          //
-          // Found by comparing the text rather than by climbing from the
-          // range's boundaries: a browser is free to express "all of this
-          // span" either as the node itself or as the text inside it, and both
-          // spellings have to land here.
-          const host = [...el.querySelectorAll('span')].find(
-            (span) => range.intersectsNode(span) && range.toString() === span.textContent,
-          );
-          if (host) {
-            if (value) host.style.setProperty(prop, value);
-            else host.style.removeProperty(prop);
-            return;
-          }
-
-          // Otherwise take the property off whatever already carries it inside
-          // the selection, so the new value is the only one there.
-          for (const span of [...el.querySelectorAll('span')]) {
-            if (range.intersectsNode(span)) span.style.removeProperty(prop);
-          }
-          if (!value) return;
-          const span = document.createElement('span');
-          span.style.setProperty(prop, value);
-          span.append(range.extractContents());
-          range.insertNode(span);
-          sel.removeAllRanges();
-          const after = document.createRange();
-          after.selectNodeContents(span);
-          sel.addRange(after);
+        change(() => {
+          if (!spread()) return null;
+          const mark = markRange();
+          for (const { el, from, to } of runs()) dress(el, rangeIn(el, from, to), prop, value);
+          return mark;
         });
 
-      // What the caret is sitting in, which is what the toolbar reports.
-      function atCaret() {
-        const sel = getSelection();
-        const node = sel?.anchorNode;
-        const el = node?.nodeType === 3 ? node.parentElement : node;
-        return el && flow.contains(el) ? el : target();
+      function dress(el, range, prop, value) {
+        // Dressing the very same words twice should not stack wrappers. If the
+        // range is exactly what one span already holds, the declaration joins
+        // that span — colour and face on one run of text are one span with two
+        // declarations, not one span inside another.
+        //
+        // Found by comparing the text rather than by climbing from the range's
+        // boundaries: a browser is free to express "all of this span" either as
+        // the node itself or as the text inside it, and both spellings have to
+        // land here.
+        const host = [...el.querySelectorAll('span')].find(
+          (span) => range.intersectsNode(span) && range.toString() === span.textContent,
+        );
+        if (host) {
+          if (value) host.style.setProperty(prop, value);
+          else host.style.removeProperty(prop);
+          return;
+        }
+
+        // Otherwise take the property off whatever already carries it inside
+        // the range, so the new value is the only one there.
+        for (const span of [...el.querySelectorAll('span')]) {
+          if (range.intersectsNode(span)) span.style.removeProperty(prop);
+        }
+        if (!value) return;
+        const span = document.createElement('span');
+        span.style.setProperty(prop, value);
+        span.append(range.extractContents());
+        range.insertNode(span);
       }
 
       const faceOf = (el) => {
@@ -1112,44 +1668,63 @@ __ICON__
       const ptOf = (el) => Math.round(parseFloat(getComputedStyle(el ?? flow).fontSize) * 0.75 * 2) / 2;
 
       const resize = (dir) => {
-        const at = atCaret();
-        const now = ptOf(at);
-        const next = Math.max(6, Math.min(96, now + dir));
-        dressUp('font-size', next + 'pt');
+        const now = ptOf(atCaret());
+        dressUp('font-size', Math.max(6, Math.min(96, now + dir)) + 'pt');
       };
 
-      // Clear formatting is every inline mark in the paragraph and every
-      // property the paragraph itself carries, gone in one gesture and so in
+      // Clear formatting is every inline mark in the selection and every
+      // property the paragraphs themselves carry, gone in one gesture and so in
       // one step of undo.
-      function clear() {
-        const el = target();
-        const id = el && marble.id(el);
-        if (!id) return;
-        commit();
-        const prior = marble.source.inner(el);
-        const redo = [];
-        const undo = [];
+      const clear = () =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            const text = marble.text(el);
+            for (const name of ['data-align', 'data-indent', 'data-list', 'style']) el.removeAttribute(name);
+            el.textContent = text;
+            if (styleOf(el) !== 'body') el.replaceWith(shape(el, 'body', document.createTextNode(text)));
+          }
+          return mark;
+        });
 
-        el.innerHTML = '';
-        el.textContent = new DOMParser().parseFromString(prior, 'text/html').body.textContent;
-        const html = marble.source.inner(el);
-        if (html !== prior) {
-          redo.push({ type: 'setInner', id, html });
-          undo.unshift({ type: 'setInner', id, html: prior });
+      // ----------------------------------------------------------- the clipboard
+      //
+      // A contenteditable will take whole documents if you let it. Plain text
+      // is what a note wants anyway, and it is the only paste that cannot put
+      // something in the file that nothing here can edit — but plain text has
+      // paragraphs in it, and they arrive as paragraphs.
+      function pasteText(text) {
+        const lines = text.replace(/\r\n?/g, '\n').split('\n');
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+        if (!sel.isCollapsed) document.execCommand('delete');
+        if (lines.length === 1) {
+          document.execCommand('insertText', false, lines[0]);
+          return;
         }
-        for (const name of ['data-align', 'data-indent', 'data-list', 'style']) {
-          if (!el.hasAttribute(name)) continue;
-          undo.unshift({ type: 'setAttr', id, name, value: name === 'style' ? styleOn(el) : el.getAttribute(name) });
-          redo.push({ type: 'setAttr', id, name, value: null });
-          el.removeAttribute(name);
+
+        settle();
+        const range = getSelection().getRangeAt(0);
+        const el = blockOf(range.startContainer);
+        if (!el) return;
+        const tail = range.cloneRange();
+        tail.setEnd(el, el.childNodes.length);
+        const rest = shape(el, 'body', tail.extractContents());
+        range.insertNode(document.createTextNode(lines[0]));
+
+        let after = el;
+        for (const line of lines.slice(1, -1)) {
+          const made = shape(el, 'body', document.createTextNode(line));
+          after.after(made);
+          after = made;
         }
-        if (redo.length) {
-          marble.record({ redo, undo });
-          for (const op of redo) marble.op(op);
-          marble.flush();
-        }
-        held = marble.source.inner(el);
-        restyle(el, 'body');
+        const ending = lines[lines.length - 1];
+        rest.prepend(document.createTextNode(ending));
+        after.after(rest);
+
+        tidyUp();
+        file(false);
+        place(rest, ending.length);
         sync();
       }
 
@@ -1189,7 +1764,7 @@ __ICON__
           const up = () => {
             removeEventListener('pointermove', move);
             handle.classList.remove('marble-dragging');
-            if (live) settled();
+            settled(live);
           };
           addEventListener('pointermove', move);
           addEventListener('pointerup', up, { once: true });
@@ -1200,7 +1775,7 @@ __ICON__
       for (const pin of document.querySelectorAll('.ruler .pin')) {
         const edge = pin.getAttribute('data-edge');
         let was = null;
-        let at = null;
+        let to = null;
         draggable(
           pin,
           (event) => {
@@ -1211,19 +1786,19 @@ __ICON__
             // An eighth of an inch is where the ruler's own ticks are. Shift is
             // the way off the ticks, for the margin that has to sit between two.
             const step = event.shiftKey ? Math.round(raw * 100) / 100 : Math.round(raw * 8) / 8;
-            at = Math.max(0.25, Math.min(3.5, step));
-            pagebox.style.setProperty('--' + edge, at + 'in');
+            to = Math.max(0.25, Math.min(3.5, step));
+            pagebox.style.setProperty('--' + edge, to + 'in');
           },
-          () => {
-            if (at === null) return;
-            const value = withVar(was, '--' + edge, at + 'in');
+          (live) => {
+            if (!live || to === null) return;
+            const value = withVar(was, '--' + edge, to + 'in');
             const id = marble.id(pagebox);
             pagebox.setAttribute('style', value);
             const op = { type: 'setAttr', id, name: 'style', value };
             marble.record({ redo: [op], undo: [{ type: 'setAttr', id, name: 'style', value: was }] });
             marble.op(op, { immediate: true });
             was = null;
-            at = null;
+            to = null;
           },
         );
       }
@@ -1231,33 +1806,33 @@ __ICON__
       // The widget is furniture you can put where you like, and where you put
       // it is an inline style on it — one attribute, filed once, on release.
       {
-        const grip = widget.querySelector('header');
+        const handle = widget.querySelector('header');
         let was = null;
         let from = null;
-        let at = null;
+        let to = null;
         draggable(
-          grip,
+          handle,
           (event) => {
             const box = widget.getBoundingClientRect();
             if (was === null) {
               was = widget.getAttribute('style');
               from = { x: event.clientX - box.left, y: event.clientY - box.top };
             }
-            at = {
+            to = {
               x: Math.max(4, Math.min(innerWidth - box.width - 4, event.clientX - from.x)),
               y: Math.max(4, Math.min(innerHeight - box.height - 4, event.clientY - from.y)),
             };
             // Pinning left/top means letting go of right/bottom, or the card
             // would be told to be in two places at once.
-            widget.style.setProperty('--fx', at.x + 'px');
-            widget.style.setProperty('--fy', at.y + 'px');
+            widget.style.setProperty('--fx', to.x + 'px');
+            widget.style.setProperty('--fy', to.y + 'px');
             widget.style.setProperty('--fr', 'auto');
             widget.style.setProperty('--fb', 'auto');
           },
-          () => {
-            if (!at) return;
-            let value = withVar(was, '--fx', at.x + 'px');
-            value = withVar(value, '--fy', at.y + 'px');
+          (live) => {
+            if (!live || !to) return;
+            let value = withVar(was, '--fx', to.x + 'px');
+            value = withVar(value, '--fy', to.y + 'px');
             value = withVar(value, '--fr', 'auto');
             value = withVar(value, '--fb', 'auto');
             const id = marble.id(widget);
@@ -1266,10 +1841,117 @@ __ICON__
             marble.record({ redo: [op], undo: [{ type: 'setAttr', id, name: 'style', value: was }] });
             marble.op(op, { immediate: true });
             was = null;
-            at = null;
+            to = null;
           },
         );
       }
+
+      // ---------------------------------------------------- picking blocks up
+      //
+      // A paragraph is a thing you can take hold of. The handle and the seam it
+      // draws belong to the page — there is one of each, moved to whichever
+      // block the pointer is beside — so the file gains nothing from this but
+      // the move itself, filed once, on release.
+
+      const grip = document.createElement('button');
+      grip.type = 'button';
+      grip.className = 'grip';
+      grip.setAttribute('data-marble-transient', '');
+      grip.setAttribute('aria-label', 'Move this paragraph');
+      grip.title = 'Drag to move · click to select';
+
+      const seam = document.createElement('i');
+      seam.className = 'seam';
+      seam.setAttribute('data-marble-transient', '');
+      page.append(grip, seam);
+
+      let beside = null;
+      let carried = [];
+
+      function gripTo(el) {
+        beside = el;
+        if (!el) return grip.removeAttribute('data-on');
+        grip.setAttribute('data-on', '1');
+        grip.style.top = el.offsetTop + 'px';
+        grip.style.left = el.offsetLeft + 'px';
+        grip.style.height = el.offsetHeight + 'px';
+      }
+
+      const dropBefore = (y) =>
+        blocks()
+          .filter((el) => !carried.includes(el))
+          .find((el) => {
+            const box = el.getBoundingClientRect();
+            return y < box.top + box.height / 2;
+          }) ?? null;
+
+      function drawSeam(before) {
+        const box = page.getBoundingClientRect();
+        const last = blocks().filter((el) => !carried.includes(el)).pop();
+        const edge = before ?? last;
+        if (!edge) return seam.removeAttribute('data-on');
+        const rect = edge.getBoundingClientRect();
+        seam.setAttribute('data-on', '1');
+        seam.style.top = (before ? rect.top : rect.bottom) - box.top + 'px';
+        seam.style.left = edge.offsetLeft + 'px';
+        seam.style.width = edge.offsetWidth + 'px';
+      }
+
+      grip.addEventListener('pointerdown', () => {
+        const all = chosen();
+        carried = beside ? (all.length > 1 && all.includes(beside) ? all : [beside]) : [];
+      });
+
+      let landing = null;
+      draggable(
+        grip,
+        (event) => {
+          if (!carried.length) return;
+          landing = dropBefore(event.clientY);
+          drawSeam(landing);
+        },
+        (live) => {
+          seam.removeAttribute('data-on');
+          if (!live) {
+            if (beside) {
+              const range = document.createRange();
+              range.selectNodeContents(beside);
+              const sel = getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+              flow.focus({ preventScroll: true });
+              sync();
+            }
+            carried = [];
+            return;
+          }
+          const moving = carried;
+          const before = landing;
+          carried = [];
+          landing = null;
+          if (!moving.length) return;
+          change(() => {
+            for (const el of moving) {
+              if (before) before.before(el);
+              else flow.append(el);
+            }
+            return null;
+          });
+          gripTo(moving[0]);
+        },
+      );
+
+      $('.scroll').addEventListener('pointermove', (event) => {
+        if (grip.classList.contains('marble-dragging')) return;
+        if (grip.contains(event.target)) return;
+        gripTo(blocks().find((el) => {
+          const box = el.getBoundingClientRect();
+          return event.clientY >= box.top && event.clientY <= box.bottom;
+        }) ?? null);
+      });
+      $('.scroll').addEventListener('pointerleave', () => {
+        if (!grip.classList.contains('marble-dragging')) gripTo(null);
+      });
 
       // ---------------------------------------------------- menus and pickers
 
@@ -1279,12 +1961,14 @@ __ICON__
         popup.removeAttribute('data-open');
         popup.textContent = '';
         opened?.removeAttribute('data-open');
+        opened?.setAttribute('aria-expanded', 'false');
         opened = null;
       }
 
       function row(label, run, { hint, on, off } = {}) {
         const button = document.createElement('button');
         button.type = 'button';
+        button.setAttribute('role', 'menuitem');
         button.append(label);
         if (hint) {
           const span = document.createElement('span');
@@ -1298,6 +1982,11 @@ __ICON__
           shut();
           run();
           sync();
+          // Emptying the popup drops whatever was focused in it on the floor,
+          // which only happens to somebody working the menu by keyboard. The
+          // notes are where they were, so that is where the key goes back —
+          // unless the command had somewhere better for it, as Rename does.
+          if (document.activeElement === document.body) flow.focus({ preventScroll: true });
         });
         popup.append(button);
       }
@@ -1309,16 +1998,51 @@ __ICON__
         build(row);
         opened = anchor;
         anchor.setAttribute('data-open', '1');
+        anchor.setAttribute('aria-expanded', 'true');
         popup.setAttribute('data-open', '1');
         const box = anchor.getBoundingClientRect();
-        popup.style.left = Math.max(4, Math.min(box.left, innerWidth - popup.offsetWidth - 8)) + 'px';
-        popup.style.top = Math.min(box.bottom + 4, innerHeight - popup.offsetHeight - 8) + 'px';
+        // A fixed popup is placed against the layout viewport, and with a
+        // keyboard up that is not the part of the screen anybody can see. The
+        // visual viewport is, so it is what the popup is kept inside.
+        const vv = window.visualViewport;
+        const wide = vv?.width ?? innerWidth;
+        const tall = vv?.height ?? innerHeight;
+        const down = vv?.offsetTop ?? 0;
+        const across = vv?.offsetLeft ?? 0;
+        popup.style.left =
+          Math.max(across + 4, Math.min(box.left, across + wide - popup.offsetWidth - 8)) + 'px';
+        // Under its button when there is room, and over it when there is not —
+        // on a phone the toolbar stands on the keyboard, and a menu clamped
+        // up from the foot of the screen would cover the button that opened it.
+        const h = popup.offsetHeight;
+        const under = box.bottom + 4;
+        const over = box.top - h - 4;
+        popup.style.top =
+          (under + h <= down + tall - 8 ? under : over >= down + 4 ? over : Math.max(down + 4, down + tall - h - 8)) + 'px';
       }
 
       const showing = (name) => document.body.getAttribute(name) !== 'off';
       const flip = (name) => attr(document.body, name, showing(name) ? 'off' : 'on');
 
+      const back = async (forward) => {
+        settle();
+        await (forward ? marble.redo() : marble.undo());
+        shadow = readFlow();
+        derive();
+        sync();
+      };
+
       const MENUS = {
+        // A phone has room for one menu, not six. The six are still in the
+        // file and still named there once — this reads their names back off
+        // them rather than writing a second copy here, and anchors each list
+        // to the one button there is room for at that width.
+        all: (add) => {
+          for (const button of document.querySelectorAll('.menus [data-menu]:not(.all)')) {
+            const key = button.getAttribute('data-menu');
+            add(button.textContent, () => open($('.menus .all'), MENUS[key]));
+          }
+        },
         file: (add) => {
           add('Page setup…', pageSetup);
           add('Print', () => print(), { hint: 'Ctrl+P' });
@@ -1329,16 +2053,19 @@ __ICON__
           });
         },
         edit: (add) => {
-          add('Undo', () => (commit(), marble.undo()), { hint: 'Ctrl+Z', off: !marble.canUndo });
-          add('Redo', () => marble.redo(), { hint: 'Ctrl+Shift+Z', off: !marble.canRedo });
+          add('Undo', () => back(false), { hint: 'Ctrl+Z', off: !marble.canUndo });
+          add('Redo', () => back(true), { hint: 'Ctrl+Shift+Z', off: !marble.canRedo });
+          add('Select all', selectAll, { hint: 'Ctrl+A' });
+          add('Move up', () => shift(-1), { hint: 'Ctrl+Shift+↑' });
+          add('Move down', () => shift(1), { hint: 'Ctrl+Shift+↓' });
           add('Delete paragraph', () => {
-            const el = target();
-            const to = el.previousElementSibling ?? el.nextElementSibling;
+            const all = chosen();
+            const to = all[0].previousElementSibling ?? all[all.length - 1].nextElementSibling;
             if (!to) return;
-            drop(el);
+            drop(all);
             here = null;
             if (isText(to)) place(to, marble.text(to).length);
-          }, { off: [...flow.children].filter(isText).length < 2 });
+          }, { off: blocks().filter(isText).length < 2 });
         },
         view: (add) => {
           add('Outline', () => flip('data-outline'), { on: showing('data-outline') });
@@ -1348,26 +2075,26 @@ __ICON__
         insert: (add) => {
           for (const key of ['h1', 'h2', 'h3']) {
             add(styleNamed(key).name, () => {
-              const made = follow(target(), shape(target(), key, ''));
-              if (made) place(made, 0);
+              const made = shape(chosen()[0], key, '');
+              follow(made);
+              place(made, 0);
             });
           }
-          add('Bulleted list', () => listAs('bullet'), { on: listOf(target()) === 'bullet' });
-          add('Numbered list', () => listAs('number'), { on: listOf(target()) === 'number' });
+          add('Bulleted list', () => listAs('bullet'), { on: listOf(chosen()[0]) === 'bullet' });
+          add('Numbered list', () => listAs('number'), { on: listOf(chosen()[0]) === 'number' });
           add('Horizontal line', () => {
             const rule = document.createElement('hr');
-            rule.setAttribute('data-marble-id', marble.newId());
-            follow(target(), rule);
+            rule.setAttribute(ID, marble.newId());
+            follow(rule);
           });
         },
         format: (add) => {
-          add('Bold', () => markUp('bold'), { hint: 'Ctrl+B', on: state('bold') });
-          add('Italic', () => markUp('italic'), { hint: 'Ctrl+I', on: state('italic') });
-          add('Underline', () => markUp('underline'), { hint: 'Ctrl+U', on: state('underline') });
-          add('Strikethrough', () => markUp('strike'), { on: state('strike') });
+          add('Bold', () => markUp('bold'), { hint: 'Ctrl+B', on: marked('bold') });
+          add('Italic', () => markUp('italic'), { hint: 'Ctrl+I', on: marked('italic') });
+          add('Underline', () => markUp('underline'), { hint: 'Ctrl+U', on: marked('underline') });
+          add('Strikethrough', () => markUp('strike'), { on: marked('strike') });
           for (const [value, name] of ALIGN) {
-            add('Align ' + name.toLowerCase(), () => attr(target(), 'data-align', value === 'left' ? null : value),
-                { on: alignOf(target()) === value });
+            add('Align ' + name.toLowerCase(), () => alignAs(value), { on: alignOf(chosen()[0]) === value });
           }
           add('Clear formatting', clear, { hint: 'Ctrl+\\' });
         },
@@ -1379,7 +2106,7 @@ __ICON__
       const PICKS = {
         style: (add) => {
           for (const style of STYLES) {
-            add(style.name, () => restyle(target(), style.key), { on: styleOf(target()) === style.key });
+            add(style.name, () => restyle(style.key), { on: styleOf(chosen()[0]) === style.key });
           }
         },
         face: (add) => {
@@ -1391,8 +2118,7 @@ __ICON__
         },
         align: (add) => {
           for (const [value, name] of ALIGN) {
-            add(name, () => attr(target(), 'data-align', value === 'left' ? null : value),
-                { on: alignOf(target()) === value });
+            add(name, () => alignAs(value), { on: alignOf(chosen()[0]) === value });
           }
         },
         colour: () => {
@@ -1426,17 +2152,19 @@ __ICON__
         return said;
       };
 
-      const state = (name) => {
-        try {
-          return document.queryCommandState(MARK[name]);
-        } catch {
-          return false;
-        }
+      // Whether the narrow toolbar is showing the rest of itself is attention
+      // rather than content: it dies with the tab, so it is set on the page
+      // and filed nowhere. attr() above is for the other kind.
+      const moreTools = (on) => {
+        document.body.setAttribute('data-tools', on ? 'on' : 'off');
+        $('.tools .more')?.setAttribute('aria-expanded', String(on));
+        arm();
       };
 
       const CMD = {
-        undo: () => (commit(), marble.undo()),
-        redo: () => marble.redo(),
+        more: () => moreTools(document.body.getAttribute('data-tools') !== 'on'),
+        undo: () => back(false),
+        redo: () => back(true),
         bold: () => markUp('bold'),
         italic: () => markUp('italic'),
         underline: () => markUp('underline'),
@@ -1451,11 +2179,83 @@ __ICON__
         fonts: () => flip('data-fonts'),
       };
 
+      // ------------------------------------------------ reaching the chrome
+      //
+      // A toolbar is one stop on the way through a page, not thirty. Tab
+      // reaches it and leaves it; the arrow keys move inside it. That is what
+      // role="toolbar" in the markup promises, and to anybody not using a
+      // pointer it is the difference between a toolbar and a heap of buttons.
+      // The menubar works the same way, so it is these lines over both.
+      //
+      // Which button holds the tab stop is the page's, and declared page-only
+      // above: a document does not remember where somebody's focus was.
+
+      const BARS = [$('.tools'), $('.menus')];
+      const reachable = (bar) =>
+        [...bar.querySelectorAll('button')].filter((el) => el.offsetParent && !el.disabled);
+
+      function arm(active) {
+        for (const bar of BARS) {
+          const all = reachable(bar);
+          if (!all.length) continue;
+          const one = all.includes(active)
+            ? active
+            : all.find((el) => el.getAttribute('tabindex') === '0') ?? all[0];
+          for (const el of all) el.setAttribute('tabindex', el === one ? '0' : '-1');
+        }
+      }
+
+      for (const bar of BARS) {
+        bar.addEventListener('focusin', (event) => {
+          if (event.target.tagName === 'BUTTON') arm(event.target);
+        });
+        bar.addEventListener('keydown', (event) => {
+          const all = reachable(bar);
+          const from = all.indexOf(document.activeElement);
+          if (from < 0) return;
+          const step = { ArrowRight: 1, ArrowLeft: -1, Home: -all.length, End: all.length }[event.key];
+          if (step === undefined) return;
+          event.preventDefault();
+          const to = all[Math.max(0, Math.min(all.length - 1, from + step))];
+          arm(to);
+          to.focus();
+        });
+      }
+
+      // A menu that only a pointer can open is a menu half the people using
+      // this cannot open at all. Down opens one and steps into it, Up and Down
+      // walk it, and Escape closes it and hands the key back to the button
+      // that opened it.
+      addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && opened) {
+          const anchor = opened;
+          event.preventDefault();
+          shut();
+          anchor.focus();
+          return;
+        }
+        const anchor = event.target.closest?.('.menu, .tool');
+        if (anchor && !opened && event.key === 'ArrowDown') {
+          if (!anchor.hasAttribute('data-menu') && !anchor.hasAttribute('data-pick')) return;
+          event.preventDefault();
+          anchor.click();
+          popup.querySelector('button')?.focus();
+          return;
+        }
+        if (!popup.contains(event.target)) return;
+        const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+        if (step === undefined) return;
+        event.preventDefault();
+        const rows = [...popup.querySelectorAll('button')];
+        const from = rows.indexOf(document.activeElement);
+        rows[Math.max(0, Math.min(rows.length - 1, from + step))]?.focus();
+      });
+
       // Delegated rather than wired button by button, so chrome rebuilt by an
       // undo, an agent or another window is live the moment it lands.
       addEventListener('mousedown', (event) => {
         // The selection stays exactly as it was under the button acting on it.
-        if (event.target.closest('.tools, .menus, .popup, .fonts')) event.preventDefault();
+        if (event.target.closest('.tools, .menus, .popup, .fonts, .grip')) event.preventDefault();
       }, true);
 
       addEventListener('pointerdown', (event) => {
@@ -1484,31 +2284,52 @@ __ICON__
 
       // -------------------------------------------------------- typing in it
 
+      flow.addEventListener('input', () => {
+        tidyUp();
+        file(true);
+        sync();
+      });
+
+      flow.addEventListener('blur', () => {
+        settle();
+        marble.flush();
+      });
+
+      flow.addEventListener('paste', (event) => {
+        event.preventDefault();
+        pasteText(event.clipboardData?.getData('text/plain') ?? '');
+      });
+
+      // Select All with the focus anywhere but in a field of its own means the
+      // document, which is the whole reason the flow is one host.
+      addEventListener('keydown', (event) => {
+        const mod = event.metaKey || event.ctrlKey;
+        if (!mod || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') return;
+        const target = event.target;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+        if (target instanceof HTMLElement && target.isContentEditable && !flow.contains(target)) return;
+        event.preventDefault();
+        selectAll();
+      });
+
       flow.addEventListener('keydown', (event) => {
-        const el = event.target.closest?.('[data-marble-rich]');
-        if (!isText(el)) return;
-        here = el;
         const mod = event.metaKey || event.ctrlKey;
 
         // Undo is this document's to handle in here. The shared `history` part
         // steps aside for any contenteditable that is not a data-marble-editable
-        // — it assumes the browser owns undo there — and a rich block is exactly
+        // — it assumes the browser owns undo there — and the flow is exactly
         // that, so Ctrl+Z would otherwise reach the browser's own stack and
         // desync the page from the file. Close the burst, then reverse it.
         if (mod && !event.altKey && 'zy'.includes(event.key.toLowerCase())) {
           event.preventDefault();
           event.stopPropagation();
-          commit();
-          held = null;
-          const forward = event.key.toLowerCase() === 'y' || event.shiftKey;
-          if (forward) marble.redo();
-          else marble.undo();
+          back(event.key.toLowerCase() === 'y' || event.shiftKey);
           return;
         }
 
         if (event.key === 'Enter' && !event.shiftKey && !mod) {
           event.preventDefault();
-          return split(el);
+          return split();
         }
 
         // Read off event.code rather than event.key: Option rewrites the
@@ -1518,15 +2339,14 @@ __ICON__
           const digit = /^Digit([0-3])$/.exec(event.code)?.[1];
           if (!digit) return;
           event.preventDefault();
-          restyle(el, digit === '0' ? 'body' : 'h' + digit);
-          return sync();
+          return restyle(digit === '0' ? 'body' : 'h' + digit);
         }
 
         if (mod && !event.altKey) {
           const key = event.key.toLowerCase();
           if (event.shiftKey && (key === 'arrowup' || key === 'arrowdown')) {
             event.preventDefault();
-            return shift(el, key === 'arrowup' ? -1 : 1);
+            return shift(key === 'arrowup' ? -1 : 1);
           }
           if (event.shiftKey && key === 'c') {
             event.preventDefault();
@@ -1536,113 +2356,99 @@ __ICON__
           event.preventDefault();
           if (key === '\\') clear();
           else markUp(key === 'b' ? 'bold' : key === 'i' ? 'italic' : 'underline');
-          return sync();
+          return;
         }
 
         if (event.key === 'Tab') {
           event.preventDefault();
-          indent(event.shiftKey ? -1 : 1);
-          return sync();
+          return indent(event.shiftKey ? -1 : 1);
         }
 
         // Backspace at the very start peels one thing off at a time — the
-        // indent, then the list, and only then the paragraph break itself.
-        if (event.key === 'Backspace' && !loose() && caretAt(el) === 0) {
-          event.preventDefault();
+        // indent, then the list, and only then the paragraph break itself,
+        // which the browser is welcome to do because joining two paragraphs is
+        // now an ordinary edit inside one field.
+        const sel = getSelection();
+        if (event.key === 'Backspace' && sel?.isCollapsed) {
+          const el = blockOf(sel.anchorNode);
+          const mark = markRange();
+          if (!el || mark?.a.offset !== 0) return;
           if (Number(el.getAttribute('data-indent') ?? 0) > 0) {
-            indent(-1);
-            return sync();
+            event.preventDefault();
+            return indent(-1);
           }
           if (el.hasAttribute('data-list')) {
-            attr(el, 'data-list', null);
-            return sync();
-          }
-          const above = el.previousElementSibling;
-          if (!above) return;
-          return isText(above) ? join(above, el) : drop(above);
-        }
-
-        if (event.key === 'Delete' && !loose() && caretAt(el) === marble.text(el).length) {
-          const below = el.nextElementSibling;
-          if (!below) return;
-          event.preventDefault();
-          return isText(below) ? join(el, below) : drop(below);
-        }
-
-        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-          if (loose()) return;
-          const up = event.key === 'ArrowUp';
-          if (!onEdge(el, up)) return;
-          let to = up ? el.previousElementSibling : el.nextElementSibling;
-          while (to && !isText(to)) to = up ? to.previousElementSibling : to.nextElementSibling;
-          if (!to) return;
-          event.preventDefault();
-          land(to, up, caretX());
-        }
-      }, true);
-
-      // A caret leaving the top or bottom line of a paragraph leaves the
-      // paragraph, which is the only thing that makes a stack of separately
-      // editable blocks feel like one page of text.
-      function onEdge(el, up) {
-        const sel = getSelection();
-        if (!sel || !sel.rangeCount) return true;
-        const range = sel.getRangeAt(0).cloneRange();
-        range.collapse(true);
-        const box = el.getBoundingClientRect();
-        const caret = range.getClientRects()[0] ?? box;
-        const cs = getComputedStyle(el);
-        const line = lineOf(el);
-        return up
-          ? caret.top - (box.top + parseFloat(cs.paddingTop)) < line * 0.6
-          : box.bottom - parseFloat(cs.paddingBottom) - caret.bottom < line * 0.6;
-      }
-
-      function caretX() {
-        const sel = getSelection();
-        if (!sel || !sel.rangeCount) return page.getBoundingClientRect().left;
-        const range = sel.getRangeAt(0).cloneRange();
-        range.collapse(true);
-        return range.getClientRects()[0]?.left ?? page.getBoundingClientRect().left;
-      }
-
-      // Landing in the next paragraph at the column you left, rather than at
-      // its end, which is what every editor does and what nobody notices until
-      // it stops happening.
-      function land(el, up, x) {
-        el.focus();
-        const box = el.getBoundingClientRect();
-        const line = lineOf(el);
-        const y = up ? box.bottom - line / 2 : box.top + line / 2;
-        let range = null;
-        if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(x, y);
-        else if (document.caretPositionFromPoint) {
-          const spot = document.caretPositionFromPoint(x, y);
-          if (spot) {
-            range = document.createRange();
-            range.setStart(spot.offsetNode, spot.offset);
+            event.preventDefault();
+            return setOn('data-list', null);
           }
         }
-        if (range && el.contains(range.startContainer)) {
-          range.collapse(true);
-          const sel = getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-          here = el;
-        } else {
-          place(el, up ? marble.text(el).length : 0);
-        }
-      }
-
-      // The margin below the last paragraph is still the page, and clicking a
-      // page puts you in its text.
-      page.addEventListener('mousedown', (event) => {
-        if (event.target !== page && event.target !== flow) return;
-        const last = [...flow.children].reverse().find(isText);
-        if (!last) return;
-        event.preventDefault();
-        place(last, marble.text(last).length);
       });
+
+      // The margin around the text is still the page, and clicking a page puts
+      // you in its text — on the line you pointed at, not at the end of it.
+      page.addEventListener('mousedown', (event) => {
+        if (event.target !== page || grip.contains(event.target)) return;
+        const all = blocks().filter(isText);
+        if (!all.length) return;
+        event.preventDefault();
+        const y = event.clientY;
+        const el = all.find((block) => y <= block.getBoundingClientRect().bottom) ?? all[all.length - 1];
+        const box = el.getBoundingClientRect();
+        const x = event.clientX < box.left ? box.left + 1 : box.right - 1;
+        const spotted = document.caretRangeFromPoint?.(x, Math.min(Math.max(y, box.top + 1), box.bottom - 1));
+        if (spotted && flow.contains(spotted.startContainer)) {
+          const range = getSelection();
+          range.removeAllRanges();
+          range.addRange(spotted);
+          flow.focus({ preventScroll: true });
+        } else {
+          place(el, marble.text(el).length);
+        }
+        sync();
+      });
+
+      // ----------------------------------------------------------- the phone
+      //
+      // The software keyboard does two things and the second is the one that
+      // gets missed. It takes room off the bottom of the screen — and it
+      // *moves* the room, sliding the visible strip down the layout viewport
+      // to keep the caret clear of itself, so everything the page fixed to
+      // that viewport ends up exactly that far too high. --kb is how much was
+      // taken, --vv-top is where what is left begins, and between them the
+      // stylesheet can put a surface on the screen somebody is looking at.
+      //
+      // Both are written on <html> and filed nowhere: where a keyboard is is
+      // not a fact about the notes. A reconcile drops them with everything
+      // else the page put there, so they are written again below.
+      //
+      // Whether the keys are up at all is a third answer, and neither number is
+      // it: a browser that slides the strip all the way down takes nothing off
+      // the bottom, and Android shrinks the window itself. A strip shorter than
+      // the window, or a window shorter than it has been at this width, while
+      // a touch screen has the caret: that is a keyboard. It is a marble- class
+      // on <html>, so it is the page's and a reconcile leaves it, and on a
+      // phone the toolbar stands on the keys by it.
+      const touch = matchMedia('(hover: none) and (pointer: coarse)');
+      let tallest = { width: 0, height: 0 };
+      function viewport() {
+        const vv = window.visualViewport;
+        const top = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+        const kb = vv ? Math.max(0, Math.round(innerHeight - vv.height - top)) : 0;
+        document.documentElement.style.setProperty('--kb', kb + 'px');
+        document.documentElement.style.setProperty('--vv-top', top + 'px');
+        if (tallest.width !== innerWidth) tallest = { width: innerWidth, height: 0 };
+        tallest.height = Math.max(tallest.height, innerHeight);
+        const typing = document.activeElement?.isContentEditable;
+        const up = Boolean(vv) && touch.matches && typing &&
+          (innerHeight - vv.height >= 80 || tallest.height - innerHeight >= 160);
+        document.documentElement.classList.toggle('marble-keys', up);
+      }
+      viewport();
+      visualViewport?.addEventListener('resize', viewport);
+      visualViewport?.addEventListener('scroll', viewport);
+      addEventListener('resize', viewport);
+      addEventListener('focusin', viewport);
+      addEventListener('focusout', () => setTimeout(viewport));
 
       // ----------------------------------------------------------- what is drawn
       //
@@ -1656,21 +2462,33 @@ __ICON__
 
       function derive() {
         outline.textContent = '';
-        for (const el of flow.children) {
+        for (const el of blocks()) {
           const depth = DEPTH[styleOf(el)];
           if (!depth || !isText(el)) continue;
           const item = document.createElement('li');
           item.className = depth;
           item.textContent = marble.text(el) || 'Heading';
-          item.addEventListener('click', () => {
+          // A reading of the notes is still something you press, so it takes a
+          // key as well as a pointer. A real <button> would want the padding
+          // and the hover back off the <li> it sits in for nothing gained, so
+          // the row says what it is and answers the two keys that means.
+          item.setAttribute('role', 'button');
+          item.tabIndex = 0;
+          const go = () => {
             el.scrollIntoView({ block: 'center', behavior: 'smooth' });
             place(el, marble.text(el).length);
             sync();
+          };
+          item.addEventListener('click', go);
+          item.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            go();
           });
           outline.append(item);
         }
 
-        const text = [...flow.children].filter(isText).map((el) => marble.text(el)).join(' ').trim();
+        const text = blocks().filter(isText).map((el) => marble.text(el)).join(' ').trim();
         counted = { words: text ? text.split(/\s+/).length : 0, characters: text.length };
         counter.textContent = counted.words === 1 ? '1 word' : counted.words + ' words';
       }
@@ -1679,58 +2497,76 @@ __ICON__
       function detail() {
         counter.textContent =
           counted.words + ' words · ' + counted.characters + ' characters · ' +
-          [...flow.children].filter(isText).length + ' paragraphs';
+          blocks().filter(isText).length + ' paragraphs';
         clearTimeout(saying);
         saying = setTimeout(derive, 6000);
       }
 
       function sync() {
-        const el = target();
-        const at = atCaret();
-        const lit = (selector, on) => $(selector)?.classList.toggle('marble-on', Boolean(on));
+        const els = chosen();
+        const el = els[0];
+        if (isText(el)) here = el;
+        const caret = atCaret();
+        // Lit is a reading, so it is said in a marble- class the carrier knows
+        // is the page's, and in the one attribute a screen reader reads.
+        const lit = (selector, on) => {
+          const el = $(selector);
+          el?.classList.toggle('marble-on', Boolean(on));
+          el?.setAttribute('aria-pressed', String(Boolean(on)));
+        };
         for (const name of ['bold', 'italic', 'underline', 'strike']) {
-          lit('[data-cmd="' + name + '"]', state(name));
+          lit('[data-cmd="' + name + '"]', marked(name, els));
         }
         lit('[data-cmd="bullet"]', listOf(el) === 'bullet');
         lit('[data-cmd="number"]', listOf(el) === 'number');
         lit('[data-cmd="fonts"]', showing('data-fonts'));
 
         $('#now-style').textContent = styleNamed(styleOf(el)).name;
-        $('#now-face').textContent = faceOf(at);
-        $('#now-pt').textContent = String(ptOf(at));
-        $('#now-fg').style.color = getComputedStyle(at ?? flow).color;
+        $('#now-face').textContent = faceOf(caret);
+        $('#now-pt').textContent = String(ptOf(caret));
+        $('#now-fg').style.color = getComputedStyle(caret ?? flow).color;
 
         const aligner = $('.aligner');
         for (const [value] of ALIGN) {
           aligner?.classList.toggle('marble-align-' + value, alignOf(el) === value);
         }
-        $('[data-cmd="undo"]').disabled = !marble.canUndo;
-        $('[data-cmd="redo"]').disabled = !marble.canRedo;
+        const steps = [$('[data-cmd="undo"]'), $('[data-cmd="redo"]')];
+        const was = steps.map((el) => el.disabled);
+        steps[0].disabled = !marble.canUndo;
+        steps[1].disabled = !marble.canRedo;
+        // Disabling a button takes it out of the tab order, and undo is the
+        // first of them — the one that holds the toolbar's only way in. Armed
+        // again only when that actually changed, because sync() runs on every
+        // move of the caret and reachable() asks the browser for a layout.
+        if (steps.some((el, i) => el.disabled !== was[i])) arm();
       }
 
-      // Wired and redrawn now, and again over anything that arrives later — a
-      // paragraph added here, an edit made in a text editor, another window's
-      // undo. A block that came back from the file has to be made editable
-      // again, which is what the carrier hands subtrees to a registration for.
-      marble.register((root) => {
-        wireRich(root);
+      // Drawn now, and again over anything that arrives later — an edit made in
+      // a text editor, another window's undo, an agent's op. What comes back
+      // from the file is the file's idea of the flow, so the shadow is taken
+      // from it again rather than kept from before.
+      marble.register(() => {
+        flow.setAttribute('contenteditable', 'true');
+        flow.setAttribute('spellcheck', 'true');
+        flow.setAttribute('autocapitalize', 'sentences');
+        flow.setAttribute('autocorrect', 'on');
+        shadow = readFlow();
+        if (normalise()) file(false);
         derive();
         sync();
+        // Everything the page put on an element and the file does not know
+        // about, put back: the tab stop inside the toolbar, and where the
+        // keyboard is.
+        arm();
+        viewport();
       });
 
-      flow.addEventListener('focusin', (event) => {
-        const el = event.target.closest?.('[data-marble-rich]');
-        if (isText(el)) {
-          here = el;
-          sync();
-        }
-      });
       flow.addEventListener('keyup', sync);
       flow.addEventListener('click', sync);
       document.addEventListener('selectionchange', () => {
-        if (inBlock(target())) sync();
+        if (flow.contains(getSelection()?.anchorNode)) sync();
       });
-      addEventListener('beforeunload', commit);
+      addEventListener('beforeunload', settle);
     };
 
     if (window.marble) begin(window.marble);

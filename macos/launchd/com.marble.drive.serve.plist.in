@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Rendered into ~/Library/LaunchAgents by macos/launchd/daemon.sh; the
+     placeholders are absolute paths this machine's copy needs. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>@LABEL@</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>@REPO@/macos/launchd/serve.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@REPO@</string>
+
+  <!-- Start when this user logs in, and start again whenever it stops: a
+       crash, an OOM kill, a reboot, or anything else. Stopping it is a
+       decision someone makes with `daemon.sh stop`, not something that
+       happens to it. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- launchd's floor between restarts. A host that cannot bind its port
+       would otherwise spin as fast as it can fail. -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <!-- Not a background chore: it answers requests and spawns agent CLIs, so it
+       should not be filed under the I/O and CPU limits launchd puts on those. -->
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <!-- serve.sh redirects its own output so it can rotate it. This file catches
+       what fails before that: a missing script, a bad interpreter. -->
+  <key>StandardOutPath</key>
+  <string>@HOME@/Library/Logs/marble-drive/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/Library/Logs/marble-drive/launchd.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

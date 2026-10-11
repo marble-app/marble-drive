@@ -18,6 +18,25 @@ import crypto from 'node:crypto';
 
 const DAY = 24 * 60 * 60 * 1000;
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+/** Did this request reach the host over HTTPS? Only a proxy on this machine is
+ *  believed when it says so — Tailscale Serve terminates TLS and forwards to
+ *  loopback — because a header is a thing anybody can type. */
+export const overHttps = (req) =>
+  LOOPBACK.has(req?.socket?.remoteAddress) && req.headers?.['x-forwarded-proto'] === 'https';
+
+/** A request made on this machine, not passed on by something in front of
+ *  it: loopback, and none of the headers a tunnel (`Cf-Ray`), the edge
+ *  (`X-Forwarded-Host`) or another proxy (`X-Forwarded-For`, `Forwarded`)
+ *  adds. Where the passphrase still opens a drive in `tools` mode. */
+export const isLocal = (req) =>
+  LOOPBACK.has(req?.socket?.remoteAddress) &&
+  !req.headers?.['x-forwarded-host'] &&
+  !req.headers?.['cf-ray'] &&
+  !req.headers?.['x-forwarded-for'] &&
+  !req.headers?.forwarded;
+
 const equal = (a, b) => {
   const left = Buffer.from(a ?? '', 'utf8');
   const right = Buffer.from(b ?? '', 'utf8');
@@ -29,14 +48,36 @@ const equal = (a, b) => {
   );
 };
 
+/** Where the gate page may send someone after they sign in: a path on this
+ *  host, else `/`. `to` comes from the URL, so it is untrusted: no scheme
+ *  (`javascript:`), no other host (`//evil`, `/\\evil`), and no control
+ *  characters, which the URL parser would drop to make `//` out of `/\t/`.
+ *  The parsed result is checked again: dot segments can make a `//` too. */
+export function returnPath(to) {
+  if (typeof to !== 'string' || !to.startsWith('/') || to.startsWith('//') || to.startsWith('/\\')) return '/';
+  if (/[\u0000-\u001f\u007f]/.test(to)) return '/';
+  try {
+    const url = new URL(to, 'http://x');
+    if (url.origin !== 'http://x') return '/';
+    // Removing dot segments can leave a leading // (`/.//evil`, `/%2e//evil`),
+    // so the result is checked again, as the browser will read it.
+    const result = url.pathname + url.search + url.hash;
+    if (result.startsWith('//') || result.startsWith('/\\')) return '/';
+    return new URL(result, 'http://x').origin === 'http://x' ? result : '/';
+  } catch {
+    return '/';
+  }
+}
+
 export function createGate({ secret, cookieName = 'marble_drive', days = 30, secure = false }) {
   const open = !secret;
 
   const sign = (payload) =>
     crypto.createHmac('sha256', secret).update(payload).digest('base64url');
 
-  function issue() {
-    const expires = Date.now() + days * DAY;
+  /** A signed cookie value, good for `ms` (a person's, by default, is `days`). */
+  function issue(ms = days * DAY) {
+    const expires = Date.now() + ms;
     const payload = String(expires);
     return `${payload}.${sign(payload)}`;
   }
@@ -66,10 +107,12 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
 
   /** Is this request allowed through? An open host says yes to everything, and
    *  says so at boot rather than quietly. */
-  function allows(req) {
+  function allows(req, { cookie = true } = {}) {
     if (open) return true;
     const jar = cookies(req.headers.cookie);
-    if (valid(jar[cookieName])) return true;
+    // `cookie: false` is a drive in `tools` mode, asked from outside: the
+    // passphrase has left the browser there, and only a script's bearer counts.
+    if (cookie && valid(jar[cookieName])) return true;
     // A bearer token is the same secret by another name, for a script, a
     // backup job, or curl. Not a second mechanism — the same one, unwrapped.
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
@@ -79,20 +122,26 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
   /** The secret, offered once, exchanged for a cookie. */
   const accepts = (offered) => open || (Boolean(offered) && equal(offered, secret));
 
-  const cookieHeader = () =>
+  // Secure when it was asked for, and otherwise when this request arrived over
+  // HTTPS. One host is reached both ways: http://localhost at the desk and the
+  // tailnet's https address from the laptop. A Secure cookie over plain http is
+  // one Safari drops, even on localhost, so the flag follows the request.
+  const secureFor = (req) => secure || overHttps(req);
+
+  const cookieHeader = (req) =>
     [
       `${cookieName}=${issue()}`,
       'Path=/',
       'HttpOnly',
       'SameSite=Lax',
       `Max-Age=${Math.floor((days * DAY) / 1000)}`,
-      secure ? 'Secure' : null,
+      secureFor(req) ? 'Secure' : null,
     ]
       .filter(Boolean)
       .join('; ');
 
-  const clearHeader = () =>
-    `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+  const clearHeader = (req) =>
+    `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFor(req) ? '; Secure' : ''}`;
 
   return { open, allows, accepts, issue, valid, cookieHeader, clearHeader, cookieName };
 }

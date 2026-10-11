@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* ------------------------------------------------------------------ tokens
+
+     An app made in Build mode starts here: empty, with the drive's tokens and
+     nothing else, so whatever the first build makes of it is drawn in the same
+     paper, ink and accent as every other app in the drive. Each colour is
+     written once as a light-dark() pair, so the app follows the machine into
+     the dark without a second stylesheet. */
+  :root {
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    --paper: light-dark(#fafaf7, #16181a);
+    --paper-2: light-dark(#f3f1ea, #1e2124);
+    --paper-3: light-dark(#eceae1, #262a2e);
+    --well: light-dark(#efece3, #101214);
+    --card: light-dark(#ffffff, #1c1f22);
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --danger: light-dark(#b4533e, #e08a74);
+    --caution: light-dark(#a07a2c, #d9b25e);
+    /* Warm shadows on paper, black ones after dark. */
+    --shadow-rest: 0 1px 2px light-dark(rgba(74,66,52,.06), rgba(0,0,0,.40)), 0 6px 16px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.28));
+    --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+    --r: 12px;
+    --r-sm: 8px;
+    --r-text: 4px;
+    --pill: 999px;
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms;
+    --t: 200ms;
+    --t-slow: 340ms;
+    /* One sans at 14/1.5 for everything an app is made of. No webfont is
+       named: the first face is whatever the machine calls its own. */
+    --ui: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  /* Width answers are asked of the root, not the window: a panel docked
+     beside the page shrinks <html> and leaves the viewport alone. */
+  html { container: app / inline-size; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--card); color: var(--ink);
+    font: 14px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+
+  /* The page: one column with room either side, which the first build fills
+     in or replaces as the app needs. */
+  .app { max-width: 64rem; margin: 0 auto; padding: 2.75rem 2.75rem 6rem; }
+  .app > h1 { margin: 0 0 .25rem; font-size: 1.65rem; font-weight: 500; letter-spacing: -.015em; }
+  .app > h1:empty::before { content: "Untitled"; color: var(--faint); }
+  @container app (max-width: 620px) { .app { padding: 1.5rem 1.1rem 6rem; } }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body data-marble-id="__ID__">
+<main class="app" data-marble-id="__ID__">
+  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+</main>
+__SCRIPT__
+</body>
+</html>

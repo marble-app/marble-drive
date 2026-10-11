@@ -1,0 +1,617 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { GARDEN, startDrive } from './harness.js';
+
+// The fake agents these tests put on the page, followed from this tab as if
+// it had asked for the work: only followed work draws a zone. The zone is
+// for work on a region; work inside one block of text is a caret instead
+// (agent-text.js, test-browser/agent-text.test.js), so what the agents here
+// work on is a section, not a lone paragraph.
+const FOLLOWED = ['c1', 'open'];
+
+const FORKED = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Fork</title>
+<style>body { font: 16px/1.5 Georgia, serif; margin: 40px; } h1 { font-size: 32px; }</style>
+</head>
+<body data-marble-id="b">
+  <marble-alt data-marble-id="h" data-marble-active="you">
+    <h1 data-marble-id="hy" data-marble-alt="you" data-marble-by="person">Yours</h1>
+    <h1 data-marble-id="ha" data-marble-alt="agent:c1" data-marble-by="agent">Theirs</h1>
+  </marble-alt>
+  <section data-marble-id="p"><p>A paragraph the fork does not own.</p><p>And a second, so it is a region and not a line of words.</p></section>
+</body></html>
+`;
+
+const AUTHORED = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Authored</title>
+<style>
+  body { font: 16px/1.5 Georgia, serif; margin: 40px; }
+  marble-alt > [data-marble-alt] { display: none; }
+  marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"] { display: inline; }
+  marble-alt[data-marble-active="v2"] > [data-marble-alt="v2"] { display: inline; }
+</style>
+</head>
+<body data-marble-id="b">
+  <p data-marble-id="p">Nature
+    <marble-alt data-marble-id="n" data-marble-active="v1">
+      <span data-marble-id="n1" data-marble-alt="v1">Modest</span>
+      <span data-marble-id="n2" data-marble-alt="v2">Timid</span>
+    </marble-alt>
+  </p>
+  <div class="marble-alts" data-marble-id="chips">v1 v2</div>
+</body></html>
+`;
+
+const TYPING = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Typing</title>
+<style>body { font: 16px/1.5 Georgia, serif; margin: 40px; }</style>
+</head>
+<body data-marble-id="b">
+  <h1 data-marble-id="h" contenteditable="true">Head</h1>
+  <section data-marble-id="p"><p>A paragraph the agent is on.</p></section>
+</body></html>
+`;
+
+const DEEP = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Deep</title>
+<style>body { font: 16px/1.5 Georgia, serif; margin: 40px; } .spacer { height: 2400px; }</style>
+</head>
+<body data-marble-id="b">
+  <p data-marble-id="top">The top of the page.</p>
+  <div class="spacer" data-marble-id="spacer"></div>
+  <p data-marble-id="deep">Where the agent is working.</p>
+</body></html>
+`;
+
+// A page that hosts its own conversation UI says so, and that is also what
+// keeps the dock from mounting on it.
+const CUSTOM = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Custom</title>
+<meta name="marble-agent" content="custom">
+<style>body { font: 16px/1.5 Georgia, serif; margin: 40px; }</style>
+</head>
+<body data-marble-id="b">
+  <p data-marble-id="p">A paragraph an agent is on.</p>
+</body></html>
+`;
+
+const host = await startDrive({
+  agents: true,
+  documents: { forked: FORKED, authored: AUTHORED, typing: TYPING, deep: DEEP, custom: CUSTOM, garden: GARDEN },
+});
+test.after(() => host.close());
+
+test('a conflict fork says why it is there, and shows Yours, The new one, Keep this, and Combine them, never an agent', async () => {
+  await host.reset();
+  const { page, errors } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const bar = page.locator('marble-alt > .marble-fork');
+  await bar.waitFor();
+
+  const labels = await bar.locator('button').allTextContents();
+  assert.deepEqual(labels.map((t) => t.trim()), ['Yours', 'The new one', 'Keep this', 'Combine them']);
+  const merge = bar.getByRole('button', { name: 'Write one version from both' });
+  assert.equal(await merge.getAttribute('title'), 'Writes a third version from both');
+  const said = await bar.evaluate((el) => [el.innerText, ...[...el.querySelectorAll('[aria-label], [title]')]
+    .flatMap((n) => [n.getAttribute('aria-label'), n.getAttribute('title')])].join(' '));
+  assert.doesNotMatch(said, /\bagent\b/i);
+  assert.equal(await bar.locator('.marble-fork-why').textContent(), 'This changed while you were editing it.');
+  assert.equal(await bar.getByRole('button', { name: 'Approve' }).count(), 0);
+  assert.equal(await bar.getByRole('button', { name: 'Reject' }).count(), 0);
+  assert.equal(await page.locator('h1.marble-alt-shown').textContent(), 'Yours');
+  assert.deepEqual(errors.filter((message) => !/favicon/.test(message)), []);
+});
+
+test('Combine them hands both versions to the agent drawer', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.locator('marble-alt > .marble-fork').waitFor();
+  await page.evaluate(() => {
+    window.__agent = { selected: null, aimed: null, opened: 0 };
+    window.marble.agent = {
+      select: (ids) => { window.__agent.selected = ids; },
+      aim: (app) => { window.__agent.aimed = app; },
+      current: () => null,
+      send: () => {},
+      open: () => { window.__agent.opened += 1; },
+    };
+  });
+  await page.getByRole('button', { name: 'Write one version from both' }).click();
+  const seen = await page.evaluate(() => window.__agent);
+  assert.deepEqual(seen.selected, ['hy', 'ha']);
+  assert.equal(seen.opened, 1);
+});
+
+test('Keep this commits the version that is showing', async () => {
+  await host.reset();
+  const { page, errors } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const bar = page.locator('marble-alt > .marble-fork');
+  await bar.waitFor();
+
+  await bar.getByRole('button', { name: 'The new one', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('h1.marble-alt-shown')?.textContent === 'Theirs');
+  await bar.getByRole('button', { name: 'Keep this' }).click();
+
+  const deadline = Date.now() + 8000;
+  let stored = await host.drive.store.read('forked');
+  while (Date.now() < deadline && stored.includes('<marble-alt')) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    stored = await host.drive.store.read('forked');
+  }
+
+  assert.match(stored, />Theirs</);
+  assert.doesNotMatch(stored, /<marble-alt/);
+  assert.doesNotMatch(stored, /Yours/);
+  assert.match(stored, /A paragraph the fork does not own/);
+  assert.deepEqual(errors.filter((message) => !/favicon/.test(message)), []);
+});
+
+test('Keep this on You keeps the person’s version', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const bar = page.locator('marble-alt > .marble-fork');
+  await bar.waitFor();
+  await bar.getByRole('button', { name: 'Keep this' }).click();
+
+  const deadline = Date.now() + 8000;
+  let stored = await host.drive.store.read('forked');
+  while (Date.now() < deadline && stored.includes('<marble-alt')) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    stored = await host.drive.store.read('forked');
+  }
+
+  assert.match(stored, />Yours</);
+  assert.doesNotMatch(stored, /<marble-alt/);
+  assert.doesNotMatch(stored, /Theirs/);
+});
+
+test('an authoring alt does not get Drive conflict chrome', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/authored`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.waitForFunction(() => Boolean(window.marble));
+
+  assert.equal(await page.locator('marble-alt > .marble-fork').count(), 0);
+  assert.equal(await page.locator('.marble-alts').count(), 1, 'generic chips stay on authoring alts');
+  assert.equal(
+    await page.locator('[data-marble-id="n1"]').evaluate((el) => getComputedStyle(el).display),
+    'inline',
+    'Drive must not force authoring alts to display:block',
+  );
+});
+
+test('a remote op flashes the component it changed', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => Boolean(window.marble));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:ops', {
+      detail: { ops: [{ type: 'setText', id: 'p', text: 'A paragraph the fork does not own.' }] },
+    }));
+  });
+  assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-flash')), true);
+});
+
+test('person presence washes the id they are on, then fades out', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'person:c1', ids: ['p'] },
+    }));
+  });
+  assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')), true);
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'people get a wash, not a construction zone');
+
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'person:c1', ids: [] },
+    }));
+  });
+  assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence-out')), true);
+  assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')), false);
+});
+
+test('agent presence tapes off the region it is working on', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'working' },
+    }));
+  });
+  const zone = page.locator('.marble-zone');
+  assert.equal(await zone.count(), 1);
+  assert.match(await zone.innerText(), /^Working/);
+  assert.doesNotMatch(await zone.innerText(), /Agent/, 'where a change happens the page never names who is making it');
+  assert.equal(
+    await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')),
+    false,
+    'agent work is a construction zone, not a per-id wash',
+  );
+
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: [] },
+    }));
+  });
+  assert.equal(await page.locator('.marble-zone').count(), 0);
+});
+
+test('the construction label uses the apply_ops note, and Hide puts it away', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing', note: 'Rename the heading.' },
+    }));
+  });
+  const zone = page.locator('.marble-zone');
+  assert.match(await zone.innerText(), /^Rename the heading(?!\.)/);
+
+  // Hide is in the zone's own pill; the way back is the work tool in the
+  // tray above the launcher, which is where every agent affordance lives now.
+  const tray = page.locator('marble-agent-drawer .tray');
+  await page.locator('.marble-zone-label').getByRole('button', { name: 'Hide construction zone' }).click();
+  assert.equal(await page.locator('.marble-zone').count(), 0);
+  assert.equal(await page.locator('.marble-zones-show').count(), 1, 'the corner fallback exists');
+  assert.equal(
+    await page.locator('.marble-zones-show').isVisible(),
+    false,
+    'but this page has a tray, so nothing is pinned to the page’s own corner',
+  );
+
+  await tray.locator('.launcher').hover();
+  const work = tray.locator('.tool[data-tool="work"]');
+  await work.waitFor({ state: 'visible' });
+  assert.equal(await work.getAttribute('aria-label'), 'Show work');
+  await work.click();
+  assert.equal(await page.locator('.marble-zone').count(), 1);
+
+  await tray.locator('.launcher').hover();
+  await page.waitForFunction(
+    () => document.querySelector('marble-agent-drawer')?.shadowRoot
+      .querySelector('.tool[data-tool="work"]')?.getAttribute('aria-label') === 'Hide work',
+  );
+  await work.click();
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'and the tool hides them again');
+});
+
+const zoneTop = (page) => page.locator('.marble-zone').evaluate((el) => el.getBoundingClientRect().top);
+const targetTop = (page, id) => page.locator(`[data-marble-id="${id}"]`).evaluate((el) => el.getBoundingClientRect().top);
+
+test('the construction zone follows its target when the person’s own typing moves it', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/typing`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing', note: 'grow the page' },
+    }));
+  });
+  await page.locator('.marble-zone').waitFor();
+  const before = await zoneTop(page);
+
+  // The person's own edits never come back as ops or presence, so nothing
+  // but the page itself says the target moved.
+  await page.click('[data-marble-id="h"]');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' ' + 'words '.repeat(120));
+  await page.waitForTimeout(300);
+
+  const target = await targetTop(page, 'p');
+  const after = await zoneTop(page);
+  assert.ok(target - before > 300, `the target moved (${before} → ${target})`);
+  assert.ok(Math.abs(after - (target - 10)) < 2, `zone top ${after} should sit 10px above the target at ${target}`);
+});
+
+test('the construction zone finds its target again after it is replaced', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/typing`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing' },
+    }));
+  });
+  await page.locator('.marble-zone').waitFor();
+
+  // Applied locally so no presence frame arrives to repaint the zone for us.
+  await page.evaluate(() => {
+    window.marble.apply({ type: 'remove', id: 'p' });
+    window.marble.apply({
+      type: 'insert',
+      html: '<div data-marble-id="tall" style="height:400px"></div><section data-marble-id="p"><p>Back again.</p></section>',
+      parentId: 'b',
+      beforeId: null,
+    });
+  });
+  await page.waitForTimeout(300);
+
+  const target = await targetTop(page, 'p');
+  const after = await zoneTop(page);
+  assert.ok(target > 300, `the new target sits low on the page (${target})`);
+  assert.ok(Math.abs(after - (target - 10)) < 2, `zone top ${after} should sit 10px above the target at ${target}`);
+});
+
+test('agent work with nothing to point at draws nothing', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const presence = async (detail) => {
+    await page.evaluate((d) => {
+      document.dispatchEvent(new CustomEvent('marble:presence', { detail: d }));
+    }, detail);
+  };
+
+  await presence({ client: 'agent:c1', ids: [], phase: 'working' });
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'no ids is no zone, not a banner over the page');
+
+  await presence({ client: 'agent:c1', ids: ['not-on-this-page'], phase: 'working' });
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'ids that are not here have nowhere to land');
+
+  await page.locator('marble-agent-drawer .launcher').hover();
+  assert.equal(
+    await page.locator('marble-agent-drawer .tool[data-tool="work"]').isVisible(),
+    false,
+    'no zone on this page, so the tray carries no work tool',
+  );
+});
+
+test('the construction label is the note as a sentence, keeps an all-caps first word, and names the phase without a note', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const labelFor = async (detail) => {
+    await page.evaluate((d) => {
+      document.dispatchEvent(new CustomEvent('marble:presence', { detail: d }));
+    }, { client: 'agent:c1', ids: ['p'], ...detail });
+    return (await page.locator('.marble-zone-label').innerText()).replace(/\s*Open chat\s*Hide\s*$/, '').trim();
+  };
+  assert.equal(await labelFor({ phase: 'writing', note: 'PDF export gets a footer.' }), 'PDF export gets a footer');
+  assert.equal(await labelFor({ phase: 'writing', note: 'add a footer' }), 'Add a footer');
+  assert.equal(await labelFor({ phase: 'reading' }), 'Reading');
+  assert.equal(await labelFor({ phase: 'writing' }), 'Writing');
+  assert.equal(await labelFor({ phase: 'working' }), 'Working');
+});
+
+// ------------------------------------------------------- the zone is someone else
+
+const paint = (page, detail) => page.evaluate((d) => {
+  document.dispatchEvent(new CustomEvent('marble:presence', { detail: d }));
+}, detail);
+
+test('the zone is a closed box with a wash, and it wears the document’s own accent', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await paint(page, { client: 'agent:c1', ids: ['p'], phase: 'writing' });
+
+  const box = await page.locator('.marble-zone').evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      widths: [s.borderTopWidth, s.borderRightWidth, s.borderBottomWidth, s.borderLeftWidth],
+      color: s.borderTopColor,
+      fill: s.backgroundColor,
+      clicks: s.pointerEvents,
+      accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+    };
+  });
+  assert.equal(new Set(box.widths).size, 1, 'a full box, not four corners');
+  assert.ok(parseFloat(box.widths[0]) > 0, 'a full box, not four corners');
+  assert.notEqual(box.fill, 'rgba(0, 0, 0, 0)', 'the box is washed, not empty');
+  assert.match(box.fill, /0\.1\d?\)?$/, 'and the wash is thin enough to read through');
+  assert.equal(box.clicks, 'none', 'the work under the wash is still yours to click');
+  // This fixture names no accent, so the agent falls back to its own violet
+  // rather than to nothing.
+  assert.equal(box.accent, '', 'the fixture declares no accent');
+  // A color-mix() resolves to color(srgb …), not rgb(…).
+  assert.match(box.color, /^(rgb|color\()/, 'and the zone is still drawn in something');
+
+  // A document that does name an accent is what the agent works in. The zone
+  // used to be deliberately outside every document's palette; its shape, its
+  // wash and its label carry "someone else is here" now, and belonging to the
+  // page it stands on costs nothing.
+  const wearing = await page.evaluate(() => {
+    document.documentElement.style.setProperty('--accent-ink', 'rgb(90, 114, 71)');
+    return getComputedStyle(document.querySelector('.marble-zone')).borderTopColor;
+  });
+  assert.equal(wearing, 'rgb(90, 114, 71)', 'the zone wears the document’s accent');
+});
+
+test('Open chat opens the conversation in the dock, and on the Agents page on its own stage', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await paint(page, { client: 'agent:c1', ids: ['p'], phase: 'writing' });
+  await page.evaluate(() => {
+    window.opened = [];
+    window.marble.agent.open = (id) => window.opened.push(id);
+    addEventListener('marble-agent:open', (e) => window.opened.push(['stage', e.detail.id]));
+  });
+  await page.getByRole('button', { name: 'Open the conversation working here' }).click();
+  assert.deepEqual(await page.evaluate(() => window.opened), ['c1'], 'an ordinary document opens the dock');
+
+  const custom = await host.newPage({ attending: FOLLOWED });
+  await custom.page.goto(`${host.base}/a/custom`);
+  await custom.page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await paint(custom.page, { client: 'agent:c1', ids: ['p'], phase: 'writing' });
+  await custom.page.evaluate(() => {
+    window.opened = [];
+    document.addEventListener('marble-agent:open', (e) => window.opened.push(e.detail.id));
+  });
+  await custom.page.getByRole('button', { name: 'Open the conversation working here' }).click();
+  assert.deepEqual(await custom.page.evaluate(() => window.opened), ['c1'], 'a page with its own conversation UI keeps it');
+});
+
+test('an undo draws no zone, so it offers no chat', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await paint(page, { client: 'agent-undo:c1', ids: ['p'], phase: 'writing' });
+  assert.equal(await page.getByRole('button', { name: 'Open the conversation working here' }).count(), 0);
+});
+
+test('on a page with its own conversation UI, where nothing tints parts, an undo still gets its box', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/custom`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  assert.equal(await page.evaluate(() => Boolean(window.marbleChange)), false, 'no marks layer here');
+  await paint(page, { client: 'agent-undo:c1', ids: ['p'], phase: 'writing', stage: 'before', turn: 'c1-t1', parts: ['p'] });
+  await page.locator('.marble-zone').waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Open the conversation working here' }).count(), 0, 'and still offers no chat');
+});
+
+test('arriving with #at= scrolls to the work, and spends the hash', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/deep#at=deep`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.waitForFunction(() => {
+    const r = document.querySelector('[data-marble-id="deep"]').getBoundingClientRect();
+    return r.top > 0 && r.top < innerHeight;
+  }, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => location.hash), '', 'the hash is an instruction, spent on arrival');
+});
+
+test('a conversation on the page it is working in scrolls there without a navigation', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/deep`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  assert.ok(await page.evaluate(() => scrollY) < 10);
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble:jump-to', { detail: { ids: ['deep'] } })));
+  await page.waitForFunction(() => scrollY > 1000, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => location.hash), '', 'no hash left in the history to get back past');
+});
+
+// ------------------------------------------------- what a change leaves behind
+// These drive collab.js the way the rest of this file does, with the events
+// the carrier and the host really send. There is no trail any more: a change
+// is marked part by part while it runs (change-marks.js, whose own suite is
+// test-browser/change-marks.test.js), and nothing stays once it has landed.
+
+const onTyping = async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/typing`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  return page;
+};
+
+const agentOps = (page, client, ops) => page.evaluate(([c, o]) => {
+  document.dispatchEvent(new CustomEvent('marble:ops', { detail: { ops: o, client: c } }));
+}, [client, ops]);
+
+const zoneFor = (page, client, detail = {}) => page.evaluate(([c, d]) => {
+  document.dispatchEvent(new CustomEvent('marble:presence', { detail: { client: c, ...d } }));
+}, [client, detail]);
+
+const leftOn = (page, id) => page.locator(`[data-marble-id="${id}"]`).evaluate((el) => ({
+  classes: [...el.classList].filter((c) => c.startsWith('marble-')),
+  shadow: getComputedStyle(el).boxShadow,
+}));
+
+test('an agent op flashes the element once and leaves nothing on it', async () => {
+  const page = await onTyping();
+  await agentOps(page, 'agent:c1', [{ type: 'setText', id: 'h', text: 'Backlog' }]);
+  await page.locator('[data-marble-id="h"].marble-flash').waitFor({ state: 'attached' });
+  await page.locator('[data-marble-id="h"].marble-flash').waitFor({ state: 'detached' });
+  assert.deepEqual(await leftOn(page, 'h'), { classes: [], shadow: 'none' }, 'no trail, no rule down its side');
+});
+
+test('an undo leaves no marks behind', async () => {
+  const page = await onTyping();
+  await zoneFor(page, 'agent-undo:c1', { ids: ['p'], phase: 'writing', stage: 'before', turn: 'c1-t1', parts: ['p'] });
+  await page.locator('.marble-change-tint[data-id="p"]').waitFor();
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'an undo draws no box');
+  await agentOps(page, 'agent-undo:c1', [{ type: 'setAttr', id: 'p', name: 'title', value: '' }]);
+  await zoneFor(page, 'agent-undo:c1', { ids: ['p'], phase: 'writing', stage: 'after', turn: 'c1-t1', parts: ['p'] });
+  await page.waitForFunction(() => document.querySelector('.marble-change-layer').children.length === 0, null, { timeout: 3000 });
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'and none comes back once its tints have gone');
+  assert.deepEqual(await leftOn(page, 'p'), { classes: [], shadow: 'none' });
+});
+
+test("a person's own ops leave no marks", async () => {
+  const page = await onTyping();
+  await agentOps(page, 'person:someone', [{ type: 'setText', id: 'h', text: 'Mine' }]);
+  assert.equal(await page.locator('.marble-trail, .marble-change-layer > *').count(), 0);
+});
+
+test('work marked part by part draws no box; work the host names no parts for keeps it', async () => {
+  const page = await onTyping();
+  await zoneFor(page, 'agent:c1', { ids: ['p'], phase: 'writing', note: 'Grow the page.', stage: 'before', turn: 'c1-t1', parts: ['p'], kind: 'structure', count: 1 });
+  await page.locator('.marble-change-tint[data-id="p"]').waitFor();
+  assert.equal(await page.locator('.marble-zone').count(), 0);
+  await zoneFor(page, 'agent:c1', { ids: [], stage: 'end', turn: 'c1-t1', done: { status: 'completed', changed: 1, added: 0, removed: 0 } });
+  await zoneFor(page, 'agent:open', { ids: ['p'], phase: 'writing', note: 'Grow the page.' });
+  await page.locator('.marble-zone').waitFor();
+  assert.match(await page.locator('.marble-zone-label').innerText(), /^Grow the page/);
+});
+
+test('a claimed zone hides its label, and Open chat can be taken by a callout', async () => {
+  const page = await onTyping();
+  await zoneFor(page, 'agent:c1', { ids: ['p'], phase: 'writing', note: 'Rename the heading.' });
+  await page.locator('.marble-zone-label').waitFor();
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('marble-callout:docked', { detail: { id: 'c1' } })));
+  await page.locator('.marble-zone-label[hidden]').waitFor({ state: 'attached' });
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('marble-callout:undocked', { detail: { id: 'c1' } })));
+  await page.locator('.marble-zone-label:not([hidden])').waitFor();
+  const taken = await page.evaluate(() => new Promise((resolve) => {
+    document.addEventListener('marble-callout:open', (event) => { event.preventDefault(); resolve(event.detail.id); }, { once: true });
+    document.querySelector('.marble-zone-label button').click();
+  }));
+  assert.equal(taken, 'c1');
+  assert.equal(
+    await page.evaluate(() => Boolean(document.querySelector('marble-agent-drawer')?.isOpen)),
+    false,
+    'the drawer did not open: the callout took the click',
+  );
+});
+
+test('a zone nobody claimed still opens its chat in the dock', async () => {
+  const page = await onTyping();
+  await zoneFor(page, 'agent:c1', { ids: ['p'], phase: 'writing' });
+  await page.getByRole('button', { name: 'Open the conversation working here' }).click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
+});
+
+test('marble.collab exposes the zone geometry and label helpers', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const out = await page.evaluate(() => {
+    const els = ['q1', 'q2'].map((id) => document.querySelector(`[data-marble-id="${id}"]`));
+    return {
+      tape: window.marble.collab.tapeTarget(els)?.getAttribute('data-marble-id'),
+      body: window.marble.collab.tapeTarget([document.body]),
+      label: window.marble.collab.phaseLabel({ phase: 'writing', note: 'Rename the heading.' }),
+    };
+  });
+  assert.deepEqual(out, { tape: 'q', body: null, label: 'Rename the heading' });
+});

@@ -1,0 +1,19 @@
+# A drive's Cloudflare tunnel on this PC: pc-<name>.marbledrive.app to the
+# home service on loopback, for the front door to reach. Rendered by
+# linux/systemd/tunnel.sh into ~/.config/systemd/user/.
+[Unit]
+Description=Marble Drive (@NAME@): Cloudflare tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@CLOUDFLARED@ tunnel --config @CONFIG@ run
+Restart=always
+RestartSec=10
+Environment="HOME=@HOME@"
+StandardOutput=append:@STATE@/tunnel-@NAME@.log
+StandardError=append:@STATE@/tunnel-@NAME@.log
+
+[Install]
+WantedBy=default.target

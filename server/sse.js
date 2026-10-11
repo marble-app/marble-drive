@@ -14,7 +14,40 @@
 // told. So it is the client that is excluded, never the connection and never
 // the document.
 
+import { marksForVisitor } from './change/marks.js';
+
 const KEEPALIVE = 25_000;
+
+/** The frame an agent's look is said as: the caller's fields ride along,
+ *  `label` keeps its old default (the client), and `client` and `ids` are
+ *  the look's own. */
+export function lookFrame(client, ids, extra = {}) {
+  const { label, client: _client, ids: _ids, ...meta } = extra ?? {};
+  return {
+    ...meta,
+    client,
+    ids: Array.isArray(ids) ? ids : [],
+    label: label ?? client,
+  };
+}
+
+/** A presence frame as someone holding a share link is sent it: where the
+ *  work is and how far along, never the words — the prompt the owner asked
+ *  with, an agent's note on a batch, the words of the step it says it is on
+ *  (its count stays), or the words its marks say (their shapes stay).
+ *  Everyone else is sent the frame whole. */
+export function forVisitor(frame) {
+  if (!frame || typeof frame !== 'object') return frame;
+  const { prompt, note, step, marks, ...rest } = frame;
+  if (marks !== undefined) rest.marks = marksForVisitor(marks);
+  if (step && typeof step === 'object') {
+    const { text, ...count } = step;
+    rest.step = count;
+  } else if (step !== undefined) {
+    rest.step = step;
+  }
+  return rest;
+}
 
 export function createChannels() {
   const perDoc = new Map();
@@ -46,11 +79,31 @@ export function createChannels() {
     }
   }
 
-  /** The bare `changed` Marble's carrier listens for. */
-  function toDocument(docPath, event = 'changed', { except = null } = {}) {
-    for (const client of perDoc.get(docPath) ?? []) {
-      if (except && client.id === except) continue;
-      write(client, `data: ${event}\n\n`);
+  /** The bare `changed` Marble's carrier listens for. When `ops` is present,
+   *  a named `ops` event goes first so a new carrier can apply them without
+   *  throwing away undo; `changed` still follows so an old carrier refetches. */
+  function toDocument(docPath, event = 'changed', { except = null, ops = null, client = null } = {}) {
+    const opsFrame = ops?.length
+      ? `event: ops\ndata: ${JSON.stringify({ ops, client })}\n\n`
+      : null;
+    const changedFrame = `data: ${event}\n\n`;
+    for (const listener of perDoc.get(docPath) ?? []) {
+      if (except && listener.id === except) continue;
+      if (opsFrame) write(listener, opsFrame);
+      write(listener, changedFrame);
+    }
+  }
+
+  /** A presence frame to every tab on the document; a share link's
+   *  listener (`visitor`) is sent `forVisitor`'s part of it. */
+  function toPresence(docPath, data, { except = null } = {}) {
+    const frame = (body) => `event: presence\ndata: ${JSON.stringify(body)}\n\n`;
+    const payload = frame(data);
+    let visitorPayload = null;
+    for (const listener of perDoc.get(docPath) ?? []) {
+      if (except && listener.id === except) continue;
+      if (listener.visitor) write(listener, (visitorPayload ??= frame(forVisitor(data))));
+      else write(listener, payload);
     }
   }
 
@@ -77,6 +130,7 @@ export function createChannels() {
     subscribeDrive,
     toDocument,
     toDrive,
+    toPresence,
     get counts() {
       return { docs: perDoc.size, drive: drive.size };
     },

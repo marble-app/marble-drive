@@ -44,8 +44,10 @@
 
     // ------------------------------------------------------------- the folder
 
-    const tree = (folder = '') =>
-      ask(`/drive/tree?folder=${encodeURIComponent(folder)}`).catch(() => ({
+    // `{ files: false }` for a caller that draws only folders and documents:
+    // in a drive with a dataset in it, the files are most of the answer.
+    const tree = (folder = '', { files = true } = {}) =>
+      ask(`/drive/tree?folder=${encodeURIComponent(folder)}${files ? '' : '&files=0'}`).catch(() => ({
         kind: 'folder',
         path: '',
         title: 'My Drive',
@@ -53,6 +55,21 @@
       }));
 
     const starters = () => ask('/drive/starters').catch(() => []);
+
+    // The drive's own choices (`.marble/drive.json`): which top-level folders
+    // wear a realm's colour, which document /today opens. A host that predates
+    // them, or a drive with none, is simply no choices.
+    const settings = () =>
+      ask('/drive/settings')
+        .then((s) => ({ realms: s?.realms ?? {}, latest: s?.latest ?? null }))
+        .catch(() => ({ realms: {}, latest: null }));
+
+    // What a starter looks like, for a gallery that shows the document rather
+    // than describing it. A href rather than the bytes, because it is mounted in
+    // an iframe and a document is not the thing that decides what a preview may
+    // run — and a href rather than a path the page builds, because a document
+    // never names a route.
+    const starterPreviewHref = (id) => `/drive/starters/${encodeURIComponent(id)}/preview`;
     const trash = () => ask('/drive/trash').catch(() => []);
 
     const create = ({ path, from = null, copy = null }) =>
@@ -70,14 +87,378 @@
         { method: 'POST', raw: source },
       );
 
+    // A file that is not a document — a song, a picture, a PDF — as its own
+    // bytes. `file` is a Blob (what a drop hands you), sent as the body with
+    // no encoding at all, because a 40 MB WAV base64-quoted is 53 MB of string.
+    //
+    // XHR rather than fetch, because fetch cannot say how far an upload has
+    // got, and a song going up over a slow link with nothing moving looks
+    // exactly like a drop that did nothing. `onProgress(sent, total)` hears it;
+    // `signal` stops it.
+    // A file bigger than this goes up in chunks through a session the host
+    // keeps (server/uploads.js), so a dropped connection costs one chunk and a
+    // reload does not cost the file.
+    const SESSION_ABOVE = 32 * 1024 * 1024;
+    const uploadFile = (opts) => (opts.file.size > SESSION_ABOVE ? uploadInChunks(opts) : uploadWhole(opts));
+
+    const uploadWhole = ({ folder = '', name, file, onProgress = null, signal = null }) =>
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(
+          'POST',
+          `/drive/upload-file?folder=${encodeURIComponent(folder)}` +
+            `&name=${encodeURIComponent(name)}&client=${CLIENT}`,
+        );
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        xhr.responseType = 'text';
+        if (onProgress) xhr.upload.onprogress = (event) => onProgress(event.loaded, event.total || file.size);
+        xhr.onload = () => {
+          let answer = {};
+          try {
+            answer = JSON.parse(xhr.responseText || '{}');
+          } catch {
+            // A proxy's HTML error page is not an answer; the status still is.
+          }
+          if (xhr.status >= 200 && xhr.status < 300) {
+            // Drawn now, while the page still holds the file.
+            if (answer.path) drawThumb({ path: answer.path, file });
+            return resolve(answer);
+          }
+          // A host started before it knew about files has no route for them,
+          // and "404" says nothing about what to do.
+          if (xhr.status === 404) return reject(new Error('the host needs a restart before it can take files'));
+          if (xhr.status === 413) return reject(new Error('too large for this host'));
+          reject(new Error(answer.error ?? `upload answered ${xhr.status}`));
+        };
+        xhr.onerror = () => reject(new Error('the connection dropped'));
+        xhr.onabort = () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError' }));
+        if (signal) {
+          if (signal.aborted) return xhr.onabort();
+          signal.addEventListener('abort', () => xhr.abort(), { once: true });
+        }
+        xhr.send(file);
+      });
+
+    // ----------------------------------------------------- chunked uploads
+    //
+    // Start a session (or pick up one this browser remembers for the same
+    // file in the same folder), send each chunk at the offset the host says it
+    // has, and finish. A chunk the network drops is retried after 1, 2, 4, 8
+    // and 16 seconds, reading back what the host has first; after that the
+    // file fails as `retryable` and the session is kept, so dropping the same
+    // file again — even after a reload, when the page no longer holds it —
+    // carries on from there.
+
+    const REMEMBERED = 'marble-drive:uploads';
+    const BACKOFF = [1, 2, 4, 8, 16];
+    const remembered = () => {
+      try {
+        const list = JSON.parse(localStorage.getItem(REMEMBERED) || '[]');
+        return Array.isArray(list) ? list : [];
+      } catch {
+        return [];
+      }
+    };
+    const remember = (list) => {
+      try {
+        localStorage.setItem(REMEMBERED, JSON.stringify(list));
+      } catch {
+        // A private window: a reload starts over, which is still correct.
+      }
+    };
+    const sameFile = (r, folder, name, file) =>
+      r.folder === folder && r.name === name && r.bytes === file.size && r.modified === file.lastModified;
+    const forget = (id) => remember(remembered().filter((r) => r.id !== id));
+
+    /** Uploads this browser started and did not finish: drop the same file
+     *  again to carry on. */
+    const pendingUploads = () => remembered().map(({ folder, name, bytes }) => ({ folder, name, bytes }));
+
+    const cancelled = () => Object.assign(new Error('cancelled'), { name: 'AbortError' });
+    const wait = (seconds, signal) => new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, seconds * 1000);
+      signal?.addEventListener('abort', () => { clearTimeout(timer); reject(cancelled()); }, { once: true });
+    });
+
+    /** One chunk as one XHR, so its progress can be heard. Answers the host's
+     *  JSON with the status beside it; a dropped connection rejects. */
+    const sendChunk = (href, body, { onProgress, signal }) => new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', href);
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      if (onProgress) xhr.upload.onprogress = (event) => onProgress(event.loaded);
+      xhr.onload = () => {
+        let answer = {};
+        try {
+          answer = JSON.parse(xhr.responseText || '{}');
+        } catch {
+          // A proxy's page, not an answer.
+        }
+        resolve({ status: xhr.status, answer });
+      };
+      xhr.onerror = () => reject(new Error('the connection dropped'));
+      xhr.onabort = () => reject(cancelled());
+      if (signal) {
+        if (signal.aborted) return xhr.onabort();
+        signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      }
+      xhr.send(body);
+    });
+
+    async function uploadInChunks({ folder = '', name, file, onProgress = null, onState = null, signal = null }) {
+      let session = null;
+      const mine = remembered().find((r) => sameFile(r, folder, name, file));
+      if (mine) {
+        session = await ask(`/drive/uploads/${mine.id}`)
+          .then((s) => ({ id: mine.id, chunk: s.chunk, received: s.received }))
+          .catch(() => (forget(mine.id), null));
+      }
+      if (!session) {
+        session = await ask('/drive/uploads', { method: 'POST', body: { folder, name, bytes: file.size, modified: file.lastModified } });
+        remember([...remembered(), { id: session.id, folder, name, bytes: file.size, modified: file.lastModified }]);
+      }
+      const { id } = session;
+      const chunk = Math.max(64 * 1024, Number(session.chunk) || SESSION_ABOVE);
+      let received = session.received;
+      let tries = 0;
+      onProgress?.(received, file.size);
+
+      while (received < file.size) {
+        if (signal?.aborted) break;
+        const end = Math.min(file.size, received + chunk);
+        try {
+          const { status, answer } = await sendChunk(
+            `/drive/uploads/${id}?offset=${received}&client=${CLIENT}`,
+            file.slice(received, end),
+            { signal, onProgress: (loaded) => onProgress?.(Math.min(received + loaded, file.size), file.size) },
+          );
+          if (status === 200 || status === 409) {
+            // The host's count is the truth, zero included: a host that lost
+            // the part says 0, and resending at the old offset would never end.
+            const at = Number(answer.received);
+            if (Number.isSafeInteger(at) && at >= 0) received = at;
+            if (tries) onState?.('going');
+            tries = 0;
+            continue;
+          }
+          if (status === 404) forget(id);
+          throw Object.assign(new Error(answer.error ?? `upload answered ${status}`), { status });
+        } catch (err) {
+          if (err.name === 'AbortError') break;
+          if (err.status) throw err;
+          if (tries >= BACKOFF.length) {
+            onState?.('paused');
+            throw Object.assign(new Error('the connection dropped — drop the file again to carry on'), { retryable: true });
+          }
+          onState?.('reconnecting');
+          await wait(BACKOFF[tries], signal);
+          tries += 1;
+          // Where is the host now? A chunk whose answer was lost may have landed.
+          received = await ask(`/drive/uploads/${id}`).then((s) => s.received, () => received);
+        }
+      }
+      if (signal?.aborted) {
+        await ask(`/drive/uploads/${id}`, { method: 'DELETE' }).catch(() => {});
+        forget(id);
+        throw cancelled();
+      }
+      const answer = await ask(`/drive/uploads/${id}/finish?client=${CLIENT}`, { method: 'POST', body: {} });
+      forget(id);
+      if (answer.path) drawThumb({ path: answer.path, file });
+      return answer;
+    }
+
     const move = (from, to) => ask('/drive/move', { method: 'POST', body: { from, to } });
     const remove = (path) => ask('/drive/trash', { method: 'POST', body: { path } });
     const restore = (id, to = null) => ask('/drive/untrash', { method: 'POST', body: { id, to } });
     const weigh = (path) => ask(`/drive/weigh?path=${encodeURIComponent(path)}`);
 
+    // Share links: one document each, at a level — 'view', 'edit' or
+    // 'modify' (server/shares.js). `make` hands back the link that is on at
+    // that level, or a new one; `off` stops one opening anything.
+    const shares = {
+      list: (path) => ask(`/drive/shares?path=${encodeURIComponent(path)}`),
+      make: (path, role) => ask('/drive/shares', { method: 'POST', body: { path, role } }),
+      off: (id) => ask('/drive/shares/off', { method: 'POST', body: { id } }),
+    };
+
+    // Publish: a folder that is its own git repository, committed and pushed
+    // (server/git.js). Only where the drive turned it on — elsewhere both
+    // answer 404, and the shell never offers it.
+    const git = {
+      status: (path, { fetch = false } = {}) =>
+        ask(`/drive/git?path=${encodeURIComponent(path)}${fetch ? '&fetch=1' : ''}`),
+      publish: (path, { message = '' } = {}) =>
+        ask('/drive/git/publish', { method: 'POST', body: { path, message } }),
+    };
+
     // A self-contained copy, blobs and all. The promise that makes blobs safe
     // to take is only a promise if it is one click away.
     const downloadHref = (path) => `/drive/download?path=${encodeURIComponent(path)}`;
+
+    // Where a file that is not a document lives. `tree()` reports these as
+    // `kind: 'file'` and their path carries its extension, so this is the one
+    // address in the drive that is not a document's. The host decides what is
+    // safe to render and what is only safe to download; a document asking for
+    // the href is not making that call.
+    const fileHref = (path) => `/drive/file?path=${encodeURIComponent(path)}`;
+
+    // A picture of that file, `w` pixels wide or a little more, from the host's
+    // thumbnailer. It may answer 404 — no thumbnailer here, or none for this
+    // kind — and a page that asks has to have something else to draw. `v` is
+    // the file's version (its modified time), so an edited file is a new
+    // address and a cached picture of the old one is never shown for it.
+    const thumbHref = (path, { w = 640, v = '' } = {}) =>
+      `/drive/thumb?path=${encodeURIComponent(path)}&w=${w}` + (v ? `&v=${encodeURIComponent(v)}` : '');
+
+    // -------------------------------------------------------- pictures drawn
+    //
+    // A host that cannot picture a file (anything but a Mac's QuickLook, or a
+    // kind QuickLook does not know) is not the end of it: the page can draw
+    // an image, a PDF's first page and a video's frame itself. It draws once,
+    // hands the picture to the host to keep for this version of the file, and
+    // every later visit, on any device, gets it from `thumbHref` instead.
+    //
+    // Right after an upload the page still holds the file, so it draws from
+    // that and costs the network nothing; otherwise it reads the file back —
+    // a PDF and a video only as far as they need to. `drawThumb` answers an
+    // object URL of what it drew, or null for a kind no browser can draw.
+
+    const DRAWN = {
+      image: new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico']),
+      video: new Set(['mp4', 'm4v', 'webm', 'mov', 'ogv']),
+      pdf: new Set(['pdf']),
+    };
+    const drawnKind = (ext) => Object.keys(DRAWN).find((k) => DRAWN[k].has(String(ext || '').toLowerCase())) ?? null;
+    // Pinned. The browser loads it, not the host, so a host needs no way out
+    // to the internet for a PDF to get a picture; offline, a PDF keeps its glyph.
+    const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+    const WIDE = 640;
+    const LONGEST = 1280;
+    const MOST_BYTES = 512 * 1024;
+
+    // Two at once: a folder of forty photos is forty asks, and forty decodes
+    // at once is the machine, not the page.
+    let drawing = 0;
+    const turns = [];
+    const turn = () => new Promise((resolve) => {
+      if (drawing < 2) {
+        drawing += 1;
+        resolve();
+      } else turns.push(resolve);
+    });
+    const done = () => {
+      const next = turns.shift();
+      if (next) next();
+      else drawing -= 1;
+    };
+
+    const canvasFor = (w, h) => {
+      const scale = Math.min(1, WIDE / w, LONGEST / h);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
+      return canvas;
+    };
+    const once = (el, ok, ms = 20_000) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timed out')), ms);
+      el.addEventListener(ok, () => { clearTimeout(timer); resolve(); }, { once: true });
+      el.addEventListener('error', () => { clearTimeout(timer); reject(new Error('no picture')); }, { once: true });
+    });
+
+    async function drawImage(source) {
+      const blob = source instanceof Blob ? source : await (await fetch(source)).blob();
+      const bitmap = await createImageBitmap(blob);
+      const canvas = canvasFor(bitmap.width, bitmap.height);
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close?.();
+      return canvas;
+    }
+
+    async function drawVideo(source) {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      const own = source instanceof Blob ? URL.createObjectURL(source) : null;
+      video.src = own ?? source;
+      try {
+        await once(video, 'loadeddata');
+        // A recorded clip can say its length is Infinity; its first frame will do.
+        const at = Number.isFinite(video.duration) ? Math.min(1, video.duration / 10) : 0;
+        if (at > 0) {
+          video.currentTime = at;
+          await once(video, 'seeked');
+        }
+        const canvas = canvasFor(video.videoWidth, video.videoHeight);
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        return canvas;
+      } finally {
+        video.removeAttribute('src');
+        video.load();
+        if (own) URL.revokeObjectURL(own);
+      }
+    }
+
+    async function drawPdf(source) {
+      const lib = await import(`${PDFJS}pdf.min.mjs`);
+      lib.GlobalWorkerOptions.workerSrc = `${PDFJS}pdf.worker.min.mjs`;
+      const doc = await lib.getDocument(
+        source instanceof Blob ? { data: new Uint8Array(await source.arrayBuffer()) } : { url: source, disableAutoFetch: true },
+      ).promise;
+      try {
+        const page = await doc.getPage(1);
+        const natural = page.getViewport({ scale: 1 });
+        const canvas = canvasFor(natural.width, natural.height);
+        const viewport = page.getViewport({ scale: canvas.width / natural.width });
+        const g = canvas.getContext('2d');
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: g, viewport }).promise;
+        return canvas;
+      } finally {
+        doc.destroy();
+      }
+    }
+
+    const encode = async (canvas) => {
+      for (const quality of [0.8, 0.6, 0.4]) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', quality));
+        if (blob && blob.size <= MOST_BYTES) return blob;
+      }
+      return null;
+    };
+
+    const drawing$ = new Map();
+    function drawThumb({ path, ext = null, file = null } = {}) {
+      const kind = drawnKind(ext ?? String(path).split('.').pop());
+      if (!kind || !path) return Promise.resolve(null);
+      if (drawing$.has(path)) return drawing$.get(path);
+      const work = (async () => {
+        await turn();
+        try {
+          const source = file ?? fileHref(path);
+          const canvas = await (kind === 'image' ? drawImage(source) : kind === 'video' ? drawVideo(source) : drawPdf(source));
+          const blob = await encode(canvas);
+          if (!blob) return null;
+          const kept = await fetch(`/drive/thumb?path=${encodeURIComponent(path)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': blob.type || 'image/webp' },
+            body: blob,
+          });
+          return kept.ok ? URL.createObjectURL(blob) : null;
+        } catch {
+          // A codec this browser lacks, a PDF it cannot read, no network for
+          // pdf.js: the tile keeps its glyph.
+          return null;
+        } finally {
+          done();
+        }
+      })();
+      drawing$.set(path, work);
+      work.finally(() => setTimeout(() => drawing$.delete(path), 0));
+      return work;
+    }
 
     // ------------------------------------------------------------- the events
     //
@@ -150,15 +531,24 @@
       client: CLIENT,
       tree,
       starters,
+      settings,
+      drawThumb,
+      starterPreviewHref,
       trash,
       create,
       mkdir,
       upload,
+      uploadFile,
+      pendingUploads,
       move,
       remove,
       restore,
       weigh,
+      shares,
+      git,
       downloadHref,
+      fileHref,
+      thumbHref,
       on,
       resolveBlobs,
     };

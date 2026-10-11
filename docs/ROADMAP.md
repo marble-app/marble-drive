@@ -15,7 +15,7 @@ this is the map.
 | `k-back` | Backups off the box | `server/backup.js`. Documents *and* `.marble/history/` |
 | `k-hist` | Fold the two history trees into one | `server/config.js` points Marble's history at the drive root. One `.marble/` |
 | `k-ord` | Ops that can be ordered later | `server/oplog.js`. `client` and `seq` alongside `t` |
-| `k-touch` | Touch | `lib/affordances.drive.js` overrides `sortable`; every drag a finger can make is pointer-driven. The one exception is a file dragged in from outside the browser, which fires no pointer events and cannot be made by a finger — see [DRIVE-DOC.md](DRIVE-DOC.md) |
+| `k-touch` | Touch | Marble's sortable is pointer-driven, so a finger can reorder. The one exception is a file dragged in from outside the browser, which fires no pointer events and cannot be made by a finger — see [DRIVE-DOC.md](DRIVE-DOC.md) |
 | `k-wt` | Measure what a document weighs | `marble-drive weigh`, and `GET /drive/weigh` |
 
 ## G1 — The Drive
@@ -30,18 +30,38 @@ this is the map.
 | `k-blob` | Blobs, with a way back | `server/flatten.js`, `server/store/blobs.js`. The round trip is byte-exact |
 | `k-drive` | A Drive that is itself a document | `templates/drive.mrbl` |
 
-## What is deliberately not here
+## G2 — isolation, accounts, sharing (in progress)
 
-**G2 — isolation, accounts, sharing.** No wildcard origin, so every document in
-a drive shares an origin with the host. Survivable at G0 because a drive has one
-owner; not survivable the moment a stranger's document can land in it. The gate
-is a placeholder that says so in its own header.
+**Superseded for accounts** by
+[the accounts and sign-in spec](superpowers/specs/2026-10-10-accounts-and-sign-in-design.md)
+(2026-10-10): identity lives at `marbledrive.app`, in the Worker, and a sign-up
+makes a sprite of its own rather than a store on a shared host, because an
+agent has a real shell. Phase 1 of it is in [ACCOUNTS.md](ACCOUNTS.md). The
+`k-acct`, `k-tenant` and `k-quota` rows below describe the earlier plan;
+`k-sess`'s `sameOrigin` is still the drive's CSRF check, and `k-orig` is still
+the precondition for anyone opening someone else's drive.
 
-**G3 — collaboration and versions.** Ops are broadcast as "something changed"
-rather than as ops, so a second tab refetches and reconciles rather than
-applying a move. The history exists and has no view. Both are the next
-generation's work, and both are cheaper for the op log carrying `client` and
-`seq` already.
+| card | | where |
+|---|---|---|
+| `k-acct` | Identity, invite-gated, scrypt over an append-only log | `server/accounts.js` |
+| `k-sess` | A session that knows whose it is — the gate's signed cookie, plus the account id | `server/sessions.js`, `sameOrigin` for CSRF |
+| `k-tenant` | A store per person at `<data>/users/<id>/` | `MARBLE_DRIVE_DATA` in `server/config.js`; the `userContext` refactor of `server/app.js` is increment 2 |
+| `k-orig` | Each document in its own origin | increment 3 — sandboxed iframe + a `postMessage` carrier. The precondition that opens the door |
+| `k-quota` | A document ceiling and a byte ceiling per account | `quotaDocs` / `quotaBytes` in config; checked in `putDocument` at increment 2 |
+
+Increment 1 lands the two hard-to-migrate modules and the config, imported by
+nothing — the same move the op log made with `client` and `seq`.
+
+**G3 — collaboration and versions.** `.mrbl` files merge on `data-marble-id`.
+Disjoint writes both-apply; overlapping work (same id, or one write contains
+the other) forks into `<marble-alt>` instead of last-write-wins. The carrier
+echoes ops so a second tab can apply a move without throwing away undo, and
+still sends `changed` so an old carrier refetches. Drive draws presence,
+a flash on a disjoint apply, and approve / reject / merge on the fork.
+
+The spec is the Drive document
+[`Research/Marble/live-collaboration.mrbl`](../drive/Research/Marble/live-collaboration.mrbl).
+Package facts live in `@bdhmin/marble/collab`; Drive chrome is `runtime/collab.js`.
 
 **G4 — local-first, desktop, agent as peer.** `oplog.since()` is written and
 tested and nothing reads it. That is the shape the vision asked for: the two

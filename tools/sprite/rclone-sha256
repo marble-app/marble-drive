@@ -1,0 +1,5 @@
+# sha256 of rclone-v<version>-linux-<arch>.zip for the version in
+# tools/sprite/rclone-version (from downloads.rclone.org/v<version>/SHA256SUMS,
+# checked against the zips themselves). Bump both together.
+982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab  linux-amd64
+03f2504174034b6d004152ed7369251c9a9ec1f7e0836eda420f5c7a5ec0dff9  linux-arm64

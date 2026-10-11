@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# Deploy Marble Drive to a Fly Sprite (docs/DEPLOY.md, "On a Fly Sprite").
+#
+#   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>] [--claude <version>] [--codex <version>]
+#   tools/sprite-deploy.sh <sprite> [--org <org>] --local
+#   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
+#   ... --no-checkpoint   skip the restore point, only when Sprites cannot make one
+#                         (a stuck checkpoint store, "…in-progress … file exists", is
+#                         recognised and skipped on its own, with a warning)
+#   ... --print-plan      say what would be deployed, and stop before touching a sprite
+#   ... --when-idle       stage now, switch when no agent is working (always, from the sprite itself)
+#   tools/sprite-deploy.sh --all [--org <org>] [--list] [--ref ...]   every user's sprite
+#
+# By default a sprite runs public sources: marble-drive at <ref> (default
+# origin/main) from GitHub, and @bdhmin/marble@<version> (default: the local
+# ../marble's version) from npm, with Claude Code pinned at --claude (default:
+# tools/sprite/claude-version, bumped deliberately: the host passes flags a given
+# CLI must know, and the machine running this may have an older one), and Codex
+# pinned the same way at --codex (default: tools/sprite/codex-version). Nothing
+# secret is copied to the sprite.
+# --local deploys this Mac's working copies instead (marble-drive's tracked and
+# untracked-but-not-ignored files, and `npm pack` of ../marble), for trying
+# unreleased changes on a test sprite.
+#
+# Every deploy checkpoints the sprite first and prints how to restore it.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
+MARBLE_DIR="${MARBLE_DIR:-$(cd "$REPO/.." && pwd)/marble}"
+[[ -d "$MARBLE_DIR" ]] || MARBLE_DIR="$(cd "$(git -C "$REPO" rev-parse --git-common-dir)/../.." && pwd)/marble"
+
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
+
+# --all: every user's sprite — labelled marble-tester (from sprite-provision.sh,
+# the owner's own drive included) or marble-user (the label they will all move
+# to) — one after another, going on past a failure and ending with one line per
+# sprite. The owner's test bed (labelled marble-owner) is never included; it is
+# deployed by name. --list only says which sprites that is.
+USER_LABELS='marble-tester|marble-user'
+if [[ "${1:-}" == --all ]]; then
+  shift
+  ALL_ORG=marble-drive
+  LIST_ONLY=0
+  PASS=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --org) ALL_ORG=$2; shift 2 ;;
+      --list) LIST_ONLY=1; shift ;;
+      *) PASS+=("$1"); shift ;;
+    esac
+  done
+  SPRITES=""
+  for one in $(sprite list -o "$ALL_ORG" 2>/dev/null); do
+    sprite info -o "$ALL_ORG" -s "$one" 2>/dev/null | grep -E '^Labels:' | grep -qwE "$USER_LABELS" && SPRITES="$SPRITES $one"
+  done
+  [[ -n "$SPRITES" ]] || { echo "sprite-deploy: no user sprites (labelled marble-tester or marble-user) in $ALL_ORG"; exit 0; }
+  if [[ $LIST_ONLY == 1 ]]; then printf '%s\n' $SPRITES; exit 0; fi
+  RESULTS=()
+  for one in $SPRITES; do
+    printf '\n==> ==== %s ====\n' "$one"
+    if "$0" "$one" --org "$ALL_ORG" ${PASS[@]+"${PASS[@]}"}; then RESULTS+=("  deployed  $one")
+    else RESULTS+=("  FAILED    $one"); fi
+  done
+  printf '\n==> summary\n'
+  printf '%s\n' "${RESULTS[@]}"
+  printf '%s\n' "${RESULTS[@]}" | grep -q FAILED && exit 1
+  exit 0
+fi
+
+[[ $# -ge 1 && "$1" != -* ]] || usage
+SPRITE=$1; shift
+ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" CODEX_VERSION="" LOCAL=0 ROLLBACK=0 CHECKPOINT=1 PRINT_PLAN=0 WHEN_IDLE=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --org) ORG=$2; shift 2 ;;
+    --ref) REF=$2; shift 2 ;;
+    --marble) MARBLE_VERSION=$2; shift 2 ;;
+    --claude) CLAUDE_VERSION=$2; shift 2 ;;
+    --codex) CODEX_VERSION=$2; shift 2 ;;
+    --local) LOCAL=1; shift ;;
+    --rollback) ROLLBACK=1; shift ;;
+    --no-checkpoint) CHECKPOINT=0; shift ;;
+    --print-plan) PRINT_PLAN=1; shift ;;
+    --when-idle) WHEN_IDLE=1; shift ;;
+    *) usage ;;
+  esac
+done
+
+on() { sprite exec -o "$ORG" -s "$SPRITE" --no-stdin "$@"; }
+REMOTE=/home/sprite/app
+say() { printf '==> %s\n' "$*"; }
+
+# Deploying to the machine this runs on (admin-p2 updating itself from one of
+# its own conversations): switching now would restart the host running that
+# conversation, so the switch is handed to marble-switch, which waits until no
+# agent is working (release.sh hand-off). A rollback waits the same way.
+# --when-idle asks for the same from anywhere, for a sprite someone is using.
+[[ "$(hostname 2>/dev/null)" == "$SPRITE" ]] && WHEN_IDLE=1
+
+send_release_script() {
+  say "sending the release script to $SPRITE ($ORG)"
+  on -- mkdir -p "$REMOTE/incoming"
+  on --file "$HERE/sprite/release.sh:$REMOTE/release.sh" -- chmod +x "$REMOTE/release.sh"
+}
+
+if [[ $ROLLBACK == 1 ]]; then
+  send_release_script
+  if [[ $WHEN_IDLE == 1 ]]; then on -- "$REMOTE/release.sh" rollback-when-idle; else on -- "$REMOTE/release.sh" rollback; fi
+  exit 0
+fi
+
+[[ -n "$CLAUDE_VERSION" ]] || CLAUDE_VERSION="$(tr -d '[:space:]' <"$HERE/sprite/claude-version" 2>/dev/null)"
+[[ -n "$CLAUDE_VERSION" ]] || { echo "sprite-deploy: no tools/sprite/claude-version — pass --claude <version>" >&2; exit 1; }
+npm view "@anthropic-ai/claude-code@$CLAUDE_VERSION" version >/dev/null 2>&1 \
+  || { echo "sprite-deploy: @anthropic-ai/claude-code@$CLAUDE_VERSION is not on npm" >&2; exit 1; }
+[[ -n "$CODEX_VERSION" ]] || CODEX_VERSION="$(tr -d '[:space:]' <"$HERE/sprite/codex-version" 2>/dev/null)"
+[[ -n "$CODEX_VERSION" ]] || { echo "sprite-deploy: no tools/sprite/codex-version — pass --codex <version>" >&2; exit 1; }
+npm view "@openai/codex@$CODEX_VERSION" version >/dev/null 2>&1 \
+  || { echo "sprite-deploy: @openai/codex@$CODEX_VERSION is not on npm" >&2; exit 1; }
+
+print_plan() { # print_plan <name> <source> <marble>
+  printf 'target: %s (%s)\nrelease: %s\nsource: %s\nmarble: %s\nclaude: %s\ncodex: %s\n' "$SPRITE" "$ORG" "$1" "$2" "$3" "$CLAUDE_VERSION" "$CODEX_VERSION"
+  if [[ $WHEN_IDLE == 1 ]]; then echo "switch: when no agent is working"; else echo "switch: now"; fi
+  exit 0
+}
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+FILES=()
+if [[ $LOCAL == 1 ]]; then
+  SHA="$(git -C "$REPO" rev-parse --short HEAD)"
+  NAME="$STAMP-local-$SHA"
+  [[ $PRINT_PLAN == 1 ]] && print_plan "$NAME" "this machine's working copy" "this machine's ../marble, packed"
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "$WORK"' EXIT
+  say "packing this Mac's marble-drive (working copy at $SHA)"
+  # No macOS metadata in the pack: Linux tar would warn about every file. Only
+  # macOS tar knows the flag; the workshop packs with GNU tar.
+  NOMAC=(); [[ "$(uname)" == Darwin ]] && NOMAC=(--no-mac-metadata)
+  (cd "$REPO" && git ls-files -co --exclude-standard -z | COPYFILE_DISABLE=1 tar "${NOMAC[@]}" --null -T - -czf "$WORK/marble-drive.tgz")
+  say "packing $MARBLE_DIR"
+  MARBLE_TGZ="$(cd "$MARBLE_DIR" && npm pack --silent --pack-destination "$WORK" | tail -1)"
+  FILES+=(--file "$WORK/marble-drive.tgz:$REMOTE/incoming/$NAME.tgz" --file "$WORK/$MARBLE_TGZ:$REMOTE/incoming/$NAME-marble.tgz")
+  SOURCE="tar:$REMOTE/incoming/$NAME.tgz"
+  MARBLE="$REMOTE/incoming/$NAME-marble.tgz"
+else
+  git -C "$REPO" fetch --quiet origin
+  SHA="$(git -C "$REPO" rev-parse --verify "$REF^{commit}")"
+  git -C "$REPO" branch -r --contains "$SHA" | grep -q . || { echo "sprite-deploy: $SHA is not on the remote — push it first, or deploy --local" >&2; exit 1; }
+  [[ -n "$MARBLE_VERSION" ]] || MARBLE_VERSION="$(node -p "require('$MARBLE_DIR/package.json').version")"
+  npm view "@bdhmin/marble@$MARBLE_VERSION" version >/dev/null 2>&1 \
+    || { echo "sprite-deploy: @bdhmin/marble@$MARBLE_VERSION is not on npm — publish marble first, or deploy --local" >&2; exit 1; }
+  NAME="$STAMP-${SHA:0:7}"
+  SOURCE="git:$SHA"
+  MARBLE="@bdhmin/marble@$MARBLE_VERSION"
+  [[ $PRINT_PLAN == 1 ]] && print_plan "$NAME" "$SOURCE" "$MARBLE"
+fi
+
+send_release_script
+
+if [[ $CHECKPOINT == 1 ]]; then
+  say "checkpointing $SPRITE"
+  if made="$(sprite checkpoint create -o "$ORG" -s "$SPRITE" --comment "before deploy $NAME" 2>&1)"; then
+    printf '%s\n' "$made"
+    echo "   to undo everything since: sprite checkpoint list -o $ORG -s $SPRITE, then sprite restore <id> -o $ORG -s $SPRITE"
+  elif grep -q 'in-progress.*file exists' <<<"$made"; then
+    # A stuck checkpoint store (docs/HOSTING.md): the next version's name is
+    # held by a checkpoint Sprites itself has lost track of, so every attempt
+    # fails the same way until Fly clears it. Stopping here would only leave
+    # this one person a release behind everyone else; a deploy replaces code,
+    # which --rollback undoes, and does not touch /drive. So it goes on, and
+    # says so.
+    printf '%s\n' "$made"
+    say "no checkpoint for $SPRITE: its checkpoint store is stuck (report it to Fly); --rollback still undoes the code"
+  else
+    printf '%s\n' "$made" >&2
+    echo "sprite-deploy: could not checkpoint $SPRITE; nothing was changed there" >&2
+    exit 1
+  fi
+else
+  # Only for a sprite whose checkpoints Sprites cannot make right now. A deploy
+  # replaces code, which --rollback undoes; it does not touch /drive.
+  say "no checkpoint for $SPRITE (--no-checkpoint); --rollback still undoes the code"
+fi
+
+say "staging $NAME"
+on ${FILES[@]+"${FILES[@]}"} -- "$REMOTE/release.sh" stage "$NAME" "$SOURCE" "$MARBLE" "$CLAUDE_VERSION" "$CODEX_VERSION"
+if [[ $WHEN_IDLE == 1 ]]; then
+  on -- "$REMOTE/release.sh" hand-off "$NAME"
+  on -- sh -c "rm -f $REMOTE/incoming/$NAME*"
+  say "done: $NAME is staged on $SPRITE and goes live when no agent is working ($REMOTE/switch.log)"
+else
+  say "switching"
+  on -- "$REMOTE/release.sh" switch "$NAME"
+  on -- sh -c "rm -f $REMOTE/incoming/$NAME*"
+  say "done: $NAME is live on $SPRITE"
+fi

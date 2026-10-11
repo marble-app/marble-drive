@@ -102,15 +102,34 @@ test('/ lands on the Drive, which is an ordinary document in the drive', async (
   assert.equal(response.headers.get('location'), '/a/drive');
 
   const page = await (await get('/a/drive')).text();
-  assert.match(page, /<script src="\/runtime\/marble\.js" data-marble-app="drive"/);
-  assert.match(page, /<script src="\/runtime\/drive\.js"/);
+  assert.match(page, /<script src="\/runtime\/marble\.js\?v=[0-9a-f]{12}" data-marble-app="drive"/);
+  assert.match(page, /<script src="\/runtime\/drive\.js\?v=[0-9a-f]{12}"/);
+  assert.match(page, /<script src="\/runtime\/collab\.js\?v=[0-9a-f]{12}"/);
+  assert.doesNotMatch(page, /agent-callout\.js/, 'no agents here, so nothing to summon');
+  assert.doesNotMatch(page, /agent-marks/, 'no agents here, so nothing to mark up for');
   // The host injects the carrier and nothing else — no affordance, no chrome.
   assert.ok(!page.includes('<script src="/lib/'));
+});
+
+test('/today bookmarks whatever the day skill mirrored there most recently, falling back like / does', async () => {
+  const before = await get('/today');
+  assert.equal(before.status, 302);
+  assert.equal(before.headers.get('location'), '/a/drive');
+
+  // The drive names its own bookmark (server/drive-settings.js).
+  await fsp.writeFile(path.join(drive.store.marbleDir, 'drive.json'), JSON.stringify({ latest: 'Days/today' }));
+  await drive.store.write('Days/today', '<html><body>today</body></html>', { label: 'seeded' });
+  await drive.store.write('a newer page', '<html><body>newer</body></html>', { label: 'seeded' });
+  const after = await get('/today');
+  assert.equal(after.status, 302);
+  assert.equal(after.headers.get('location'), `/a/${encodeURIComponent('Days/today')}`);
+  await fsp.rm(path.join(drive.store.marbleDir, 'drive.json'));
 });
 
 test('the carrier and its Drive extension are both served', async () => {
   assert.match(await (await get('/runtime/marble.js')).text(), /window\.marble = \{/);
   assert.match(await (await get('/runtime/drive.js')).text(), /marble\.drive = \{/);
+  assert.match(await (await get('/runtime/collab.js')).text(), /marble-collab-host/);
   assert.equal((await get('/runtime/../server/app.js')).status, 404);
   assert.equal((await get('/runtime/nope.js')).status, 404);
 });
@@ -127,6 +146,95 @@ test('a document three folders down is created, served and listed', async () => 
 
   const tree = await asJson(await get('/docs?tree=1'));
   assert.equal(tree.children.find((c) => c.path === 'work').children[0].path, 'work/q3');
+});
+
+// A file in a folder that is not a document. The Drive draws these quietly
+// rather than hiding them, and a thing you can see and cannot open is worse
+// than one you cannot see — so there is a route, and it is careful.
+test('a file that is not a document is in the tree and reachable', async () => {
+  await fsp.mkdir(path.join(ROOT, 'work/q3'), { recursive: true });
+  await fsp.writeFile(path.join(ROOT, 'work/q3/refs.bib'), '@article{a}');
+
+  const tree = await asJson(await get('/drive/tree?folder=work%2Fq3'));
+  const file = tree.children.find((c) => c.name === 'refs.bib');
+  assert.equal(file.kind, 'file');
+  assert.equal(file.ext, 'bib');
+  // `/docs` is the carrier's surface and it answers with documents, so a file
+  // arriving in the tree must not have arrived there too.
+  const docs = await asJson(await get('/docs'));
+  assert.equal(docs.some((entry) => entry.path.endsWith('.bib')), false);
+
+  const served = await get('/drive/file?path=work%2Fq3%2Frefs.bib');
+  assert.equal(served.status, 200);
+  assert.equal(await served.text(), '@article{a}');
+});
+
+test('a file is served under a type the browser will not execute', async () => {
+  // Text, and text only, for anything textual — a `.js` in a folder is
+  // something you read, and a type the browser runs would be a script on this
+  // origin with this drive's cookie.
+  await fsp.writeFile(path.join(ROOT, 'work/q3/tool.js'), 'alert(1)');
+  const js = await get('/drive/file?path=work%2Fq3%2Ftool.js');
+  assert.equal(js.headers.get('content-type'), 'text/plain; charset=utf-8');
+  assert.equal(js.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(js.headers.get('content-security-policy'), /sandbox/);
+  assert.match(js.headers.get('content-disposition'), /^inline/);
+
+  // Not on the allowlist, so it is handed over rather than rendered. An SVG is
+  // the one that matters: it looks like a picture and can carry script.
+  await fsp.writeFile(path.join(ROOT, 'work/q3/logo.svg'), '<svg/>');
+  const svg = await get('/drive/file?path=work%2Fq3%2Flogo.svg');
+  assert.equal(svg.headers.get('content-type'), 'application/octet-stream');
+  assert.match(svg.headers.get('content-disposition'), /^attachment/);
+});
+
+// A song is played by seeking into it, and a browser that is not offered a
+// byte range will play one from the top and refuse to move the playhead.
+test('a file is served in ranges, so a song can be seeked', async () => {
+  await fsp.writeFile(path.join(ROOT, 'work/q3/tone.mp3'), Buffer.from('0123456789'));
+  const whole = await get('/drive/file?path=work%2Fq3%2Ftone.mp3');
+  assert.equal(whole.headers.get('accept-ranges'), 'bytes');
+  assert.equal(whole.headers.get('content-type'), 'audio/mpeg');
+
+  const mid = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=2-5' } });
+  assert.equal(mid.status, 206);
+  assert.equal(mid.headers.get('content-range'), 'bytes 2-5/10');
+  assert.equal(await mid.text(), '2345');
+
+  const tail = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=-3' } });
+  assert.equal(await tail.text(), '789');
+  const open = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=7-' } });
+  assert.equal(await open.text(), '789');
+
+  const past = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=40-' } });
+  assert.equal(past.status, 416);
+  assert.equal(past.headers.get('content-range'), 'bytes */10');
+});
+
+// The browser's PDF viewer will not draw under a sandbox, so a PDF is the one
+// file served without it — and still never sniffed into something else.
+test('a PDF opens in the browser rather than as a blank sandboxed tab', async () => {
+  await fsp.writeFile(path.join(ROOT, 'work/q3/paper.pdf'), '%PDF-1.4\n%%EOF');
+  const pdf = await get('/drive/file?path=work%2Fq3%2Fpaper.pdf');
+  assert.equal(pdf.headers.get('content-type'), 'application/pdf');
+  assert.match(pdf.headers.get('content-disposition'), /^inline/);
+  assert.equal(pdf.headers.get('content-security-policy'), null);
+  assert.equal(pdf.headers.get('x-content-type-options'), 'nosniff');
+});
+
+test('a thumbnail is asked for, and a file with none is a 404 the page can draw around', async () => {
+  const none = await get('/drive/thumb?path=work%2Fq3%2Frefs.bib&w=320');
+  assert.equal(none.status, 404);
+  assert.equal((await get('/drive/thumb?path=work%2Fq3%2Fnope.pdf')).status, 404);
+  assert.equal((await get('/drive/thumb?path=..%2Fetc%2Fpasswd')).status, 400);
+});
+
+test('the file route refuses a document, a folder and a way out of the drive', async () => {
+  assert.equal((await get('/drive/file?path=work%2Fq3%2Fnotes')).status, 404);
+  assert.equal((await get('/drive/file?path=work%2Fq3%2Fnotes.mrbl')).status, 400);
+  assert.equal((await get('/drive/file?path=work%2Fq3')).status, 404);
+  assert.equal((await get('/drive/file?path=..%2F..%2Fetc%2Fpasswd')).status, 400);
+  assert.equal((await get('/drive/file?path=.marble%2Ftrash.jsonl')).status, 400);
 });
 
 test('the loop: an op splices the file and the bytes on disk change', async () => {
@@ -161,9 +269,9 @@ test('the op log records who filed it and their count of it', async () => {
 });
 
 test('the echo reaches every other client and never the one that wrote', async () => {
-  const doc = encodeURIComponent('work/q3/notes');
-  const page = await (await get('/a/work%2Fq3%2Fnotes')).text();
-  const id = idIn(page, 'h1');
+  const source = `<!doctype html>\n<html><head><title>Echo</title></head>\n<body data-marble-id="b">\n<h1 data-marble-id="h">Title</h1>\n</body></html>\n`;
+  const made = await asJson(await put('', 'Echo Live.mrbl', source));
+  const doc = encodeURIComponent(made.path);
 
   const mine = collect(`/events?app=${doc}&client=c1`, { want: 1, ms: 900 });
   const theirs = collect(`/events?app=${doc}&client=c2`, { want: 2, ms: 900 });
@@ -172,17 +280,70 @@ test('the echo reaches every other client and never the one that wrote', async (
   await fetch(`${base}/ops?app=${doc}&client=c1`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify([{ type: 'setText', id, text: 'A quieter title' }]),
+    body: JSON.stringify([{ type: 'setText', id: 'h', text: 'A quieter title' }]),
   });
 
   const heard = (frames) => frames.filter((frame) => frame.data === 'changed');
   assert.equal(heard(await mine.frames).length, 0, 'the writer is not reconciled against its own gesture');
-  assert.equal(heard(await theirs.frames).length, 1, 'every other client is told');
+  const theirsFrames = await theirs.frames;
+  assert.equal(heard(theirsFrames).length, 1, 'every other client is told');
+  const opsFrame = theirsFrames.find((frame) => frame.event === 'ops');
+  assert.ok(opsFrame, 'the echo is ops, not only changed');
+  assert.match(opsFrame.data, /"type":"setText"/);
+});
+
+test('presence is echoed to other tabs and never written into the file', async () => {
+  const source = `<!doctype html>\n<html><head><title>Here</title></head>\n<body data-marble-id="b">\n<h1 data-marble-id="h">Title</h1>\n</body></html>\n`;
+  const made = await asJson(await put('', 'Presence Live.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  const mine = collect(`/events?app=${doc}&client=you`, { want: 1, ms: 900 });
+  const theirs = collect(`/events?app=${doc}&client=them`, { want: 1, ms: 900 });
+  await Promise.all([mine.ready, theirs.ready]);
+
+  const noted = await fetch(`${base}/presence?app=${doc}&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: ['h'] }),
+  });
+  assert.equal(noted.status, 200);
+
+  const theirsFrames = await theirs.frames;
+  const presence = theirsFrames.find((frame) => frame.event === 'presence');
+  assert.ok(presence);
+  assert.match(presence.data, /"h"/);
+  assert.equal((await mine.frames).filter((frame) => frame.event === 'presence').length, 0);
+
+  const stored = await fsp.readFile(path.join(ROOT, `${made.path}.mrbl`), 'utf8');
+  assert.doesNotMatch(stored, /marble-presence/);
+});
+
+test('a late second event for a save the host already made is not an edit from outside', async () => {
+  const doc = encodeURIComponent('work/q3/notes');
+  const page = await (await get('/a/work%2Fq3%2Fnotes')).text();
+  const id = idIn(page, 'h1');
+  await fetch(`${base}/ops?app=${doc}&client=c3`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify([{ type: 'setText', id, text: 'Settled title' }]),
+  });
+  // Long enough for the save's own event to settle and use up its mark.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const writer = collect(`/events?app=${doc}&client=c3`, { want: 1, ms: 900 });
+  await writer.ready;
+  // What macOS does to a busy watcher: the same save, reported again, late.
+  // The bytes are the ones the host wrote, so nothing changed.
+  const file = path.join(ROOT, 'work/q3/notes.mrbl');
+  await fsp.writeFile(file, await fsp.readFile(file, 'utf8'));
+
+  const heard = (await writer.frames).filter((frame) => frame.data === 'changed');
+  assert.equal(heard.length, 0, 'the writer is not reconciled against its own save');
 });
 
 test('an edit from outside the host reaches the page, with the prior state kept', async () => {
   const doc = encodeURIComponent('work/q3/notes');
-  const listening = collect(`/events?app=${doc}&client=c9`, { want: 1, ms: 2500 });
+  const listening = collect(`/events?app=${doc}&client=c9`, { want: 3, ms: 2500 });
   await listening.ready;
 
   const file = path.join(ROOT, 'work/q3/notes.mrbl');
@@ -217,16 +378,52 @@ test('the Drive hears about the folder changing, not just about one file', async
   assert.ok((await listening.frames).some((frame) => frame.event === 'created'));
 });
 
+test('a starter can be looked at without one being made', async () => {
+  const before = await asJson(await get('/drive/tree'));
+
+  const response = await get('/drive/starters/board/preview');
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/html/);
+  const html = await response.text();
+  assert.match(html, /^<!doctype html>/);
+  assert.ok(!/<script/i.test(html), 'a preview carries nothing that could run');
+
+  // The gallery asks for this on every draw. Asking must not leave anything
+  // behind — a preview is a picture of a document, not a document.
+  assert.deepEqual(await asJson(await get('/drive/tree')), before);
+
+  assert.equal((await get('/drive/starters/telekinesis/preview')).status, 404);
+});
+
 test('moving, trashing and restoring, over HTTP', async () => {
   await asJson(await post('/drive/new', { path: 'scratch', from: 'board' }));
   await asJson(await post('/drive/move', { from: 'scratch', to: 'archive/scratch' }));
-  assert.equal((await get('/a/scratch')).status, 404);
+  // The old address is not a dead end: it forwards to where it went.
+  const old = await get('/a/scratch');
+  assert.equal(old.status, 302);
+  assert.equal(old.headers.get('location'), '/a/archive%2Fscratch');
   assert.equal((await get('/a/archive%2Fscratch')).status, 200);
 
   const gone = await asJson(await post('/drive/trash', { path: 'archive/scratch' }));
   assert.equal((await get('/a/archive%2Fscratch')).status, 404);
   await asJson(await post('/drive/untrash', { id: gone.id }));
   assert.equal((await get('/a/archive%2Fscratch')).status, 200);
+});
+
+test('a rename retitles the document, and a move alone leaves its title be', async () => {
+  await asJson(await post('/drive/new', { path: 'first name', from: 'doc' }));
+  const titled = (await drive.store.read('first name')).replace(/<title>[^<]*<\/title>/, '<title data-marble-id="t1">Kept &amp; mine</title>');
+  await drive.store.write('first name', titled, { label: 'test' });
+
+  // Into a folder under the same name: the person named nothing.
+  await asJson(await post('/drive/move', { from: 'first name', to: 'shelf/first name' }));
+  assert.match(await drive.store.read('shelf/first name'), /<title data-marble-id="t1">Kept &amp; mine<\/title>/);
+
+  // A new name is the name the tab says, and the title keeps its id.
+  await asJson(await post('/drive/move', { from: 'shelf/first name', to: 'shelf/second name' }));
+  const renamed = await drive.store.read('shelf/second name');
+  assert.match(renamed, /<title data-marble-id="t1">second name<\/title>/);
+  assert.equal(renamed.replace(/<title[^>]*>[^<]*/, ''), titled.replace(/<title[^>]*>[^<]*/, ''));
 });
 
 test('a name that is taken gets a number rather than a refusal', async () => {
@@ -253,7 +450,60 @@ test('a copy is a copy of the bytes, because a document is one file', async () =
 // arriving from outside.
 const brought = (title, id = 'aa11bb22') =>
   `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
-  `<body data-marble-id="body${id}">\n<h1 data-marble-id="${id}" data-marble-editable>${title}</h1>\n</body>\n</html>\n`;
+  `<body data-marble-id="body${id}">\n<h1 data-marble-id="${id}">${title}</h1>\n</body>\n</html>\n`;
+
+const collabDoc = (title) =>
+  `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
+  `<body data-marble-id="bodyc1">\n<main data-marble-id="rootc1">\n<h1 data-marble-id="hc1" data-marble-editable>${title}</h1>\n</main>\n</body>\n</html>\n`;
+
+test('a page and its runtime come compressed to a browser that asks, and plain to one that does not', async () => {
+  // Over a sprite's URL every byte of a page crosses the internet, and a page
+  // is its document plus about 800 KB of runtime.
+  for (const encoding of ['br', 'gzip']) {
+    const page = await get('/a/drive', { headers: { 'Accept-Encoding': encoding } });
+    assert.equal(page.headers.get('content-encoding'), encoding);
+    assert.match(page.headers.get('vary'), /Accept-Encoding/);
+    assert.match(await page.text(), /<script src="\/runtime\/marble\.js/, 'and it still reads as the page');
+  }
+  const js = await get('/runtime/marble.js', { headers: { 'Accept-Encoding': 'gzip, br' } });
+  assert.equal(js.headers.get('content-encoding'), 'br', 'brotli when both are on offer');
+  assert.match(await js.text(), /window\.marble = \{/);
+
+  const http = await import('node:http');
+  const plain = await new Promise((resolve, reject) => {
+    http.get(`${base}/a/drive`, (res) => {
+      let body = '';
+      res.setEncoding('utf8').on('data', (chunk) => { body += chunk; }).on('end', () => resolve({ res, body }));
+    }).on('error', reject);
+  });
+  assert.equal(plain.res.headers['content-encoding'], undefined);
+  assert.match(plain.body, /<script src="\/runtime\/marble\.js/);
+});
+
+test('the runtime a page names is kept by the browser until it changes, and any other address is revalidated', async () => {
+  const page = await (await get('/a/drive')).text();
+  const named = page.match(/src="(\/runtime\/marble\.js\?v=([0-9a-f]{12}))"/);
+  assert.ok(named, 'the page names a version of marble.js');
+
+  const pinned = await get(named[1]);
+  assert.equal(pinned.status, 200);
+  assert.match(pinned.headers.get('cache-control'), /max-age=31536000/);
+  assert.match(pinned.headers.get('cache-control'), /immutable/);
+  assert.equal(pinned.headers.get('etag'), `"${named[2]}"`, 'the version is the hash of what is served');
+
+  // An import() inside the runtime names no version; neither does a page from
+  // before the file changed. Both are asked about, and a match costs nothing.
+  for (const route of ['/runtime/marble.js', '/runtime/marble.js?v=000000000000']) {
+    const response = await get(route);
+    assert.equal(response.headers.get('cache-control'), 'no-cache', route);
+    const again = await get(route, { headers: { 'If-None-Match': response.headers.get('etag') } });
+    assert.equal(again.status, 304, route);
+    assert.equal(await again.text(), '');
+  }
+
+  // Documents are never kept: the page is the document, and it moves.
+  assert.equal((await get('/a/drive')).headers.get('cache-control'), 'no-store');
+});
 
 test('a document dropped into the drive lands in the folder it was dropped on', async () => {
   const made = await asJson(await put('archive', 'Brought In.mrbl', brought('Brought In')));
@@ -263,7 +513,7 @@ test('a document dropped into the drive lands in the folder it was dropped on', 
 
   // Served as the app it is, not previewed — the whole point of the drive.
   const page = await (await get('/a/archive%2FBrought%20In')).text();
-  assert.match(page, /<script src="\/runtime\/marble\.js" data-marble-app="archive\/Brought In"/);
+  assert.match(page, /<script src="\/runtime\/marble\.js\?v=[0-9a-f]{12}" data-marble-app="archive\/Brought In"/);
   assert.match(page, /<h1 data-marble-id="aa11bb22"/);
 
   // And it is in the tree, in that folder, rather than at the root.
@@ -324,6 +574,62 @@ test('an upload is announced to the drive, and never to whoever filed it', async
   assert.deepEqual(await uploader.frames, []);
 });
 
+/** The file route: the body is the bytes, and nothing about them is text. */
+const putFile = (folder, name, bytes, client = 'up') =>
+  fetch(
+    `${base}/drive/upload-file?folder=${encodeURIComponent(folder)}` +
+      `&name=${encodeURIComponent(name)}&client=${client}`,
+    { method: 'POST', headers: { 'Content-Type': 'audio/mpeg' }, body: bytes },
+  );
+
+test('a song dropped into a folder lands there byte for byte, and plays from the drive', async () => {
+  await asJson(await post('/drive/mkdir', { path: 'Fun/Song Mashups' }));
+  // Every byte value, so a text decode anywhere on the way would show.
+  const bytes = Buffer.from(Array.from({ length: 70000 }, (_, i) => (i * 37) % 256));
+  const others = collect('/events?drive=1&client=listener', { want: 1, ms: 1500 });
+  await others.ready;
+
+  const first = await asJson(await putFile('Fun/Song Mashups', 'thank u, next (Instrumental).mp3', bytes));
+  assert.equal(first.path, 'Fun/Song Mashups/thank u next Instrumental.mp3');
+  assert.equal(first.bytes, bytes.length);
+  assert.deepEqual(await fsp.readFile(path.join(ROOT, first.path)), bytes);
+
+  const heard = await others.frames;
+  assert.ok(heard.some((f) => f.event === 'created' && JSON.parse(f.data).path === first.path));
+
+  const served = await get(first.href);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'audio/mpeg');
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), bytes);
+
+  // The same name twice is a second file, numbered before the extension so it
+  // is still an mp3 — never the first one overwritten.
+  const second = await asJson(await putFile('Fun/Song Mashups', 'thank u, next (Instrumental).mp3', Buffer.from('b')));
+  assert.equal(second.path, 'Fun/Song Mashups/thank u next Instrumental 1.mp3');
+  assert.deepEqual(await fsp.readFile(path.join(ROOT, first.path)), bytes);
+
+  const tree = await asJson(await get('/drive/tree?folder=Fun%2FSong%20Mashups'));
+  const names = tree.children.map((c) => c.kind + ':' + c.name).sort();
+  assert.deepEqual(names, [
+    'file:thank u next Instrumental 1.mp3',
+    'file:thank u next Instrumental.mp3',
+  ]);
+  // Nothing half-written is left behind under its hidden name.
+  const onDisk = await fsp.readdir(path.join(ROOT, 'Fun/Song Mashups'));
+  assert.equal(onDisk.filter((n) => n.startsWith('.')).length, 0);
+});
+
+test('a document is never stored as a file, and a file cannot climb out', async () => {
+  const doc = await putFile('', 'Sneaky.mrbl', Buffer.from('<!doctype html><title>x</title>'));
+  assert.equal(doc.status, 400);
+  assert.equal((await putFile('', 'page.html', Buffer.from('<p>'))).status, 400);
+
+  const climbed = await asJson(await putFile('../..', '../escape.mp3', Buffer.from('x')));
+  assert.ok(path.resolve(ROOT, climbed.path).startsWith(path.resolve(ROOT) + path.sep));
+  assert.match(climbed.path, /escape\.mp3$/);
+  assert.ok(!(await fsp.stat(path.join(ROOT, '..', 'escape.mp3')).catch(() => null)));
+});
+
 test('a bad path is a 400 with a sentence, not a stack trace', async () => {
   for (const bad of ['../../etc/passwd', 'work//notes', '.marble/x']) {
     const response = await post('/drive/mkdir', { path: bad });
@@ -371,6 +677,28 @@ test('a document made here carries its own mark, and the host has one for the re
   assert.match(taken, /<link rel="icon" href="data:image\/svg\+xml,/);
 });
 
+test('the gate cookie is Secure when the secret arrived through a local HTTPS proxy', async () => {
+  const closed = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_SECRET: 'hunter2' }), {
+    log: quiet,
+  });
+  const shutPort = await new Promise((resolve) => {
+    closed.server.listen(0, '127.0.0.1', () => resolve(closed.server.address().port));
+  });
+  const offer = (headers = {}) =>
+    fetch(`http://127.0.0.1:${shutPort}/gate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ secret: 'hunter2' }),
+    });
+
+  // What Tailscale Serve looks like from here: loopback, saying https.
+  assert.match((await offer({ 'X-Forwarded-Proto': 'https' })).headers.get('set-cookie'), /; Secure/);
+  // And http://localhost at the desk still gets a cookie Safari will keep.
+  assert.doesNotMatch((await offer()).headers.get('set-cookie'), /Secure/);
+
+  await closed.close();
+});
+
 test('health answers before the gate, and the gate closes everything else', async () => {
   const closed = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_SECRET: 'hunter2' }), {
     log: quiet,
@@ -414,6 +742,138 @@ test('health answers before the gate, and the gate closes everything else', asyn
   );
 
   await closed.close();
+});
+
+// `you` claims an element by writing it. A write that changes nothing is not
+// noted (applyOps returns before it notes), so each claim below changes text.
+const youWrite = (doc, ops) =>
+  fetch(`${base}/ops?app=${doc}&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ops),
+  });
+
+test('an outside write to a disjoint id both-applies next to a heading you wrote', async () => {
+  const source = collabDoc('Hello');
+  const made = await asJson(await put('', 'Collab Live.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  const wrote = await youWrite(doc, [{ type: 'setText', id: 'hc1', text: 'Hello!' }]);
+  assert.equal(wrote.status, 200);
+
+  const listening = collect(`/events?app=${doc}&client=you`, { want: 3, ms: 2500 });
+  await listening.ready;
+
+  const file = path.join(ROOT, `${made.path}.mrbl`);
+  const onDisk = await fsp.readFile(file, 'utf8');
+  await fsp.writeFile(file, onDisk.replace('</main>', '<p data-marble-id="pc1">Body</p>\n</main>'));
+
+  const frames = await listening.frames;
+  assert.ok(frames.some((frame) => frame.event === 'ops' || frame.data === 'changed'));
+
+  const after = await fsp.readFile(file, 'utf8');
+  assert.match(after, /<h1 data-marble-id="hc1"[^>]*>Hello!<\/h1>/);
+  assert.match(after, /<p data-marble-id="pc1">Body<\/p>/);
+  assert.doesNotMatch(after, /<marble-alt/);
+});
+
+test('an outside rewrite of a heading you wrote forks rather than clobbering', async () => {
+  const source = collabDoc('Yours');
+  const made = await asJson(await put('', 'Collab Fork.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  assert.equal((await youWrite(doc, [{ type: 'setText', id: 'hc1', text: 'Yours!' }])).status, 200);
+
+  const listening = collect(`/events?app=${doc}&client=you`, { want: 3, ms: 2500 });
+  await listening.ready;
+
+  const file = path.join(ROOT, `${made.path}.mrbl`);
+  const onDisk = await fsp.readFile(file, 'utf8');
+  assert.match(onDisk, />Yours!<\/h1>/);
+  await fsp.writeFile(file, onDisk.replace('>Yours!</h1>', '>Theirs</h1>'));
+
+  await listening.frames;
+  const after = await fsp.readFile(file, 'utf8');
+  assert.match(after, /<marble-alt data-marble-id="hc1"/);
+  assert.match(after, /Yours!/);
+  assert.match(after, /Theirs/);
+});
+
+test('an undo neither forks against your edit nor leaves a claim behind', async () => {
+  const source = collabDoc('Original');
+  const made = await asJson(await put('', 'Collab Undo.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+  const write = (client, text) =>
+    fetch(`${base}/ops?app=${doc}&client=${encodeURIComponent(client)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ type: 'setText', id: 'hc1', text }]),
+    });
+
+  // You edited it; an agent's undo puts it back. The undo's own hash check is
+  // its conflict guard (server/agent/undo.js), so the host does not fork it.
+  assert.equal((await write('you', 'Yours!')).status, 200);
+  const undone = await asJson(await write('agent-undo:zz', 'Original'));
+  assert.equal(undone.applied, 1);
+  let after = await fsp.readFile(path.join(ROOT, `${made.path}.mrbl`), 'utf8');
+  assert.doesNotMatch(after, /<marble-alt/, 'an undo is a retraction, not a second version');
+  assert.match(after, />Original<\/h1>/);
+
+  // And the undo left no claim: your next edit lands, it does not fork.
+  assert.equal((await write('you', 'Yours again')).status, 200);
+  after = await fsp.readFile(path.join(ROOT, `${made.path}.mrbl`), 'utf8');
+  assert.doesNotMatch(after, /<marble-alt/, 'an undo does not claim what it restored');
+  assert.match(after, />Yours again<\/h1>/);
+});
+
+test('an outside rewrite of a heading you only had your caret in applies cleanly', async () => {
+  const source = collabDoc('Looking');
+  const made = await asJson(await put('', 'Collab Look.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  const noted = await fetch(`${base}/presence?app=${doc}&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: ['hc1'] }),
+  });
+  assert.equal(noted.status, 200);
+
+  const listening = collect(`/events?app=${doc}&client=you`, { want: 3, ms: 2500 });
+  await listening.ready;
+
+  const file = path.join(ROOT, `${made.path}.mrbl`);
+  const onDisk = await fsp.readFile(file, 'utf8');
+  await fsp.writeFile(file, onDisk.replace(
+    '<h1 data-marble-id="hc1" data-marble-editable>Looking</h1>',
+    '<h1 data-marble-id="hc1" data-marble-editable>Changed</h1>',
+  ));
+
+  await listening.frames;
+  const after = await fsp.readFile(file, 'utf8');
+  assert.doesNotMatch(after, /<marble-alt/, 'a caret is observation, not a claim');
+  assert.match(after, /<h1 data-marble-id="hc1"[^>]*>Changed<\/h1>/);
+});
+
+test('two of your own tabs writing the same attribute do not fork each other', async () => {
+  // The Agents page files its Focus split on the .focus element from whichever
+  // tab last dragged the seam. Two tabs are two clients, and a fork is a
+  // person-against-agent thing: a second tab's write is not "the agent".
+  const source = collabDoc('Split');
+  const made = await asJson(await put('', 'Collab Tabs.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+  const write = (client, value) =>
+    fetch(`${base}/ops?app=${doc}&client=${encodeURIComponent(client)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ type: 'setAttr', id: 'hc1', name: 'data-split', value }]),
+    });
+
+  assert.equal((await write('tab-one', '0.6')).status, 200);
+  const second = await asJson(await write('tab-two', '0.7'));
+  assert.deepEqual(second.forks, [], 'a person writing after another person is a write, not a conflict');
+  const after = await fsp.readFile(path.join(ROOT, `${made.path}.mrbl`), 'utf8');
+  assert.doesNotMatch(after, /<marble-alt/);
+  assert.match(after, /<h1[^>]*data-split="0.7"[^>]*>Split<\/h1>/);
 });
 
 test.after(async () => {

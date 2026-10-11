@@ -104,9 +104,131 @@ test('deleting is recoverable, and restoring beside a name that was retaken', as
   assert.equal((await store.listTrash()).length, 0);
 });
 
+test('a folder goes to the trash whole, and comes back whole', async () => {
+  await store.write('box/one', doc('One'));
+  await store.write('box/deep/two', doc('Two'));
+  await fsp.writeFile(path.join(ROOT, 'box', 'refs.bib'), '@article{a,title={A}}');
+
+  const entry = await store.trash('box');
+  assert.equal(entry.kind, 'folder');
+  assert.equal(await store.hasFolder('box'), false);
+  assert.equal(await store.has('box/deep/two'), false);
+
+  // What a row in the trash has to draw. A folder that reports nothing is a
+  // folder that draws as empty, which reads as "restoring this gives back
+  // nothing" — and the bytes are right there under .marble/trash.
+  const [listed] = (await store.listTrash()).filter((item) => item.id === entry.id);
+  assert.equal(listed.items, 3);
+  // Folders first, then documents, then everything else: the order a tile
+  // draws its cells in.
+  assert.deepEqual(listed.kinds, ['folder', 'doc', 'file']);
+
+  const back = await store.untrash(entry.id);
+  assert.equal(back.path, 'box');
+  assert.match(await store.read('box/one'), /hello/);
+  assert.match(await store.read('box/deep/two'), /hello/);
+  assert.equal(await store.hasFile('box/refs.bib'), true);
+});
+
+test('a trashed document still says how big it is and what it is called', async () => {
+  await store.write('measured', doc('Measured'));
+  const entry = await store.trash('measured');
+  const [listed] = (await store.listTrash()).filter((item) => item.id === entry.id);
+  assert.equal(listed.title, 'Measured');
+  assert.equal(listed.nodes, 2);
+  assert.ok(listed.bytes > 0);
+  await store.untrash(entry.id);
+});
+
 test('create refuses to overwrite', async () => {
   await store.create('fresh', doc('Fresh'));
   await assert.rejects(() => store.create('fresh', doc('Fresh')), /already exists/);
+});
+
+// ------------------------------------------------------- the third kind
+//
+// A folder holds the work and it holds what the work needed. The second is off
+// by default in `list` — every caller that says "documents" means documents —
+// and on in `tree`, which is what a Drive draws a folder from.
+
+test('a file that is not a document is listed only when asked for', async () => {
+  await fsp.mkdir(path.join(ROOT, 'paper'), { recursive: true });
+  await fsp.writeFile(path.join(ROOT, 'paper', 'refs.bib'), '@article{a}');
+  await fsp.writeFile(path.join(ROOT, 'paper', 'cover.png'), 'not really a png');
+  await store.write('paper/draft', doc('Draft'));
+
+  const documents = await store.list({ folder: 'paper' });
+  assert.deepEqual(documents.map((e) => e.path), ['paper/draft']);
+
+  const everything = await store.list({ folder: 'paper', files: true });
+  const file = everything.find((e) => e.path === 'paper/refs.bib');
+  assert.equal(file.kind, 'file');
+  // The extension stays in the path, because for a file that *is* the address.
+  assert.equal(file.name, 'refs.bib');
+  assert.equal(file.ext, 'bib');
+  assert.ok(file.bytes > 0);
+});
+
+test('the tree carries files, ordered behind the documents', async () => {
+  const paper = (await store.tree({ folder: 'paper' })).children;
+  assert.deepEqual(paper.map((e) => e.kind), ['doc', 'file', 'file']);
+});
+
+test('a tree can leave the files out, for a caller that draws only documents', async () => {
+  const paper = (await store.tree({ folder: 'paper', files: false })).children;
+  assert.deepEqual(paper.map((e) => e.kind), ['doc']);
+});
+
+test('what a document says of itself is remembered only until the file changes', async () => {
+  await store.write('facts', doc('First'));
+  assert.equal((await store.stat('facts')).title, 'First');
+  // Through the host, and behind its back — an agent's editor, a copy from
+  // Finder — the next stat reads the file again.
+  await store.write('facts', doc('Second'));
+  assert.equal((await store.stat('facts')).title, 'Second');
+  await fsp.writeFile(path.join(ROOT, 'facts.mrbl'), doc('Third').replace('<p data-marble-id="p">hello</p>', ''));
+  const info = await store.stat('facts');
+  assert.equal(info.title, 'Third');
+  assert.equal(info.nodes, 1);
+  await fsp.rm(path.join(ROOT, 'facts.mrbl'));
+  assert.equal(await store.stat('facts'), null);
+});
+
+test('a file with no extension, and a name the grammar refuses', async () => {
+  await fsp.writeFile(path.join(ROOT, 'paper', 'Makefile'), 'all:');
+  // A leading dot is how the store hides its own bookkeeping, so a file named
+  // that way is not addressable and is left alone rather than listed.
+  await fsp.writeFile(path.join(ROOT, 'paper', '.hidden'), 'x');
+  const files = await store.list({ folder: 'paper', files: true });
+  assert.equal(files.find((e) => e.name === 'Makefile').ext, '');
+  assert.equal(files.some((e) => e.name === '.hidden'), false);
+});
+
+test('readRaw hands over a file, and refuses a document', async () => {
+  const file = await store.readRaw('paper/refs.bib');
+  assert.equal(file.ext, 'bib');
+  const bytes = [];
+  for await (const chunk of file.open()) bytes.push(chunk);
+  assert.equal(Buffer.concat(bytes).toString(), '@article{a}');
+
+  assert.equal(await store.readRaw('paper/draft'), null);
+  await assert.rejects(() => store.readRaw('paper/draft.mrbl'), /a document, not a file/);
+});
+
+test('a file can be renamed and trashed like anything else in the drive', async () => {
+  await store.move('paper/cover.png', 'paper/figure-one.png');
+  assert.equal(await store.hasFile('paper/figure-one.png'), true);
+  assert.equal(await store.hasFile('paper/cover.png'), false);
+  // Moving onto a name a file already has is refused, the same as for a
+  // document — a rename that overwrites is a delete nobody asked for.
+  await assert.rejects(() => store.move('paper/refs.bib', 'paper/figure-one.png'), /already exists/);
+
+  const entry = await store.trash('paper/figure-one.png');
+  assert.equal(entry.kind, 'file');
+  assert.equal(await store.hasFile('paper/figure-one.png'), false);
+  const back = await store.untrash(entry.id);
+  assert.equal(back.path, 'paper/figure-one.png');
+  assert.equal(await store.hasFile('paper/figure-one.png'), true);
 });
 
 test('every method refuses a path that leaves the drive', async () => {
@@ -116,3 +238,15 @@ test('every method refuses a path that leaves the drive', async () => {
 });
 
 test.after(() => fsp.rm(ROOT, { recursive: true, force: true }));
+
+test('a document\'s own favicon rides along; the marble every document starts with does not', async () => {
+  const { link } = await import('../server/favicon.js');
+  const own = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+  const withIcon = (href) => doc('Icon').replace('</title>', `</title><link rel="icon" href="${href}">`);
+  await store.write('icons/own', withIcon(own));
+  await store.write('icons/marble', doc('Marble').replace('</title>', `</title>${link('doc')}`));
+  await store.write('icons/remote', withIcon('https://example.com/icon.png'));
+  assert.equal((await store.stat('icons/own')).icon, own);
+  assert.equal('icon' in (await store.stat('icons/marble')), false);
+  assert.equal('icon' in (await store.stat('icons/remote')), false, 'only a picture carried in the file');
+});
