@@ -403,7 +403,11 @@ multi-tenant host and on a host with no passphrase or door.
   registers itself (`/oauth/register`), and sends the owner to
   `/oauth/authorize`. That page is behind the gate like any other, so the
   passphrase or the Marble Drive sign-in proves it is the owner, and asks one
-  question: Allow or Don't allow. Codes need PKCE (S256), are good once and for
+  question: Allow or Don't allow, and says which account the drive will be
+  linked to. A code goes only to Claude's or ChatGPT's own callback
+  (`claude.ai`, `claude.com`, `chatgpt.com`) or back to this machine, so it
+  lands in the account that pressed Connect; an app is named by where its
+  codes go, never by the name it registers with. Codes need PKCE (S256), are good once and for
   a minute; access tokens last an hour, refresh tokens 90 days and are good
   once. `.marble/connector.json` holds clients and grants, with tokens only as
   hashes. `/connector` lists the apps let in, with a Turn off for each, which

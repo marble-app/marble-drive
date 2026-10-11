@@ -48,7 +48,7 @@ const drive = await createDrive(config, {
 await drive.createDocument('garden', SOURCE);
 const port = await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', () => resolve(drive.server.address().port)));
 const base = `http://127.0.0.1:${port}`;
-const REDIRECT = 'https://claude.example/api/mcp/auth_callback';
+const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 
 test.after(async () => {
   await drive.close?.();
@@ -138,13 +138,19 @@ test('without a token, /mcp says where to sign in', async () => {
   assert.deepEqual(server.code_challenge_methods_supported, ['S256']);
 });
 
-test('registering takes only https or loopback redirects', async () => {
-  for (const bad of ['http://evil.example/cb', 'javascript:alert(1)', 'https://x.example/cb#frag']) {
+test('only Claude, ChatGPT or an app on this computer can register', async () => {
+  for (const bad of ['http://evil.example/cb', 'javascript:alert(1)', 'https://claude.ai/cb#frag', 'https://evil.example/api/mcp/auth_callback', 'https://claude.ai.evil.example/cb', 'https://user@claude.ai/cb']) {
     const response = await call('/oauth/register', { method: 'POST', body: { redirect_uris: [bad] } });
     assert.equal(response.status, 400, bad);
   }
-  const ok = await call('/oauth/register', { method: 'POST', body: { redirect_uris: ['http://127.0.0.1:6274/cb'] } });
-  assert.equal(ok.status, 201);
+  const local = await call('/oauth/register', { method: 'POST', body: { client_name: 'Claude Code', redirect_uris: ['http://127.0.0.1:6274/cb'] } });
+  assert.equal(local.status, 201);
+  assert.equal((await local.json()).client_name, 'Claude Code on this computer');
+  const mixed = await call('/oauth/register', { method: 'POST', body: { redirect_uris: ['https://claude.ai/api/mcp/auth_callback', 'http://localhost:9/cb'] } });
+  assert.equal(mixed.status, 400);
+  // A name is a claim: what an app is comes from where its codes go.
+  const posing = await call('/oauth/register', { method: 'POST', body: { client_name: 'Totally Not Claude', redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'] } });
+  assert.equal((await posing.json()).client_name, 'ChatGPT');
 });
 
 test('the Allow page is the owner\'s alone, and only for a known redirect', async () => {
@@ -159,7 +165,9 @@ test('the Allow page is the owner\'s alone, and only for a known redirect', asyn
   const cookie = await owner();
   const page = await call(`/oauth/authorize?${query}`, { headers: { Cookie: cookie } });
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Let Claude use your drive\?/);
+  const words = await page.text();
+  assert.match(words, /Let Claude use your drive\?/);
+  assert.match(words, /linked to the Claude account signed in there \(claude\.ai\)/);
 
   const elsewhere = new URLSearchParams(query);
   elsewhere.set('redirect_uri', 'https://evil.example/cb');

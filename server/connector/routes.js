@@ -18,7 +18,7 @@
 import { escapeHtml, html, json, readBody, send } from '../http.js';
 import { overHttps } from '../gate.js';
 import { sameOrigin } from '../sessions.js';
-import { redirectAllowed } from './grants.js';
+import { appFor, redirectAllowed } from './grants.js';
 
 const SCOPE = 'drive';
 const BODY_MAX = 1024 * 1024;
@@ -147,6 +147,12 @@ export function createConnectorRoutes({ grants, mcp, publicUrl = null, isOwner, 
   /** The one page: may this app use the drive? */
   function askPage(res, { client, params }) {
     const name = escapeHtml(client.name);
+    const app = appFor(params.redirect_uri);
+    // Whose hands the drive ends up in, said before the button: the account
+    // that pressed Connect, wherever that was.
+    const whose = app.local
+      ? `<p>Only press Allow if you started this on this computer just now. The app answers at ${escapeHtml(app.host)}, on this machine.</p>`
+      : `<p>Only press Allow if you pressed Connect in ${name} just now. Your drive will be linked to the ${name} account signed in there (${escapeHtml(app.host)}), and anyone using that account can use it.</p>`;
     const fields = Object.entries(params)
       .map(([k, v]) => `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}">`)
       .join('');
@@ -162,11 +168,12 @@ button[value=allow]{background:#738698;color:#fafaf7;border-color:#738698}
 <ul><li>read every document and app in this drive</li>
 <li>start, steer and stop agent chats, which run on this computer with the same access as the ones you start in Marble</li>
 <li>answer the questions those chats ask</li></ul>
+${whose}
 <p>You can turn it off again at any time on this drive’s Connected apps page (/connector).</p>
 <form method="post" action="/oauth/authorize">${fields}
 <button name="decision" value="allow">Allow</button><button name="decision" value="deny">Don’t allow</button></form></main>`, {
       'X-Frame-Options': 'DENY',
-      'Content-Security-Policy': "frame-ancestors 'none'; form-action 'self' https: http://localhost:* http://127.0.0.1:*",
+      'Content-Security-Policy': "frame-ancestors 'none'; form-action 'self' https://claude.ai https://claude.com https://chatgpt.com https://chat.openai.com http://localhost:* http://127.0.0.1:*",
     });
   }
 
