@@ -8932,6 +8932,10 @@
     .claude-credit p { margin: 0; }
     .claude-credit .credit-used { color: var(--muted); font-size: 12px; }
     .credit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; }
+    .claude-plan { grid-column: 2; display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: var(--muted); }
+    .claude-plan[hidden] { display: none; }
+    .claude-plan button.link { padding-left: 0; font-size: 12px; }
+    .claude-plan span + button.link { padding-left: 6px; }
     .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
     .project { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
     .project code { font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
@@ -9150,7 +9154,7 @@
       this.usagePane.replaceChildren(h('p', 'empty', 'Loading…'));
       this.setTab(this.tab);
       let providers = [];
-      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, cursor: false, openai: false } };
+      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, claude: false, cursor: false, openai: false } };
       let usage = { meters: [] };
       let voice = null;
       this.voicePane.replaceChildren(h('p', 'empty', 'Loading…'));
@@ -9408,9 +9412,11 @@
     }
 
     /** Claude signs in with the Claude login or an API key: one agent, one
-     *  switch. The key field shows only while "API key" is on. A drive the
-     *  door gave starter credit has a third way, and while it is on, the line
-     *  says whose credit and how much of it is used. */
+     *  switch. The key field shows only while "API key" is on; under the
+     *  login, the person's own plan, connected from here (Connect your
+     *  Claude) or disconnected. A drive the door gave starter credit has a
+     *  third way, and while it is on, the line says whose credit and how much
+     *  of it is used. */
     claudeSwitch(settings) {
       const credit = settings.credit ?? null;
       const ways = [...(credit ? [['credit', 'Starter credit']] : []), ['login', 'Claude login'], ['api', 'API key']];
@@ -9425,12 +9431,15 @@
       key.hidden = auth !== 'api';
       const onCredit = credit ? this.creditLine(credit, () => choose('api')) : null;
       if (onCredit) onCredit.hidden = auth !== 'credit';
+      const plan = this.claudePlan(settings);
+      plan.hidden = auth !== 'login';
       const radios = new Map();
       const choose = (value) => {
         const radio = radios.get(value);
         if (radio) radio.checked = true;
         key.hidden = value !== 'api';
         if (onCredit) onCredit.hidden = value !== 'credit';
+        plan.hidden = value !== 'login';
         if (value === 'api') key.querySelector('input')?.focus();
       };
       for (const [value, text] of ways) {
@@ -9443,12 +9452,13 @@
         radio.addEventListener('change', () => {
           key.hidden = value !== 'api';
           if (onCredit) onCredit.hidden = value !== 'credit';
+          plan.hidden = value !== 'login';
         });
         radios.set(value, radio);
         label.append(radio, document.createTextNode(text));
         group.append(label);
       }
-      return onCredit ? [group, onCredit, key] : [group, key];
+      return onCredit ? [group, onCredit, key, plan] : [group, key, plan];
     }
 
     /** "On Bryan's starter credit · $3.90 of $5 used", with the two ways off
@@ -9461,7 +9471,8 @@
       connect.type = 'button';
       connect.addEventListener('click', () => {
         // Nothing drew the sheet: the key is the other way in.
-        if (!connectClaude()) useKey();
+        if (connectClaude()) this.close();
+        else useKey();
       });
       const instead = h('button', 'link', 'Use an API key instead');
       instead.type = 'button';
@@ -9469,6 +9480,36 @@
       actions.append(connect, instead);
       line.append(actions);
       return line;
+    }
+
+    /** The plan Claude's login runs on when it was connected from the
+     *  browser, and the way to connect one: the sheet, by its event. */
+    claudePlan(settings) {
+      const plan = h('div', 'claude-plan');
+      if (settings.keys?.claude) {
+        const off = h('button', 'link', 'Disconnect');
+        off.type = 'button';
+        off.addEventListener('click', async () => {
+          try {
+            await this.api.saveSettings({ keys: { claude: '' } });
+            dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+            await this.fill();
+          } catch (err) {
+            this.status.textContent = err.message;
+            this.status.classList.add('error');
+          }
+        });
+        plan.append(h('span', '', 'On your Claude plan'), off);
+        return plan;
+      }
+      const connect = h('button', 'link', 'Connect your Claude');
+      connect.type = 'button';
+      connect.addEventListener('click', () => {
+        this.close();
+        document.dispatchEvent(new CustomEvent('marble:connect-claude'));
+      });
+      plan.append(connect);
+      return plan;
     }
 
     keyRow(name, label, set, { field = `key-${name}` } = {}) {
@@ -9843,6 +9884,179 @@
   }
 
   customElements.define('marble-agent-setup', MarbleAgentSetup);
+
+  // ------------------------------------------------------------ connect your Claude
+
+  // The person's own Claude plan, from the browser: the host runs `claude
+  // setup-token` (server/agent/claude-signin.js) and answers its sign-in
+  // address; this opens it in a new tab, she signs in there and is shown a
+  // code, and the code pasted here goes back to the same run. The one action
+  // is the sign-in until a code is in the field, then it is Connect.
+  //
+  // Opened from Agents › Settings › Claude, and by any page that fires
+  // `document.dispatchEvent(new CustomEvent('marble:connect-claude'))` (the
+  // credit line, Start here, a chat that ran out). "Use an API key instead"
+  // is the key popup above, opened for Claude whatever Not now said.
+  const CONNECT_CSS = `
+    .steps { margin: 0 0 16px; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 8px; }
+    .steps li { counter-increment: step; display: grid; grid-template-columns: 1.4em 1fr; font-size: 13.5px; color: var(--ink); }
+    .steps li::before { content: counter(step); color: var(--muted); font-variant-numeric: tabular-nums; }
+    .actions { justify-content: space-between; align-items: center; }
+    button.link.key { padding-left: 0; }
+    button.link.key:hover { color: var(--ink); }
+  `;
+
+  class MarbleClaudeConnect extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>${TOKENS}${SETUP_CSS}${CONNECT_CSS}</style>
+        <dialog aria-labelledby="claude-connect-title" aria-describedby="claude-connect-lede">
+          <form>
+            <h2 id="claude-connect-title">Connect your Claude</h2>
+            <p class="lede" id="claude-connect-lede">Agents on this drive then run on your Claude plan, not on credit.</p>
+            <ol class="steps">
+              <li>Sign in to Claude in the tab this opens</li>
+              <li>Copy the code it shows you and paste it here</li>
+            </ol>
+            <label>Code from Claude
+              <input name="code" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+            </label>
+            <p class="status" role="status" aria-live="polite"></p>
+            <div class="actions">
+              <button type="button" class="link key">Use an API key instead</button>
+              <button type="submit" class="save">Open Claude sign-in</button>
+            </div>
+          </form>
+        </dialog>`;
+      this.dialog = root.querySelector('dialog');
+      this.form = root.querySelector('form');
+      this.input = root.querySelector('input[name="code"]');
+      this.status = root.querySelector('.status');
+      this.action = root.querySelector('.save');
+      this.keyButton = root.querySelector('.key');
+      // A sign-in the host started for this sheet and has not finished.
+      this.started = false;
+      this.busy = false;
+    }
+
+    get api() {
+      return window.marble?.agent;
+    }
+
+    connectedCallback() {
+      this.unwatchTheme = watchPageTheme(this);
+      // Cancelled, so whoever fired it knows the sheet is drawn.
+      this.onAsk = (event) => { event.preventDefault(); this.open(); };
+      document.addEventListener('marble:connect-claude', this.onAsk);
+      this.form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (this.busy) return;
+        if (this.input.value.trim()) this.connect();
+        else this.signIn();
+      });
+      // The action follows the field: a code in it is a code to send.
+      this.input.addEventListener('input', () => this.label());
+      this.keyButton.addEventListener('click', () => {
+        this.close();
+        document.querySelector('marble-agent-setup')?.present({ offers: ['claude'] });
+      });
+      this.dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        this.close();
+      });
+      // A press on the backdrop is outside the form: the sheet goes.
+      this.dialog.addEventListener('click', (event) => {
+        if (event.target === this.dialog) this.close();
+      });
+    }
+
+    disconnectedCallback() {
+      this.unwatchTheme?.();
+      this.unwatchTheme = null;
+      document.removeEventListener('marble:connect-claude', this.onAsk);
+    }
+
+    label() {
+      this.action.textContent = this.input.value.trim() ? 'Connect' : 'Open Claude sign-in';
+    }
+
+    open() {
+      if (this.dialog.open) return;
+      this.input.value = '';
+      this.input.disabled = false;
+      this.label();
+      this.say('');
+      this.dialog.showModal();
+      this.action.focus();
+    }
+
+    /** Closed before the code came back: the run the host is holding for it
+     *  is ended now rather than at its timeout. */
+    close() {
+      if (this.started) this.api?.claudeSignInCancel?.().catch(() => {});
+      this.started = false;
+      this.dialog.close();
+    }
+
+    async signIn() {
+      // The tab opens on the press, before the host answers, or a browser
+      // that blocks pop-ups blocks it; it is pointed at the address once
+      // there is one, and cut off from this page.
+      const tab = window.open('', '_blank');
+      if (tab) tab.opener = null;
+      this.busy = true;
+      this.action.disabled = true;
+      this.say('Starting Claude sign-in…');
+      try {
+        const { url } = await this.api.claudeSignIn();
+        this.started = true;
+        if (tab && !tab.closed) tab.location.href = url;
+        else if (!window.open(url, '_blank', 'noopener')) throw new Error('The browser blocked the new tab. Allow pop-ups for this drive and try again.');
+        this.say('Signed in? Paste the code from Claude here.');
+        this.input.focus();
+      } catch (err) {
+        tab?.close();
+        this.say(err.message || "Claude's sign-in didn't start. Try again.", true);
+      }
+      this.busy = false;
+      this.action.disabled = false;
+    }
+
+    async connect() {
+      const code = this.input.value.trim();
+      this.busy = true;
+      this.action.disabled = true;
+      this.input.disabled = true;
+      this.say('Connecting…');
+      try {
+        await this.api.claudeSignInCode(code);
+        this.started = false;
+        this.input.value = '';
+        dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+        this.say('Connected. Agents now run on your Claude plan.');
+        setTimeout(() => this.dialog.close(), 900);
+      } catch (err) {
+        this.input.disabled = false;
+        // The run that would have taken it is over: back to the sign-in.
+        if (err.status === 409 || err.status === 400) {
+          this.started = false;
+          this.input.value = '';
+          this.label();
+        }
+        this.say(err.message || "Couldn't connect. Open Claude sign-in again.", true);
+      }
+      this.busy = false;
+      this.action.disabled = false;
+    }
+
+    say(text, error = false) {
+      this.status.textContent = text;
+      this.status.classList.toggle('error', error);
+    }
+  }
+
+  customElements.define('marble-claude-connect', MarbleClaudeConnect);
 
   // ------------------------------------------------------------ the drawer
 
@@ -11251,9 +11465,18 @@
     document.body.append(el);
   };
 
+  // Connect your Claude waits for its event on every top-level page.
+  const mountConnect = () => {
+    if (window.top !== window || document.querySelector('marble-claude-connect')) return;
+    const el = document.createElement('marble-claude-connect');
+    el.setAttribute('data-marble-transient', '');
+    document.body.append(el);
+  };
+
   const mount = () => {
     mountSettings();
     mountSetup();
+    mountConnect();
     const pageUsage = document.querySelector('header.topbar > .usage');
     if (pageUsage) watchUsage(pageUsage);
     bindNewChatKey();

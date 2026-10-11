@@ -11,10 +11,11 @@
 // answer them from the drawer.
 //
 // The providers differ only in billing: the subscription gets no API key in
-// its environment, so the CLI uses the login; the API provider hands it one;
-// and starter credit (claude-credit) hands it the drive's own credit token
-// with ANTHROPIC_BASE_URL pointed at the credit proxy (worker/src/credit.js),
-// which adds the owner's key on the way to Anthropic.
+// its environment, so the CLI uses the login (or the long-lived token of a
+// plan connected from the browser, CLAUDE_CODE_OAUTH_TOKEN); the API provider
+// hands it one; and starter credit (claude-credit) hands it the drive's own
+// credit token with ANTHROPIC_BASE_URL pointed at the credit proxy
+// (worker/src/credit.js), which adds the owner's key on the way to Anthropic.
 
 import path from 'node:path';
 
@@ -240,6 +241,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       const current = live();
       const probeEnv = pickEnv(current);
       if (api && current.ANTHROPIC_API_KEY) probeEnv.ANTHROPIC_API_KEY = current.ANTHROPIC_API_KEY;
+      // The person's own plan, connected from the browser (claude-signin.js):
+      // the CLI reads the token from its environment and answers as signed in.
+      if (!api && current.CLAUDE_CODE_OAUTH_TOKEN) probeEnv.CLAUDE_CODE_OAUTH_TOKEN = current.CLAUDE_CODE_OAUTH_TOKEN;
       const probe = await exec('claude', ['auth', 'status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'claude is not installed' };
       if (cliVersion == null) {
@@ -344,6 +348,7 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
           ...(api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {}),
           // The drive's own token, never the owner's key: the proxy holds that.
           ...(onCredit ? { ANTHROPIC_BASE_URL: onCredit.url, ANTHROPIC_API_KEY: onCredit.token } : {}),
+          ...(!api && !onCredit && current.CLAUDE_CODE_OAUTH_TOKEN ? { CLAUDE_CODE_OAUTH_TOKEN: current.CLAUDE_CODE_OAUTH_TOKEN } : {}),
         },
         stdin,
         ...(full ? { stdinOpen: true } : {}),

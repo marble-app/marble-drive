@@ -262,6 +262,9 @@ export function loadConfig(env = process.env) {
     openaiBase: str('MARBLE_DRIVE_OPENAI_BASE', 'https://api.openai.com'),
     // The longest clip voice sends to be written down (server/agent/voice).
     voiceMaxSeconds: num('MARBLE_DRIVE_VOICE_MAX_SECONDS', 120),
+    // How long Connect your Claude waits for the code from Claude's page
+    // before it ends the sign-in it started (server/agent/claude-signin.js).
+    claudeSignInSeconds: num('MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS', 600),
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),
