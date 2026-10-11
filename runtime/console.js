@@ -508,7 +508,7 @@
       sha ? (d.releaseFrom === 'checkpoint'
         ? `${sha.slice(0, 7)} or later`
         : `${sha.slice(0, 7)}${d.behind > 0 ? ` · ${d.behind} behind` : ''}`) : null,
-      seen?.claudeAuth === 'login' ? 'Claude login' : seen?.claudeAuth === 'api' ? 'API key' : null,
+      seen?.claudeAuth === 'login' ? 'Claude login' : seen?.claudeAuth === 'api' ? 'API key' : seen?.claudeAuth === 'credit' ? 'Starter credit' : null,
       d.access,
     ].filter(Boolean);
     meta.textContent = job ? `${job.title}…` : failed ? `${d.lastJob.title} failed` : facts.join(' · ') || 'Not looked inside yet';
@@ -761,7 +761,7 @@
     const control = segmented([['login', 'Claude login'], ['api', 'API key']], busy ? null : mode, choose, { small: true, busy: Boolean(busy), label: 'Which Claude pays' });
     return section('Claude', null,
       h('div.kv', {},
-        h('div.what', {}, h('span', { text: busy ? 'Switching…' : mode === 'login' ? 'Agents here use a Claude login' : mode === 'api' ? 'Agents here use an API key' : 'Not known yet' }),
+        h('div.what', {}, h('span', { text: busy ? 'Switching…' : mode === 'login' ? 'Agents here use a Claude login' : mode === 'api' ? 'Agents here use an API key' : mode === 'credit' ? 'Agents here use starter credit' : 'Not known yet' }),
           seen ? h('small', { text: [seen.claudeLogin ? 'A login is on this machine' : 'No login on this machine', (seen.keys ?? []).includes('anthropic') ? 'an API key is saved' : 'no API key saved'].join(' · ') } ) : null),
         control),
       mode === 'api' && seen && !(seen.keys ?? []).includes('anthropic') ? h('p.warn', { style: { margin: '.7rem 0 0', 'font-size': '.85rem' }, text: 'Its agents cannot run: no API key is saved. Paste one in its Agents settings, or switch it to a Claude login.' }) : null,

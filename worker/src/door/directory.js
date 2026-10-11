@@ -21,6 +21,13 @@ const NONCE_MS = 2 * 60 * 1000;
 const AUDIT_DAYS = 180;
 export const DEFAULT_MAX_DRIVES = 10;
 export const STEPS = ['machine', 'install', 'check'];
+// Starter credit (worker/src/credit.js): what a drive may spend on the owner's
+// Anthropic key before it is asked to connect its own Claude. One number, in
+// dollars; an invite or a drive can carry its own.
+export const DEFAULT_CREDIT_USD = 5;
+const MAX_CREDIT_USD = 1000;
+const MICROS = 1_000_000;
+const CREDIT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -37,6 +44,13 @@ const refuse = (status, message, extra) => {
 };
 
 const str = (value, max = 200) => (typeof value === 'string' ? value.slice(0, max) : '');
+
+/** A credit amount in dollars, refused unless it is 0 to MAX_CREDIT_USD. */
+function creditDollars(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > MAX_CREDIT_USD) refuse(400, `Credit is a number of dollars from 0 to ${MAX_CREDIT_USD}.`);
+  return Math.round(n * 100) / 100;
+}
 
 export class DirectoryCore {
   constructor(storage, { now = () => Date.now(), maxDrives = DEFAULT_MAX_DRIVES } = {}) {
@@ -80,7 +94,7 @@ export class DirectoryCore {
     return { ok: true, hash, invite };
   }
 
-  async makeInvite({ note = '', uses = 1, days = 14, drive = null, sprite = null, owner = false } = {}) {
+  async makeInvite({ note = '', uses = 1, days = 14, drive = null, sprite = null, owner = false, credit = null } = {}) {
     return this.exclusive(async () => {
       if (owner && (await this.storage.get('meta:owner'))) refuse(409, 'There is already an owner.');
       if (drive) {
@@ -91,6 +105,7 @@ export class DirectoryCore {
       const d = Number(days);
       if (!(n >= 1 && n <= 100)) refuse(400, 'Uses is a whole number from 1 to 100.');
       if (!(d > 0 && d <= 365)) refuse(400, 'Days is a number from 1 to 365.');
+      const cap = credit === null || credit === undefined || credit === '' ? null : creditDollars(credit);
       const code = randomId(16);
       const hash = await sha256Hex(code);
       const invite = {
@@ -102,6 +117,9 @@ export class DirectoryCore {
         drive: drive || null,
         sprite: sprite ? str(sprite, 64) : null,
         owner: Boolean(owner),
+        // The starter credit a drive made with this invite gets, in dollars;
+        // null is the default (DEFAULT_CREDIT_USD).
+        credit: cap,
       };
       await this.storage.put(`invite:${hash}`, invite);
       await this.audit('invite-made', { detail: { invite: invite.id, uses: invite.uses, drive: invite.drive, owner: invite.owner } });
@@ -285,7 +303,7 @@ export class DirectoryCore {
       if (await this.storage.get(`drive:${name}`)) refuse(409, `${name} is taken.`);
       if ((await this.liveDriveCount()) >= this.maxDrives) refuse(503, 'Bryan has made as many drives as he can for now. Your invite still works; try again later.');
 
-      const drive = { name, owner: acct.id, sprite: `d-${name}`, homes: {}, state: 'queued', created: this.iso(), steps: {} };
+      const drive = { name, owner: acct.id, sprite: `d-${name}`, homes: {}, state: 'queued', created: this.iso(), steps: {}, credit: held?.ok ? held.invite.credit ?? null : null };
       await this.storage.put(`drive:${name}`, drive);
       if (held?.ok) await this.storage.put(`invite:${held.hash}`, { ...held.invite, uses: held.invite.uses - 1 });
       await this.storage.put(`acct:${acct.id}`, { ...acct, held: null, approved: false, drives: [...(acct.drives ?? []), name] });
@@ -349,6 +367,118 @@ export class DirectoryCore {
       await this.storage.put(`drive:${name}`, next);
       await this.audit(on ? 'drive-held' : 'drive-released', { account: d.owner, detail: { drive: name } });
       return { drive: this.driveView(next) };
+    });
+  }
+
+  // ------------------------------------------------------------- credit
+  //
+  // Each drive on starter credit has a token of its own (kept here as a
+  // hash), a cap and what it has spent, in millionths of a dollar so sums
+  // never drift. Kept apart from `drive:` records: a drive made by hand has
+  // credit without being a door drive, and the router reads `drive:`.
+
+  creditView(rec) {
+    if (!rec) return null;
+    const cap = rec.cap / MICROS;
+    const spent = rec.spent / MICROS;
+    return { name: rec.name, cap, spent, left: Math.max(0, (rec.cap - rec.spent) / MICROS), by: rec.by ?? null, on: Boolean(rec.hash), minted: rec.minted ?? null, last: rec.last ?? null, requests: rec.requests ?? 0 };
+  }
+
+  /** The drive a credit token names, or null. */
+  async creditByHash(hash) {
+    const name = hash ? await this.storage.get(`credtok:${hash}`) : null;
+    const rec = name ? await this.storage.get(`credit:${name}`) : null;
+    return rec && rec.hash === hash ? this.creditView(rec) : null;
+  }
+
+  async credit(name) {
+    return this.creditView(await this.storage.get(`credit:${name}`));
+  }
+
+  async listCredit() {
+    const all = await this.storage.list({ prefix: 'credit:' });
+    return [...all.values()].map((r) => this.creditView(r)).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** The owner's first name, for "On Bryan's starter credit". */
+  async ownerName() {
+    const id = await this.storage.get('meta:owner');
+    const acct = id ? await this.storage.get(`acct:${id}`) : null;
+    const first = String(acct?.name ?? '').trim().split(/\s+/)[0];
+    return first && !first.includes('@') ? str(first, 40) : null;
+  }
+
+  /** A new token for a drive, returned once. Minting again replaces the token
+   *  and keeps what was spent. Its cap is the one given, else the one it
+   *  had, else its invite's, else DEFAULT_CREDIT_USD. */
+  async mintCredit(name, { cap = null, by = null } = {}) {
+    if (typeof name !== 'string' || !CREDIT_NAME.test(name)) refuse(400, 'A drive name is 1 to 40 of a-z, 0-9 and -.');
+    const capGiven = cap === null || cap === undefined || cap === '' ? null : creditDollars(cap);
+    return this.exclusive(async () => {
+      const before = await this.storage.get(`credit:${name}`);
+      if (before?.hash) await this.storage.delete(`credtok:${before.hash}`);
+      const drive = await this.storage.get(`drive:${name}`);
+      const dollars = capGiven ?? (before ? before.cap / MICROS : drive?.credit ?? DEFAULT_CREDIT_USD);
+      const token = `mdc_${randomId(24)}`;
+      const hash = await sha256Hex(token);
+      const rec = {
+        name,
+        hash,
+        cap: Math.round(dollars * MICROS),
+        spent: before?.spent ?? 0,
+        by: by ? str(by, 40) : before?.by ?? (await this.ownerName()),
+        minted: this.iso(),
+        last: before?.last ?? null,
+        requests: before?.requests ?? 0,
+      };
+      await this.storage.put(`credit:${name}`, rec);
+      await this.storage.put(`credtok:${hash}`, name);
+      await this.audit('credit-minted', { account: drive?.owner ?? null, detail: { drive: name, cap: dollars } });
+      return { token, credit: this.creditView(rec) };
+    });
+  }
+
+  /** A drive's cap or the name its credit is said to come from; `reset`
+   *  sets what it has spent back to nothing. */
+  async setCredit(name, { cap, by, reset = false } = {}) {
+    return this.exclusive(async () => {
+      const rec = await this.storage.get(`credit:${name}`);
+      if (!rec) refuse(404, 'That drive has no credit. Mint it a token first.');
+      const next = { ...rec };
+      if (cap !== undefined && cap !== null && cap !== '') next.cap = Math.round(creditDollars(cap) * MICROS);
+      if (typeof by === 'string') next.by = by.trim() ? str(by.trim(), 40) : null;
+      if (reset) next.spent = 0;
+      await this.storage.put(`credit:${name}`, next);
+      await this.audit('credit-set', { detail: { drive: name, cap: next.cap / MICROS, reset: Boolean(reset) } });
+      return { credit: this.creditView(next) };
+    });
+  }
+
+  /** The token stops working; what was spent stays on record. */
+  async revokeCredit(name) {
+    return this.exclusive(async () => {
+      const rec = await this.storage.get(`credit:${name}`);
+      if (!rec) refuse(404, 'That drive has no credit.');
+      if (rec.hash) await this.storage.delete(`credtok:${rec.hash}`);
+      const next = { ...rec, hash: null };
+      await this.storage.put(`credit:${name}`, next);
+      await this.audit('credit-revoked', { detail: { drive: name } });
+      return { credit: this.creditView(next) };
+    });
+  }
+
+  /** Add one request's cost, in millionths of a dollar. */
+  async spend(name, micros) {
+    const n = Math.ceil(Number(micros));
+    if (!Number.isFinite(n) || n < 0) refuse(400, 'micros is a number of millionths of a dollar');
+    return this.exclusive(async () => {
+      const rec = await this.storage.get(`credit:${name}`);
+      if (!rec) refuse(404, 'That drive has no credit.');
+      const next = { ...rec, spent: rec.spent + n, requests: (rec.requests ?? 0) + 1, last: this.iso() };
+      await this.storage.put(`credit:${name}`, next);
+      // Once, the moment it runs out, so the log says when.
+      if (rec.spent < rec.cap && next.spent >= next.cap) await this.audit('credit-used-up', { detail: { drive: name, cap: rec.cap / MICROS } });
+      return { credit: this.creditView(next) };
     });
   }
 
@@ -497,6 +627,26 @@ export class Directory {
       if (method === 'POST' && path === '/count') {
         const b = await body(request);
         return json(200, await c.count({ key: String(b.key ?? ''), limit: Number(b.limit) || 1, windowSeconds: Number(b.windowSeconds) || 60 }));
+      }
+      if ((m = /^\/credit\/token\/([0-9a-f]{64})$/.exec(path)) && method === 'GET') {
+        const cr = await c.creditByHash(m[1]);
+        return cr ? json(200, cr) : json(404, { why: 'No drive has that credit token.' });
+      }
+      if (method === 'POST' && path === '/credit/spend') {
+        const b = await body(request);
+        return json(200, await c.spend(String(b.name ?? ''), b.micros));
+      }
+      if (method === 'GET' && path === '/credit') return json(200, { drives: await c.listCredit() });
+      if ((m = /^\/credit\/([a-z0-9-]{1,40})$/.exec(path))) {
+        if (method === 'GET') {
+          const cr = await c.credit(m[1]);
+          return cr ? json(200, cr) : json(404, { why: 'That drive has no credit.' });
+        }
+        if (method === 'POST') return json(200, await c.setCredit(m[1], await body(request)));
+      }
+      if ((m = /^\/credit\/([a-z0-9-]{1,40})\/token$/.exec(path))) {
+        if (method === 'POST') return json(200, await c.mintCredit(m[1], await body(request)));
+        if (method === 'DELETE') return json(200, await c.revokeCredit(m[1]));
       }
       if (method === 'GET' && path === '/log') return json(200, { lines: await c.log({ account: url.searchParams.get('account'), limit: Number(url.searchParams.get('limit')) || 200 }) });
       return json(404, { why: 'no such route' });

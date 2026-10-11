@@ -13,8 +13,8 @@ import { doorEnv, fakeProviders } from './fixtures/door-env.js';
 beforeEach(() => forgetLeases());
 const quiet = { log() {}, error() {} };
 
-async function door(names = ['ana']) {
-  const env = doorEnv();
+async function door(names = ['ana'], vars = {}, inviteBody = {}) {
+  const env = doorEnv(vars);
   const google = { sub: '1', email: 'ana@example.com', name: 'Ana' };
   const fake = fakeProviders({ google });
   fake.setNonce = (n) => {
@@ -24,7 +24,7 @@ async function door(names = ['ana']) {
   const admin = async (method, path, body) =>
     (await fetchImpl(`https://marbledrive.app/_door${path}`, { method, headers: { authorization: `Bearer ${env.DOOR_ADMIN_TOKEN}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
   for (const [i, name] of names.entries()) {
-    const code = (await admin('POST', '/invite', {})).link.split('/join/')[1];
+    const code = (await admin('POST', '/invite', inviteBody)).link.split('/join/')[1];
     google.sub = String(i + 1);
     const b = browser(env, { fetchImpl: fake.fetchImpl, ip: `198.51.100.${i + 1}` });
     await signInWith(b, 'google', { invite: code, fake });
@@ -162,4 +162,78 @@ test('scriptRunner hands each line over in order and resolves with the exit code
   assert.equal(code, 0);
   assert.deepEqual(lines, ['step: machine now', 'step: machine done', 'url: https://x.sprites.app']);
   assert.deepEqual(fakeSpawn.last.args, ['/x/sprite-provision.sh', '--door', 'ana', '--account', 'a1b2c3d4e5f60718', '--keys', '/k', '--org', 'marble-drive']);
+});
+
+test('with starter credit on, each drive is minted its own token and the script is handed it', async () => {
+  const d = await door(['ana'], { CREDIT_ANTHROPIC_KEY: 'sk-ant-owner' });
+  const seen = [];
+  const p = createProvisioner({
+    directoryUrl: 'https://marbledrive.app',
+    adminToken: d.env.DOOR_ADMIN_TOKEN,
+    fetchImpl: d.fetchImpl,
+    log: quiet,
+    run: script((job) => {
+      seen.push(job);
+      return ['step: machine now', 'step: machine done', 'step: install now', 'step: install done', 'step: check now', 'step: check done', 'url: https://d-ana-abc.sprites.app'];
+    }),
+  });
+  assert.deepEqual(await p.once(), { made: 'ana' });
+  assert.equal(seen[0].credit.url, 'https://marbledrive.app/_credit');
+  assert.match(seen[0].credit.token, /^mdc_[0-9a-f]{48}$/);
+  const credit = await (await d.fetchImpl('https://marbledrive.app/_credit/admin/drives/ana', { headers: { authorization: `Bearer ${d.env.DOOR_ADMIN_TOKEN}` } })).json();
+  assert.equal(credit.cap, 5);
+  assert.equal(credit.on, true);
+});
+
+test('with starter credit off, a drive is made as before, with no credit', async () => {
+  const d = await door(['ana']);
+  const seen = [];
+  const p = createProvisioner({
+    directoryUrl: 'https://marbledrive.app',
+    adminToken: d.env.DOOR_ADMIN_TOKEN,
+    fetchImpl: d.fetchImpl,
+    log: quiet,
+    run: script((job) => {
+      seen.push(job);
+      return ['url: https://d-ana-abc.sprites.app'];
+    }),
+  });
+  assert.deepEqual(await p.once(), { made: 'ana' });
+  assert.equal(seen[0].credit, undefined);
+});
+
+test('scriptRunner hands the credit over in a private file, never in argv, and removes it after', async () => {
+  const fs = await import('node:fs');
+  const { EventEmitter } = await import('node:events');
+  const { PassThrough } = await import('node:stream');
+  const token = `mdc_${'ab'.repeat(24)}`;
+  let during = null;
+  const fakeSpawn = (cmd, args) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    const file = args[args.indexOf('--credit-file') + 1];
+    during = { args, text: fs.readFileSync(file, 'utf8'), mode: fs.statSync(file).mode & 0o777, file };
+    setImmediate(() => {
+      child.stdout.end('');
+      child.stderr.end('');
+      setTimeout(() => child.emit('close', 0), 5);
+    });
+    return child;
+  };
+  const run = scriptRunner({ script: '/x/sprite-provision.sh', keysFile: '/k', spawnImpl: fakeSpawn, log: quiet });
+  assert.equal(await run({ name: 'ana', account: 'a1b2c3d4e5f60718', credit: { url: 'https://marbledrive.app/_credit', token } }, async () => {}), 0);
+  assert.ok(during.args.includes('--credit-file'));
+  assert.ok(!during.args.join(' ').includes(token));
+  assert.equal(during.text, `MARBLE_CREDIT_URL=https://marbledrive.app/_credit\nMARBLE_CREDIT_TOKEN=${token}\n`);
+  assert.equal(during.mode, 0o600);
+  assert.equal(fs.existsSync(during.file), false, 'gone once the script is done');
+});
+
+test('an invite with no credit makes a drive without it', async () => {
+  const d = await door(['ana'], { CREDIT_ANTHROPIC_KEY: 'sk-ant-owner' }, { credit: 0 });
+  const seen = [];
+  const p = createProvisioner({ directoryUrl: 'https://marbledrive.app', adminToken: d.env.DOOR_ADMIN_TOKEN, fetchImpl: d.fetchImpl, log: quiet, run: script((job) => { seen.push(job); return ['url: https://d-ana-abc.sprites.app']; }) });
+  assert.deepEqual(await p.once(), { made: 'ana' });
+  assert.equal(seen[0].credit, undefined);
 });

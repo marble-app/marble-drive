@@ -4,7 +4,8 @@
 // settings the script would have put on the sprite, and what it printed.
 
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import http from 'node:http';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,7 +48,17 @@ if [[ "$*" == *redirect_url* ]]; then printf '%s' '${enter}'; else printf 200; f
       env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, MARBLE_SPRITE_DEPLOY: deploy },
       encoding: 'utf8',
     });
-  return { home, got, keys, run, calls: async () => (await fsp.readFile(path.join(home, 'calls'), 'utf8').catch(() => '')).trim().split('\n') };
+  // The same, without blocking: for a run that calls the door, served here.
+  const runAsync = (args) =>
+    new Promise((resolve) => {
+      const child = spawn('bash', [SCRIPT, ...args], { env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, MARBLE_SPRITE_DEPLOY: deploy } });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (b) => { stdout += b; });
+      child.stderr.on('data', (b) => { stderr += b; });
+      child.on('close', (status) => resolve({ status, stdout, stderr }));
+    });
+  return { home, got, keys, run, runAsync, calls: async () => (await fsp.readFile(path.join(home, 'calls'), 'utf8').catch(() => '')).trim().split('\n') };
 }
 
 test('--door makes d-<name>, labelled marble-user, with exactly the door settings, and prints no passphrase', async () => {
@@ -124,4 +135,62 @@ test('a drive that does not send a browser to sign in is not done', async () => 
   assert.notEqual(run.status, 0);
   assert.match(run.stderr, /did not send a browser to sign in/);
   assert.doesNotMatch(run.stdout, /^url: /m);
+});
+
+const TOKEN = `mdc_${'a1'.repeat(24)}`;
+
+test('--door with --credit-file puts the drive on starter credit: the proxy, its token, and claude-credit', async () => {
+  const r = await rig();
+  const file = path.join(r.home, 'credit.env');
+  await fsp.writeFile(file, `MARBLE_CREDIT_URL=https://marbledrive.app/_credit\nMARBLE_CREDIT_TOKEN=${TOKEN}\n`, { mode: 0o600 });
+  const run = r.run(['--door', 'ana', '--account', ACCOUNT, '--keys', r.keys, '--credit-file', file]);
+  assert.equal(run.status, 0, run.stderr);
+  const env = await fsp.readFile(path.join(r.got, 'sprite.env'), 'utf8');
+  assert.match(env, /^MARBLE_DRIVE_AGENT_PROVIDER=claude-credit$/m);
+  assert.match(env, /^MARBLE_CREDIT_URL=https:\/\/marbledrive\.app\/_credit$/m);
+  assert.match(env, new RegExp(`^MARBLE_CREDIT_TOKEN=${TOKEN}$`, 'm'));
+  assert.ok(!run.stdout.includes(TOKEN) && !run.stderr.includes(TOKEN), 'the token is never printed');
+});
+
+test('a credit file of the wrong shape is refused before anything is made', async () => {
+  const r = await rig();
+  const file = path.join(r.home, 'credit.env');
+  await fsp.writeFile(file, 'MARBLE_CREDIT_URL=http://evil.example\nMARBLE_CREDIT_TOKEN=sk-ant-oops\n');
+  const run = r.run(['--door', 'ana', '--account', ACCOUNT, '--keys', r.keys, '--credit-file', file]);
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /credit file/);
+  assert.ok(!(await r.calls()).some((c) => c.startsWith('deploy')));
+});
+
+test('a drive made by hand with --credit mints its token from the door and says nothing needs setting up', async () => {
+  const { route } = await import('../worker/src/router.js');
+  const { doorEnv } = await import('./fixtures/door-env.js');
+  const env = doorEnv({ CREDIT_ANTHROPIC_KEY: 'sk-ant-owner', DOOR_SIGNING_KEY: '' });
+  const server = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const answer = await route(new Request(`https://marbledrive.app${req.url}`, { method: req.method, headers: req.headers, body: chunks.length ? Buffer.concat(chunks) : undefined }), env);
+    res.writeHead(answer.status, Object.fromEntries(answer.headers));
+    res.end(Buffer.from(await answer.arrayBuffer()));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const r = await rig({ enter: '302 https://t-ana-abc.sprites.app/gate' });
+    const conf = path.join(r.home, '.config', 'marble-drive');
+    await fsp.mkdir(conf, { recursive: true, mode: 0o700 });
+    await fsp.writeFile(path.join(conf, 'door.env'), `DOOR_URL=http://127.0.0.1:${server.address().port}\nDOOR_ADMIN_TOKEN=${env.DOOR_ADMIN_TOKEN}\n`, { mode: 0o600 });
+    const run = await r.runAsync(['ana', '--credit']);
+    assert.equal(run.status, 0, run.stderr);
+    const settings = await fsp.readFile(path.join(r.got, 'sprite.env'), 'utf8');
+    assert.match(settings, /^MARBLE_DRIVE_AGENT_PROVIDER=claude-credit$/m);
+    const token = /^MARBLE_CREDIT_TOKEN=(mdc_[0-9a-f]{48})$/m.exec(settings)?.[1];
+    assert.ok(token, settings);
+    assert.ok(!run.stdout.includes(token), 'not printed');
+    assert.match(run.stdout, /Agents run on starter credit to begin with/);
+    assert.doesNotMatch(run.stdout, /paste your Anthropic API key/);
+    const listed = await (await route(new Request('https://marbledrive.app/_credit/admin/drives', { headers: { authorization: `Bearer ${env.DOOR_ADMIN_TOKEN}` } }), env)).json();
+    assert.deepEqual(listed.drives.map((d) => d.name), ['t-ana']);
+  } finally {
+    server.close();
+  }
 });

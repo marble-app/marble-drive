@@ -11,10 +11,18 @@
 // Only lines of a known shape are passed on (`step: <step> <state>`, `url:
 // <https URL>`), so nothing the script or the sprite CLI says, a secret
 // included, can reach the person's page.
+//
+// When starter credit is on (worker/src/credit.js), each drive is minted its
+// own credit token first, and the script writes it into the drive's settings
+// beside the proxy's address. It travels in a file only this user can read,
+// never in argv, and the file is gone when the script ends.
 
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 import readline from 'node:readline';
 
 const STEP = /^step: (machine|install|check) (now|done)$/;
@@ -26,16 +34,33 @@ const same = (a, b) =>
 /** Runs the provisioning script for one drive; each stdout line goes to
  *  `onLine`, in order. Resolves with the exit code. */
 export function scriptRunner({ script, keysFile, org = 'marble-drive', log = console, spawnImpl = spawn }) {
-  return ({ name, account }, onLine) =>
+  return ({ name, account, credit = null }, onLine) =>
     new Promise((resolve) => {
-      const child = spawnImpl('bash', [script, '--door', name, '--account', account, '--keys', keysFile, '--org', org], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const args = [script, '--door', name, '--account', account, '--keys', keysFile, '--org', org];
+      let creditDir = null;
+      if (credit?.url && credit?.token) {
+        creditDir = fs.mkdtempSync(path.join(os.tmpdir(), 'marble-credit-'));
+        const file = path.join(creditDir, 'credit.env');
+        fs.writeFileSync(file, `MARBLE_CREDIT_URL=${credit.url}\nMARBLE_CREDIT_TOKEN=${credit.token}\n`, { mode: 0o600 });
+        args.push('--credit-file', file);
+      }
+      const forget = () => {
+        if (creditDir) fs.rmSync(creditDir, { recursive: true, force: true });
+      };
+      const child = spawnImpl('bash', args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let chain = Promise.resolve();
       readline.createInterface({ input: child.stdout }).on('line', (line) => {
         chain = chain.then(() => onLine(line)).catch(() => {});
       });
       readline.createInterface({ input: child.stderr }).on('line', (line) => log.error(`[provisioner] ${name}: ${line.slice(0, 300)}`));
-      child.on('error', () => resolve(127));
-      child.on('close', (code) => chain.then(() => resolve(code ?? 1)));
+      child.on('error', () => {
+        forget();
+        resolve(127);
+      });
+      child.on('close', (code) => {
+        forget();
+        chain.then(() => resolve(code ?? 1));
+      });
     });
 }
 
@@ -50,6 +75,31 @@ export function createProvisioner({ directoryUrl, adminToken, run, log = console
     });
     if (!res.ok) throw new Error(`the door answered ${method} ${path} with ${res.status}`);
     return res.json();
+  }
+
+  /** A credit token for the drive, or null when starter credit is off (the
+   *  Worker answers 404) or could not be minted: the drive is then made
+   *  without it, as before, and its person brings a key. */
+  async function mintCredit(name) {
+    try {
+      const res = await fetchImpl(new URL(`/_credit/admin/drives/${encodeURIComponent(name)}/token`, directoryUrl).href, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' },
+        body: '{}',
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        log.error(`[provisioner] ${name}: no starter credit (the door answered ${res.status})`);
+        return null;
+      }
+      const { token, credit } = await res.json();
+      // An invite with --credit 0: this drive is made without credit.
+      if (credit?.cap === 0) return null;
+      return /^mdc_[0-9a-f]{48}$/.test(token ?? '') ? { url: new URL('/_credit', directoryUrl).href, token } : null;
+    } catch (err) {
+      log.error(`[provisioner] ${name}: no starter credit (${err.message})`);
+      return null;
+    }
   }
 
   /** The oldest queued drive, made. A second call while one runs does nothing. */
@@ -77,7 +127,8 @@ export function createProvisioner({ directoryUrl, adminToken, run, log = console
         if (at) url = at[1];
       };
       log.log(`[provisioner] making ${job.name}`);
-      const code = await run({ name: job.name, account: job.owner }, onLine);
+      const credit = await mintCredit(job.name);
+      const code = await run({ name: job.name, account: job.owner, ...(credit ? { credit } : {}) }, onLine);
       if (code === 0 && url) {
         await api('POST', `/drives/${job.name}/step`, { state: 'ready', url, sprite: job.sprite });
         log.log(`[provisioner] ${job.name} is ready`);
