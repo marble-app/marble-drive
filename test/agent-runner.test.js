@@ -7,17 +7,27 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { MAX_HOP } from '../server/agent/messages.js';
-import { createRunner } from '../server/agent/runner.js';
+import { createRunner, clipFailure } from '../server/agent/runner.js';
 import { createAgentStore } from '../server/agent/store.js';
 import { createTools } from '../server/agent/tools.js';
 import { createFakeProvider } from './fixtures/fake-provider.js';
+import { STAY } from '../server/agent/usage-failover.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
+test('a Cursor model-list dump keeps the sentence and drops the catalog', () => {
+  assert.equal(
+    clipFailure('Cannot use this model: opus-high. Available models: auto, grok-4.7-high, claude-opus-4-8-medium'),
+    'Cannot use this model: opus-high',
+  );
+});
+
 const SCRIPTS = {
+  ceiling: [{ sayEnv: 'GIT_CEILING_DIRECTORIES' }],
   hello: [{ say: 'Hello from the fake agent' }],
   slow: [{ sleep: 600 }, { say: 'done sleeping' }],
   stall: [{ silent: 5_000 }],
+  quietWork: [{ silent: 1_500 }, { say: 'finished quietly' }],
   hold: [{ silent: 20_000 }],
   stubborn: [{ ignoreTerm: true }, { silent: 5_000 }],
   broken: [{ fail: 'You have hit your usage limit' }],
@@ -35,9 +45,46 @@ const SCRIPTS = {
     { say: 'the subagent finished' },
     { lingerUntilEof: true },
   ],
+  // A test run left going in the background: silent from start to end, and
+  // its report is what the agent answers after its result.
+  backgroundRun: [
+    { say: 'tests are running' },
+    { bg: 'start', id: 'tests' },
+    { done: true },
+    { silent: 1_500 },
+    { bg: 'end', id: 'tests' },
+    { sleep: 300 },
+    { say: 'the tests passed' },
+    { done: true },
+    { lingerUntilEof: true },
+  ],
+  // After the answer, the agent is in a long silent command of its own when its
+  // background run ends: the end of the run is not the end of the turn.
+  backgroundEndsMidCommand: [
+    { say: 'tests are running' },
+    { bg: 'start', id: 'tests' },
+    { done: true },
+    { sleep: 200 },
+    { toolStart: 'Bash', id: 'build' },
+    { bg: 'end', id: 'tests' },
+    { silent: 1_500 },
+    { toolEnd: 'build' },
+    { say: 'built and tested' },
+    { done: true },
+    { lingerUntilEof: true },
+  ],
+  // Background work that never ends, after the answer is in.
+  backgroundIdle: [{ say: 'started the server' }, { bg: 'start', id: 'server' }, { done: true }, { lingerUntilEof: true }],
   // A result, and then a process that neither reads its stdin nor takes SIGTERM.
   stubbornResult: [{ ignoreTerm: true }, { say: 'answer' }, { done: true }, { hang: true }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
+  // Code changed, then tested, then a pause long enough to read the row.
+  buildAndTest: [
+    { tool: 'Edit', input: { file_path: 'runtime/x.js' } },
+    { tool: 'Bash', input: { command: 'npm test', description: 'Run the unit tests' } },
+    { sleep: 700 },
+    { say: 'Built and tested.' },
+  ],
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
   // Sends one message to whoever is in $to (the test rewrites the script), then ends.
   sendone: [
@@ -63,7 +110,7 @@ const SCRIPTS = {
   linger2: [{ sleep: 1500 }, { say: 'done lingering' }],
 };
 
-async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, nameConversation = null, origin = () => 'http://127.0.0.1:1' } = {}) {
+async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, nameConversation = null, origin = () => 'http://127.0.0.1:1', providerMap = null, awake = undefined, progress = undefined } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -82,7 +129,6 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
   const runner = createRunner({
     store,
     tools: tools ?? realTools ?? { call: async (name, input, turn) => { toolCalls.push({ name, input, turn: turn.id }); return { ok: true }; } },
-    providers: new Map([['fake', provider]]),
     workdir: path.join(dir, 'work'),
     driveRoot,
     projects: projects ?? { find: async (id) => (!id || id === 'drive' ? { id: 'drive', name: 'Drive', path: driveRoot, builtIn: true } : null) },
@@ -92,6 +138,7 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
     // `onPublish` is how a test makes the host fail underneath a turn: a
     // throw here reaches `send` through `emit`, which is the one unguarded
     // await in the path a delivery turn takes.
+    providers: providerMap ?? new Map([['fake', provider]]),
     publish: (conversationId, event, summary = null) => {
       published.push({ conversationId, event, summary });
       onPublish?.(conversationId, event);
@@ -102,6 +149,8 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
     onLook,
     onFinish,
     nameConversation,
+    ...(awake ? { awake } : {}),
+    ...(progress ? { progress } : {}),
   });
   await runner.boot();
   return { store, runner, published, toolCalls, spawned };
@@ -403,6 +452,78 @@ test('a turn runs, streams into the transcript, and completes', async () => {
   await runner.close();
 });
 
+test('a chat’s row says what its card says while it runs, and its end line when it is done', async () => {
+  const { store, runner, published } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:buildAndTest', context: { target: 'doc' } });
+  await until(async () => (await store.conversation(id)).activity === 'Testing that it works');
+  // Each sentence reaches the lists with the step that caused it.
+  const edit = published.find((p) => p.event.type === 'tool.call' && p.event.name === 'Edit');
+  assert.equal(edit.summary.activity, 'Writing the changes');
+  const bash = published.find((p) => p.event.type === 'tool.call' && p.event.name === 'Bash');
+  assert.equal(bash.summary.activity, 'Testing that it works');
+  // A new sentence is not news about the chat: it keeps its place in a list.
+  assert.equal(bash.summary.updatedAt, edit.summary.updatedAt);
+
+  await finished(store, turnId);
+  assert.equal((await store.conversation(id)).activity, 'Made the changes');
+  await runner.close();
+});
+
+test('a chat waiting on a question shows the question; one waiting on a permission says it needs your OK', async () => {
+  const { store, runner } = await setup({ capability: 'full' });
+  const q = await store.createConversation({ provider: 'fake' });
+  await runner.send(q.id, { prompt: 'script:question', context: { target: 'garden' } });
+  await until(async () => (await store.events(q.id)).some((e) => e.type === 'ask'));
+  assert.equal((await store.summary(q.id)).activity, 'A or B?');
+
+  const p = await store.createConversation({ provider: 'fake' });
+  await runner.send(p.id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(p.id)).find((e) => e.type === 'ask'));
+  assert.equal((await store.summary(p.id)).activity, 'Needs your OK');
+  await runner.answer(`${p.id}-t1`, ask.requestId, { behavior: 'allow' });
+  await until(async () => (await store.turn(`${p.id}-t1`)).status === 'completed');
+  assert.equal((await store.summary(p.id)).activity, 'All done');
+  await runner.close();
+});
+
+test('a turn that only answered, with no card, keeps saying Answered', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'doc' } });
+  await finished(store, turnId);
+  assert.equal((await store.conversation(id)).activity, 'Answered');
+  await runner.close();
+});
+
+test('a finished turn says so once more after its own record is final, for a page asking what is left to review', async () => {
+  const order = [];
+  const { store, runner, published } = await setup({
+    onPublish: () => {
+      const last = published.at(-1);
+      if (last?.summary) order.push('summary');
+    },
+  });
+  const update = store.updateTurn;
+  store.updateTurn = async (turnId, patch) => {
+    const result = await update(turnId, patch);
+    if (['completed', 'failed', 'cancelled', 'interrupted'].includes(patch?.status)) order.push('final');
+    return result;
+  };
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'notes', selection: [] } });
+  await finished(store, turnId);
+  // The summary is published after the final write lands, which can be a
+  // moment after the turn reads as finished: waited for, not slept on.
+  await until(() => order.indexOf('final') >= 0 && order.slice(order.indexOf('final') + 1).includes('summary')).catch(() => {});
+  const final = order.indexOf('final');
+  assert.ok(final >= 0, 'the turn record was finalised');
+  assert.ok(order.slice(final + 1).includes('summary'), `a summary follows the final write: ${order.join(', ')}`);
+  const last = published.filter((p) => p.summary).at(-1);
+  assert.equal(last.summary.running, false);
+  await runner.close();
+});
+
 test('a finished turn tells the host to forget what that writer touched', async () => {
   const released = [];
   const { store, runner } = await setup({ onFinish: (conversationId) => released.push(conversationId) });
@@ -428,6 +549,126 @@ test('a turn tapes off the selection while it runs, then clears it', async () =>
   await finished(store, turnId);
   assert.ok(looks.some((look) => look.ids.length === 0 && !look.extra?.phase), 'turn end clears the zone');
   await runner.close();
+});
+
+test('the turn-start look names the turn and carries its prompt, cut to 300', async () => {
+  const looks = [];
+  const { store, runner } = await setup({
+    onLook: (doc, ids, client, extra) => looks.push({ doc, ids, client, extra }),
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const longPrompt = `script:hello\n${'x'.repeat(400)}`;
+  const { turnId } = await runner.send(id, { prompt: longPrompt, context: { target: 'notes' } });
+  const start = await until(() => looks.find((look) => look.extra?.stage === 'start') ?? null);
+  assert.equal(start.extra.turn, turnId);
+  assert.equal(start.extra.prompt.length, 300);
+  assert.equal(start.extra.prompt, longPrompt.slice(0, 300));
+  await finished(store, turnId);
+  await runner.close();
+});
+
+test('the turn-end look reports what the turn did: added, removed, and the rest changed', async () => {
+  const looks = [];
+  const { store, runner } = await setup({
+    onLook: (doc, ids, client, extra) => looks.push({ doc, ids, client, extra }),
+    tools: {
+      call: async (name, input, turn) => {
+        // What a real apply_ops leaves on the turn (server/agent/tools.js):
+        // the union of parts touched this turn, and which of those were
+        // inserted or removed.
+        turn.v5 = {
+          parts: new Set(['a', 'b', 'c']),
+          added: new Set(['b']),
+          removed: new Set(['c']),
+          total: null,
+          reach: null,
+        };
+        turn.onEvent({ type: 'ops.applied', path: 'd', count: 1 });
+        return { ok: true };
+      },
+    },
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  await runner.callTool(live.token, 'apply_ops', {});
+  await runner.cancel(turnId);
+  await finished(store, turnId);
+  const end = looks.find((look) => look.extra?.stage === 'end');
+  assert.equal(end.ids.length, 0);
+  assert.equal(end.extra.turn, turnId);
+  assert.equal(end.extra.done.status, 'cancelled');
+  assert.equal(end.extra.done.changed, 1, '"a" is neither added nor removed');
+  assert.equal(end.extra.done.added, 1);
+  assert.equal(end.extra.done.removed, 1);
+  await runner.close();
+});
+
+test('cancel aborts the turn\'s signal, so the workers a tool started stop with it', async () => {
+  let seen = null;
+  const { store, runner } = await setup({
+    tools: {
+      call: async (name, input, turn) => {
+        seen = turn.abort.signal;
+        // What fan_out does: wait on its workers, which stop on this signal.
+        await new Promise((resolve) => turn.abort.signal.addEventListener('abort', resolve, { once: true }));
+        return { stopped: true };
+      },
+    },
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  const call = runner.callTool(live.token, 'fan_out', {});
+  await until(() => seen);
+  assert.equal(seen.aborted, false);
+  const started = Date.now();
+  await runner.cancel(turnId);
+  assert.deepEqual(await call, { stopped: true });
+  const turn = await finished(store, turnId);
+  assert.equal(turn.status, 'cancelled');
+  assert.equal(seen.aborted, true);
+  assert.ok(Date.now() - started < 2_000, 'the turn does not wait out its workers');
+  await runner.close();
+});
+
+test('a turn that finishes on its own aborts its signal too', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  assert.equal(live.abort.signal.aborted, false);
+  const turn = await finished(store, turnId);
+  assert.equal(turn.status, 'completed');
+  assert.equal(live.abort.signal.aborted, true, 'nothing a finished turn started keeps running');
+  await runner.close();
+});
+
+test('the turn-end look says how many groups of a fan out are still failed, whenever the turn fanned out', async () => {
+  const looks = [];
+  const run = async (failed, fanout = { call: 1, of: 3, done: 3 - failed }) => {
+    looks.length = 0;
+    const { store, runner } = await setup({
+      onLook: (doc, ids, client, extra) => looks.push({ doc, ids, client, extra }),
+      tools: {
+        call: async (name, input, turn) => {
+          turn.v5 = { parts: new Set(['a']), added: new Set(), removed: new Set(), total: null, reach: null, failed, lost: [], fanout };
+          return { ok: true };
+        },
+      },
+    });
+    const { id } = await store.createConversation({ provider: 'fake' });
+    const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+    const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+    await runner.callTool(live.token, 'fan_out', {});
+    await runner.cancel(turnId);
+    await finished(store, turnId);
+    await runner.close();
+    return looks.find((look) => look.extra?.stage === 'end').extra.done;
+  };
+  assert.equal((await run(2)).failed, 2);
+  assert.equal((await run(0)).failed, 0, 'none failed, or the failed ones landed after all: said as 0, so a page counting its own knows');
+  assert.equal('failed' in (await run(0, null)), false, 'a turn that never fanned out says nothing of groups');
 });
 
 test('the prompt carries the target and the selected source', async () => {
@@ -949,8 +1190,10 @@ test('the process gets the allowlisted environment plus what the provider adds, 
   });
   await runner.boot();
 
-  const saved = { secret: process.env.MARBLE_DRIVE_SECRET, foo: process.env.FOO, key: process.env.SOME_API_KEY };
+  const saved = { secret: process.env.MARBLE_DRIVE_SECRET, foo: process.env.FOO, key: process.env.SOME_API_KEY, hub: process.env.MARBLE_HUB_ENV };
   process.env.MARBLE_DRIVE_SECRET = 'hunter2';
+  // A home host's hub settings: a server an agent starts must not join the hub.
+  process.env.MARBLE_HUB_ENV = '/nonexistent/hub.env';
   process.env.FOO = 'inherited';
   process.env.SOME_API_KEY = 'sk-inherited';
   const envOf = async (provider) => {
@@ -964,6 +1207,7 @@ test('the process gets the allowlisted environment plus what the provider adds, 
     assert.equal(bare.MARBLE_DRIVE_SECRET, undefined);
     assert.equal(bare.FOO, undefined, 'nothing is inherited past the allowlist');
     assert.equal(bare.SOME_API_KEY, undefined);
+    assert.equal(bare.MARBLE_HUB_ENV, undefined, 'an agent never gets the hub settings');
     assert.equal(bare.PATH, process.env.PATH);
     assert.equal(bare.MARBLE_AGENT_TOKEN.length, 64, 'the bridge still gets its token');
 
@@ -972,7 +1216,7 @@ test('the process gets the allowlisted environment plus what the provider adds, 
     assert.equal(extra.FOO, 'y');
     assert.equal(extra.SOME_API_KEY, undefined);
   } finally {
-    for (const [name, value] of [['MARBLE_DRIVE_SECRET', saved.secret], ['FOO', saved.foo], ['SOME_API_KEY', saved.key]]) {
+    for (const [name, value] of [['MARBLE_DRIVE_SECRET', saved.secret], ['FOO', saved.foo], ['SOME_API_KEY', saved.key], ['MARBLE_HUB_ENV', saved.hub]]) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
@@ -1098,6 +1342,48 @@ test('a drive turn keeps the document context block', async () => {
   await runner.close();
 });
 
+test('a turn sent from the Chat app is told to answer, not to edit the app', async () => {
+  const { store, runner, spawned } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'Chat', viewing: 'Chat', surface: 'chat' } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  const prompt = spawned.at(-1).prompt;
+  assert.match(prompt, /Sent from the Chat app \("Chat"\)\. This is a conversation/);
+  assert.doesNotMatch(prompt, /The document you may edit/);
+  assert.equal((await store.turn(`${id}-t1`)).context.surface, 'chat');
+  await runner.close();
+});
+
+test('a spoken turn is told its reply will be heard, once, after the Chat app line', async () => {
+  const { store, runner, spawned } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'Chat', viewing: 'Chat', surface: 'chat', spoken: true } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  const prompt = spawned.at(-1).prompt;
+  const said = prompt.indexOf('They said this aloud, and your reply will be read aloud to them.');
+  assert.ok(said > 0);
+  assert.equal(prompt.indexOf('They said this aloud', said + 1), -1, 'once');
+  assert.ok(prompt.indexOf('Sent from the Chat app') < said, 'after the Chat app line');
+  assert.match(prompt, /no lists, headings, tables, code, links, file paths or ids/);
+  assert.match(prompt, /if a word doesn't fit, take the nearest document or term that does/);
+  assert.equal((await store.turn(`${id}-t1`)).context.spoken, true);
+  const user = (await store.events(id)).find((e) => e.type === 'user');
+  assert.equal(user.spoken, true);
+  await runner.close();
+});
+
+test('a typed turn is not told it will be heard', async () => {
+  const { store, runner, spawned } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'garden', viewing: 'garden', spoken: 'yes' } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  assert.doesNotMatch(spawned.at(-1).prompt, /They said this aloud/);
+  assert.equal((await store.turn(`${id}-t1`)).context.spoken, undefined);
+  const user = (await store.events(id)).find((e) => e.type === 'user');
+  assert.equal(user.spoken, undefined);
+  await runner.close();
+});
+
 test('a conversation whose project is gone fails its turn plainly', async () => {
   const { store, runner } = await setup({ capability: 'full' });
   const { id } = await store.createConversation({ provider: 'fake', project: 'gone' });
@@ -1199,7 +1485,7 @@ test('a process that waits for more input after its result is ended by the runne
 });
 
 test('a result while background work is outstanding is not the end of the turn', async () => {
-  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50, backgroundSettleMs: 5_000 } });
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50 } });
   const { id } = await store.createConversation({ provider: 'fake' });
   await runner.send(id, { prompt: 'script:background', context: { target: 'garden' } });
   const turn = await finished(store, `${id}-t1`);
@@ -1207,6 +1493,57 @@ test('a result while background work is outstanding is not the end of the turn',
   assert.equal(turn.error, null);
   const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
   assert.ok(said.includes('the subagent finished'), said.join(' | '));
+  await runner.close();
+});
+
+// A backgrounded command prints nothing while it runs. Ending the turn after
+// any stretch of silence closed the CLI under the run, and killed it.
+test('a silent background run outlives the settle window, and the agent answers after it', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, drainedSettleMs: 1_000, killGraceMs: 50 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundRun', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
+  const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
+  const answered = said.indexOf('the tests passed');
+  assert.ok(answered > said.indexOf('tests are running') && said.indexOf('tests are running') !== -1, said.join(' | '));
+  await runner.close();
+});
+
+test('background work that ends during a silent command of the agent\'s own does not end the turn under it', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, drainedSettleMs: 300, killGraceMs: 50 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundEndsMidCommand', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
+  assert.ok(said.includes('built and tested'), said.join(' | '));
+  await runner.close();
+});
+
+test('background work gone quiet after the answer ends the turn as completed, not stalled', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50, stallMs: 400 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundIdle', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
+  await runner.close();
+});
+
+// The runner cannot end by closing stdin a process it never held stdin for;
+// waiting on its background work for good would leave the turn running forever.
+test('background work gone quiet under a process handed a closed stdin still ends the turn', async () => {
+  const closed = createFakeProvider({ scripts: { idle: [{ say: 'started the server' }, { bg: 'start', id: 'server' }, { done: true }, { hang: true }] } });
+  const spawn = closed.spawn.bind(closed);
+  closed.spawn = (opts) => ({ ...spawn(opts), stdinOpen: false });
+  const { store, runner } = await setup({ providerMap: new Map([['fake', closed]]), limits: { settleMs: 50, killGraceMs: 50, stallMs: 400 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:idle', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'failed');
+  assert.match(turn.error, /stalled/);
   await runner.close();
 });
 
@@ -1233,6 +1570,19 @@ test('a steer that waited wraps the model prompt, not the user event', async () 
   assert.equal(user.text, 'script:hello\nkeep going');
   const echoed = (await store.events(id)).find((e) => e.turn === second.turnId && e.type === 'text');
   assert.match(echoed.text, /^prompt:While you were working I added this note/);
+  await runner.close();
+});
+
+test('a spoken steer still opens with the course-correction note', async () => {
+  const { store, runner, spawned } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const first = await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } });
+  const second = await runner.send(id, { prompt: 'script:hello\nactually the other one', context: { target: 'd', spoken: true }, dispatch: 'steer' });
+  await finished(store, first.turnId);
+  await finished(store, second.turnId);
+  const prompt = spawned.at(-1).prompt;
+  assert.match(prompt, /^While you were working I added this note/);
+  assert.match(prompt, /They said this aloud/);
   await runner.close();
 });
 
@@ -1589,8 +1939,9 @@ test('a chat is named by a model once its first turn is over', async () => {
   assert.equal(asked[0].prompt, 'script:hello');
   assert.match(asked[0].reply, /Hello from the fake agent/);
 
-  // Lists hear about it without asking.
-  const meta = published.find((p) => p.conversationId === chat.id && p.event.type === 'meta');
+  // Lists hear about it without asking. (The turn's own end is said as a
+  // meta summary too, before the name; the name's is the last.)
+  const meta = published.filter((p) => p.conversationId === chat.id && p.event.type === 'meta').at(-1);
   assert.equal(meta.summary.title, 'Fake Agent Says Hello');
   await runner.close();
 });
@@ -1638,5 +1989,298 @@ test('a host with no namer leaves the placeholder alone', async () => {
   await finished(store, turnId);
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal((await store.conversation(chat.id)).title, 'script:hello');
+  await runner.close();
+});
+
+const GROK_MODELS = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'grok-4.6-high', label: 'Grok 4.6 High' },
+  { id: 'grok-4.7-high', label: 'Grok 4.7 High' },
+  { id: 'grok-4.7-xhigh', label: 'Grok 4.7 Extra High' },
+];
+
+const CLAUDE_AND_GROK = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'claude-fable-5-1-high', label: 'Claude Fable 5.1 1M' },
+  { id: 'claude-opus-5-thinking-high', label: 'Claude Opus 5 1M Thinking' },
+  { id: 'claude-opus-4-8-high', label: 'Claude Opus 4.8 1M' },
+  { id: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 1M High' },
+  { id: 'claude-opus-5-5-xhigh', label: 'Claude Opus 5.5 1M Extra High' },
+  { id: 'claude-sonnet-5-high', label: 'Claude Sonnet 5 1M' },
+  { id: 'grok-4.7-high', label: 'Grok 4.7 High' },
+  { id: 'grok-4.7-xhigh', label: 'Grok 4.7 Extra High' },
+];
+
+/** Claude is the scripted provider. Cursor is a second one whose model list the handoff reads. */
+async function setupFailover({
+  signedIn = true,
+  models = GROK_MODELS,
+  listModels = null,
+  failover = 'auto',
+  model = 'opus',
+  cursorScripts = { hello: [{ say: 'picked up' }] },
+  cursorPrompt = null,
+} = {}) {
+  const spawned = [];
+  const claude = createFakeProvider({
+    id: 'claude-subscription',
+    scripts: {
+      spent: [{ fail: 'You have hit your limit' }],
+      retry: [{ fail: 'Rate limit — try again shortly' }],
+      crash: [{ fail: 'exited with 1' }],
+      hello: [{ say: 'done' }],
+    },
+  });
+  const cursor = createFakeProvider({ id: 'cursor', scripts: cursorScripts });
+  const claudeSpawn = claude.spawn.bind(claude);
+  claude.spawn = (opts) => {
+    spawned.push({ provider: 'claude-subscription', ...opts });
+    return claudeSpawn(opts);
+  };
+  const cursorSpawn = cursor.spawn.bind(cursor);
+  cursor.spawn = (opts) => {
+    spawned.push({ provider: 'cursor', ...opts });
+    const script = cursorPrompt ? cursorPrompt(spawned) : 'script:hello';
+    return cursorSpawn({ ...opts, prompt: `${script}\n${opts.prompt}` });
+  };
+  cursor.detect = async () => ({ installed: true, signedIn });
+  cursor.listModels = listModels ?? (async () => models);
+  const made = await setup({
+    providerMap: new Map([['claude-subscription', claude], ['cursor', cursor]]),
+  });
+  const chat = await made.store.createConversation({ provider: 'claude-subscription', model, effort: 'high', failover });
+  await made.store.updateConversation(chat.id, { providerSession: 'claude-session' });
+  return { ...made, spawned, chat };
+}
+
+test('a spent Claude window switches the chat to the newest Grok and continues', async () => {
+  const { store, runner, spawned, chat, published } = await setupFailover();
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  const failed = await finished(store, turnId);
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error, /hit your limit/);
+  await until(async () => (await store.conversation(chat.id)).provider === 'cursor');
+  const meta = await store.conversation(chat.id);
+  assert.equal(meta.provider, 'cursor');
+  assert.equal(meta.model, 'grok-4.7');
+  assert.equal(meta.effort, 'high');
+  assert.equal(meta.providerSession, null);
+  const turns = await store.turns(chat.id);
+  const cont = turns.find((turn) => turn.prompt === 'Continue');
+  assert.ok(cont);
+  assert.equal(cont.usageHandoff, true);
+  await finished(store, cont.id);
+  const handoff = spawned.find((item) => item.provider === 'cursor');
+  assert.match(handoff.prompt, /Finish the work it started/);
+  assert.match(handoff.prompt, /Person: script:spent/);
+  assert.match(handoff.prompt, /\nContinue\n/);
+  assert.equal(published.some((item) => item.event.type === 'usage.continued' && item.event.label === 'Grok 4.7 High'), true);
+  const again = await runner.handoffUsage(chat.id);
+  assert.equal(again.turnId, cont.id);
+  await runner.close();
+});
+
+test('Continue runs ahead of a prompt that was already queued', async () => {
+  const { store, runner, spawned, chat } = await setupFailover();
+  const first = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  const queued = await runner.send(chat.id, { prompt: 'script:hello\nplease also fix the tests', context: { target: 'd' } });
+  await finished(store, first.turnId);
+  await until(async () => (await store.turns(chat.id)).some((turn) => turn.prompt === 'Continue'));
+  await finished(store, queued.turnId);
+  const cont = (await store.turns(chat.id)).find((turn) => turn.prompt === 'Continue');
+  await finished(store, cont.id);
+  const cursorSpawns = spawned.filter((item) => item.provider === 'cursor');
+  assert.match(cursorSpawns[0].prompt, /Finish the work it started/);
+  assert.match(cursorSpawns[1].prompt, /please also fix the tests/);
+  assert.equal(cursorSpawns[1].prompt.includes('Finish the work it started'), false);
+  await runner.close();
+});
+
+test('a crash or a short retry does not switch off Claude', async () => {
+  for (const prompt of ['script:crash', 'script:retry']) {
+    const { store, runner, chat } = await setupFailover();
+    const { turnId } = await runner.send(chat.id, { prompt, context: { target: 'd' } });
+    await finished(store, turnId);
+    assert.equal((await store.conversation(chat.id)).provider, 'claude-subscription');
+    assert.equal((await store.turns(chat.id)).some((turn) => turn.prompt === 'Continue'), false);
+    await runner.close();
+  }
+});
+
+test('Pause asks instead of continuing, and records whether Cursor can take the chat', async () => {
+  const asking = await setupFailover({ failover: 'pause' });
+  const sent = await asking.runner.send(asking.chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  const failed = await finished(asking.store, sent.turnId);
+  assert.equal(failed.usageStopped, true);
+  assert.equal(failed.canSwitch, true);
+  assert.equal((await asking.store.conversation(asking.chat.id)).provider, 'claude-subscription');
+  assert.equal(asking.published.some((item) => item.event.type === 'turn.failed' && item.event.usageStopped && item.event.canSwitch), true);
+  await asking.runner.close();
+
+  const blocked = await setupFailover({ failover: 'pause', signedIn: false });
+  const stopped = await blocked.runner.send(blocked.chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  const stayed = await finished(blocked.store, stopped.turnId);
+  assert.equal(stayed.canSwitch, false);
+  assert.match(stayed.error, new RegExp(STAY.signedOut.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  await blocked.runner.close();
+});
+
+test('a spent Claude window continues on Cursor with the same model, and Fable continues on Opus', async () => {
+  const { store, runner, spawned, chat, published } = await setupFailover({ models: CLAUDE_AND_GROK, model: 'fable' });
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  await finished(store, turnId);
+  await until(async () => (await store.conversation(chat.id)).provider === 'cursor');
+  const meta = await store.conversation(chat.id);
+  assert.equal(meta.model, 'claude-opus-5-5');
+  assert.equal(meta.effort, 'high');
+  assert.equal(meta.usageLane, 'model');
+  assert.equal(meta.providerSession, null);
+  const cont = (await store.turns(chat.id)).find((turn) => turn.prompt === 'Continue');
+  await finished(store, cont.id);
+  const handoff = spawned.find((item) => item.provider === 'cursor');
+  assert.equal(handoff.model, 'claude-opus-5-5');
+  assert.equal(handoff.effort, 'high');
+  assert.match(handoff.prompt, /Finish the work it started/);
+  assert.equal(published.some((item) => item.event.type === 'usage.continued' && item.event.label === 'Claude Opus 5.5 1M High'), true);
+  assert.equal((await store.conversation(chat.id)).model, 'claude-opus-5-5');
+  await runner.close();
+});
+
+test('a session limit on that Cursor model continues once more on Grok', async () => {
+  const { store, runner, spawned, chat } = await setupFailover({
+    models: CLAUDE_AND_GROK,
+    model: 'opus',
+    cursorScripts: {
+      spent: [{ fail: "You've hit your session limit" }],
+      hello: [{ say: 'picked up' }],
+    },
+    cursorPrompt: (spawned) => (spawned.filter((item) => item.provider === 'cursor').length === 1 ? 'script:spent' : 'script:hello'),
+  });
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  await finished(store, turnId);
+  await until(async () => (await store.conversation(chat.id)).model === 'claude-opus-5-5');
+  const first = (await store.turns(chat.id)).find((turn) => turn.prompt === 'Continue');
+  const failed = await finished(store, first.id);
+  assert.match(failed.error, /session limit/);
+  await until(async () => (await store.conversation(chat.id)).model === 'grok-4.7');
+  const meta = await store.conversation(chat.id);
+  assert.equal(meta.provider, 'cursor');
+  assert.equal(meta.usageLane, 'grok');
+  assert.equal(meta.effort, 'high');
+  const continues = (await store.turns(chat.id)).filter((turn) => turn.prompt === 'Continue');
+  assert.equal(continues.length, 2);
+  await finished(store, continues[1].id);
+  const grok = spawned.filter((item) => item.provider === 'cursor').at(-1);
+  assert.equal(grok.model, 'grok-4.7');
+  assert.match(grok.prompt, /The Cursor model stopped because its usage was used up/);
+  const third = await runner.handoffUsage(chat.id);
+  assert.equal(third.turnId, continues[1].id);
+  await runner.close();
+});
+
+test('a signed-out Cursor, an unreadable list, or no Grok leaves the chat on Claude', async () => {
+  const cases = [
+    [{ signedIn: false }, STAY.signedOut],
+    [{ listModels: async () => { throw new Error('nope'); } }, STAY.unreadable],
+    [{ models: [{ id: 'auto', label: 'Auto' }, { id: 'composer-2.5', label: 'Composer 2.5' }] }, STAY.noGrok],
+  ];
+  for (const [options, suffix] of cases) {
+    const { store, runner, chat } = await setupFailover(options);
+    const { turnId } = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+    const failed = await finished(store, turnId);
+    assert.equal((await store.conversation(chat.id)).provider, 'claude-subscription');
+    assert.match(failed.error, new RegExp(suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    await runner.close();
+  }
+});
+
+// The drive may sit inside the app's own checkout (it does on a development
+// machine). A turn working in the drive must not find that repository: git's
+// search stops at the drive's parent, so `git status` there is "not a git
+// repository" and a commit cannot land in the app.
+test('a turn in the drive cannot see the git repository around it; a turn in a registered project can', async () => {
+  const repo = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-repo-'));
+  let driveRoot = null;
+  const projects = {
+    find: async (id) => (id === 'p1'
+      ? { id: 'p1', name: 'Repo', path: repo, builtIn: false }
+      : { id: 'drive', name: 'Drive', path: driveRoot, builtIn: true }),
+  };
+  const said = async (store, id) => (await store.events(id))
+    .filter((e) => e.type === 'text' && e.text.startsWith('GIT_CEILING_DIRECTORIES='))
+    .map((e) => e.text.slice('GIT_CEILING_DIRECTORIES='.length));
+
+  const full = await setup({ capability: 'full', projects });
+  const somewhere = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-checkout-'));
+  driveRoot = path.join(somewhere, 'drive');
+  await fsp.mkdir(driveRoot);
+  const inDrive = await full.store.createConversation({ provider: 'fake' });
+  await full.runner.send(inDrive.id, { prompt: 'script:ceiling', context: { target: 'garden' } });
+  await until(async () => (await full.store.turn(`${inDrive.id}-t1`)).status === 'completed');
+  assert.deepEqual(await said(full.store, inDrive.id), [somewhere]);
+
+  const inRepo = await full.store.createConversation({ provider: 'fake', project: 'p1' });
+  await full.runner.send(inRepo.id, { prompt: 'script:ceiling', context: { target: 'garden' } });
+  await until(async () => (await full.store.turn(`${inRepo.id}-t1`)).status === 'completed');
+  assert.deepEqual(await said(full.store, inRepo.id), ['']);
+  await full.runner.close();
+
+  // A documents turn works in an empty workspace, not the drive: nothing to fence.
+  const docs = await setup();
+  const plain = await docs.store.createConversation({ provider: 'fake' });
+  await docs.runner.send(plain.id, { prompt: 'script:ceiling', context: { target: 'garden' } });
+  await until(async () => (await docs.store.turn(`${plain.id}-t1`)).status === 'completed');
+  assert.deepEqual(await said(docs.store, plain.id), ['']);
+  await docs.runner.close();
+});
+
+// A long job is often silent: one command crunching for hours prints nothing.
+// Working is output or the CPU and I/O of the turn's processes; a turn is
+// stalled only when there has been neither, in time the sprite was awake.
+test('a quiet turn whose processes are working is not stalled', async () => {
+  let n = 0;
+  const progress = { available: true, sample: () => (n += 1) }; // always growing
+  const { store, runner } = await setup({ limits: { stallMs: 300 }, progress });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:quietWork', context: { target: 'd' } });
+  await until(async () => ['completed', 'failed'].includes((await store.turn(turnId)).status), 8000);
+  const turn = await store.turn(turnId);
+  assert.equal(turn.status, 'completed', turn.error ?? '');
+  await runner.close();
+});
+
+test('a turn frozen with its sprite is not stalled when the sprite wakes', async () => {
+  // The awake clock does not move while the sprite is paused; model the whole
+  // quiet stretch as frozen.
+  const awake = { now: () => 0, tick() {}, stop() {} };
+  const progress = { available: true, sample: () => 7 }; // nothing moves either
+  const { store, runner } = await setup({ limits: { stallMs: 300 }, awake, progress });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:quietWork', context: { target: 'd' } });
+  await until(async () => ['completed', 'failed'].includes((await store.turn(turnId)).status), 8000);
+  assert.equal((await store.turn(turnId)).status, 'completed');
+  await runner.close();
+});
+
+test('a hidden brief rides in the prompt, never in the message the chat shows', async () => {
+  const { store, runner, spawned } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const brief = 'Wrap it in a <marble-alt> and add 2 more versions.';
+  const { turnId } = await runner.send(id, { prompt: 'script:hello Explore 3 variations of this row', context: { target: 'notes', brief } });
+  await finished(store, turnId);
+  assert.ok(spawned[0].prompt.includes(brief), 'the agent reads the brief');
+  const user = (await store.events(id)).find((e) => e.type === 'user');
+  assert.ok(!user.text.includes(brief), 'the chat shows only what was typed');
+  await runner.close();
+});
+
+test('an ask that builds carries the Marble way; a question does not', async () => {
+  const { store, runner, spawned } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await finished(store, (await runner.send(id, { prompt: 'script:hello make this list interactive', context: { target: 'notes' } })).turnId);
+  await finished(store, (await runner.send(id, { prompt: 'script:hello what does this paragraph mean?', context: { target: 'notes' } })).turnId);
+  assert.match(spawned[0].prompt, /Build it the Marble way/);
+  assert.match(spawned[0].prompt, /read_guide "Persistence"/, 'a documents agent is pointed at the guide');
+  assert.doesNotMatch(spawned[1].prompt, /Build it the Marble way/);
   await runner.close();
 });

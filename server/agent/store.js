@@ -17,9 +17,12 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import '../../runtime/agent-folders.js';
+import '../../runtime/agent-words.js';
+import '../../runtime/agent-status.js';
 import { fallbackTitle } from './namer.js';
 
 const folderLib = () => globalThis.marbleAgentFolders;
+const statusLib = () => globalThis.marbleAgentStatus;
 
 const REVIEWABLE = new Set(['changes', 'done', 'failed', 'interrupted', 'watchdog']);
 
@@ -71,6 +74,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
   const inboxFile = (id) => path.join(convDir(id), 'inbox.jsonl');
   const turnFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.json`);
   const undoFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.undo.json`);
+  const redoFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.redo.json`);
   const rawFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'raw', `${turnId}.jsonl`);
   const foldersFile = path.join(dir, 'folders.json');
 
@@ -117,8 +121,50 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     return out;
   }
 
+  // The events of the conversations read lately, parsed, with how many bytes
+  // of the file they came from. The file only ever grows, so a read that
+  // finds it longer parses just the new lines: opening a long chat was
+  // re-reading and re-parsing megabytes every time.
+  const parsed = new Map();
+  const PARSED_KEEP = 8;
+
+  // Each conversation's last step, as its summary carries it, so a list can
+  // say what a working chat is doing, and when it last did anything, without
+  // reading its transcript. Held here while the host runs; the runner writes
+  // it onto meta.json when a turn ends, so a restart keeps it.
+  const steps = new Map();
+
   async function events(id, { after = 0 } = {}) {
-    return parseEvents(id, await eventsText(id)).filter((event) => event.seq > after);
+    let handle;
+    try {
+      handle = await fsp.open(eventsFile(id), 'r');
+    } catch (err) {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    }
+    let hit;
+    try {
+      const { size } = await handle.stat();
+      hit = parsed.get(id);
+      if (!hit || size < hit.size) hit = { size: 0, events: [] };
+      if (size > hit.size) {
+        const fresh = Buffer.alloc(size - hit.size);
+        const { bytesRead } = await handle.read(fresh, 0, fresh.length, hit.size);
+        // Only whole lines: one still being appended is read next time.
+        const whole = fresh.subarray(0, bytesRead).lastIndexOf(0x0a) + 1;
+        if (whole) {
+          const events = hit.events.slice();
+          for (const event of parseEvents(id, fresh.subarray(0, whole).toString('utf8'))) events.push(event);
+          hit = { size: hit.size + whole, events };
+        }
+      }
+    } finally {
+      await handle.close();
+    }
+    parsed.delete(id);
+    parsed.set(id, hit);
+    if (parsed.size > PARSED_KEEP) parsed.delete(parsed.keys().next().value);
+    return hit.events.filter((event) => event.seq > after);
   }
 
   async function conversation(id) {
@@ -149,7 +195,9 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     });
   }
 
-  async function updateConversation(id, patch) {
+  /** `touch: false` leaves `updatedAt` alone: for a change that is not news
+   *  about the chat, like the line its card says changing as a turn runs. */
+  async function updateConversation(id, patch, { touch = true } = {}) {
     const interactionFields = ['folderId', 'pinned', 'focusX', 'focusY'];
     const folderIdPatched = 'folderId' in patch;
     let previousFolderId;
@@ -166,7 +214,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         processed.lastInteractedAt = Date.now();
       }
 
-      const updated = { ...meta, ...processed, updatedAt: Date.now() };
+      const updated = { ...meta, ...processed, updatedAt: touch ? Date.now() : meta.updatedAt };
       await writeJson(metaFile(id), updated);
       return updated;
     });
@@ -196,6 +244,8 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
       const line = { seq, t: Date.now(), ...event };
       await fsp.mkdir(convDir(id), { recursive: true });
       await fsp.appendFile(eventsFile(id), `${lead}${JSON.stringify(line)}\n`);
+      const step = statusLib().stepOf(line);
+      if (step) steps.set(id, step);
       return line;
     });
     if (event.type === 'user') {
@@ -273,8 +323,67 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
   async function summary(id) {
     const meta = await conversation(id);
     if (!meta) return null;
-    const queued = (await turns(id)).some((t) => t.status === 'queued');
-    return summarize({ ...meta, queued });
+    const records = await turns(id);
+    const queued = records.some((t) => t.status === 'queued');
+    // When the running turn began: with the last step, what tells a chat
+    // that is working from one that has gone quiet (runtime/agent-status.js).
+    const turnStartedAt = meta.running ? (records.findLast((t) => t.status === 'running')?.startedAt ?? null) : null;
+    return summarize({ ...meta, queued, turnStartedAt, lastStep: steps.get(id) ?? meta.lastStep ?? null });
+  }
+
+  /** Every conversation's turns that were working at any time since
+   *  `since`, archived ones' too, in one read: what the day's lanes and the
+   *  pages two chats worked on at once are drawn from. A turn's record is
+   *  cut to its times, outcome and page. With `paths`, each turn also says
+   *  which pages it changed, read from its own steps. */
+  async function turnsSince(since, { paths = false } = {}) {
+    const from = Number(since) || 0;
+    const out = [];
+    await Promise.all((await ids()).map(async (id) => {
+      const meta = await conversation(id);
+      if (!meta) return;
+      // A conversation whose turns folder has not been written to since
+      // then, and that is not running, has no turn that ended in range.
+      if (!meta.running) {
+        try {
+          if ((await fsp.stat(path.join(convDir(id), 'turns'))).mtimeMs < from) return;
+        } catch (err) {
+          if (err.code === 'ENOENT') return;
+          throw err;
+        }
+      }
+      const records = (await turns(id)).filter((t) => {
+        if (t.status === 'running' || t.status === 'queued') return true;
+        const end = t.finishedAt ?? t.startedAt ?? t.createdAt ?? 0;
+        return end >= from;
+      });
+      if (!records.length) return;
+      let changed = null;
+      if (paths) {
+        changed = new Map();
+        for (const e of await events(id)) {
+          if ((e.type !== 'ops.applied' && e.type !== 'document.changed') || !e.turn || !e.path) continue;
+          if (!changed.has(e.turn)) changed.set(e.turn, new Set());
+          changed.get(e.turn).add(e.path);
+        }
+      }
+      for (const t of records) {
+        out.push({
+          id: t.id,
+          conversationId: id,
+          n: t.n,
+          status: t.status,
+          createdAt: t.createdAt ?? null,
+          startedAt: t.startedAt ?? null,
+          finishedAt: t.finishedAt ?? null,
+          applied: t.applied ?? 0,
+          target: t.context?.target ?? meta.target ?? null,
+          ...(meta.archived ? { archived: true } : {}),
+          ...(changed ? { changed: [...(changed.get(t.id) ?? [])] } : {}),
+        });
+      }
+    }));
+    return out.sort((a, b) => (a.startedAt ?? a.createdAt ?? 0) - (b.startedAt ?? b.createdAt ?? 0) || a.id.localeCompare(b.id));
   }
 
   // ------------------------------------------------------------------ uploads
@@ -363,7 +472,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
     saveSettings,
 
-    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = 'drive' }) {
+    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = 'drive', failover = 'auto' }) {
       const now = Date.now();
       const meta = {
         id: crypto.randomBytes(6).toString('hex'),
@@ -392,6 +501,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         focusY: null,
         lastInteractedAt: now,
         queueCombine: false,
+        failover: failover === 'pause' ? 'pause' : 'auto',
       };
       await writeJson(metaFile(meta.id), meta);
       return meta;
@@ -409,6 +519,8 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
       const meta = await conversation(id);
       await fsp.rm(convDir(id), { recursive: true, force: true });
       counters.delete(id);
+      parsed.delete(id);
+      steps.delete(id);
       await serial('folders', async () => {
         const state = await readFolders();
         const before = JSON.stringify(state);
@@ -521,7 +633,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     appendEvent,
     events,
 
-    async createTurn(id, { prompt, context, dispatch = 'queue', behind = false, bundle = null }) {
+    async createTurn(id, { prompt, context, dispatch = 'queue', behind = false, bundle = null, usageHandoff = false }) {
       return serial(`turns:${id}`, async () => {
         const n = (await turns(id)).length + 1;
         const turn = {
@@ -541,6 +653,8 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
           applied: 0,
           usage: null,
           undoneAt: null,
+          keptAt: null,
+          ...(usageHandoff ? { usageHandoff: true } : {}),
         };
         await writeJson(turnFile(turn.id), turn);
         return turn;
@@ -589,9 +703,17 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     updateTurn,
 
     turns,
+    turnsSince,
+
+    /** The last step this host saw a conversation take, or null. */
+    lastStep: (id) => steps.get(id) ?? null,
 
     saveUndo: (turnId, records) => writeJson(undoFile(turnId), records),
     undoRecords: (turnId) => readJson(undoFile(turnId)),
+
+    saveRedo: (turnId, records) => writeJson(redoFile(turnId), records),
+    redoRecords: (turnId) => readJson(redoFile(turnId)),
+    deleteRedo: (turnId) => fsp.rm(redoFile(turnId), { force: true }),
 
     async appendRaw(turnId, line) {
       await fsp.mkdir(path.dirname(rawFile(turnId)), { recursive: true });

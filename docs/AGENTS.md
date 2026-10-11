@@ -14,8 +14,27 @@ MARBLE_DRIVE_AGENT_PROVIDER=claude-subscription
 
 API keys belong in `.agent-keys.local` (gitignored) or `MARBLE_DRIVE_AGENT_KEYS`,
 not in the drive and not in `.marble/`. The settings panel writes them there.
-`.env.local` can still hold `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` for a host
-that has no panel-set key; both files are gitignored.
+`.env.local` can still hold `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` /
+`CODEX_API_KEY` for a host that has no panel-set key; both files are gitignored.
+
+A drive that can run no agent — Claude with neither a signed-in login nor a
+key, and Codex the same — says so on the first page of a visit: a popup
+(`<marble-agent-setup>` in `runtime/agent-ui.js`) with a field to paste an API
+key into. It reads **Connect Claude** on a drive that has only Claude, and
+**Connect an agent**, with a Claude | Codex choice, on one that has both; a
+pasted `sk-ant-` key moves the choice to Claude and another `sk-` key to Codex.
+`GET /agent/setup` answers whether it is needed and which agents a key could
+connect (`offers`); `POST /agent/setup {key}` checks a Claude key with
+Anthropic (the model list, via `@anthropic-ai/sdk`; nothing is spent) and
+keeps it only if Anthropic does not refuse it, then switches Claude to the key.
+`POST /agent/setup {provider: 'codex', key}` does the same with OpenAI's model
+list, keeps the key for Codex, and makes Codex the agent new chats start on if
+the current one cannot run. `GET /agent/settings` reports as `defaultProvider`
+the saved default when it can run, else the first agent that can, so a Run
+button or the day never starts on a Claude that is not signed in. An unreachable company keeps the key and says it
+went unchecked. "Not now" lasts the tab; a page inside another page never asks.
+`MARBLE_DRIVE_ANTHROPIC_BASE` and `MARBLE_DRIVE_OPENAI_BASE` point the checks
+elsewhere (the tests' fakes).
 
 Refused, with the reason printed at boot, on a multi-tenant host, on an
 ungated host that is not listening on loopback, and on a host bound to one
@@ -95,8 +114,8 @@ Being on the page is not a claim on it. Where your caret is has no bearing on
 what the agent may change; only an edit you made **after its turn began**
 counts as a conflict with an edit of the same element by the agent. When that
 happens, nothing is overwritten: the element becomes two versions with a bar
-above — *You* and *Agent* to look at each, *Keep this* to settle on the one
-showing, and *Ask an agent to combine* to send both to an agent that writes a
+above — *Yours* and *The new one* to look at each, *Keep this* to settle on
+the one showing, and *Combine them* to send both to an agent that writes a
 third. A turn's ending forgets what it touched, and an undo claims nothing it
 restores, so an agent's claims never outlive its work.
 
@@ -116,9 +135,8 @@ element under the pointer is outlined, a click toggles it, **Escape** clears.
 The card's composer is the composer: setups, model, effort, and the Project
 picker. Choosing a registered project makes it a coding turn in that
 repository, which is how "fix the code behind this" works with no new
-mechanism. **Continue in `<title>`** sends the brief to the chat this tab was
-last in, if it is idle, instead of starting a new one — the same agent, with
-its memory, brought to a new region.
+mechanism. The card is a new conversation: the first send creates it, and
+it does not continue the chat this tab was last in.
 
 While the agent works the card stands where the zone's label would, showing
 `Agent · <what it is doing>`, and the label itself steps back: one object on
@@ -128,13 +146,14 @@ ends the card reads `Changed 4 elements · Undo · Done`. *Undo* is the turn's
 own undo. *Done* marks the chat reviewed, clears the trail, and puts the
 callout away: seeing it and saying done is reviewing it.
 
-`×` folds the card to a pill with the chat's name, or with what its last turn
-did if that ended while it was folded. The pill reopens the card. While the
-agent is still working the pill steps aside altogether, because the zone's own
-label is the folded callout — *Open chat* there brings the card back.
-**Open beside** moves the chat to the drawer; **Open in Agents** leaves for the
-Agents page with that chat open. Undo and Done live in the card, never on the
-pill: they come after looking.
+The two controls at the card's corner do different jobs. The side icon folds
+the card to a pill and opens that chat in the drawer. `×` only folds it. The
+pill reopens the card, and it never opens the drawer: the side icon is the
+only control that does. While the agent is still working the pill steps aside
+altogether, because the zone's own label is the folded callout — clicking that
+label, or *Open chat* on it, brings the card back. **Open in Agents** leaves
+for the Agents page with that chat open, once the conversation exists. Undo
+and Done live in the card, never on the pill: they come after looking.
 
 A reload rebuilds callouts for chats about this document that are running,
 asking, or unreviewed, at the region their last turn was about — at most six,
@@ -142,30 +161,126 @@ newest first. A chat whose region is no longer on the page draws nothing; the
 drawer still lists it. A prompt sent from the drawer with a selection gets a
 callout as well, so both paths end at the same object.
 
-On a phone the handle opens the drawer with the selection attached; there is
-no anchored card. The Agents page draws no callouts of its own.
+On a phone the handle opens the drawer on a new conversation, with the
+selection attached; there is no anchored card. The Agents page draws no
+callouts of its own.
 
-## Marking a document up for an agent
+## Describe mode: saying what you want about a document
 
-Every document also carries a small round button at its bottom right, wearing
-the callout's bubble. It opens into a strip of tools; in this phase the strip
-holds **Select**. Pick a tool and the page is in that mode until Escape, or the
-tool again, gives it back. Wheel scrolling still works inside a mode.
+The drawer's tray has one entry for this, **Describe**; the shell's bar has a
+button for it, and **⌘⇧D** turns it on and off from anywhere. It opens a
+toolbar at the bottom of the page — centred on the page, not the window, when
+the shell or a docked chat has taken some of it — holding the tools that go
+with it: icons, with each one's name and key in a tip. **Use the app** (V) is
+no tool at all: the page answers as it always does and the marks stay where
+they are. Select is A, Sketch P, Note T, Explore E; the keys are the mode's
+only while it is on, and never while you are typing. They are pointer
+tools, so none of them is offered where there is no hover; each is a mode that
+Escape or a second press leaves; Escape with no tool leaves Describe mode, and
+so does **Done**. Leaving fades the whole layer out — the ink, the notes, the
+frame, the field and the toolbar together — and keeps every mark: the tray's
+entry reads **Describe · 3 kept**, and opening it again brings them back
+exactly as they were, selection included. A page you have stopped marking up is
+a page you want to read. Inside a mode the pointer belongs to the layer while the wheel
+still scrolls the page under it. A page with no tray — the Agents page — has
+none of this.
 
-**Select** draws a marquee. Every addressed element the rectangle covers by
-sixty percent or more is outlined as you drag, and a rectangle across a whole
-list outlines the list rather than its items. Letting go hands those elements
-to the callout — the same handle and card a text selection gets — and leaves
-the mode. **Shift** while releasing adds to what is already selected; a
-double-click on Select pins the mode for several rectangles; **Escape** with a
-marquee selection standing clears it, as it clears Option-picks.
+- **Select** draws a marquee. Every addressed element it covers by sixty
+  percent or more is outlined as you drag, and a rectangle across a whole list
+  means the list rather than its items. It also picks up **marks**: a rectangle
+  over a sketch or a note takes that mark, ⌫ removes what is picked, and a drag
+  from inside the picked area moves it. **Shift** while releasing adds to what
+  is already selected.
+- **Sketch** draws. Each stroke is read as **a box around** the elements it
+  encloses, **an arrow from** one element **to** another — a short stroke at
+  either end within half a second is its head, not a second mark — or **ink
+  over** what it covers. Resting on a stroke shows its reading in words. ⌘Z
+  takes back the last stroke.
+- **Note** puts a text box on the page at the point you click, anchored to the
+  element under it. It reads as `a note on q1: "make this the headline"`, it is
+  dragged by its grip, and an empty one is discarded when it loses the caret.
+- **Clear marks** takes the ink, the notes and the selection off.
 
-The button can be thrown to any corner: drag it, let go, and it settles in the
-corner nearest to where the throw was headed. The corner is remembered per
-document. When the drawer is pinned the toolbar moves in with the page's edge;
-while an unpinned drawer is open — the usual case at any width, phone or
-desktop — it steps aside rather than sit under the panel. The Agents page has
-no toolbar; it is the orchestration view already.
+Everything selected or marked is wrapped in **one frame**, with a **field**
+hanging under it: one line, *Describe the change…*, Enter to send. The brief
+line above it says what is attached — `3 elements · a box around q1 · a note on
+p`. Sending opens the callout's card at the same region with the marks and your
+sentence in it and submits, so the turn, the zone, the trail, Undo and Done are
+the ones that already exist. Marks live in the page for as long as the tab does;
+nothing is written to the document — except what Adjust does, which is a real
+edit, and is reported in the brief as `I already moved p1 to the end of its list
+by hand` so an agent reads what the hand did as the example for the rest.
+
+## Variations
+
+An element that might have been something else is a `<marble-alt>` in the file
+with one child per version, and which one shows is one attribute. Wherever a
+document has one, the page grows a **version pill** on that element — the name,
+where you are in the set, and ‹ › to step through it. A step is an ordinary op:
+it records, undoes, reaches the file and travels to another tab.
+
+The pill's last button opens the **compare surface**, which lays every version
+out as a live preview of itself in whatever space the page has left after the
+drawer and the toolbar — side by side when the versions are narrow enough to
+stay legible, stacked when they are not. Each card says what it is trying, and
+offers **Use** (make it the one that shows) and **Keep only this** (drop the
+others and unwrap, leaving the survivor answering to the id the element always
+had). The surface is dragged by its bar, resized from its corner, and remembers
+where it was left.
+
+**Explore variations**, in Describe mode's toolbar, is how a set gets written in
+the first place: with something selected it asks what you want to try and why,
+how many to make, and sends one turn asking for exactly that, in `<marble-alt>`
+form. When the alternatives land the compare surface opens on them.
+
+## Automations: Automate it and Make it alive
+
+A document cannot fetch or run anything on its own, so an automation is an
+element that carries its own brief and the Drive runs it
+(`runtime/agent-run.js`):
+
+```html
+<button data-marble-id="go" data-marble-run="Gather what is new about the Ai2
+  project from Bryan's Days and update the notes under Progress."
+  data-marble-scope="progress" data-marble-on="daily 07:00">Update now</button>
+```
+
+Pressing it starts an agent with that brief, aimed at this document and at the
+element named by `data-marble-scope`; its changes land like any other, with
+Undo. One run per element at a time: pressing again while it works opens that
+chat. **Automate it**, in the ⌘J line, asks for one of these with
+`data-marble-on="press"`: a button that runs when pressed and only then.
+
+**Make it alive** asks for the same trigger with a schedule in
+`data-marble-on`, and the host runs it on that schedule with no page open
+(`server/alive.js`). The schedules are `hourly`, `every 6h` (any whole number
+of hours or days), `daily 07:00` and `weekly mon 07:00`, in
+`MARBLE_DRIVE_DAY_TZ`. Nothing runs more often than once an hour; anything the
+parser does not know, `every 30m` included, is not a schedule. The agent builds
+three things beside it: the **Update now** button itself (a press still runs it
+at once), a line saying how often and when it last ran ("Updates every morning
+· last Oct 7, 7:02"), which each run sets, and a **Pause** button carrying
+`data-marble-pause="<the trigger's id>"`. Pause writes `data-marble-paused` on
+the trigger and `aria-pressed` on itself, both as ops, so the hold is in the
+file and the host reads it there. A shared link can neither hold one nor let
+it go (docs/SHARING.md).
+
+The host looks at the drive every five minutes for triggers and checks every
+minute, and when a request comes in, whether one is due. Each scheduled run is a
+conversation titled `Kept alive · <document> · <id>` and aimed at the
+document, and that is how the last run is remembered: a restart neither
+forgets one nor starts a second. A trigger that never ran counts from when the
+host first saw it, so making something alive does not set it off at once.
+Before a run the file is read again, so a pause made since the last look wins.
+What a schedule can cost is kept small: one run of a trigger at a time (a run
+still going holds the next), at most three scheduled runs across the drive at
+once, and a run that will not start is tried again after fifteen minutes, not
+every minute.
+
+The timer holds nothing up. A sprite asleep at seven runs the morning's run
+when something next wakes it, as the day's run does, and the run is then held
+awake like any other turn. `MARBLE_DRIVE_ALIVE=0` turns scheduled runs off;
+pressing still works.
 
 ## What a full agent can do
 
@@ -194,6 +309,33 @@ Cursor's file tools are pointed at the project with `--add-dir`; the shell's
 cwd is the project; `--sandbox disabled` lets its native `WebSearch` /
 `WebFetch` and the browser reach the network. Cursor has no host-answered
 prompt channel, so it runs `--yolo` and asks its questions in text.
+
+A `full` Codex turn is the terminal's Codex too: `codex exec --json` in the
+project, with the person's own `~/.codex` config, skills, `AGENTS.md` and MCP
+servers. Marble's document and browser servers are added with `-c` as
+`marble_drive` and `marble_browser`, approved up front (Marble's tools refuse
+what its rules forbid themselves, and a sandboxed exec would otherwise refuse
+every call it cannot ask about), with a tool timeout longer than
+`wait_for_reply`'s longest wait (Codex's own is 60 s). The turn token is named
+in `env_vars` and travels in the environment, never in argv. The browser's
+pass, a login to the drive, does not: Codex hands its environment to every
+command it runs, so `prepare` writes it to a mode-600 `browser-pass` in the
+workspace and the server reads `MARBLE_BROWSER_PASS_FILE`. Marble's rules go
+in as `developer_instructions` (which replaces any in the person's own
+config), with the app's own skills listed by path, since Codex cannot be
+handed them as a plugin. Codex's own browser and computer use are turned off:
+headless they only fail, and the model reached for them before Marble's
+signed-in browser. The mode is its sandbox: **Full access**
+(`danger-full-access`, the default), **Workspace** (`workspace-write`: writes
+only in the project, no network for the shell) and **Documents only**
+(`read-only`: the shell only reads; Marble's tools still edit documents). The
+two sandboxed modes run with `approval_policy="never"`, so a reviewer in the
+person's own Codex config cannot approve an escalation out of them. A
+host where `codex sandbox -- true` fails — every sprite, where bubblewrap will
+not start — offers only Full access. exec has no channel for asking, so Codex
+asks its questions in text, like Cursor. Its key, when one is set, goes in as
+`CODEX_API_KEY` (`codex exec` ignores `OPENAI_API_KEY`); without one, the
+ChatGPT login does.
 
 The drawer on a document and the Agents page start the same runner. A turn's
 *target* is the page you asked from; its *tools* are not smaller there.
@@ -247,6 +389,46 @@ and appends — see `test/agent-permissions.test.js`.
 
 Prefer a rule to a bigger hammer. Raising the mode to `bypassPermissions`
 removes the classifier and every other check with it.
+
+## From Claude or ChatGPT: the connector
+
+`MARBLE_DRIVE_CONNECTOR=1` makes the drive an MCP server at `/mcp`
+(`server/connector/`), so Claude (Settings → Connectors → Add custom
+connector) or ChatGPT (developer mode connectors) can be given the drive's
+address, `https://<drive>/mcp`. Off unless asked for; refused on a
+multi-tenant host and on a host with no passphrase or door.
+
+- **Signing in** is OAuth 2.1: the client finds the drive's metadata
+  (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`),
+  registers itself (`/oauth/register`), and sends the owner to
+  `/oauth/authorize`. That page is behind the gate like any other, so the
+  passphrase or the Marble Drive sign-in proves it is the owner, and asks one
+  question: Allow or Don't allow, and says which account the drive will be
+  linked to. A code goes only to Claude's or ChatGPT's own callback
+  (`claude.ai`, `claude.com`, `chatgpt.com`) or back to this machine, so it
+  lands in the account that pressed Connect; an app is named by where its
+  codes go, never by the name it registers with. Codes need PKCE (S256), are good once and for
+  a minute; access tokens last an hour, refresh tokens 90 days and are good
+  once. `.marble/connector.json` holds clients and grants, with tokens only as
+  hashes. `/connector` lists the apps let in, with a Turn off for each, which
+  ends every token that app holds.
+- **The tools** are reading (`list_documents`, `read_document`, the agents'
+  own read tools under a reader that leaves no look and no ledger) and running
+  chats (`list_chats`, `read_chat`, `start_chat`, `send_to_chat`,
+  `answer_question`, `stop_chat`). A change to a document is made by a chat,
+  never by the connector: the chat has the ledger, undo, live patching and the
+  check. A chat started from here is an ordinary chat on the drive's default
+  agent, with that agent's full power, and shows in the drawer and on the Agents
+  page (`/a/Agents?open=<id>`, the link each result carries).
+- **Waiting:** `start_chat`, `send_to_chat` and `answer_question` wait up to
+  `wait_seconds` (45 by default, 240 at most) for the turn to end or ask
+  something, then answer with where it got to. A longer job keeps running;
+  `read_chat` picks it up.
+- **The edge:** the marbledrive.app Worker passes `/mcp`, `/oauth/register`,
+  `/oauth/token` and the two `.well-known` documents through without a pass,
+  for the drive to judge. `/oauth/authorize` signs in like any page.
+- **Transport:** Streamable HTTP with JSON answers only: one POST per message
+  (or a batch), no SSE stream, no session id.
 
 ## Blocked and failed are different
 
@@ -308,6 +490,61 @@ it asked — derived from the runner's live turns, not stored. The summary
 stream (`/agent/events?all=1`) carries `event: ask` when one opens and
 `event: ask.resolved` when it closes, so a list can know without holding
 every conversation's stream. The Agents page's Deck is built on both.
+
+## Visuals in the chat
+
+An answer may hold one thing that is not text. A fenced block tagged
+`marble-visual` becomes a card in the transcript:
+
+````
+```marble-visual Two layouts
+<button class="pick" aria-pressed="false" data-answer="Side by side">…</button>
+```
+````
+
+The body is a fragment — markup, an optional `<style>`, an optional `<script>`
+— and the host puts it in an iframe with `sandbox="allow-scripts"` and nothing
+else. No `allow-same-origin`, so it runs at an opaque origin: it cannot read
+the page it is drawn in, its cookie or its storage, and it cannot navigate the
+tab. That boundary is what lets a visual be interactive at all on a drawer that
+sits on top of every document.
+
+The frame is handed the chrome's own palette — which is the open document's,
+copied on by `applyPageTheme` — so a visual in a green Research document is
+green, and a page that changes colour repaints the frames rather than reloading
+them. It is also handed the size the transcript is being read at, because a
+phone reads at seventeen. It measures its content and the card grows to it,
+capped at 70vh with **Expand** offered only when there is more to see, and
+**Code** shows the markup behind it. Because it is a frame, a
+`@media (max-width: 420px)` inside it fires off the card's own width: one
+visual is legible in a 380px drawer and a wide Focus pane without the author
+knowing which it is in.
+
+A visual answers: `data-answer="…"` on a button sends that text as the person's
+next message, `data-draft="…"` puts it in the composer, and `marble.answer()` /
+`marble.draft()` do the same from script. It goes through the composer's own
+submit, so queueing and steering are the ones that already exist; a card is
+rate-limited to one send every 600 ms and twelve in all, and says **Sent** once
+it has been spent.
+
+Nothing is stored. The block travels in the turn's text event, so a reload
+draws the card again from the transcript; a host that cannot serve
+`runtime/chat-visual.js` shows the markup as code rather than a placeholder
+that never resolves. While a visual is still arriving the live message shows
+the words around it and a quiet *Drawing…* — half a visual is markup, and
+markup is not what the log shows.
+
+The rules an agent writes them by are in the `visuals-in-chat` skill
+(`agent-plugin/skills/visuals-in-chat/`, loaded as `marble-drive:visuals-in-chat`), and the four recipes there are rendered at
+both widths in both schemes by `node tools/visual-shots.mjs`. Design:
+[`superpowers/specs/2026-09-22-visuals-in-chat-design.md`](superpowers/specs/2026-09-22-visuals-in-chat-design.md).
+
+The owner's **triage** skill (`agent-plugin/skills/triage/`, loaded as
+`marble-drive:triage`) groups the workshop's chats, commits, worktrees and
+specs into features for the Console's Features view. It reads and saves only
+through `triage.mjs` beside it, never deploys or commits, and answers with a
+link to `/a/Console?view=features`. On a drive with no workshop checkout it
+says so and stops.
 
 ## Messages
 
@@ -373,7 +610,9 @@ the value. Backups of `.marble/` therefore do not take them.
 |---|---|---|
 | `claude-subscription` | `claude -p --input-format stream-json`, the initialize handshake then the prompt on stdin, `--model` / `--effort` from the conversation (none means your own settings), `--permission-mode` from the conversation (`auto` unless picked) | `full`: the terminal's own configuration, cwd the project, every built-in tool, plus Marble's document MCP and browser MCP; prompts and questions come back to the drawer |
 | `claude-api` | the same, with `ANTHROPIC_API_KEY`; without it the turn fails rather than fall back to the login | the same |
+| `claude-credit` | the same, with `ANTHROPIC_BASE_URL` set to `MARBLE_CREDIT_URL` and the drive's `MARBLE_CREDIT_TOKEN` as `ANTHROPIC_API_KEY`. Only on a drive with both settings, and the default there until it has a key or a login of its own ([ACCOUNTS.md](ACCOUNTS.md#starter-credit)) | the same |
 | `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `full`: `--add-dir` the drive, `--sandbox disabled`, cwd the drive, hook allows Cursor's own tools, Marble's document tools, and Marble's `MCP:browser_*` (`bin/marble-cursor-hook.js`) |
+| `codex` | `codex exec --json`, prompt on stdin, `resume <thread>` after the first turn, `-m` / `model_reasoning_effort` from the conversation (none means `~/.codex/config.toml`), the sandbox from its mode, `CODEX_API_KEY` when a key is set | `full`: the person's own Codex, cwd the project, plus `marble_drive` and `marble_browser`; `documents`: `--ignore-user-config`, read-only, no shell (`features.shell_tool` and `unified_exec` off), in the empty workspace |
 
 The Cursor hook sees a tool's name (`MCP:read_document`) but not which MCP
 server it belongs to, and `--approve-mcps` approves every server Cursor loads,
@@ -411,7 +650,51 @@ A provider is `{ id, label, detect, prepare, spawn, parse }`, and optionally
 has the session. The runner then forgets the session, says so in the turn's
 error, and the next message starts a new one (it does not retry). A parser is
 tested against streams recorded from real runs in `test/fixtures/providers/`;
-record a new one when a CLI changes its output. Codex arrives in Plan 5.
+record a new one when a CLI changes its output. A provider may also offer
+`failure(stderr)`: the reason a run that ended without a result died, read the
+way its CLI writes it (Codex's own `Error:` line, past its MCP servers' logs).
+Codex's models and efforts come from `codex debug models` (the ones it lists);
+naming falls back to Codex last, only on its login.
+
+### Connect your Claude
+
+A person can put a drive's Claude on their own Pro or Max plan from the
+browser, without a terminal. The sheet that does it opens from Agents ›
+Settings › Claude, and from any page that fires
+`document.dispatchEvent(new CustomEvent('marble:connect-claude'))`.
+
+Pressing Open Claude sign-in asks the host (`POST /agent/claude/sign-in`) to
+run `claude setup-token` in a pseudo-terminal and answer the sign-in address
+it prints. The page opens that address in a new tab. Claude's page shows a
+code; the person pastes it into the sheet, and `POST
+/agent/claude/sign-in/code` hands it to the same run. The long-lived token it
+prints is kept in the agent keys file as `claude`, next to the API keys, and
+reaches `claude-subscription` as `CLAUDE_CODE_OAUTH_TOKEN`. The switch moves
+to the login, and a default of Claude moves with it. `claude-api` never sees
+the token. Settings › Claude then says "On your Claude plan", with Disconnect.
+
+The pseudo-terminal is the system's `script` (`server/agent/claude-signin.js`),
+not a native module, and it is made 1000 columns wide so nothing wraps. Only
+one sign-in runs at a time. A sign-in with no code after
+`MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS` (600) is killed, and so is one the sheet
+was closed on. The routes sit behind the gate like every `/agent` route.
+
+What `claude setup-token` prints was read from Claude Code 2.1.281 on Linux,
+with a fresh HOME and `BROWSER=false`. It asks nothing first, tries to open a
+browser, and after about three seconds prints the address, both as a terminal
+hyperlink and as text, then `Paste code here if prompted >`. A pasted code
+reaches it through the pseudo-terminal. A wrong code gets `OAuth error:
+Request failed with status code 400` and `Press Enter to retry`, which the
+host reads as a refusal and ends the run. A good code gets `Your OAuth token
+(valid for 1 year):` and the `sk-ant-oat…` token on its own line.
+`test/fixtures/fake-claude-setup-token.mjs` draws the same screen. Record it
+again if a new Claude Code changes it.
+
+Not yet tried end to end with a real sign-in. The first real one should be on
+t-bryan: open Agents › Settings, choose Claude login, press Connect your
+Claude, sign in, paste the code, and send a chat. If the code is refused
+there, the fallback is Codex's `--device-auth` pattern, where the person
+types a short code on Anthropic's page instead. The sheet stays the same.
 
 ## The drawer
 
@@ -425,6 +708,21 @@ those variables are missing) so the chrome matches the page — a white
 starter, a custom theme, or Drive cream. Drive UIST warm / Dusk is only
 the fallback. Below 720 px
 it is a full-screen sheet. Drag the header away to dismiss it.
+
+Hovering the launcher hangs a small menu over it: the things an agent can do
+from here, each a row with its key — **New chat** (`⌘⇧O`), **Ask here** (`⌘J`,
+while there is a selection), **Point at something** (click a part to ask about
+it, ⇧-click to add more), **Describe a change** (`⌘⇧D`), and **Hide work**
+while an agent's work is drawn. Switches for how agents behave on the page —
+offers after edits, offers on rest, agent dots — are in Settings › **Chat**,
+with the keys. The launcher wears one dot for the most pressing chat: it
+breathes while an agent works, is a ring while one needs you, and is ink when
+one finished unread.
+
+The keys hold on every page, while typing too: `⌘J` asks in place, `⌘⇧J` shows
+and hides the chat (inside the drive shell it pins and unpins it, as `⌘⇧\`
+does the tree), and `⌘⇧O` opens the chat on a new conversation. ⌥ does
+nothing here: it is how a Mac moves the caret by a word.
 
 The conversation you had open follows you from page to page. A turn keeps the
 document it started on: when you are looking at another page, the header says
@@ -459,16 +757,27 @@ and project are the mast's tags; what a turn changed is its footer; there is
 no status line. The setup shrinks first (segments fold into dropdowns, the
 capsule packs into More) and takes its own line only when even that does not
 fit. Saved setups are the main toggles when Claude or Cursor is signed in: Anthropic or
-Cursor mark plus a short **model + effort** name (Fable 5.1 High, Opus Extra
-High, Opus High, Sonnet High, Grok Extra High). Those presets stay clickable on an
+Cursor mark plus a short **model + effort** name, weakest first (Sonnet High,
+Grok 4.7 High, Opus High, Fable 5.1 High). Grok 4.7 rests on High; High Fast
+is the same model with fast on, and it stays on the effort slider. Those presets stay clickable on an
 existing thread, so you can switch from Claude to Cursor (or back) without
 starting a new conversation. The next turn uses the new CLI and does not
-resume the previous CLI's session. A new conversation still prefers the
+resume the previous CLI's session. Beside the model, one word — **Auto** or
+**Pause** — belongs to that chat (a new chat starts on Auto; on a phone the
+word is in the setup sheet with the model). When a Claude turn stops because
+its usage window is spent, Auto continues that chat on Cursor at the same
+effort, or the nearest effort Cursor offers. The first stop uses the same
+model the chat was on. Fable continues on Opus, so the handoff does not spend
+Fable again. If that Cursor model then stops for usage, Auto continues once
+more, on Cursor's newest Grok, and sends **Continue** with this chat's
+transcript. If Cursor has no matching model, the first stop goes straight to
+Grok. Pause leaves the turn failed and asks above the composer whether to
+switch. **Leave it** keeps the failure. **Switch** is the same handoff. A crash, a refusal,
+or a message that says to retry shortly does not switch. A new conversation still prefers the
 Settings default, except when Claude's 5-hour meter is at 100%: then the
 picker starts on Cursor if Cursor is signed in. If Claude usage cannot be
-read, Claude is treated as unavailable: the picker starts on Cursor, Claude's
-CLI and presets are disabled, and the Claude meter reads Unavailable. **Custom** expands the three thin
-segmented bars for **CLI** (Claude, Cursor, KIXLAB API), **model**, and
+read, the meter reads Unavailable and Claude stays pickable — not knowing is not being out. **Custom** expands the three thin
+segmented bars for **CLI** (Claude, Cursor), **model**, and
 **effort**. If a bar would overflow the row, it becomes a compact dropdown
 instead of scrolling sideways. Cursor's picker is Default, Auto, and the
 newest Grok family; Claude stays Haiku → Sonnet → Opus → Fable. **Shift+Tab**
@@ -508,13 +817,80 @@ In the transcript, a tool row says what it touched (`Read harness.js`,
 more finished rows folds into one line — `6 steps · Shell ×2 · Read ×2
 harness.js, agents.mrbl · Grep packFocus` — that opens on click. The row
 still running, and any failed or refused row, stays out of the fold. The conversation mast has an editable
-title and tags for the agent (`Claude`, `KIXLAB API`) and for
+title and tags for the agent (`Claude`, `Claude · API` when a conversation runs on an API key) and for
 model • effort (`Sonnet 4.5 • high`). On Agents, the title and the
 target document live on the pane header instead of a right-hand inspector.
 
 Agent text is shown, never interpreted as HTML (`renderText` in
 `runtime/agent-ui.js`). Browser tests: `npm run test:browser`; screenshots:
 `node test-browser/screens.mjs <dir>`.
+
+## Voice
+
+You can talk to any chat and hear it answer (spec:
+`docs/superpowers/specs/2026-10-10-voice-design.md`). It is speech wrapped
+around an ordinary turn, so it works the same on Claude, Codex and Cursor:
+OpenAI writes down what you said, the chat's own agent answers it with the
+same rules, marks and undo as typing, and an OpenAI voice reads the answer.
+
+- **Where.** Every `<marble-conversation>` (drawer, Agents panes, the
+  callout card, the Chat app, the phone sheet) draws Talk, a microphone left
+  of Send, when the drive has an OpenAI key and Settings › Voice has it on.
+  On a phone it stands where Send will be while the box is empty. Nothing
+  moves at rest; while it listens the box says Listening with a trace of the
+  level, and Cancel (×) or Esc throws the clip away.
+- **Turn-taking.** Push to talk. It ends after 1.2 s of quiet that follows
+  speech (a floor measured over the first 300 ms, `quietEnd` in
+  `runtime/voice.js`), or on Send. The words land in the box and are sent,
+  unless "Send when I stop" is off or the box was pressed while they were
+  being written down. Said while a turn runs, they steer it (Settings can
+  make that Queue). Saying "stop" is not a command; Stop is.
+- **What is heard.** `POST /agent/voice/transcribe?doc=<path>&seconds=<n>`
+  with the raw clip (`audio/webm` from Chrome, `audio/mp4` from Safari) →
+  `{ text }`. The host forwards it to OpenAI's `/v1/audio/transcriptions`
+  with `gpt-transcribe` and `keywords[]`: the open document's title and the
+  titles at the drive's top level, so names come back spelled the drive's
+  way. At most 4 MB (413) and 120 s (`MARBLE_DRIVE_VOICE_MAX_SECONDS`).
+- **What is said.** The prompt goes as a turn with `context.spoken: true`:
+  its `user` event carries `spoken` (the chat shows "Said aloud") and the
+  agent gets one more context line asking for one to three sentences that
+  sound right spoken (`runner.js`, `SPOKEN_NOTE`). When the turn ends the page
+  plays `GET /agent/turns/:id/speech`: the host takes the turn's last `text`,
+  cleans it with `speakable()` (`server/agent/voice/speakable.js`: no fences,
+  tables, marks, links or paths; about 60 words, then "The rest is in the
+  chat."), and streams `gpt-4o-mini-tts` mp3 back, at most 2,000
+  characters. A failed turn says its reason's first sentence; a turn waiting
+  on an OK says "It needs your OK. It's on the screen." and the OK is a press,
+  never a word. Only the last reply is spoken, and only in the tab that said
+  it. Read aloud under a reply reads any reply; with no key it uses the
+  device's `speechSynthesis`.
+- **Where audio goes.** Nowhere. A clip lives in the tab (kept for one
+  retry) and in the host's memory for one request; it is never written to the
+  drive, `.marble/`, a backup, the op log or the transcript. Spoken replies
+  are streamed through, `Cache-Control: no-store`. The microphone opens only on
+  a press, every track is stopped when listening ends, and a hidden tab stops
+  listening and drops the clip.
+- **The key.** The `openai` field of `.agent-keys.local`, the one Codex uses,
+  read only on the host (`keys.value('openai')`) and sent only as a bearer
+  token to `config.openaiBase`. It is never in a response, a log or an error:
+  OpenAI's own error text is replaced by a plain line. Settings › Voice takes
+  one (`POST /agent/voice/key`, checked with `/v1/models` first). A drive
+  whose agents run on the owner's login has no voice until it has its own key.
+- **Routes**, all behind the gate and `sameOrigin` like the rest of
+  `/agent/*`: `GET /agent/voice` (available, why, the choices, the voices,
+  this month's counts), `POST /agent/voice/transcribe`,
+  `GET /agent/turns/:id/speech`, `POST /agent/voice/sample {voice}`,
+  `POST /agent/voice/key {key}`.
+- **Settings › Voice** (`settings.voice` in the agents' `settings.json`):
+  `on`, `sendWhenStop`, `readAloud` (`spoken` | `always` | `never`),
+  `whileRunning` (`steer` | `queue`), `voice` (marin by default). The models
+  are settings too (`transcribeModel`, `speechModel`), not offered on the
+  page. Settings › Usage shows minutes heard and spoken this month
+  (`.marble/agents/voice-usage.json`, counts only).
+
+Tests: `test/agent-voice-*.test.js` against a fake OpenAI on a local port,
+and `test-browser/voice-composer.test.js`, `voice-settings.test.js` with
+Chromium's fake microphone.
 
 ## The Agents document
 
@@ -523,14 +899,15 @@ document at the root, seeded the same way Drive is: written only if it is
 not already there. It is a library of conversations in five views: **List**,
 **Board**, **Folders**, **Focus**, and **Deck**. `V` cycles that order.
 `⌘⇧O` starts a new chat from anywhere on the page — the same thing **New**
-does, and it keeps working while the caret is in a composer. The
+does, and it keeps working while the caret is in a composer. (On every other
+page the drawer answers it, opening the side chat on a new conversation.) The
 drawer's **Open Agents** appears once that document exists.
 
 The page uses `window.marble.agent` and the same `<marble-conversation>`
 as the drawer (`<meta name="marble-agent" content="custom">`, so it does
 not wear a second launcher). The topbar has three thin segmented bars on
 one row: **List / Board / Folders / Focus**, **CLI** (All plus each signed-in
-agent, so you can show only Claude, Cursor, or KIXLAB API), and **All /
+agent, so you can show only Claude or Cursor), and **All /
 Running / Review / Archived**. Conversation rows are not stored in the file.
 
 **Folders** is a vertical tab strip. Groups sit on top, ungrouped last, and
@@ -562,8 +939,11 @@ whenever a chat ticks.
 Click selects. Double-click or Enter pins a chat **Full**; other Fulls become
 Digest. Shift-double-click or **Keep open** adds a Full without demoting the
 others, up to four. Cold Digests over the budget become Chips. Arrow keys
-move selection; Space opens a Quick Look preview without pinning. Narrow view
-stacks the cards and does not add extra panes.
+move selection. Resting a pointer on a card opens **the peek** beside it —
+the last thing you asked, what it is doing or last said, and the documents it
+wrote to — which closes with the pointer and never counts as having read the
+chat; Space opens the same thing *held*, until Escape. Neither pins. Narrow
+view stacks the cards and does not add extra panes.
 
 **Deck** orders by how much a conversation wants you, not where it lives:
 four bands — **Needs you**, **Running**, **Review**, **Idle** — each a

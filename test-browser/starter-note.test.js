@@ -1,0 +1,1152 @@
+// The Note starter, driven the way somebody jots into it.
+//
+// A note is one editing host and there are several notes in the file, so two
+// things have to hold at once: the browser's idea of the markup after a keystroke
+// gets turned back into the document's vocabulary and filed as ops, and only the
+// open note is ever typeable. Which one that is, is a single attribute — so the
+// list in the rail, the class that shows the page and the class that lights its
+// row all have to be derivations, and none of them may reach the file.
+//
+// Every assertion here is about one of three things: what the person sees, what
+// reaches the file, and whether undo can get back.
+
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { build } from '../server/gallery.js';
+import { startDrive } from './harness.js';
+
+const scratch = await build('note', { name: 'Scratch' });
+const host = await startDrive({ agents: false, documents: { scratch } });
+test.after(() => host.close());
+
+const pages = [];
+const closePages = async () => {
+  for (const page of pages.splice(0)) await page.close().catch(() => {});
+};
+test.after(closePages);
+
+const open = async ({ viewport = { width: 1280, height: 900 }, ...rest } = {}) => {
+  await closePages();
+  await host.reset();
+  const { page, errors } = await host.newPage({ viewport, ...rest });
+  pages.push(page);
+  await page.goto(`${host.base}/a/scratch`);
+  await page.waitForFunction(() => Boolean(window.marble));
+  await page.waitForTimeout(150);
+  return { page, errors };
+};
+
+/** A phone, with a finger rather than a pointer. */
+const openPhone = () => open({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true });
+
+/** The keyboard coming up, as the browser reports it: the visual viewport
+ *  shrinks by `kb`, and — on a browser that has to lift the caret clear — slides
+ *  `offsetTop` down the layout viewport as well. Both halves, because a page
+ *  that answers only the first looks right until it meets the other. */
+const raiseKeyboard = async (page, kb, offsetTop = 0) => {
+  await page.evaluate(({ kb: taken, offsetTop: slid }) => {
+    const vv = window.visualViewport;
+    Object.defineProperty(vv, 'height', { value: window.innerHeight - taken, configurable: true });
+    Object.defineProperty(vv, 'offsetTop', { value: slid, configurable: true });
+    vv.dispatchEvent(new Event('resize'));
+  }, { kb, offsetTop });
+  await page.waitForTimeout(150);
+};
+
+/** Where the person can actually see, and what is standing in it. */
+const seen = (page) =>
+  page.evaluate(() => {
+    const vv = window.visualViewport;
+    const box = (sel) => {
+      const r = document.querySelector(sel)?.getBoundingClientRect();
+      return r ? { top: Math.round(r.top), bottom: Math.round(r.bottom) } : null;
+    };
+    const root = getComputedStyle(document.documentElement);
+    return {
+      kb: root.getPropertyValue('--kb').trim(),
+      vvTop: root.getPropertyValue('--vv-top').trim(),
+      strip: { top: Math.round(vv.offsetTop), bottom: Math.round(vv.offsetTop + vv.height) },
+      shell: box('body.app'),
+      pill: box('.marble-status'),
+    };
+  });
+
+/** The blocks of the open note, as the file would address them. */
+const blocks = (page) =>
+  page.evaluate(() =>
+    [...document.querySelector('.note.marble-open').children].map((el) => ({
+      id: el.getAttribute('data-marble-id'),
+      tag: el.tagName,
+      rich: el.hasAttribute('data-marble-rich'),
+      list: el.getAttribute('data-list'),
+      text: el.textContent,
+    })),
+  );
+
+/** What the file says, once everything queued has reached it. */
+const filed = async (page) => {
+  await page.evaluate(() => window.marble.flush());
+  const answer = await fetch(`${host.base}/a/scratch`, { headers: { accept: 'text/html' } });
+  return answer.text();
+};
+
+/** Put the caret at the true end of a block — End stops at the end of a line. */
+const caretToEndOf = (page, index) =>
+  page.evaluate((index) => {
+    const note = document.querySelector('.note.marble-open');
+    const range = document.createRange();
+    range.selectNodeContents(note.children[index]);
+    range.collapse(false);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    note.focus();
+  }, index);
+
+const select = (page, from, at, to, until) =>
+  page.evaluate(([from, at, to, until]) => {
+    const note = document.querySelector('.note.marble-open');
+    const range = document.createRange();
+    range.setStart(note.children[from].firstChild, at);
+    range.setEnd(note.children[to].firstChild, until);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    note.focus();
+  }, [from, at, to, until]);
+
+test('one note is the editing host, and opening it files nothing', async () => {
+  const { page, errors } = await open();
+  const shape = await page.evaluate(() => ({
+    notes: document.querySelectorAll('.note').length,
+    open: document.querySelectorAll('.note.marble-open').length,
+    hosts: [...document.querySelectorAll('[contenteditable]')].filter((el) => el.closest('.notes')).length,
+    // A block of its own would be a second editing host, which is what stops a
+    // selection crossing from one line into the next.
+    inner: [...document.querySelector('.note.marble-open').children]
+      .filter((el) => el.hasAttribute('contenteditable')).length,
+  }));
+  assert.equal(shape.notes, 2);
+  assert.equal(shape.open, 1);
+  assert.equal(shape.hosts, 1, 'only the open note is typeable');
+  assert.equal(shape.inner, 0);
+
+  const all = await blocks(page);
+  assert.ok(all.length >= 4);
+  assert.ok(all.every((block) => block.id && block.rich));
+  assert.equal(new Set(all.map((block) => block.id)).size, all.length);
+
+  const source = await filed(page);
+  // Every one of these is derived or page-only, so none may be carried by an
+  // element in the file — the names themselves are all over the stylesheet.
+  assert.ok(!/<[a-z][^>]*\scontenteditable=/i.test(source), 'no element carries contenteditable');
+  assert.ok(!/class="[^"]*marble-/.test(source), 'a derived class is not a fact about a note');
+  // The rail's own container is in the file; nothing it is filled with is.
+  assert.ok(!/class="row"/.test(source), 'the rail is a reading, not a copy');
+  assert.ok(!/class="open"/.test(source));
+  assert.match(source, /class="rows" id="rows" role="list" data-marble-transient><\/div>/);
+  assert.deepEqual(errors, []);
+});
+
+test('the rail is the notes read back — first line for the name', async () => {
+  const { page, errors } = await open();
+  const rail = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.row .t')].map((el) => el.textContent),
+    under: [...document.querySelectorAll('.row .s')].map((el) => el.textContent.slice(0, 20)),
+    lit: [...document.querySelectorAll('.row')].map((el) => el.classList.contains('marble-current')),
+    meta: document.querySelector('.meta').textContent,
+  }));
+  assert.deepEqual(rail.rows, ['Scratch', 'Keys']);
+  assert.equal(rail.lit[0], true, 'the open note is the lit row');
+  assert.equal(rail.lit[1], false);
+  assert.ok(rail.under[0].length > 0, 'and the line under it is the rest of the note');
+  assert.equal(rail.meta, '2 notes');
+
+  // Rename the note by typing over its first line: the rail follows, because it
+  // is the same fact read again rather than a second copy of it.
+  await caretToEndOf(page, 0);
+  await page.keyboard.type('pad');
+  await page.waitForTimeout(150);
+  assert.equal(await page.textContent('.row.marble-current .t'), 'Scratchpad');
+  assert.ok((await filed(page)).includes('Scratchpad'));
+  assert.deepEqual(errors, []);
+});
+
+test('Select All takes the note rather than the line', async () => {
+  const { page, errors } = await open();
+  await page.click('.note.marble-open > *:nth-child(2)');
+  await page.keyboard.press('ControlOrMeta+a');
+  const picked = await page.evaluate(() => {
+    const range = getSelection().getRangeAt(0);
+    const kids = [...document.querySelector('.note.marble-open').children];
+    return { blocks: kids.filter((el) => range.intersectsNode(el)).length, chars: getSelection().toString().length };
+  });
+  assert.equal(picked.blocks, (await blocks(page)).length);
+  assert.ok(picked.chars > 400, `only ${picked.chars} characters`);
+  assert.deepEqual(errors, []);
+});
+
+test('typing reaches the file, and one burst is one step of undo', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.type(' Filed as you type.');
+  await page.waitForTimeout(150);
+  assert.ok((await filed(page)).includes('Filed as you type.'));
+
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(250);
+  assert.ok(!(await filed(page)).includes('Filed as you type.'), 'undo reached the file too');
+  assert.deepEqual(errors, []);
+});
+
+test('Enter splits a line into a new addressed block, and undo joins it back', async () => {
+  const { page, errors } = await open();
+  const before = await blocks(page);
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('A second line.');
+  await page.waitForTimeout(150);
+
+  const after = await blocks(page);
+  assert.equal(after.length, before.length + 1);
+  assert.equal(after[2].tag, 'P');
+  assert.equal(after[2].text, 'A second line.');
+  assert.ok(after[2].rich);
+  // The browser splits a paragraph by duplicating the element, id and all.
+  assert.equal(new Set(after.map((block) => block.id)).size, after.length);
+  assert.ok((await filed(page)).includes('A second line.'));
+
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(200);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(250);
+  assert.equal((await blocks(page)).length, before.length);
+  assert.deepEqual(errors, []);
+});
+
+test('the markers are the formatting: # a heading, - a bullet, --- a rule', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+
+  await page.keyboard.type('# ');
+  await page.waitForTimeout(150);
+  let made = (await blocks(page))[2];
+  assert.equal(made.tag, 'H2', 'the marker became the heading it was drawing');
+  assert.equal(made.text, '', 'and the marker itself is gone');
+  await page.keyboard.type('A heading');
+  await page.waitForTimeout(150);
+
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- a bullet');
+  await page.waitForTimeout(150);
+  made = (await blocks(page))[3];
+  assert.equal(made.tag, 'P');
+  assert.equal(made.list, 'bullet');
+  assert.equal(made.text, 'a bullet');
+
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('---');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  const all = await blocks(page);
+  assert.ok(all.some((block) => block.tag === 'HR'), 'three dashes and Enter drew a rule');
+
+  const source = await filed(page);
+  assert.match(source, /<h2[^>]*>A heading<\/h2>/);
+  assert.match(source, /data-list="bullet"/);
+  assert.match(source, /<hr/);
+  // The marker is taken off and the block restyled inside one change, so one
+  // press of undo puts the whole shortcut back.
+  assert.deepEqual(errors, []);
+});
+
+test('arrows draw themselves: -> is →, --> is ⟶, and Backspace or undo puts back what was typed', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('a -> b --> c <- d <-> e <-- f <--> g => h <=> i');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[2].text, 'a → b ⟶ c ← d ↔ e ⟵ f ⟷ g ⇒ h ⇔ i');
+  assert.ok((await filed(page)).includes('a → b ⟶ c ← d ↔ e ⟵ f ⟷ g ⇒ h ⇔ i'), 'the arrows reached the file');
+
+  // Backspace straight after an arrow gives the characters back, and only once.
+  await page.keyboard.type(' x -->');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+  assert.ok((await blocks(page))[2].text.endsWith(' x -->'));
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+  assert.ok((await blocks(page))[2].text.endsWith(' x --'), 'a second Backspace deletes as usual');
+
+  // The arrow is its own step of undo, after the keystroke that drew it.
+  await page.keyboard.type('> y ->');
+  await page.waitForTimeout(150);
+  assert.ok((await blocks(page))[2].text.endsWith(' x ⟶ y →'));
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(250);
+  assert.ok((await blocks(page))[2].text.endsWith(' x ⟶ y ->'));
+  assert.ok((await filed(page)).includes(' x ⟶ y -&gt;'), 'and so is the file');
+
+  // An arrow typed in front of words leaves the line's list alone.
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- list');
+  await page.keyboard.press('Home');
+  await page.keyboard.type('=>');
+  await page.waitForTimeout(150);
+  const made = (await blocks(page))[2];
+  assert.equal(made.list, 'bullet', 'a dash and a space still start a list');
+  assert.equal(made.text, '⇒list');
+  assert.deepEqual(errors, []);
+});
+
+test('four heading sizes: #### and Ctrl+Alt+4 make the smallest, in the face of the text', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('### Small');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('#### Smallest');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Body');
+  await page.waitForTimeout(150);
+  let all = await blocks(page);
+  assert.deepEqual(all.slice(2, 5).map((b) => [b.tag, b.text]), [['H4', 'Small'], ['H5', 'Smallest'], ['P', 'Body']]);
+
+  const look = await page.evaluate(() => {
+    const note = document.querySelector('.note.marble-open');
+    const of = (el) => {
+      const s = getComputedStyle(el);
+      return { size: parseFloat(s.fontSize), weight: s.fontWeight, family: s.fontFamily, caps: s.textTransform, line: s.textDecorationLine };
+    };
+    return { small: of(note.children[2]), smallest: of(note.children[3]), body: of(note.children[4]) };
+  });
+  assert.equal(look.small.caps, 'none', 'the small heading is not set in capitals');
+  assert.equal(look.small.family, look.body.family, 'and is in the text\'s face');
+  assert.ok(look.small.size > look.body.size, 'and is bigger than the text');
+  assert.equal(look.smallest.size, look.body.size, 'the smallest is the text\'s size');
+  assert.equal(look.smallest.weight, '600');
+  assert.equal(look.smallest.line, 'underline');
+
+  // Ctrl+Alt+4 makes a line the smallest heading, and Ctrl+Alt+0 makes it plain.
+  await caretToEndOf(page, 4);
+  await page.keyboard.press('Control+Alt+Digit4');
+  await page.waitForTimeout(150);
+  all = await blocks(page);
+  assert.equal(all[4].tag, 'H5');
+  const source = await filed(page);
+  assert.match(source, /<h5[^>]*>Smallest<\/h5>/);
+  await page.keyboard.press('Control+Alt+Digit0');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[4].tag, 'P');
+  assert.deepEqual(errors, []);
+});
+
+test('two hints: ##### is a quiet italic aside and ###### the same in red, and neither runs on', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('##### Quiet');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('###### Loud');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Body');
+  await page.waitForTimeout(150);
+  let all = await blocks(page);
+  assert.deepEqual(all.slice(2, 5).map((b) => [b.tag, b.text]), [['H6', 'Quiet'], ['H6', 'Loud'], ['P', 'Body']]);
+
+  const look = await page.evaluate(() => {
+    const note = document.querySelector('.note.marble-open');
+    const of = (el) => {
+      const s = getComputedStyle(el);
+      return { size: parseFloat(s.fontSize), weight: s.fontWeight, style: s.fontStyle, color: s.color, red: el.hasAttribute('data-red') };
+    };
+    return { quiet: of(note.children[2]), loud: of(note.children[3]), body: of(note.children[4]) };
+  });
+  assert.equal(look.quiet.size, look.body.size, 'a hint is the text\'s size');
+  assert.equal(look.quiet.style, 'italic');
+  assert.equal(look.quiet.weight, '400');
+  assert.notEqual(look.quiet.color, look.body.color, 'and a shade lighter than it');
+  assert.equal(look.quiet.red, false);
+  assert.equal(look.loud.style, 'italic');
+  assert.equal(look.loud.color, 'rgb(255, 0, 0)', 'the red hint is pure red');
+  assert.equal(look.body.red, false, 'Enter after a red hint hands over to a plain paragraph');
+
+  const source = await filed(page);
+  assert.match(source, /<h6 [^>]*>Quiet<\/h6>/);
+  assert.match(source, /<h6 [^>]*data-red[^>]*>Loud<\/h6>/);
+
+  // Ctrl+Alt+5 and 6 move a line between the two, and Ctrl+Alt+0 makes it
+  // plain again.
+  await caretToEndOf(page, 2);
+  await page.keyboard.press('Control+Alt+Digit6');
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => document.querySelector('.note.marble-open').children[2].hasAttribute('data-red')), true);
+  await page.keyboard.press('Control+Alt+Digit5');
+  await page.waitForTimeout(150);
+  all = await blocks(page);
+  assert.equal(all[2].tag, 'H6');
+  assert.equal(await page.evaluate(() => document.querySelector('.note.marble-open').children[2].hasAttribute('data-red')), false);
+  assert.match(await filed(page), /<h6 (?![^>]*data-red)[^>]*>Quiet<\/h6>/);
+  await page.keyboard.press('Control+Alt+Digit0');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[2].tag, 'P');
+  assert.deepEqual(errors, []);
+});
+
+test('bold marks exactly what was selected, across lines', async () => {
+  const { page, errors } = await open();
+  // The second line of this note already holds two marks of its own, so the
+  // question is never "is there a <b>" but "is there one more than there was".
+  const count = () =>
+    page.evaluate(() =>
+      [1, 2].map((at) => document.querySelector('.note.marble-open').children[at].querySelectorAll('b').length),
+    );
+  const before = await count();
+  await select(page, 1, 4, 2, 6);
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.waitForTimeout(200);
+
+  const marked = await count();
+  assert.ok(marked[0] > before[0], 'the line the selection started in');
+  assert.ok(marked[1] > before[1], 'and the one it ended in');
+  const source = await filed(page);
+  assert.ok(/<b>/.test(source));
+  // Wrapping a run that was already partly marked must not nest one mark in
+  // the same mark.
+  assert.ok(!/<b><b>/.test(source));
+
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(250);
+  assert.deepEqual(await count(), before, 'undo takes the mark off again, and only it');
+  assert.deepEqual(errors, []);
+});
+
+test('a mark with nothing selected opens at the caret and eats nothing', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Ask about the ');
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.keyboard.type('positioning');
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.keyboard.type(' before Friday.');
+  await page.waitForTimeout(250);
+
+  // Selecting the line on the person's behalf — which is what a document with a
+  // toolbar can afford to do — means the next character they type replaces it.
+  const made = (await blocks(page))[2];
+  assert.equal(made.text, 'Ask about the positioning before Friday.');
+  const source = await filed(page);
+  assert.ok(source.includes('Ask about the <b>positioning</b> before Friday.'));
+  assert.deepEqual(errors, []);
+});
+
+test('Backspace at the head of a numbered line gives back the "1. " that made it', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('1. ');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[2].list, 'number');
+
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+  let made = (await blocks(page))[2];
+  assert.equal(made.list, null, 'the line is no longer a list line');
+  assert.equal(made.text, '1. ', 'and the marker is back as text');
+  await page.keyboard.type('two');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[2].text, '1. two', 'the caret sits after the marker');
+
+  // Further down a list, the number the line showed is what comes back.
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('1. first');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('second');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+  made = (await blocks(page))[4];
+  assert.equal(made.list, null);
+  assert.equal(made.text, '2. second');
+  assert.equal((await blocks(page))[3].list, 'number', 'the line above stays in its list');
+
+  // One press of undo puts the numbered line back.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(150);
+  made = (await blocks(page))[4];
+  assert.equal(made.list, 'number');
+  assert.equal(made.text, 'second');
+  assert.ok((await filed(page)).includes('1. two'));
+  assert.deepEqual(errors, []);
+});
+
+test('an emptied line keeps its caret, wherever the bullet is drawn', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- gone');
+  await page.waitForTimeout(150);
+  for (const _ of 'gone') await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+
+  // An empty bullet's ::before is the bullet, out in the margin where it lays no
+  // line box — so the line has nothing to put a caret in unless it is given one.
+  await page.keyboard.type('still here');
+  await page.waitForTimeout(200);
+  const all = await blocks(page);
+  assert.equal(all[2].list, 'bullet');
+  assert.equal(all[2].text, 'still here', 'the line kept the caret it was given');
+  assert.ok((await filed(page)).includes('still here'));
+  assert.deepEqual(errors, []);
+});
+
+test('clicking a row opens that note, and the file remembers which', async () => {
+  const { page, errors } = await open();
+  const second = await page.evaluate(() => document.querySelectorAll('.note')[1].getAttribute('data-marble-id'));
+  await page.click('.row:nth-child(2) .open');
+  await page.waitForTimeout(200);
+
+  const now = await page.evaluate(() => ({
+    current: document.querySelector('#notes').getAttribute('data-current'),
+    open: document.querySelector('.note.marble-open').getAttribute('data-marble-id'),
+    hosts: [...document.querySelectorAll('[contenteditable]')].filter((el) => el.closest('.notes')).length,
+    lit: [...document.querySelectorAll('.row')].map((el) => el.classList.contains('marble-current')),
+  }));
+  assert.equal(now.current, second);
+  assert.equal(now.open, second);
+  assert.equal(now.hosts, 1, 'the note left behind is not typeable any more');
+  assert.deepEqual(now.lit, [false, true]);
+  assert.match(await filed(page), new RegExp(`data-current="${second}"`));
+
+  // And typing lands in the note that is open, not the one that was.
+  await caretToEndOf(page, 0);
+  await page.keyboard.type(' and knobs');
+  await page.waitForTimeout(200);
+  assert.equal(await page.textContent('.row.marble-current .t'), 'Keys and knobs');
+  assert.deepEqual(errors, []);
+});
+
+test('a new note goes on top, is filed, and undo takes it back off', async () => {
+  const { page, errors } = await open();
+  await page.click('[data-cmd="new"]');
+  await page.waitForTimeout(250);
+
+  let all = await page.evaluate(() => [...document.querySelectorAll('.note')].map((el) => el.getAttribute('data-marble-id')));
+  assert.equal(all.length, 3);
+  const made = all[0];
+  assert.equal(await page.evaluate(() => document.querySelector('.note.marble-open').getAttribute('data-marble-id')), made);
+  assert.equal(await page.textContent('.meta'), '3 notes');
+
+  await page.keyboard.type('Milk, bread');
+  await page.waitForTimeout(200);
+  assert.equal(await page.textContent('.row.marble-current .t'), 'Milk, bread');
+  let source = await filed(page);
+  assert.ok(source.includes('Milk, bread'));
+  assert.ok(source.includes(made));
+
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(250);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(300);
+  all = await page.evaluate(() => [...document.querySelectorAll('.note')].map((el) => el.getAttribute('data-marble-id')));
+  assert.equal(all.length, 2, 'undo took the note back off');
+  source = await filed(page);
+  assert.ok(!source.includes('Milk, bread'));
+  assert.deepEqual(errors, []);
+});
+
+test('a new note is stamped under its name, and Updated follows each edit without being undone', async () => {
+  const { page, errors } = await open();
+  await page.click('[data-cmd="new"]');
+  await page.waitForTimeout(250);
+  await page.keyboard.type('Lab meeting');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Agenda');
+  // The stamp waits for typing to stop.
+  await page.waitForTimeout(1300);
+
+  let all = await blocks(page);
+  assert.deepEqual([all[0].text, all[2].text], ['Lab meeting', 'Agenda']);
+  assert.match(all[1].text, /^Created \w{3} \d+, \d{4}, \d+:\d\d [AP]MUpdated \w{3} \d+, \d{4}, \d+:\d\d [AP]M$/);
+  assert.equal(await page.textContent('.wc'), '1 word', 'the stamp is not counted');
+  assert.match(await filed(page), /class="stamp" data-embed>.*Created <time [^>]*data-marble-editable datetime=.*Updated <time [^>]*datetime=/);
+
+  // An Updated from long ago, as a note left alone would have.
+  await page.evaluate(() => {
+    const time = document.querySelector('.note.marble-open .stamp > span:last-of-type > time');
+    const id = window.marble.id(time);
+    for (const op of [
+      { type: 'setAttr', id, name: 'datetime', value: '2026-01-01T09:00-08:00' },
+      { type: 'setInner', id, html: 'Jan 1, 2026, 9:00 AM' },
+    ]) { window.marble.apply(op); window.marble.op(op); }
+  });
+  await page.waitForTimeout(150);
+  await caretToEndOf(page, 2);
+  await page.keyboard.type(' and notes');
+  await page.waitForTimeout(1300);
+  const updated = () => page.evaluate(() =>
+    document.querySelector('.note.marble-open .stamp > span:last-of-type > time').getAttribute('datetime'));
+  assert.notEqual(await updated(), '2026-01-01T09:00-08:00', 'the edit moved Updated');
+  let source = await filed(page);
+  assert.ok(source.includes('Agenda and notes'), 'the words that moved it reached the file too');
+  assert.ok(!source.includes('2026-01-01T09:00-08:00'));
+
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(300);
+  all = await blocks(page);
+  assert.equal(all[2].text, 'Agenda', 'undo takes back the words');
+  assert.notEqual(await updated(), '2026-01-01T09:00-08:00', 'and leaves the clock');
+  assert.deepEqual(errors, []);
+});
+
+test('a note made before the stamp is left without one', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.type(' More.');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.note .stamp').count(), 0);
+  assert.deepEqual(errors, []);
+});
+
+test('the × forgets a note, and says how to get it back', async () => {
+  const { page, errors } = await open();
+  const doomed = await page.evaluate(() => document.querySelectorAll('.note')[1].getAttribute('data-marble-id'));
+  await page.hover('.row:nth-child(2)');
+  await page.click('.row:nth-child(2) .drop');
+  await page.waitForTimeout(250);
+
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.note').length), 1);
+  assert.match(await page.textContent('.meta'), /Ctrl\+Z/);
+  let source = await filed(page);
+  assert.ok(!source.includes(doomed), 'the note left the file');
+  // The last note has no × at all: emptying it is what deleting it would mean.
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.row .drop').length), 0);
+
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.note').length), 2);
+  source = await filed(page);
+  assert.ok(source.includes(doomed), 'and it came back whole, with its text');
+  assert.ok(source.includes('Ctrl+Alt+1'));
+  assert.deepEqual(errors, []);
+});
+
+test('searching the notes files nothing', async () => {
+  const { page, errors } = await open();
+  await page.fill('.find', 'menu');
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.row').length), 1);
+  assert.equal(await page.textContent('.row .t'), 'Keys');
+
+  const source = await filed(page);
+  assert.ok(!/class="find"[^>]*"menu"/.test(source), 'what was typed into the field is not in the file');
+  assert.ok(!/class="find"[^>]*value=/.test(source));
+
+  await page.focus('.find');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.row').length), 2);
+  assert.deepEqual(errors, []);
+});
+
+test('a paste arrives as plain lines, each its own addressed block', async () => {
+  const { page, errors } = await open();
+  const before = await blocks(page);
+  await caretToEndOf(page, 1);
+  await page.evaluate(() => {
+    const note = document.querySelector('.note.marble-open');
+    const data = new DataTransfer();
+    data.setData('text/plain', 'one\ntwo\nthree');
+    data.setData('text/html', '<h1 style="color:red">one</h1><div>two</div><div>three</div>');
+    note.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
+  });
+  await page.waitForTimeout(200);
+
+  const after = await blocks(page);
+  assert.equal(after.length, before.length + 2);
+  assert.ok(after[1].text.endsWith('one'));
+  assert.equal(after[2].text, 'two');
+  assert.equal(after[3].text, 'three');
+  assert.ok(after.every((block) => block.id));
+  const source = await filed(page);
+  assert.ok(!source.includes('color:red'), 'the dressing did not come with it');
+  assert.ok(!/<h1[^>]*>one/.test(source), 'nor the tag it was wearing');
+  assert.deepEqual(errors, []);
+});
+
+// ---------------------------------------------------------------- links
+
+const paste = (page, text) =>
+  page.evaluate((text) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', text);
+    document.querySelector('.note.marble-open')
+      .dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
+  }, text);
+
+const anchors = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.note.marble-open a')].map((a) => ({ href: a.getAttribute('href'), text: a.textContent })));
+
+test('Mod+K links the selection, the box under it opens, changes and removes it', async () => {
+  const { page, errors } = await open();
+  await select(page, 1, 0, 1, 5);
+  await page.keyboard.press('ControlOrMeta+k');
+  const box = page.locator('.linkbox');
+  await box.locator('.lb-in').waitFor();
+  assert.equal(await box.getAttribute('data-mode'), 'edit');
+  // Only the web and mail: anything that would run is refused in the field.
+  await box.locator('.lb-in').fill('javascript:alert(1)');
+  await box.locator('.lb-in').press('Enter');
+  assert.equal(await box.locator('.lb-in').getAttribute('aria-invalid'), 'true');
+  // An address typed without its scheme is given the one a person meant.
+  await box.locator('.lb-in').fill('example.com');
+  await box.locator('.lb-in').press('Enter');
+  await page.waitForTimeout(200);
+  assert.deepEqual(await anchors(page), [{ href: 'https://example.com', text: 'There' }]);
+  assert.match(await filed(page), /<a href="https:\/\/example\.com">There<\/a> is no save button/);
+
+  // The caret in the link shows where it goes.
+  await page.locator('.note.marble-open a').click();
+  await page.waitForTimeout(150);
+  assert.equal(await box.isVisible(), true);
+  assert.equal(await box.getAttribute('data-mode'), 'view');
+  assert.equal(await box.locator('.lb-url').textContent(), 'https://example.com');
+  assert.equal(await page.locator('.tool[data-kind="link"]').getAttribute('aria-pressed'), 'true', 'the chain in the toolbar is lit');
+
+  await box.locator('[data-do="unlink"]').click();
+  await page.waitForTimeout(200);
+  assert.deepEqual(await anchors(page), []);
+  assert.doesNotMatch(await filed(page), /<a href="https:\/\/example\.com">/);
+  assert.deepEqual(errors, []);
+});
+
+test('an address pasted over words links them; pasted or typed on its own, it is a link', async () => {
+  const { page, errors } = await open();
+  await select(page, 1, 0, 1, 5);
+  await paste(page, 'https://example.org/a');
+  await page.waitForTimeout(200);
+  assert.deepEqual(await anchors(page), [{ href: 'https://example.org/a', text: 'There' }]);
+
+  await caretToEndOf(page, 2);
+  await paste(page, ' see https://example.net/b.');
+  await page.waitForTimeout(200);
+  assert.deepEqual((await anchors(page))[1], { href: 'https://example.net/b', text: 'https://example.net/b' });
+
+  // Typed, then a space: a link, and what follows it stays outside it.
+  await caretToEndOf(page, 3);
+  await page.keyboard.type(' www.example.com and after');
+  await page.waitForTimeout(250);
+  const typed = (await anchors(page)).at(-1);
+  assert.deepEqual(typed, { href: 'https://www.example.com', text: 'www.example.com' });
+  const source = await filed(page);
+  assert.match(source, /<a href="https:\/\/www\.example\.com">www\.example\.com<\/a> and after/);
+  assert.deepEqual(errors, []);
+});
+
+// ---------------------------------------------------------------- the count
+
+test('the corner counts the open note: not its name, not its quotes, and a limit its name gives', async () => {
+  const { page, errors } = await open();
+  const wc = page.locator('.wc');
+  const count = async () => {
+    await page.waitForTimeout(120);
+    return (await wc.textContent()).trim();
+  };
+  // Make the open note exactly: a name with a limit, a quote, and five words.
+  await page.evaluate(() => {
+    const note = document.querySelector('.note.marble-open');
+    const [name, first] = note.children;
+    for (const el of [...note.children].slice(2)) el.remove();
+    name.textContent = 'Essay · 6 words';
+    first.textContent = 'one two three four five';
+    const quote = document.createElement('blockquote');
+    quote.textContent = 'a prompt that is not counted at all';
+    note.insertBefore(quote, first);
+  });
+  assert.equal(await count(), '5 / 6 words');
+  assert.equal(await wc.getAttribute('data-over'), null);
+
+  await caretToEndOf(page, 2);
+  await page.keyboard.type(' six seven');
+  assert.equal(await count(), '7 / 6 words');
+  assert.equal(await wc.getAttribute('data-over'), '', 'over the limit, it says so');
+
+  await select(page, 2, 0, 2, 7);
+  assert.equal(await count(), '2 of 7 words selected');
+
+  // Nothing of it reaches the file.
+  assert.doesNotMatch(await filed(page), /class="wc"[^>]*>\d/);
+  assert.deepEqual(errors, []);
+});
+
+// ---------------------------------------------------------------- the phone
+//
+// A note is the thing you type into with a keyboard up, so the keyboard is not
+// an edge case here — it is the setting. Everything below is about the screen
+// the person is actually looking at rather than the one the window reports.
+
+test('the keyboard is two insets, and nothing stands under it', async () => {
+  const { page, errors } = await openPhone();
+  await caretToEndOf(page, 3);
+  await page.keyboard.type(' typing at the foot of the note.');
+
+  // A browser that answers the keyboard by shrinking the visual viewport.
+  await raiseKeyboard(page, 336);
+  let s = await seen(page);
+  assert.equal(s.kb, '336px');
+  assert.equal(s.vvTop, '0px');
+  assert.ok(s.shell.bottom <= s.strip.bottom + 1, `the shell ends at ${s.shell.bottom}, under a keyboard that starts at ${s.strip.bottom}`);
+  assert.ok(s.shell.bottom >= s.strip.bottom - 2, `the shell ends at ${s.shell.bottom}, ${s.strip.bottom - s.shell.bottom}px short of the sill at ${s.strip.bottom}`);
+  assert.ok(s.pill.bottom <= s.strip.bottom, `the save pill ends at ${s.pill.bottom}, behind the keyboard at ${s.strip.bottom}`);
+
+  // And one that slides the viewport down the page to keep the caret clear:
+  // nothing was taken off the bottom, and everything fixed to the layout
+  // viewport is now above the screen unless it hears about --vv-top.
+  await raiseKeyboard(page, 336, 336);
+  s = await seen(page);
+  assert.equal(s.vvTop, '336px');
+  assert.ok(s.shell.top >= s.strip.top - 1, `the shell starts at ${s.shell.top}, above the screen's top edge at ${s.strip.top}`);
+  assert.ok(s.shell.bottom <= s.strip.bottom + 1 && s.shell.bottom >= s.strip.bottom - 2, `the shell ends at ${s.shell.bottom}, not on the sill at ${s.strip.bottom}`);
+  assert.ok(s.pill.bottom <= s.strip.bottom, `the save pill ends at ${s.pill.bottom}, off a screen that ends at ${s.strip.bottom}`);
+
+  // The line being typed is the whole point of the exercise.
+  await page.keyboard.type(' and more.');
+  await page.waitForTimeout(200);
+  const caret = await page.evaluate(() => {
+    const r = getSelection().getRangeAt(0).getBoundingClientRect();
+    const vv = window.visualViewport;
+    return { bottom: Math.round(r.bottom), sill: Math.round(vv.offsetTop + vv.height) };
+  });
+  assert.ok(caret.bottom <= caret.sill, `the caret is at ${caret.bottom}, behind a keyboard that starts at ${caret.sill}`);
+
+  // The keyboard going away puts the whole window back.
+  await raiseKeyboard(page, 0, 0);
+  s = await seen(page);
+  assert.equal(s.kb, '0px');
+  assert.ok(s.shell.bottom >= 778, `the shell ends at ${s.shell.bottom} with no keyboard up`);
+  assert.deepEqual(errors, []);
+});
+
+test('the insets are written again after the file has been read back over the page', async () => {
+  // They are an inline style on <html>, and the file says <html> carries none:
+  // reconciling the page against the file takes them off unless something puts
+  // them back. An edit made in a text editor is what that looks like.
+  const { page, errors } = await openPhone();
+  await caretToEndOf(page, 1);
+  await raiseKeyboard(page, 336);
+  const source = await filed(page);
+  await host.drive.createDocument('scratch', source.replace('Keys', 'Keys and knobs'), { label: 'by hand' });
+  await page.waitForFunction(() => document.body.textContent.includes('Keys and knobs'), null, { timeout: 4000 });
+  await page.waitForTimeout(200);
+
+  const s = await seen(page);
+  assert.equal(s.kb, '336px', 'the reconcile took the keyboard inset off <html>');
+  assert.ok(s.shell.bottom <= s.strip.bottom + 1, `the shell ends at ${s.shell.bottom}, under a keyboard that starts at ${s.strip.bottom}`);
+  assert.deepEqual(errors, []);
+});
+
+test('a mouse has no keyboard: a viewport short of the window leaves no band', async () => {
+  // A desktop web view's title bar or a zoomed page makes the visual viewport
+  // shorter than the window with no keyboard anywhere near it.
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await raiseKeyboard(page, 200);
+  const s = await seen(page);
+  assert.equal(s.kb, '0px');
+  assert.equal(s.shell.bottom, 900, `the shell ends at ${s.shell.bottom} of 900`);
+  // And the stylesheet holds even if a script says otherwise.
+  await page.evaluate(() => document.documentElement.style.setProperty('--kb', '200px'));
+  assert.equal((await seen(page)).shell.bottom, 900);
+  assert.deepEqual(errors, []);
+});
+
+test('the rail and the page fill the window, whatever else the host puts in <body>', async () => {
+  for (const phone of [false, true]) {
+    const { page, errors } = phone ? await openPhone() : await open();
+    await page.evaluate(() => {
+      const extra = document.createElement('marble-agent-setup');
+      extra.setAttribute('data-marble-transient', '');
+      extra.textContent = 'injected';
+      document.body.append(extra);
+    });
+    const r = await page.evaluate(() => ({
+      rail: document.querySelector('.rail').getBoundingClientRect().toJSON(),
+      sheet: Math.round(document.querySelector('.sheet').getBoundingClientRect().bottom),
+      height: innerHeight,
+    }));
+    assert.equal(r.sheet, r.height, `${phone ? 'phone' : 'desktop'}: the page ends at ${r.sheet} of ${r.height}`);
+    if (!phone) assert.equal(Math.round(r.rail.bottom), r.height, `the rail ends at ${r.rail.bottom}`);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test('a finger gets its 44, and the search field does not zoom the page', async () => {
+  const { page, errors } = await openPhone();
+  const hands = await page.evaluate(() => {
+    const box = (sel) => {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    };
+    return {
+      add: box('[data-cmd="new"]'),
+      // The × was being cut back to 28px by the rule that places it in a row.
+      drop: box('.row .drop'),
+      row: box('.row .open'),
+      find: box('.find'),
+      // Under 16px a phone zooms the whole page when the field takes focus.
+      findText: parseFloat(getComputedStyle(document.querySelector('.find')).fontSize),
+      // Nothing is hidden behind a hover on a screen that has none.
+      dropShown: getComputedStyle(document.querySelector('.row .drop')).opacity,
+    };
+  });
+  assert.ok(hands.add.w >= 44 && hands.add.h >= 44, `the new-note button is ${hands.add.w}×${hands.add.h}`);
+  assert.ok(hands.drop.w >= 44 && hands.drop.h >= 44, `the × is ${hands.drop.w}×${hands.drop.h}`);
+  assert.ok(hands.row.h >= 44, `a note chip is ${hands.row.h}px tall`);
+  assert.ok(hands.find.h >= 44, `the search field is ${hands.find.h}px tall`);
+  assert.ok(hands.findText >= 16, `the search field is set at ${hands.findText}px`);
+  assert.equal(hands.dropShown, '1');
+  assert.deepEqual(errors, []);
+});
+
+test('the way back from a deletion is said on a phone too', async () => {
+  // The count is not worth a line of a phone screen and is hidden there; the
+  // news is, because the × is the one gesture on this screen that takes
+  // something away and Ctrl+Z is the only way back from it.
+  const { page, errors } = await openPhone();
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.meta')).display), 'none');
+  await page.click('.row:nth-child(2) .drop');
+  await page.waitForTimeout(250);
+  const meta = await page.evaluate(() => ({
+    display: getComputedStyle(document.querySelector('.meta')).display,
+    text: document.querySelector('.meta').textContent,
+    role: document.querySelector('.meta').getAttribute('role'),
+  }));
+  assert.notEqual(meta.display, 'none', 'the news was said off the screen');
+  assert.match(meta.text, /Ctrl\+Z/);
+  assert.equal(meta.role, 'status', 'and said out loud as well as drawn');
+  assert.deepEqual(errors, []);
+});
+
+// ---------------------------------------------------------------- on paper
+
+test('printing gives you the note you are in, and none of the chrome', async () => {
+  // From a screen that was in the dark, because that is the printout that goes
+  // wrong: paper is white and ink is black whichever way the machine was set.
+  const { page, errors } = await open({ colorScheme: 'dark' });
+  await page.click('.row:nth-child(2) .open');
+  await page.waitForTimeout(200);
+  await page.emulateMedia({ media: 'print', colorScheme: 'dark' });
+  await page.waitForTimeout(150);
+
+  const paper = await page.evaluate(() => {
+    const cs = (sel, prop) => getComputedStyle(document.querySelector(sel))[prop];
+    return {
+      rail: cs('.rail', 'display'),
+      // The field is inside the rail, so what it is worth asking is whether it
+      // comes out on the paper — not what its own display says.
+      find: document.querySelector('.find').getClientRects().length,
+      pill: cs('.marble-status', 'display'),
+      ink: cs('.note.marble-open', 'color'),
+      paper: cs('body.app', 'backgroundColor'),
+      sheet: cs('.sheet', 'backgroundColor'),
+      // The half screen of room under the last line would print as a blank page.
+      trailing: cs('.note.marble-open', 'paddingBottom'),
+      printed: [...document.querySelectorAll('.note')]
+        .filter((el) => getComputedStyle(el).display !== 'none')
+        .map((el) => el.textContent.trim().slice(0, 4)),
+      breaks: cs('.note.marble-open > h2, .note.marble-open > p', 'orphans'),
+    };
+  });
+  assert.equal(paper.rail, 'none', 'the rail is on the paper');
+  assert.equal(paper.find, 0, 'the search field is on the paper');
+  assert.equal(paper.pill, 'none', 'the save pill is on the paper');
+  assert.equal(paper.ink, 'rgb(0, 0, 0)');
+  assert.equal(paper.paper, 'rgb(255, 255, 255)');
+  assert.equal(paper.sheet, 'rgb(255, 255, 255)');
+  assert.equal(paper.trailing, '0px');
+  assert.deepEqual(paper.printed, ['Keys'], 'the note you are in, and only it');
+  assert.equal(paper.breaks, '2', 'a paragraph may not leave one line behind');
+  assert.deepEqual(errors, []);
+});
+
+// ------------------------------------------------------------- the caret
+//
+// The failure this family is prone to: an empty block has no line box of its
+// own, so the caret cannot be put in it, and the next thing typed lands in the
+// line below. Placing the caret with a script would not catch it — these drive
+// the mouse, which is the only thing that can fail.
+
+test('the caret reaches an empty line, clicked into rather than placed', async () => {
+  const { page, errors } = await open();
+  await page.click('[data-cmd="new"]');
+  await page.waitForTimeout(250);
+
+  // A new note is one empty line with a placeholder drawn over it.
+  const inside = await page.evaluate(() => {
+    const r = document.querySelector('.note.marble-open').getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 120) };
+  });
+  await page.mouse.click(inside.x, inside.y);
+  await page.keyboard.type('Clicked into');
+  await page.waitForTimeout(250);
+  let all = await blocks(page);
+  assert.equal(all.length, 1, 'the click made a second line rather than a caret');
+  assert.equal(all[0].text, 'Clicked into');
+
+  // And the white beside the page, which is the page: an empty first line is
+  // where that has nothing to aim at.
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(200);
+  const margin = await page.evaluate(() => {
+    const r = document.querySelector('.note.marble-open').getBoundingClientRect();
+    const sheet = document.querySelector('.sheet').getBoundingClientRect();
+    return { x: Math.round((sheet.left + r.left) / 2), y: Math.round(r.top + 30) };
+  });
+  await page.mouse.click(margin.x, margin.y);
+  await page.keyboard.type('From the margin');
+  await page.waitForTimeout(250);
+  all = await blocks(page);
+  assert.equal(all[0].text, 'From the margin', 'the click in the margin landed somewhere else');
+  assert.deepEqual(errors, []);
+});
+
+test('an empty line in the middle of a note takes a caret and keeps it', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('after the gap');
+  await page.waitForTimeout(200);
+
+  const gap = await page.evaluate(() => {
+    const el = document.querySelector('.note.marble-open').children[2];
+    const r = el.getBoundingClientRect();
+    return { text: el.textContent, h: Math.round(r.height), x: Math.round(r.left + 8), y: Math.round(r.top + r.height / 2) };
+  });
+  assert.equal(gap.text, '', 'the middle line is not the empty one');
+  assert.ok(gap.h > 8, `an empty line has no line box to stand a caret in — ${gap.h}px tall`);
+
+  await page.mouse.click(gap.x, gap.y);
+  await page.keyboard.type('in the gap');
+  await page.waitForTimeout(250);
+  const all = await blocks(page);
+  assert.equal(all[2].text, 'in the gap', 'what was typed went into the line below instead');
+  assert.equal(all[3].text, 'after the gap');
+  assert.ok((await filed(page)).includes('in the gap'));
+  assert.deepEqual(errors, []);
+});
+
+test('the rail says what it is to somebody who cannot see it', async () => {
+  const { page, errors } = await open();
+  const spoken = await page.evaluate(() => ({
+    rail: document.querySelector('.rail').tagName,
+    railName: document.querySelector('.rail').getAttribute('aria-label'),
+    rows: document.querySelector('#rows').getAttribute('role'),
+    row: document.querySelector('.row').getAttribute('role'),
+    current: document.querySelector('.row.marble-current .open').getAttribute('aria-current'),
+    find: document.querySelector('.find').getAttribute('aria-label'),
+    add: document.querySelector('[data-cmd="new"]').getAttribute('aria-label'),
+    keys: document.querySelector('[data-cmd="new"]').getAttribute('aria-keyshortcuts'),
+    drop: document.querySelector('.row .drop').getAttribute('aria-label'),
+    sheet: document.querySelector('.sheet').tagName,
+  }));
+  assert.equal(spoken.rail, 'NAV');
+  assert.equal(spoken.railName, 'Notes');
+  assert.equal(spoken.rows, 'list');
+  assert.equal(spoken.row, 'listitem');
+  assert.equal(spoken.current, 'page');
+  assert.equal(spoken.find, 'Search notes');
+  assert.equal(spoken.add, 'New note');
+  assert.equal(spoken.keys, 'Control+Enter');
+  assert.match(spoken.drop, /^Delete note: /);
+  assert.equal(spoken.sheet, 'MAIN');
+
+  // None of it reaches the file except the two that are in the markup.
+  const source = await filed(page);
+  assert.ok(!/role="list(item)?"/.test(source.replace('role="list"', '')), 'a row role is a reading, not a fact');
+  assert.deepEqual(errors, []);
+});
+
+test('the page has margins until the switch says full width, and the file keeps which', async () => {
+  const { page, errors } = await open();
+  const measure = () =>
+    page.evaluate(() => ({
+      note: Math.round(document.querySelector('.note.marble-open').getBoundingClientRect().width),
+      sheet: Math.round(document.querySelector('.sheet').getBoundingClientRect().width),
+      lit: document.querySelector('.tool[data-kind="width"]')?.getAttribute('aria-checked'),
+      width: document.querySelector('.sheet').getAttribute('data-width'),
+    }));
+
+  const before = await measure();
+  assert.equal(before.lit, 'false', 'the switch is in the toolbar, off');
+  assert.equal(before.width, null);
+  assert.ok(before.note <= 768, `with margins the page is a column, not ${before.note}px`);
+  assert.ok(before.sheet - before.note > 100, 'and there is margin either side of it');
+
+  await page.click('.tool[data-kind="width"]');
+  await page.waitForTimeout(450);
+  const full = await measure();
+  assert.equal(full.lit, 'true');
+  assert.equal(full.width, 'full');
+  assert.equal(full.note, full.sheet, 'full width runs to the edges of the sheet');
+  const sheetTag = async () => (await filed(page)).match(/<main\b[^>]*id="sheet"[^>]*>/)[0];
+  assert.match(await sheetTag(), / data-width="full"/);
+
+  // The caret was never taken from the text, and one undo puts the margins back.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(450);
+  const back = await measure();
+  assert.equal(back.width, null);
+  assert.equal(back.lit, 'false');
+  assert.doesNotMatch(await sheetTag(), /data-width/);
+
+  // A phone's page has no margins to give, so it has no switch.
+  const phone = await openPhone();
+  assert.equal(await phone.page.evaluate(() => getComputedStyle(document.querySelector('.tool[data-kind="width"]')).display), 'none');
+  assert.deepEqual(errors, []);
+  assert.deepEqual(phone.errors, []);
+});
+
+test('folded, the rail keeps a square for each note, and the name comes up beside it', async () => {
+  const { page, errors } = await open();
+  await page.click('[data-cmd="rail"]');
+  await page.waitForTimeout(200);
+  const folded = await page.evaluate(() => ({
+    rail: Math.round(document.querySelector('.rail').getBoundingClientRect().width),
+    rows: getComputedStyle(document.querySelector('#rows')).display,
+    find: getComputedStyle(document.querySelector('.find')).display,
+    marks: [...document.querySelectorAll('.row .open')].map((el) => el.dataset.mono),
+    names: [...document.querySelectorAll('.row .open .t')].map((el) => el.textContent.trim()),
+    expanded: document.querySelector('[data-cmd="rail"]').getAttribute('aria-expanded'),
+  }));
+  assert.ok(folded.rail < 80, `the folded rail is a strip, not ${folded.rail}px`);
+  assert.notEqual(folded.rows, 'none', 'the notes stay in it');
+  assert.equal(folded.find, 'none', 'the search folds away');
+  assert.deepEqual(folded.marks, ['S', 'K']);
+  assert.equal(folded.names[1], 'Keys', 'a screen reader still hears the name');
+  assert.equal(folded.expanded, 'false');
+
+  // The pointer brings the name up beside the square; a click opens the note.
+  await page.hover('.row:nth-child(2) .open');
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => { const t = document.querySelector('.foldtip'); return t.hidden ? null : t.textContent; }), 'Keys');
+  await page.click('.row:nth-child(2) .open');
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => document.querySelector('.note.marble-open').firstElementChild.textContent), 'Keys');
+
+  const source = await filed(page);
+  assert.ok(!/data-mono=|<div class="foldtip"|<html[^>]*data-rail/.test(source), 'the folded rail is a reading, not a fact');
+
+  // Unfolded, the rows are rows again.
+  await page.click('[data-cmd="rail"]');
+  await page.waitForTimeout(200);
+  assert.ok(await page.evaluate(() => document.querySelector('.rail').getBoundingClientRect().width > 200));
+  assert.deepEqual(errors, []);
+});

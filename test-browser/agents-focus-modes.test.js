@@ -396,3 +396,166 @@ test('the mode survives a reload', async () => {
   assert.equal(await page.locator('.focus-modes button[data-mode="group"]').textContent(), 'Beta');
   assert.equal(await page.locator('.focus-modes button[data-mode="group"]').getAttribute('data-color'), 'gold');
 });
+
+/** Where every pane on the stage stands, keyed by the chat it holds. The
+ *  primary pane's chat is the one <marble-conversation> that is not inside a
+ *  frame; every other frame names its chat on its bar. */
+const paneRects = (page) => page.evaluate(() => {
+  const primary = [...document.querySelectorAll('marble-conversation')]
+    .find((el) => !el.closest('.dock-frame'))?.getAttribute('conversation') ?? null;
+  return Object.fromEntries([...document.querySelectorAll('.pane .dock-frame:not(.dock-ghost):not(.marble-leaving)')]
+    .map((el) => {
+      const id = el.dataset.key === 'P' ? primary : (el.querySelector('.dock-bar')?.dataset.id ?? null);
+      const r = el.getBoundingClientRect();
+      return [id, [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]];
+    }));
+});
+
+/** No pane over another. While the stage eases a pane in, the one it is
+ *  arriving beside still spans the room it is taking — so a sample that
+ *  overlaps is a sample mid-flight, however still it looks for a frame. */
+const tiled = (rects) => {
+  const all = Object.values(rects);
+  if (!all.length) return false;
+  const left = Math.min(...all.map(([x]) => x));
+  const top = Math.min(...all.map(([, y]) => y));
+  const width = Math.max(...all.map(([x, , w]) => x + w)) - left;
+  const height = Math.max(...all.map(([, y, , h]) => y + h)) - top;
+  const sum = all.reduce((total, [, , w, h]) => total + w * h, 0);
+  return width > 0 && height > 0 && sum <= width * height * 1.02;
+};
+
+/** The stage holding `count` panes, laid out and twice over with the same
+ *  numbers: it eases to every change, so a rect read the instant after a
+ *  click is mid-flight. */
+const stageStill = async (page, count) => {
+  let last = null;
+  for (let i = 0; i < 160; i += 1) {
+    const now = await paneRects(page);
+    const key = JSON.stringify(now);
+    if (Object.keys(now).length === count && !(null in now) && tiled(now) && key === last) return now;
+    last = key;
+    await page.waitForTimeout(50);
+  }
+  throw new Error('the stage never settled');
+};
+
+/** The same panes as shares of the stage they stand in. The stage's own box
+ *  moves with the field beside it — a lens with different chips in it leaves
+ *  the panes a few pixels over — and what is being compared here is the
+ *  arrangement, not where the canvas put it. */
+const sharesOf = (rects) => {
+  const all = Object.values(rects);
+  const left = Math.min(...all.map(([x]) => x));
+  const top = Math.min(...all.map(([, y]) => y));
+  const width = Math.max(...all.map(([x, , w]) => x + w)) - left;
+  const height = Math.max(...all.map(([, y, , h]) => y + h)) - top;
+  return Object.fromEntries(Object.entries(rects)
+    .map(([id, [x, y, w, h]]) => [id, [(x - left) / width, (y - top) / height, w / width, h / height]]));
+};
+
+/** Every pane within a fiftieth of the stage of where it was. */
+const sameArrangement = (a, b) => {
+  const one = sharesOf(a);
+  const two = sharesOf(b);
+  const ids = Object.keys(one);
+  return ids.length === Object.keys(two).length
+    && ids.every((id) => two[id] && one[id].every((v, i) => Math.abs(v - two[id][i]) <= 0.02));
+};
+
+/** Drag the first vertical seam on the stage by `dx`, and come back with the
+ *  arrangement it made. A seam grabbed while the stage is still easing is a
+ *  seam missed, and a missed drag is silent — so this checks that the panes
+ *  actually came out uneven, and tries again if they did not. */
+const dragRowSeam = async (page, dx, count) => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await stageStill(page, count);
+    await page.waitForFunction(() => document.querySelectorAll('.pane .dock-gutter[data-dir="row"]').length > 0);
+    const gut = await page.locator('.pane .dock-gutter[data-dir="row"]').first().boundingBox();
+    const x = gut.x + gut.width / 2;
+    const y = gut.y + Math.min(120, gut.height / 2);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx / 4, y, { steps: 4 });
+    await page.mouse.move(x + dx, y, { steps: 10 });
+    await page.mouse.up();
+    const after = await stageStill(page, count);
+    const widths = Object.values(after).map(([, , w]) => w);
+    if (Math.max(...widths) - Math.min(...widths) > 60) return after;
+  }
+  throw new Error('the seam would not move');
+};
+
+/** The arrangement is the person's. A lens is only a lens: leaving Pinned for
+ *  Active and coming back has to put the panes down where they were. */
+test('a lens hands the pinned stage back the way it was arranged', async () => {
+  const { page } = await openAgents();
+  const pins = await page.evaluate(async () => {
+    const ids = [];
+    for (const title of ['pin one', 'pin two', 'pin three']) {
+      const id = await window.marble.agent.start({ provider: 'fake' });
+      await window.marble.agent.update(id, { title, pinned: true });
+      ids.push(id);
+    }
+    return ids;
+  });
+  await enterFocus(page);
+  await until(page, async () => sameSet(await stageIds(page), pins), 'the three pins to hold the stage');
+
+  // Arrange it by hand. One seam dragged off the default is an arrangement
+  // nothing else would have made, so getting the default back reads as a loss.
+  const arranged = await dragRowSeam(page, -140, 3);
+
+  await page.locator('.focus-modes button[data-mode="active"]').click();
+  await until(page, async () => (await modeOf(page)).mode === 'active', 'active mode');
+  await until(page, async () => (await stageIds(page)).length === 0, 'nothing active to stage');
+
+  await page.locator('.focus-modes button[data-mode="pinned"]').click();
+  await until(page, async () => (await modeOf(page)).mode === 'pinned', 'pinned mode');
+  await until(page, async () => sameSet(await stageIds(page), pins), 'the pinned stage to come back');
+  const back = await stageStill(page, 3);
+  assert.ok(sameArrangement(arranged, back), `the panes came back where they were: ${JSON.stringify(arranged)} vs ${JSON.stringify(back)}`);
+});
+
+/** Each lens keeps its own: coming home is not the only case — a lens you
+ *  arranged is arranged the next time you look through it. */
+test('Pinned and Active each keep the arrangement they were given', async () => {
+  const { page } = await openAgents();
+  const seeded = await page.evaluate(async () => {
+    const mk = async (title, extra = {}) => {
+      const id = await window.marble.agent.start({ provider: 'fake' });
+      await window.marble.agent.update(id, { title, ...extra });
+      return id;
+    };
+    const pins = [];
+    for (const title of ['pin one', 'pin two', 'pin three']) pins.push(await mk(title, { pinned: true }));
+    const live = [await mk('asking one'), await mk('asking two')];
+    for (const id of live) {
+      await window.marble.agent.send(id, { prompt: 'script:permission', target: 'garden', viewing: 'Agents', selection: [] });
+    }
+    return { pins, live };
+  });
+  await until(page, async () => {
+    const metas = await Promise.all(seeded.live.map((id) => metaOf(page, id)));
+    return metas.every((meta) => meta?.asking === true);
+  }, 'both chats to be asking');
+  await enterFocus(page);
+  await until(page, async () => sameSet(await stageIds(page), seeded.pins), 'the pins to hold the stage');
+  const pinned = await stageStill(page, 3);
+
+  await page.locator('.focus-modes button[data-mode="active"]').click();
+  await until(page, async () => sameSet(await stageIds(page), seeded.live), 'the asking chats to hold the stage');
+  const active = await dragRowSeam(page, 180, 2);
+
+  // Home, and the pinned stage is as it was left.
+  await page.locator('.focus-modes button[data-mode="pinned"]').click();
+  await until(page, async () => sameSet(await stageIds(page), seeded.pins), 'the pinned stage to come back');
+  const homeAgain = await stageStill(page, 3);
+  assert.ok(sameArrangement(pinned, homeAgain), `pinned: ${JSON.stringify(pinned)} vs ${JSON.stringify(homeAgain)}`);
+
+  // And back through the lens, which kept what it was given.
+  await page.locator('.focus-modes button[data-mode="active"]').click();
+  await until(page, async () => sameSet(await stageIds(page), seeded.live), 'the asking chats again');
+  const activeAgain = await stageStill(page, 2);
+  assert.ok(sameArrangement(active, activeAgain), `active: ${JSON.stringify(active)} vs ${JSON.stringify(activeAgain)}`);
+});

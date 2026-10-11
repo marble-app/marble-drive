@@ -18,7 +18,9 @@
   // Drive UIST warm / Dusk stay as fallbacks. When the open document names a
   // palette (--paper, --ink, … on :root) or paints the body, the chrome copies
   // those colors so a conversation on a white starter or a custom theme matches
-  // the page it is sitting on — not a second, Drive-only sheet.
+  // the page it is sitting on — not a second, Drive-only sheet. Colors only:
+  // the type is the design system's own UI stack on every page (see
+  // applyPageTheme).
   const TOKENS = `
     :host {
       --ink: #111111; --muted: #5a5a5a; --faint: #8a8a8a; --line: #ddd9cf;
@@ -119,12 +121,24 @@
   function applyPageTheme(el, theme) {
     const next = theme || pageTheme(getComputedStyle(document.documentElement), getComputedStyle(document.body));
     for (const [name, value] of Object.entries(next)) el.style.setProperty(`--${name}`, value);
-    const family = getComputedStyle(document.body).fontFamily;
-    if (family) el.style.setProperty('--ui-font', family);
+    // Colour is the page's, type is not. A document picks its body face to be
+    // read in — Avenir, a serif, whatever it was written in — and the chrome is
+    // not the document: a log, a composer and a row of buttons set in the
+    // page's reading face stop being the same piece of furniture from one
+    // document to the next. The chrome keeps the design system's UI stack. A
+    // page that really means to restyle it can still say so by declaring
+    // --ui-font, which this no longer overwrites.
+    el.style.removeProperty('--ui-font');
   }
 
   function watchPageTheme(el) {
-    const paint = () => applyPageTheme(el);
+    // A visual is a frame, so the palette does not cascade into it: a page that
+    // changes colour has to be told to it. Nothing reloads — the frame swaps
+    // one stylesheet.
+    const paint = () => {
+      applyPageTheme(el);
+      el.repaintVisuals?.();
+    };
     paint();
     const mo = new MutationObserver(paint);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
@@ -140,7 +154,7 @@
 
   // ------------------------------------------------------------ safe text
 
-  const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\s][^*\n]*\*)|(\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\))/g;
+  const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\s][^*\n]*\*)|(~~[^~\n]+~~)|(\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\))/g;
 
   /** Inline marks, and — when a `chip` hook is given — the `[image n]` /
    *  `[pasted text n]` tokens a sent message carries, as the chips they name. */
@@ -163,8 +177,10 @@
 
   function inlineMarks(parent, text) {
     let last = 0;
-    INLINE.lastIndex = 0;
-    for (let match = INLINE.exec(text); match; match = INLINE.exec(text)) {
+    // matchAll walks its own copy of the regex: marks nest, so this recurses,
+    // and a shared lastIndex reset by the inner call re-found the same `**…**`
+    // forever.
+    for (const match of text.matchAll(INLINE)) {
       if (match.index > last) parent.append(text.slice(last, match.index));
       const [whole] = match;
       let node;
@@ -172,15 +188,19 @@
         node = document.createElement('code');
         node.textContent = whole.slice(1, -1);
       } else if (match[2]) {
+        // Marks nest: `**the \`.mrbl\` file**` is bold with code in it.
         node = document.createElement('strong');
-        node.textContent = whole.slice(2, -2);
+        inlineMarks(node, whole.slice(2, -2));
       } else if (match[3]) {
         node = document.createElement('em');
-        node.textContent = whole.slice(1, -1);
+        inlineMarks(node, whole.slice(1, -1));
+      } else if (match[4]) {
+        node = document.createElement('del');
+        inlineMarks(node, whole.slice(2, -2));
       } else {
         node = document.createElement('a');
-        node.textContent = /^\[([^\]]+)\]/.exec(whole)[1];
-        node.href = match[5];
+        inlineMarks(node, /^\[([^\]]+)\]/.exec(whole)[1]);
+        node.href = match[6];
         node.target = '_blank';
         node.rel = 'noopener noreferrer';
       }
@@ -190,20 +210,71 @@
     if (last < text.length) parent.append(text.slice(last));
   }
 
-  const BULLET = /^\s*[-*]\s+(.*)$/;
-  const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
+  const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
   const FENCE = /^\s*```/;
+  const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
+  const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
+  const QUOTE = /^\s{0,3}>\s?(.*)$/;
+  // The row under a table's header: pipes, dashes, and a colon where a column
+  // says how it is aligned. Nothing else looks like it.
+  const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+  // The whole protocol for a visual: what the info string says. The caption
+  // after it, and everything done with the block, is chat-visual.js's.
+  const VISUAL_FENCE = /^marble-visual\b/i;
+  // The same fence, found in a message that is still arriving.
+  const VISUAL_OPEN = /(^|\n)[ \t]*```[ \t]*marble-visual\b/i;
 
-  function renderText(text, { chip = null } = {}) {
-    const out = document.createDocumentFragment();
+  const indentOf = (line) => /^\s*/.exec(line)[0].replace(/\t/g, '    ').length;
+  /** The cells of one table row. A pipe inside backticks is the code's, and
+   *  `\|` is a pipe the writer meant as a character. */
+  function cellsOf(line) {
+    let row = line.trim();
+    if (row.startsWith('|')) row = row.slice(1);
+    if (row.endsWith('|') && !row.endsWith('\\|')) row = row.slice(0, -1);
+    const cells = [];
+    let cell = '';
+    let code = false;
+    for (let k = 0; k < row.length; k += 1) {
+      const c = row[k];
+      if (c === '\\' && row[k + 1] === '|') { cell += '|'; k += 1; continue; }
+      if (c === '`') code = !code;
+      if (c === '|' && !code) { cells.push(cell.trim()); cell = ''; continue; }
+      cell += c;
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+  const isTableStart = (lines, i) => lines[i].includes('|') && i + 1 < lines.length
+    && TABLE_RULE.test(lines[i + 1]) && lines[i + 1].includes('-')
+    && (lines[i + 1].includes('|') || cellsOf(lines[i]).length > 1);
+  /** Where a paragraph stops: at a blank line, or where another block begins. */
+  const startsBlock = (lines, i) => FENCE.test(lines[i]) || HEADING.test(lines[i])
+    || RULE.test(lines[i]) || QUOTE.test(lines[i]) || LIST_ITEM.test(lines[i]) || isTableStart(lines, i);
+
+  function renderText(text, { chip = null, visual = null } = {}) {
     const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n');
+    return renderBlocks(lines, { chip, visual });
+  }
+
+  function renderBlocks(lines, opts) {
+    const { chip, visual } = opts;
+    const out = document.createDocumentFragment();
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
       if (FENCE.test(line)) {
+        const info = line.replace(FENCE, '').trim();
         const body = [];
         for (i += 1; i < lines.length && !FENCE.test(lines[i]); i += 1) body.push(lines[i]);
         i += 1;
+        // A fence the agent tagged `marble-visual` is the one piece of its text
+        // that is not read as text. It is not read by this page either: the
+        // card hands it to a sandboxed frame. Anything else is code.
+        const card = VISUAL_FENCE.test(info) ? visual?.(info, body.join('\n')) : null;
+        if (card) {
+          out.append(card);
+          continue;
+        }
         const pre = document.createElement('pre');
         const code = document.createElement('code');
         code.textContent = body.join('\n');
@@ -211,31 +282,152 @@
         out.append(pre);
         continue;
       }
-      const kind = BULLET.test(line) ? BULLET : NUMBERED.test(line) ? NUMBERED : null;
-      if (kind) {
-        const list = document.createElement(kind === BULLET ? 'ul' : 'ol');
-        for (; i < lines.length && kind.test(lines[i]); i += 1) {
-          const item = document.createElement('li');
-          inline(item, kind.exec(lines[i])[1], chip);
-          list.append(item);
-        }
-        out.append(list);
-        continue;
-      }
       if (!line.trim()) {
         i += 1;
         continue;
       }
+      // A heading in a chat is a section of one reply, not a page title: `#`
+      // and `##` both land on the reply's largest step, and the rest step down
+      // from there. The level the agent wrote survives as aria-level.
+      const heading = HEADING.exec(line);
+      if (heading) {
+        const level = heading[1].length;
+        const node = document.createElement(`h${Math.min(6, Math.max(3, level + 1))}`);
+        node.className = 'md-h';
+        node.dataset.level = String(Math.min(level, 4));
+        inline(node, heading[2], chip);
+        out.append(node);
+        i += 1;
+        continue;
+      }
+      // A rule is checked before a list: `* * *` is a rule, not an item.
+      if (RULE.test(line)) {
+        out.append(document.createElement('hr'));
+        i += 1;
+        continue;
+      }
+      if (QUOTE.test(line)) {
+        const body = [];
+        for (; i < lines.length && lines[i].trim() && (QUOTE.test(lines[i]) || !startsBlock(lines, i)); i += 1) {
+          const m = QUOTE.exec(lines[i]);
+          body.push(m ? m[1] : lines[i]);
+        }
+        const quote = document.createElement('blockquote');
+        quote.append(renderBlocks(body, opts));
+        out.append(quote);
+        continue;
+      }
+      if (isTableStart(lines, i)) {
+        const head = cellsOf(line);
+        const align = cellsOf(lines[i + 1]).map((c) => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : ''));
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const tbody = document.createElement('tbody');
+        const row = (cells, tag) => {
+          const tr = document.createElement('tr');
+          head.forEach((_, k) => {
+            const cell = document.createElement(tag);
+            if (align[k]) cell.style.textAlign = align[k];
+            inline(cell, cells[k] ?? '', chip);
+            tr.append(cell);
+          });
+          return tr;
+        };
+        thead.append(row(head, 'th'));
+        for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes('|') && !FENCE.test(lines[i]); i += 1) {
+          tbody.append(row(cellsOf(lines[i]), 'td'));
+        }
+        table.append(thead, tbody);
+        // The frame scrolls, not the reply: a wide table in a narrow pane
+        // keeps its columns and slides.
+        const wrap = document.createElement('div');
+        wrap.className = 'md-table';
+        wrap.append(table);
+        out.append(wrap);
+        continue;
+      }
+      if (LIST_ITEM.test(line)) {
+        out.append(renderList(lines, i, opts, (next) => { i = next; }));
+        continue;
+      }
       const paragraph = document.createElement('p');
       let first = true;
-      for (; i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !BULLET.test(lines[i]) && !NUMBERED.test(lines[i]); i += 1) {
+      for (; i < lines.length && lines[i].trim() && (first || !startsBlock(lines, i)); i += 1) {
         if (!first) paragraph.append(document.createElement('br'));
-        inline(paragraph, lines[i], chip);
+        inline(paragraph, lines[i].trim(), chip);
         first = false;
       }
       out.append(paragraph);
     }
     return out;
+  }
+
+  /** One list, from the item at `start`. An item owns every line indented
+   *  past its marker — a second paragraph, a nested list, a fence — and a
+   *  blank line between two items of the same kind does not end the list
+   *  (so `1.` … `2.` with space between them stays one list, numbered on). */
+  function renderList(lines, start, opts, done) {
+    const first = LIST_ITEM.exec(lines[start]);
+    const base = indentOf(lines[start]);
+    const ordered = /\d/.test(first[2]);
+    const list = document.createElement(ordered ? 'ol' : 'ul');
+    if (ordered) {
+      const n = parseInt(first[2], 10);
+      if (n !== 1) list.start = n;
+    }
+    const sameKind = (m) => m && indentOf(m[0]) <= base + 1 && /\d/.test(m[2]) === ordered;
+    let i = start;
+    let loose = false;
+    while (i < lines.length) {
+      const m = LIST_ITEM.exec(lines[i]);
+      if (!sameKind(m)) break;
+      const body = [m[3]];
+      const inset = indentOf(lines[i]) + m[2].length + 1;
+      let gap = false;
+      for (i += 1; i < lines.length; i += 1) {
+        const l = lines[i];
+        if (!l.trim()) {
+          gap = true;
+          body.push('');
+          continue;
+        }
+        const ind = indentOf(l);
+        if (ind > base && (ind >= Math.min(inset, base + 2) || !gap)) {
+          // Indented past the marker: this item's. A lazy line straight under
+          // it (no blank between, no indent) continues its paragraph too.
+          body.push(l.replace(new RegExp(`^\\s{0,${Math.min(ind, inset)}}`), ''));
+          gap = false;
+          continue;
+        }
+        if (!gap && ind <= base && !startsBlock(lines, i)) {
+          body.push(l.trim());
+          continue;
+        }
+        break;
+      }
+      while (body.length && !body[body.length - 1].trim()) body.pop();
+      // A blank line before the next item of this list makes it loose.
+      if (gap && sameKind(LIST_ITEM.exec(lines[i] ?? ''))) loose = true;
+      const item = document.createElement('li');
+      const task = /^\[([ xX])\]\s+/.exec(body[0]);
+      if (task) {
+        body[0] = body[0].slice(task[0].length);
+        item.className = 'md-task';
+        item.dataset.done = String(task[1] !== ' ');
+      }
+      const content = renderBlocks(body, opts);
+      // A tight item is its words, not a paragraph holding them.
+      if (content.firstChild?.nodeName === 'P') {
+        const p = content.firstChild;
+        p.replaceWith(...p.childNodes);
+      }
+      item.append(content);
+      list.append(item);
+      if (gap && !sameKind(LIST_ITEM.exec(lines[i] ?? ''))) break;
+    }
+    if (loose) list.classList.add('loose');
+    done(i);
+    return list;
   }
 
   // ------------------------------------------------------------ motion
@@ -275,6 +467,27 @@
     (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
 
   // ------------------------------------------------------------ helpers
+
+  /** Keys typed into a field in chrome belong to the field. A page listens for
+   *  its shortcuts on the document, and an event from inside a shadow root
+   *  reaches it retargeted to the host — so to the page, V typed into the
+   *  composer is V pressed on the page, and ⌘Z there is the page's undo.
+   *  Stopped at the shadow root, the key never gets that far. The drive's own
+   *  chords (⌘J, ⌘K, ⌘\) are heard in the capture phase on window, before
+   *  this; Escape and Tab still travel, since leaving a field is not typing in
+   *  it; and ⌘⇧O and ⌘⇧D, which a page may answer itself, go through. */
+  const typingIn = (event) => {
+    const node = event.composedPath?.()[0];
+    return Boolean(node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node?.tagName ?? ''));
+  };
+  function keepKeys(root) {
+    const keep = (event) => {
+      if (!typingIn(event) || event.key === 'Escape' || event.key === 'Tab') return;
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && /^[odj]$/i.test(event.key)) return;
+      event.stopPropagation();
+    };
+    for (const type of ['keydown', 'keypress', 'keyup']) root.addEventListener(type, keep);
+  }
 
   const h = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -380,22 +593,29 @@
     // slide to the wrong resting spot. offsetWidth/Height have no transform.
     const m = { width: menu.offsetWidth, height: menu.offsetHeight };
     const pad = 8;
+    // The strip of the window a person can see. With a phone's keyboard up
+    // it is the visual viewport, slid some way down the layout one; a menu
+    // clamped to the layout viewport opened under the keys.
+    const vv = window.visualViewport;
+    const seenTop = vv ? Math.max(0, vv.offsetTop) : 0;
+    const seenBottom = vv ? Math.min(innerHeight, vv.offsetTop + vv.height) : innerHeight;
     // Above the trigger when there is room, below when there is not.
     const above = a.top - pad - m.height;
-    const top = above >= pad ? above : Math.min(a.bottom + pad, innerHeight - pad - m.height);
+    const fitsAbove = above >= seenTop + pad;
+    const top = fitsAbove ? above : Math.min(a.bottom + pad, seenBottom - pad - m.height);
     const want = align === 'center' ? a.left + a.width / 2 - m.width / 2
       : align === 'start' ? a.left
         : a.right - m.width;
     const left = Math.min(Math.max(pad, want), innerWidth - pad - m.width);
-    menu.style.top = `${Math.max(pad, Math.round(top))}px`;
+    menu.style.top = `${Math.max(seenTop + pad, Math.round(top))}px`;
     menu.style.left = `${Math.round(left)}px`;
-    menu.style.maxHeight = `${Math.round(Math.max(120, innerHeight - 2 * pad))}px`;
+    menu.style.maxHeight = `${Math.round(Math.max(120, seenBottom - seenTop - 2 * pad))}px`;
     // It grows out of the control that opened it: the origin is the trigger's
     // middle, on the edge the sheet actually opened from. A sheet that scales
     // up from its own centre reads as a thing that appeared; one that scales
     // up from the button reads as that button opening.
     const originX = Math.round(Math.min(Math.max(a.left + a.width / 2 - left, 0), m.width));
-    menu.style.transformOrigin = `${originX}px ${above >= pad ? '100%' : '0%'}`;
+    menu.style.transformOrigin = `${originX}px ${fitsAbove ? '100%' : '0%'}`;
   };
   const unfloatMenu = (menu) => {
     if (!menu) return;
@@ -544,7 +764,15 @@
     anchor.dataset.hinted = '1';
     const tip = asPopover(h('div', 'keytip'));
     tip.setAttribute('role', 'tooltip');
-    tip.textContent = text;
+    // A tip on a toggle has to say what the toggle is now, so the text is read
+    // when it opens rather than when it was hooked up.
+    const say = typeof text === 'function' ? text : () => text;
+    const word = () => {
+      const said = say();
+      tip.textContent = said;
+      tip.classList.toggle('is-multi', said.includes('\n'));
+    };
+    word();
     anchor.after(tip);
     let timer = null;
     const cancel = () => {
@@ -556,7 +784,10 @@
       // A finger has no hover, and a tip it cannot dismiss would sit there.
       if (event.pointerType === 'touch') return;
       clearTimeout(timer);
-      timer = setTimeout(() => showHint(anchor, tip), HINT_DELAY);
+      timer = setTimeout(() => {
+        word();
+        showHint(anchor, tip);
+      }, HINT_DELAY);
     });
     anchor.addEventListener('pointerleave', cancel);
     anchor.addEventListener('pointerdown', cancel);
@@ -613,6 +844,62 @@
     else openSegBox(box);
   };
   const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** Typing with thumbs: a touchscreen at a phone's width (the width every
+   *  phone layout here folds at). There Return is a new line and the send
+   *  button sends, as in Messages and every chat app on a phone: a soft
+   *  keyboard has no Shift-Return within reach, and a message sent half
+   *  written by the key beside the space bar cannot be taken back. A
+   *  hardware keyboard on a tablet is wider than this and keeps Return. */
+  const THUMBS = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse) and (max-width: 719px)') : { matches: false };
+  /** Whether a soft keyboard is up. runtime/phone.js says so on most phones,
+   *  but it measures the keys as the part of the window under the visible
+   *  strip, and iOS, sliding that strip all the way down to a composer at
+   *  the foot of the window, leaves nothing under it: the keys are up and
+   *  read as none. So a strip shorter than the window while a field has the
+   *  caret counts too, at a zoom of 1 (a pinch shrinks the strip with no
+   *  keys anywhere). */
+  const keysUp = () => {
+    if (window.marblePhone?.keyboard) return true;
+    const vv = window.visualViewport;
+    if (!vv || !matchMedia('(pointer: coarse)').matches || Math.abs((vv.scale ?? 1) - 1) > 0.01) return false;
+    let el = document.activeElement;
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+    const typing = Boolean(el && (el.isContentEditable || el.tagName === 'TEXTAREA'
+      || (el.tagName === 'INPUT' && !/^(button|checkbox|radio|range|color|file|submit|reset|image|hidden)$/i.test(el.type))));
+    return typing && window.innerHeight - vv.height >= 80;
+  };
+  /** Calls fn(up) whenever the keyboard comes up or goes. Returns the off. */
+  const watchKeys = (fn) => {
+    let last = null;
+    const check = () => {
+      const up = keysUp();
+      if (up !== last) fn((last = up));
+    };
+    // Now, and again a frame later: whichever of this and the phone layer
+    // hears a resize first, the second look has both.
+    const twice = () => {
+      check();
+      requestAnimationFrame(check);
+    };
+    const soon = () => requestAnimationFrame(check);
+    const late = () => setTimeout(check, 60);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', twice);
+    vv?.addEventListener('scroll', twice);
+    addEventListener('resize', twice);
+    document.addEventListener('focusin', soon, true);
+    document.addEventListener('focusout', late, true);
+    const offPhone = window.marblePhone?.onKeyboard?.(check);
+    check();
+    return () => {
+      vv?.removeEventListener('resize', twice);
+      vv?.removeEventListener('scroll', twice);
+      removeEventListener('resize', twice);
+      document.removeEventListener('focusin', soon, true);
+      document.removeEventListener('focusout', late, true);
+      offPhone?.();
+    };
+  };
   const ensureThumb = (track) => {
     let thumb = track.querySelector(':scope > .seg-thumb');
     if (!thumb) {
@@ -778,6 +1065,16 @@
     if (!picker || picker.hidden) return;
     const segs = [...picker.querySelectorAll('.seg-opts')].filter((box) => !box.closest('.seg')?.hidden);
     const overflowed = () => picker.scrollWidth > picker.clientWidth + 1;
+    // Measuring unfolds every sheet and folds it back, and a fold left to its
+    // transition plays the sheet's exit: the options hang over the composer
+    // for a moment each time. Nothing here is a sheet opening or closing, so
+    // the closed ones measure without motion.
+    for (const box of segs) {
+      const menu = box.classList.contains('is-open') ? null : segMenuOf(box);
+      if (!menu) continue;
+      menu.style.transition = 'none';
+      requestAnimationFrame(() => requestAnimationFrame(() => { menu.style.transition = ''; }));
+    }
     for (const box of segs) {
       collapseSegBox(box);
       box.classList.remove('is-drop');
@@ -828,6 +1125,33 @@
       .sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
     for (const chip of chips) track.insertBefore(chip, more);
   };
+  /** The one word the packed control wears. The checked setup names itself;
+   *  nothing checked means the setup is not one of the saved ones — a model
+   *  tuned off its resting effort, or one chosen in the custom row — and the
+   *  word then has to be the model actually set. It used to fall back to the
+   *  first chip in the menu, which told everybody they were on Sonnet High
+   *  whatever they had picked. `data-custom` is written by markCustomSetup
+   *  just before this runs. */
+  const nameCurrentPreset = (track, more, menu) => {
+    const span = menu.querySelector('input:checked + span');
+    if (span) {
+      more.replaceChildren(span.cloneNode(true));
+      more.classList.add('is-current');
+      more.setAttribute('aria-label', `Setup: ${span.textContent.trim()}`);
+      return;
+    }
+    const label = track.dataset.custom || '';
+    if (!label) return;
+    // The same node a chip wears — a span holding the brand mark and the name
+    // — so a setup nobody saved reads at exactly the weight and size of one
+    // that is. BRAND is this file's own constant; the name is text.
+    const wrap = h('span');
+    wrap.innerHTML = BRAND[track.dataset.customBrand] ?? '';
+    wrap.append(document.createTextNode(label));
+    more.replaceChildren(wrap);
+    more.classList.add('is-current');
+    more.setAttribute('aria-label', `Setup: ${label}`);
+  };
   const fitPresets = (track) => {
     if (!track || track.hidden) return;
     const { more, menu } = ensurePresetOverflow(track);
@@ -852,12 +1176,7 @@
       more.hidden = false;
       track.classList.add('is-packed');
       for (const chip of all) menu.append(chip);
-      const span = menu.querySelector('input:checked + span') ?? menu.querySelector('span');
-      if (span) {
-        more.replaceChildren(span.cloneNode(true));
-        more.classList.add('is-current');
-        more.setAttribute('aria-label', `Setup: ${span.textContent.trim()}`);
-      }
+      nameCurrentPreset(track, more, menu);
       slideThumb(track, { animate: false });
       return;
     }
@@ -900,16 +1219,26 @@
         fitPresets(track);
         return;
       }
-      const span = menu.querySelector('input:checked + span');
-      if (span) {
-        more.replaceChildren(span.cloneNode(true));
-        more.classList.add('is-current');
-        more.setAttribute('aria-label', span.textContent.trim());
-      }
+      nameCurrentPreset(track, more, menu);
     }
     slideThumb(track, { animate: false });
   };
-  const PICKER_PROVIDER_ORDER = ['claude-subscription', 'cursor', 'claude-api'];
+  const PICKER_PROVIDER_ORDER = ['claude-subscription', 'claude-credit', 'codex', 'cursor', 'claude-api'];
+  // Starter credit (docs/ACCOUNTS.md). Connect your Claude is the sheet that
+  // signs a drive in to its person's own Claude plan; whatever draws it
+  // listens for this event and calls preventDefault. Answers whether it did.
+  const connectClaude = () => !document.dispatchEvent(new CustomEvent('marble:connect-claude', { cancelable: true }));
+  const dollars = (n) => {
+    const v = Math.max(0, Number(n) || 0);
+    return Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`;
+  };
+  /** "On Bryan's starter credit", or without a name when the drive has none. */
+  const creditWhose = (credit) => (credit?.by ? `On ${credit.by}\u2019s starter credit` : 'On starter credit');
+  const creditUsed = (credit) => (credit?.known ? `${dollars(credit.spent)} of ${dollars(credit.cap)} used` : 'How much is used can\u2019t be read right now.');
+  // Said once on this drive, the first time less than a dollar is left.
+  const CREDIT_LOW_SAID = 'marble-credit-low-said';
+  // At zero the sheet opens by itself, once a page: the note stays for later.
+  let creditSheetOpened = false;
   const sortProviders = (list) => {
     const rank = (id) => {
       const index = PICKER_PROVIDER_ORDER.indexOf(id);
@@ -933,16 +1262,26 @@
     // are about to talk to, not the company that made it.
     anthropic: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1.6c.5 0 .9.4.9.9v6.06l4.29-4.28a.9.9 0 0 1 1.27 1.27l-4.28 4.29h6.06a.9.9 0 0 1 0 1.8h-6.06l4.28 4.29a.9.9 0 1 1-1.27 1.27l-4.29-4.28v6.06a.9.9 0 0 1-1.8 0v-6.06l-4.29 4.28a.9.9 0 0 1-1.27-1.27l4.28-4.29H3.76a.9.9 0 0 1 0-1.8h6.06L5.54 5.55a.9.9 0 0 1 1.27-1.27l4.29 4.28V2.5c0-.5.4-.9.9-.9z"/></svg>',
     cursor: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.2 2.4 20.6 12 11.4 13.7 9.5 21.6z"/></svg>',
+    // Codex's own mark, a prompt in a cloud: like Claude's, it names the agent
+    // you are about to talk to rather than the company behind it.
+    codex: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M8.086.457a6.105 6.105 0 0 1 3.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 0 0 .107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198a5.62 5.62 0 0 1 .421 2.126 5.655 5.655 0 0 1-.18 1.631.167.167 0 0 0 .04.155 5.982 5.982 0 0 1 1.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 0 1-2.934 1.851.162.162 0 0 0-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 0 0-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 0 1-2.595-.622 6.058 6.058 0 0 1-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 0 1-.495-1.283 6.11 6.11 0 0 1-.017-3.064.166.166 0 0 0 .008-.074.115.115 0 0 0-.037-.064 5.958 5.958 0 0 1-1.38-2.202 5.196 5.196 0 0 1-.333-1.589 6.915 6.915 0 0 1 .188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 0 0 .087-.087A6.016 6.016 0 0 1 5.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 0 0-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 0 0 1.46.864l1.94-3.272a.849.849 0 0 0 .007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 0 0 0 1.695h4.848a.849.849 0 0 0 0-1.696h-4.848z"/></svg>',
   };
   const PRESETS = [
+    // Weakest first, which is the menu and the scrubber: a slider is pushed
+    // right to turn something up, so Fable sits at the right-hand end.
     // Opus Extra High is not a setup of its own any more: the scrubber tunes
     // effort on its own axis, so it is Opus with one press of ↑.
-    { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
-    { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus High', brand: 'anthropic' },
+    // Grok 4.7 rests on High. High Fast is the same model with fast on, and
+    // that stays a step on the effort slider rather than the saved setup.
     { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
-    { id: 'grok-xhigh', provider: 'cursor', model: 'cursor-grok-4.6', effort: 'xhigh', name: 'Grok Extra High', brand: 'cursor' },
+    { id: 'grok-high', provider: 'cursor', model: 'grok-4.7', effort: 'high', name: 'Grok 4.7 High', brand: 'cursor' },
+    // Codex's setup is the first model its catalog lists, which is the one it
+    // leads with; the name comes from the catalog too, so it moves with it.
+    { id: 'codex-high', provider: 'codex', model: '', effort: 'high', name: 'Codex High', brand: 'codex' },
+    { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus 5.5 High', brand: 'anthropic' },
+    { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
   ];
-  const EFFORT_WORD = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max' };
+  const EFFORT_WORD = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max', ultra: 'Ultra' };
   /** Every effort word stacked in one grid cell, only the current one lit.
    *  Two things fall out of that. The cell is always as wide as the longest
    *  word, so "Low" and "Extra High" take the same room and the model name
@@ -990,6 +1329,13 @@
     const name = String(preset?.name ?? '');
     return word && name.endsWith(` ${word}`) ? name.slice(0, -(word.length + 1)) : name;
   };
+  /** The same trim done to a catalog label. Cursor spells effort into the
+   *  model's own name ("Grok 4.7 High Fast"); effort is the other axis here
+   *  and says itself, so the model keeps only what names the model. */
+  const modelHead = (label) => String(label ?? '')
+    .replace(/\s+(Extra High|High|Medium|Low)(\s+Fast)?$/i, '')
+    .replace(/\s+Fast$/i, '')
+    .trim();
   const nextMode = (modes, current) => {
     const ids = (modes ?? []).map((item) => item.id);
     if (!ids.length) return current ?? '';
@@ -1023,27 +1369,31 @@
   const providerHue = (id) => {
     if (String(id).startsWith('claude')) return 1;
     if (id === 'cursor') return 0;
+    if (id === 'codex') return 3;
     return hueIndex(id);
   };
 
   const KNOWN_PROVIDERS = {
     'claude-subscription': 'Claude',
-    'claude-api': 'KIXLAB API',
+    'claude-api': 'Claude',
     'cursor': 'Cursor',
+    'codex': 'Codex',
   };
 
   const KNOWN_MODELS = [
-    ['sonnet', 'Sonnet'],
-    ['opus', 'Opus'],
-    ['haiku', 'Haiku'],
-    ['fable', 'Fable'],
+    ['sonnet', 'Sonnet 5'],
+    ['opus', 'Opus 5.5'],
+    ['haiku', 'Haiku 4.5'],
+    ['fable', 'Fable 5.1'],
   ];
 
   const providerLabel = (summary, labels) => {
     const id = summary?.provider;
     if (!id) return '';
     const listed = labels instanceof Map ? labels.get(id)?.label : '';
-    return listed || KNOWN_PROVIDERS[id] || id;
+    const name = listed || KNOWN_PROVIDERS[id] || id;
+    // One Claude either way; a conversation paid for by an API key says so.
+    return id === 'claude-api' ? `${name} · API` : name;
   };
 
   const modelLabel = (summary, labels) => {
@@ -1051,8 +1401,12 @@
     if (!id) return '';
     const models = labels instanceof Map ? labels.get(summary.provider)?.models : null;
     const named = models?.find((item) => item.id === id)?.label;
-    if (named) return named;
+    if (named) return modelHead(named) || named;
     const lower = String(id).toLowerCase();
+    const grok = lower.match(/grok[^\d]*(\d+(?:\.\d+)?)/);
+    if (grok) return `Grok ${grok[1]}`;
+    // Written the way Codex's catalog writes them: gpt-6-astra is GPT-6-Astra.
+    if (lower.startsWith('gpt-')) return `GPT-${String(id).slice(4).split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('-')}`;
     for (const [key, name] of KNOWN_MODELS) {
       if (lower === key || lower.includes(key)) return name;
     }
@@ -1133,7 +1487,9 @@
     [data-state="unseen"] .dot { background: var(--ink); }
     [data-state="failed"] .dot { background: var(--danger); }
     [data-state="working"] .dot { background: var(--accent-ink); animation: dot-breathe 1.6s ease-in-out infinite; }
-    [data-state="waiting"] .dot { background: var(--caution); animation: dot-ring 1.8s ease-out infinite; }
+    /* A ring, not a dot: needs you has to read apart from working by shape,
+       not only by colour. Heavier than idle's hairline, and it pulses. */
+    [data-state="waiting"] .dot { background: transparent; border: 2px solid var(--caution); animation: dot-ring 1.8s ease-out infinite; }
     @keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
     @keyframes dot-ring {
       0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--caution) 55%, transparent); }
@@ -1433,7 +1789,12 @@
       }
     };
     load();
-    timer = setInterval(load, 120_000);
+    // Only while someone is using the tab: a request is activity, and a meter
+    // polling from a forgotten tab would keep its sprite awake.
+    timer = setInterval(() => {
+      if (document.visibilityState === 'hidden' || window.marbleTabRest?.resting) return;
+      load();
+    }, 120_000);
     const onSaved = () => load();
     addEventListener('marble:agent-settings-saved', onSaved);
     return () => {
@@ -1445,7 +1806,12 @@
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const seconds = (ms) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`);
-  const firstSentence = (text) => String(text ?? '').split(/(?<=[.!?—])\s/)[0].replace(/\s*—\s*$/, '');
+  // What the progress card says (runtime/agent-words.js, loaded first). The
+  // host reads the same words into a chat's one-line status, so its row in
+  // every list says what its card says.
+  const {
+    firstSentence, docName, CHECK_WORDS, BUILD_WORDS, plainStep, askSay, askClosedSay, endSay, stuckWhy, failedLine,
+  } = globalThis.marbleAgentWords;
 
   /** What to send back for an ask. `picks` is a Map question → Set of labels.
    *  For a permission, `note === null` is Allow; any string is Deny with that
@@ -1470,6 +1836,7 @@
   const SHORT_NAMES = new Map([
     ['shell', 'Shell'], ['bash', 'Shell'], ['read_document', 'Read'], ['read', 'Read'],
     ['apply_ops', 'Edit'], ['edit', 'Edit'], ['updatetodos', 'Todos'], ['todowrite', 'Todos'], ['task', 'Task'],
+    ['fan_out', 'Change'],
   ]);
   const toolShortName = (name) => {
     if (!name) return 'Tool';
@@ -1486,6 +1853,11 @@
   const hostOf = (url) => { try { return new URL(url).host; } catch { return String(url ?? ''); } };
   const firstString = (input) => Object.values(input ?? {}).find((v) => typeof v === 'string' && v.trim()) ?? '';
 
+  const ACT_GERUND = {
+    press: 'Pressing', type: 'Typing in', set: 'Setting', move: 'Moving',
+    size: 'Resizing', remove: 'Removing', pick: 'Picking',
+  };
+
   /** One line per call: a verb, and the thing it touched. `source` is what a
    *  folded run lists; `short` is the kind it counts by. */
   function toolLabel(name, input = {}) {
@@ -1497,10 +1869,26 @@
         return out(`Read${where}${Array.isArray(input.ids) && input.ids.length ? ` · ${plural(input.ids.length, 'element')}` : ''}`, input.path ?? '');
       case 'apply_ops':
         return out(`Editing${where}${input.note ? ` — ${input.note}` : ''}`, input.path ?? '');
+      case 'fan_out': {
+        const n = Array.isArray(input.shards)
+          ? input.shards.reduce((sum, s) => sum + (Array.isArray(s?.ids) ? s.ids.length : 0), 0)
+          : 0;
+        return out(`Changing${where} · ${n ? plural(n, 'part') : 'parts'} side by side`, input.path ?? '');
+      }
+      // Operating, not authoring. The gesture vocabulary is closed, so the
+      // verb is a lookup; the control is an id until the act has run, and the
+      // app says its own name back in the result (see toolResult).
+      case 'act': {
+        const doing = ACT_GERUND[input.gesture] ?? 'Acting on';
+        return out(`${doing} ${input.id ?? 'a control'}`, input.path ?? '');
+      }
+      case 'read_affordances':
+        return out(`What${where} affords${Array.isArray(input.ids) && input.ids.length ? ` · ${plural(input.ids.length, 'element')}` : ''}`, input.path ?? '');
       case 'list_documents': return out('Listed documents');
       case 'create_document': return out(`Creating${where}`, input.path ?? '');
       case 'read_guide': return out(input.section ? `Read the guide · ${input.section}` : 'Read the guide', input.section ?? '');
       case 'check_document': return out(`Check${where}`, input.path ?? '');
+      case 'affordance_script': return out('Affordance script', Array.isArray(input.affords) ? input.affords.join(', ') : '');
       case 'browser_navigate': return out(input.url ? `Open ${input.url}` : 'Open page', hostOf(input.url));
       case 'browser_snapshot': return out('Snapshot page');
       case 'browser_click': return out(input.ref ? `Click ${input.ref}` : 'Click', input.ref ?? '');
@@ -1558,9 +1946,33 @@
     return choiceModule;
   };
 
+  // ------------------------------------------------------------ visuals
+
+  // The same arrangement for the card a ```marble-visual block becomes. The
+  // shell is built the moment the text renders; runtime/chat-visual.js — the
+  // sandboxed frame, the palette, the wire back to the composer — follows.
+  let visualModule = null;
+  const loadVisual = () => {
+    visualModule ??= import('/runtime/chat-visual.js').then((mod) => {
+      Object.assign(window.marbleAgentUI, {
+        readVisualInfo: mod.readVisualInfo,
+        maskStreamingVisuals: mod.maskStreamingVisuals,
+        visualDocument: mod.visualDocument,
+        VISUAL_CSS: mod.VISUAL_CSS,
+      });
+      return mod;
+    }).catch(() => null);
+    return visualModule;
+  };
+
   // ------------------------------------------------------------ tool runs
 
-  const foldable = (node) => node?.classList?.contains('tool') && node.dataset.state === 'done';
+  // A run of finished steps folds into "7 steps" because reads and greps are
+  // the agent's own business. An act is not: it happened in the person's
+  // document, by the person's app, and it keeps its line.
+  const foldable = (node) => node?.classList?.contains('tool')
+    && node.dataset.state === 'done'
+    && node.dataset.kind !== 'act';
 
   /** `Shell ×2 · Read harness.js, agents.mrbl +1 · Grep packFocus`. */
   function groupLabel(rows) {
@@ -1642,6 +2054,655 @@
     flush();
   }
 
+  // ------------------------------------------------------------ progress in plain words
+
+  // Two ways to watch a turn. Technical is the log above: every call, in the
+  // agent's own words. Simple — the default — is one card per turn that says
+  // where the work is (Explore, Build, Check, Done), what is happening now in
+  // a sentence anyone can read, and what is being made. The rows are still
+  // built underneath, so switching is a style, not a re-render. It is the
+  // reader's choice, not the conversation's: kept per browser, and every
+  // conversation on the page follows it.
+  // A chat opens on its last few turns; the rest arrive a few at a time as
+  // the reader scrolls up to them (server/agent/slice.js).
+  const TAIL_TURNS = 3;
+  const EARLIER_TURNS = 6;
+
+  // The end of each chat this tab has had open, as its last page left it.
+  // Every click in the tree is a new page, and a chat drawn from here appears
+  // with the page instead of a round trip later; what happened since arrives
+  // as events after the copy's last seq (the log is append-only, so that is
+  // the whole difference). Per tab, a few chats, none large.
+  const TAIL_KEY = 'marble-chat-tail:';
+  const TAILS_KEY = 'marble-chat-tails';
+  const TAIL_KEEP = 8;
+  const TAIL_MAX = 300_000;
+  // More new events than this since the copy, and the chat is drawn from its
+  // new end instead: laid over the copy they would be most of the work.
+  const CATCH_UP_MAX = 400;
+
+  const readTail = (id) => {
+    try {
+      const tail = JSON.parse(sessionStorage.getItem(TAIL_KEY + id) ?? 'null');
+      return tail?.v === 1 && tail.meta && Array.isArray(tail.events) && Number.isFinite(tail.seq) ? tail : null;
+    } catch {
+      return null;
+    }
+  };
+  const writeTail = (id, tail) => {
+    try {
+      const ids = JSON.parse(sessionStorage.getItem(TAILS_KEY) ?? '[]').filter((other) => other !== id);
+      const text = tail ? JSON.stringify({ v: 1, ...tail }) : '';
+      if (!text || text.length > TAIL_MAX) {
+        sessionStorage.removeItem(TAIL_KEY + id);
+      } else {
+        ids.push(id);
+        while (ids.length > TAIL_KEEP) sessionStorage.removeItem(TAIL_KEY + ids.shift());
+        sessionStorage.setItem(TAIL_KEY + id, text);
+      }
+      sessionStorage.setItem(TAILS_KEY, JSON.stringify(ids));
+    } catch { /* full, or private: the next page asks, as it always did */ }
+  };
+
+  const DETAIL_KEY = 'marble:chat-detail';
+  const readDetail = () => {
+    try { return localStorage.getItem(DETAIL_KEY) === 'technical' ? 'technical' : 'simple'; } catch { return 'simple'; }
+  };
+  const writeDetail = (mode) => {
+    try { localStorage.setItem(DETAIL_KEY, mode); } catch { /* private browsing: this page still follows */ }
+    dispatchEvent(new CustomEvent('marble:chat-detail', { detail: mode }));
+  };
+  addEventListener('storage', (event) => {
+    if (event.key === DETAIL_KEY) dispatchEvent(new CustomEvent('marble:chat-detail', { detail: readDetail() }));
+  });
+
+  const STAGES = [
+    { key: 'look', name: 'Explore', gist: 'Getting to know what is there' },
+    { key: 'build', name: 'Build', gist: 'Making the changes you asked for' },
+    { key: 'check', name: 'Check', gist: 'Making sure it works' },
+    { key: 'done', name: 'Done', gist: '' },
+  ];
+  const stageIndex = (key) => STAGES.findIndex((s) => s.key === key);
+
+  /** A plan the agent wrote down, as `{ text, status }` rows: Claude's
+   *  TodoWrite hands the list itself, Cursor's updateTodos a JSON preview. */
+  function readTodos(input = {}) {
+    let todos = input.todos;
+    let merge = Boolean(input.merge);
+    if (!Array.isArray(todos) && typeof input.preview === 'string') {
+      try {
+        const parsed = JSON.parse(input.preview);
+        todos = parsed.todos;
+        merge = Boolean(parsed.merge);
+      } catch { return null; }
+    }
+    if (!Array.isArray(todos)) return null;
+    const status = (s) => {
+      const word = String(s ?? '').toLowerCase();
+      if (word.includes('complet') || word === 'done') return 'done';
+      if (word.includes('progress') || word === 'active') return 'now';
+      if (word.includes('cancel')) return 'dropped';
+      return 'next';
+    };
+    return {
+      merge,
+      todos: todos.map((t) => ({
+        id: t.id ?? t.content,
+        text: String((status(t.status) === 'now' && t.activeForm) || t.content || '').trim(),
+        status: status(t.status),
+      })).filter((t) => t.text),
+    };
+  }
+
+  // Drawn, not named: a lens while it explores, blocks going up while it
+  // builds, a tick being drawn while it checks. CSS moves them.
+  const STAGE_GLYPHS = {
+    look: '<svg viewBox="0 0 24 24" aria-hidden="true"><g class="g-lens"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14.6 14.6 19 19" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></g></svg>',
+    build: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect class="g-b1" x="4" y="14" width="7" height="6" rx="1.4" fill="currentColor"/><rect class="g-b2" x="13" y="14" width="7" height="6" rx="1.4" fill="currentColor"/><rect class="g-b3" x="8.5" y="6.5" width="7" height="6" rx="1.4" fill="currentColor"/></svg>',
+    check: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".35"/><path class="g-tick" d="M7.8 12.4l2.8 2.8 5.6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    done: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="M7.8 12.4l2.8 2.8 5.6-6" fill="none" stroke="var(--card)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    failed: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="M12 7.5v5.5" stroke="var(--card)" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.4" r="1.3" fill="var(--card)"/></svg>',
+    stopped: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="currentColor"/><rect x="8.6" y="8.6" width="6.8" height="6.8" rx="1.2" fill="var(--card)"/></svg>',
+  };
+  STAGE_GLYPHS.ask = '<svg viewBox="0 0 24 24" aria-hidden="true"><g class="g-ask"><path d="M7 4h10a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3h-6l-4 3.5V15a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z" fill="currentColor"/><path d="M10.3 7.6a1.8 1.8 0 1 1 2.5 1.7c-.5.2-.8.6-.8 1.1v.3" fill="none" stroke="var(--card)" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12.4" r=".95" fill="var(--card)"/></g></svg>';
+  const DOC_GLYPH = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.5h4l2.5 2.5v6.5H3z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M7 1.5V4h2.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>';
+  const DETAIL_ICONS = {
+    simple: '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="3" cy="7" r="1.6" fill="currentColor"/><circle cx="7" cy="7" r="1.6" fill="currentColor" opacity=".6"/><circle cx="11" cy="7" r="1.6" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>',
+    technical: '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 4l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10.5h4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  };
+
+
+  // What an apply_ops call changes, read off its own ops: the few elements,
+  // each in the simplest words that still say what it is. An insert is named
+  // by its first heading or line and sized by what it holds; a style that
+  // sets a colour is that colour; a removal is a removal.
+  const COLOR = /#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/gi;
+  const colorsIn = (text) => [...new Set(String(text ?? '').match(COLOR) ?? [])].slice(0, 3);
+  const plainCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  function sketchHtml(html) {
+    const box = document.createElement('template');
+    box.innerHTML = String(html ?? '');
+    const root = box.content;
+    const heading = root.querySelector('h1, h2, h3, h4, h5, h6, legend, summary, [aria-label], label');
+    const lead = heading?.getAttribute?.('aria-label') || heading?.textContent || root.textContent || '';
+    const name = trimTo(lead, 40) || 'A new element';
+    const count = (sel) => root.querySelectorAll(sel).length;
+    const parts = [];
+    // The wrapper an insert arrives in is the element itself, not a group in it.
+    const top = new Set(root.children);
+    const groups = [...root.querySelectorAll('section, fieldset, ul, ol, table, .group, [class*="group"]')].filter((el) => !top.has(el)).length;
+    const items = count('li, tr, .item, [class*="item"]');
+    const boxes = count('input[type="checkbox"]');
+    const controls = count('button, input:not([type="checkbox"]), select, textarea');
+    const pictures = count('img, svg, canvas, video');
+    if (groups > 1) parts.push(plainCount(groups, 'group'));
+    if (items) parts.push(plainCount(items, 'item'));
+    if (boxes) parts.push(plainCount(boxes, 'tick box', 'tick boxes'));
+    if (controls) parts.push(plainCount(controls, 'control'));
+    if (pictures) parts.push(plainCount(pictures, 'picture'));
+    return { name, parts, colors: colorsIn(html) };
+  }
+
+  /** One apply_ops call → rows of `{ op: '+'|'~'|'-', text, colors, parts }`.
+   *  `nameOf(id)` names an element the page can see ("Research Garden"),
+   *  so a change to it says whose it was; it answers '' for any other. */
+  function readOps(ops, nameOf = () => '') {
+    const rows = [];
+    const removed = [];
+    let moved = 0;
+    const of = (id) => {
+      const name = nameOf(id);
+      return name ? ` of “${name}”` : '';
+    };
+    for (const op of Array.isArray(ops) ? ops : []) {
+      switch (op?.type) {
+        case 'insert': {
+          const { name, parts, colors } = sketchHtml(op.html);
+          rows.push({ op: '+', text: name, parts, colors });
+          break;
+        }
+        case 'setText': rows.push({ op: '~', text: `Text: “${trimTo(op.text, 48)}”` }); break;
+        case 'setInner': {
+          const { name, parts, colors } = sketchHtml(op.html);
+          const whose = nameOf(op.id);
+          rows.push({ op: '~', text: whose ? `Rewrote “${whose}”` : name === 'A new element' ? 'Rewrote an element' : `Rewrote ${name}`, parts, colors });
+          break;
+        }
+        case 'setAttr': {
+          const colors = colorsIn(op.value);
+          if (op.name === 'style' && colors.length) rows.push({ op: '~', text: `Colour${of(op.id)}`, colors });
+          else if (op.name === 'style') rows.push({ op: '~', text: `Look${of(op.id)}` });
+          else if (op.name === 'hidden') rows.push({ op: '~', text: `${op.value == null ? 'Showed' : 'Hid'}${of(op.id) ? ` “${nameOf(op.id)}”` : ' an element'}` });
+          else rows.push({ op: '~', text: `Setting: ${op.name}${of(op.id)}` });
+          break;
+        }
+        case 'remove': removed.push(nameOf(op.id)); break;
+        case 'move': moved += 1; break;
+        default:
+      }
+    }
+    if (moved) rows.push({ op: '~', text: `Moved ${plainCount(moved, 'element')}` });
+    if (removed.length === 1 && removed[0]) rows.push({ op: '-', text: `Took away “${removed[0]}”` });
+    else if (removed.length) rows.push({ op: '-', text: `Took away ${plainCount(removed.length, 'element')}` });
+    return rows;
+  }
+
+  /** What a permission would let the agent do, in a sentence. */
+  function plainAskOf(event) {
+    const input = event.input ?? {};
+    const tool = String(event.tool ?? '');
+    const what = input.description || '';
+    if (/^(Bash|Shell|shell)$/.test(tool)) return what ? `Run: ${trimTo(what, 70)}` : 'Run a command on your computer';
+    if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(tool)) return `Change ${tail(input.file_path ?? input.notebook_path ?? '')}`;
+    if (tool === 'WebFetch') return `Open ${hostOf(input.url)}`;
+    if (/send|email|message/i.test(tool)) return 'Send a message for you';
+    if (/delete|trash|remove/i.test(tool)) return 'Delete something';
+    return `Use ${event.displayName || toolShortName(tool)}`;
+  }
+
+  // What the person can do next, by how the turn stands. `send` says it for
+  // them, `draft` puts the caret in the box with a question, the rest act.
+  function nextSteps(state, ctx = {}) {
+    const doc = ctx.docs?.[0];
+    switch (state) {
+      case 'running': return { quiet: true, acts: [
+        { label: 'Add a note', kind: 'draft', placeholder: 'Tell it something while it works…' },
+        { label: 'Stop', kind: 'stop' },
+      ] };
+      case 'asking': return { q: 'Is that OK?', acts: [
+        { label: 'Allow once', kind: 'choose', value: 'allow', primary: true },
+        { label: 'Don’t allow', kind: 'choose', value: 'deny' },
+        { label: 'Ask why first', kind: 'send', text: 'Why do you need to do that, and what happens if I say no?' },
+      ] };
+      case 'completed': return doc
+        ? { q: 'How did it turn out?', acts: [
+          { label: `Open ${docName(doc)}`, kind: 'open', value: doc, primary: true },
+          { label: 'Looks good', kind: 'send', text: 'Looks good, thanks!' },
+          { label: 'Change something…', kind: 'draft', placeholder: 'What should be different?' },
+          ...(ctx.undoable ? [{ label: 'Undo', kind: 'undo' }] : []),
+        ] }
+        : { q: 'Was this what you needed?', acts: [
+          { label: 'Yes, thanks', kind: 'send', text: 'Yes, thanks!', primary: true },
+          { label: 'Save it as a note', kind: 'send', text: 'Save this as a note in my drive.' },
+          { label: 'Dig deeper…', kind: 'draft', placeholder: 'What should it look into more?' },
+        ] };
+      case 'declined': return { q: 'You said no, so it stopped there. What would you like instead?', acts: [
+        { label: 'Allow it and try again', kind: 'send', text: 'Go ahead, you can do that. Try again.', primary: true },
+        { label: 'Do it another way…', kind: 'draft', placeholder: 'How should it go about it instead?' },
+        { label: 'Leave it', kind: 'send', text: 'Let’s leave it there.' },
+      ] };
+      case 'failed': return { q: 'It hit a problem it couldn’t fix on its own. What would you like to do?', acts: [
+        { label: 'Try again', kind: 'send', text: 'Try that again.', primary: true },
+        { label: 'What went wrong?', kind: 'send', text: 'What went wrong, in plain words?' },
+        { label: 'Give it a hint…', kind: 'draft', placeholder: 'What should it try?' },
+        ...(ctx.undoable ? [{ label: 'Undo its changes', kind: 'undo' }] : []),
+      ] };
+      case 'cancelled': return { q: 'You stopped it partway. What next?', acts: [
+        { label: 'Keep going', kind: 'send', text: 'Keep going from where you stopped.', primary: true },
+        ...(ctx.undoable ? [{ label: 'Undo what it did', kind: 'undo' }] : []),
+        { label: 'Do something else…', kind: 'draft', placeholder: 'What should it do instead?' },
+      ] };
+      case 'interrupted': return { q: 'Marble restarted before it finished.', acts: [
+        { label: 'Pick up where it left off', kind: 'send', text: 'Pick up where you left off.', primary: true },
+        { label: 'What got done?', kind: 'send', text: 'What did you get done before you stopped?' },
+      ] };
+      default: return null;
+    }
+  }
+
+  // Patch a preview in place rather than redraw it. What is on screen stays
+  // put, a changed word is swapped where it stands, and only a node that was
+  // not there before gets data-enter, the one thing entrances key on.
+  const kindOf = (n) => (n.nodeType === 1 ? `${n.tagName}.${n.classList[0] ?? ''}#${n.dataset.k ?? ''}` : `#${n.nodeType}`);
+  function patchNode(have, want, enter) {
+    if (have.nodeType === 3) { if (have.data !== want.data) have.data = want.data; return; }
+    if (have.nodeType !== 1) return;
+    for (const a of [...have.attributes]) if (a.name !== 'data-enter' && !want.hasAttribute(a.name)) have.removeAttribute(a.name);
+    for (const a of [...want.attributes]) if (have.getAttribute(a.name) !== a.value) have.setAttribute(a.name, a.value);
+    patchChildren(have, want, enter);
+  }
+  function patchChildren(from, to, enter) {
+    const wanted = [...to.childNodes];
+    wanted.forEach((want, i) => {
+      const have = from.childNodes[i];
+      if (have && kindOf(have) === kindOf(want)) { patchNode(have, want, enter); return; }
+      const key = want.nodeType === 1 ? want.dataset.k : '';
+      const moved = key ? [...from.children].find((c, j) => j >= i && c.dataset.k === key) : null;
+      if (moved) { from.insertBefore(moved, have ?? null); patchNode(moved, want, enter); return; }
+      if (enter && want.nodeType === 1) want.setAttribute('data-enter', '');
+      from.insertBefore(want, have ?? null);
+    });
+    while (from.childNodes.length > wanted.length) from.lastChild.remove();
+  }
+  /** `build(root)` fills a scratch node; `el` is patched to match it. */
+  function morph(el, build, enter) {
+    const next = document.createElement('div');
+    build(next);
+    patchChildren(el, next, enter);
+  }
+
+
+  // ------------------------------------------------------------ v2: the work, shown
+  // The card is one line while it works (glyph, sentence, four stops, time),
+  // a live view under it drawn from what the agent is doing, a strip of
+  // frames for the steps it has finished, and at the end a receipt: what
+  // changed, what was checked, where the time went, and your call. Each view
+  // makes itself from its data and sets itself in place, so only what is new
+  // moves. The kit is small on purpose: the same kind of work always gets the
+  // same picture.
+  const wsvg = (d) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const WI = {
+    doc: wsvg('<path d="M4 1.8h5l3 3v9.4H4z"/><path d="M9 1.8v3h3"/>'),
+    search: wsvg('<circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3.3 3.3"/>'),
+    globe: wsvg('<circle cx="8" cy="8" r="5.8"/><path d="M2.2 8h11.6M8 2.2c-1.8 1.7-2.6 3.6-2.6 5.8s.8 4.1 2.6 5.8c1.8-1.7 2.6-3.6 2.6-5.8S9.8 3.9 8 2.2"/>'),
+    lock: wsvg('<rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/>'),
+    tick: wsvg('<path d="m3.5 8.5 3 3 6-7"/>'),
+    alert: wsvg('<circle cx="8" cy="8" r="5.8"/><path d="M8 5v3.6M8 11h0"/>'),
+    x: wsvg('<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>'),
+    arrowR: wsvg('<path d="M3 8h9.5M9.5 5l3 3-3 3"/>'),
+    reply: wsvg('<path d="M6.5 4 3 7.5 6.5 11"/><path d="M3.5 7.5h5.5a4 4 0 0 1 4 4v1"/>'),
+    drop: wsvg('<path d="M8 2.2c2.4 3 4 5.1 4 7.1a4 4 0 0 1-8 0c0-2 1.6-4.1 4-7.1z"/>'),
+    words: wsvg('<path d="M3 4.5h10M3 8h10M3 11.5h6"/>'),
+    layout: wsvg('<rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M5.5 5h5M5.5 7.5h5M5.5 10h3"/>'),
+    dots: wsvg('<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="8" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="11" r="1" fill="currentColor"/><circle cx="8" cy="11" r="1" fill="currentColor"/><circle cx="12" cy="11" r="1" fill="currentColor"/>'),
+    choose: wsvg('<path d="M5.5 2.5v7.2l1.8-1.6 1.3 3.2 1.5-.6-1.3-3.2 2.4-.2z"/>'),
+    pause: wsvg('<path d="M6 4v8M10 4v8"/>'),
+    plus: wsvg('<path d="M8 3.5v9M3.5 8h9"/>'),
+  };
+  const wesc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const wel = (html) => { const t = document.createElement('template'); t.innerHTML = String(html).trim(); return t.content.firstElementChild; };
+  const wflag = (n, name, on, value = '') => { if (!n) return; if (on) n.setAttribute(name, value); else n.removeAttribute(name); };
+  const wclock = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+  // Contrast is computed, never typed: a ratio on the screen is a claim.
+  const rgbCache = new Map();
+  function toRgb(color) {
+    const key = String(color ?? '').trim();
+    if (!key) return null;
+    if (rgbCache.has(key)) return rgbCache.get(key);
+    const probe = document.createElement('span');
+    probe.style.color = key;
+    if (!probe.style.color) { rgbCache.set(key, null); return null; }
+    probe.style.display = 'none';
+    document.documentElement.append(probe);
+    const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/.exec(getComputedStyle(probe).color);
+    probe.remove();
+    const rgb = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+    rgbCache.set(key, rgb);
+    return rgb;
+  }
+  const lin = (c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  function contrast(a, b) {
+    const x = toRgb(a); const y = toRgb(b);
+    if (!x || !y) return null;
+    const [hi, lo] = [lum(x), lum(y)].sort((p, q) => q - p);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  const verdict = (r) => (r == null ? '' : r >= 4.5 ? 'reads as text' : r >= 3 ? 'large text only' : 'too faint');
+
+  // Words, not characters: what a redline shows is which words went and came.
+  function wordDiff(before, after) {
+    const a = String(before ?? '').split(/(\s+)/).filter(Boolean);
+    const b = String(after ?? '').split(/(\s+)/).filter(Boolean);
+    if (a.length * b.length > 40000) return [['-', before], ['+', after]];
+    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = a.length - 1; i >= 0; i -= 1) for (let j = b.length - 1; j >= 0; j -= 1) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const out = [];
+    const push = (op, t) => { const last = out[out.length - 1]; if (last && last[0] === op) last[1] += t; else out.push([op, t]); };
+    let i = 0; let j = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] === b[j]) { push('=', a[i]); i += 1; j += 1; } else if (dp[i + 1][j] >= dp[i][j + 1]) { push('-', a[i]); i += 1; } else { push('+', b[j]); j += 1; }
+    }
+    while (i < a.length) { push('-', a[i]); i += 1; }
+    while (j < b.length) { push('+', b[j]); j += 1; }
+    // Long unchanged runs are cut to their ends, so the change is the line.
+    return out.map(([op, t]) => (op === '=' && t.length > 60 ? ['=', `${t.slice(0, 24)} … ${t.slice(-24)}`] : [op, t]));
+  }
+
+  // Test output, read for its counts. Node's runner, mocha, jest and pytest
+  // all say how many passed and failed in a line of their own.
+  function readTests(text) {
+    const s = String(text ?? '');
+    const num = (re) => { const m = re.exec(s); return m ? Number(m[1]) : null; };
+    const pass = num(/ℹ pass (\d+)/) ?? num(/(\d+) passing/) ?? num(/Tests?:\s+(?:\d+ failed, )?(\d+) passed/) ?? num(/(\d+) passed/);
+    const fail = num(/ℹ fail (\d+)/) ?? num(/(\d+) failing/) ?? num(/(\d+) failed/) ?? 0;
+    if (pass == null) return null;
+    const failLine = /✖ (?!failing tests)([^\n(]+)/.exec(s)?.[1]?.trim() ?? '';
+    return { passed: pass, failed: fail, total: pass + fail, failLine };
+  }
+
+  const WV = {};
+  WV.read = {
+    icon: 'doc', label: 'Reading',
+    make: (d) => wel(`<div class="v v-read">${d.items.map((x) => `<span class="v-read-c" data-k="${wesc(x)}">${WI.doc}${wesc(x)}</span>`).join('')}</div>`),
+    set(n, d, enter) { d.items.slice(n.children.length).forEach((x) => { const c = wel(`<span class="v-read-c" data-k="${wesc(x)}">${WI.doc}${wesc(x)}</span>`); wflag(c, 'data-enter', enter); n.append(c); }); },
+  };
+  // A colour is a swatch with the words on it and whether they read.
+  WV.swatch = {
+    icon: 'drop', label: 'Colour',
+    row(c) {
+      const chip = (color, isNew) => {
+        if (!color) return '<span class="v-sw-chip" data-none>—</span>';
+        const r = contrast(color, c.on || '#ffffff');
+        const inkOn = (contrast(color, '#ffffff') ?? 0) >= (contrast(color, '#111111') ?? 0) ? '#ffffff' : '#111111';
+        const asText = c.prop === 'color';
+        return `<span class="v-sw-chip"${isNew ? ' data-new' : ''} style="--c:${wesc(asText ? (c.on || '#ffffff') : color)};--t:${wesc(asText ? color : inkOn)}" title="${wesc(color)}">Aa<small>${r == null ? '' : `${r.toFixed(1)}:1<span class="v-sw-verdict"> ${verdict(r)}</span>`}</small></span>`;
+      };
+      return `<span class="v-sw-lab">${wesc(c.name)}</span>${chip(c.from)}<span class="v-sw-arrow">${WI.arrowR}</span>${chip(c.to, true)}`;
+    },
+    make: (d) => wel(`<div class="v v-sw"><div class="v-sw-rows">${d.rows.map((c) => WV.swatch.row(c)).join('')}</div></div>`),
+    set(n, d, enter) {
+      const rows = n.querySelector('.v-sw-rows');
+      const have = rows.children.length / 4;
+      d.rows.slice(have).forEach((c) => { const t = document.createElement('template'); t.innerHTML = WV.swatch.row(c); for (const x of [...t.content.children]) { wflag(x, 'data-enter', enter); rows.append(x); } });
+    },
+  };
+  WV.redline = {
+    icon: 'words', label: 'Words',
+    line: (l) => `<div class="v-red-item" data-k="${wesc(l.where)}${wesc(l.after).slice(0, 24)}">${l.where ? `<div class="v-red-where">${wesc(l.where)}</div>` : ''}<p class="v-red-text">${(l.before == null ? [['+', l.after]] : wordDiff(l.before, l.after)).map(([op, t]) => (op === '-' ? `<del>${wesc(t)}</del>` : op === '+' ? `<ins>${wesc(t)}</ins>` : wesc(t))).join('')}</p></div>`,
+    make: (d) => wel(`<div class="v v-red">${d.lines.slice(-3).map((l) => WV.redline.line(l)).join('')}</div>`),
+    set(n, d, enter) {
+      const want = d.lines.slice(-3).map((l) => wel(WV.redline.line(l)));
+      const next = document.createElement('div');
+      next.append(...want);
+      for (const node of next.children) if (![...n.children].some((c) => c.dataset.k === node.dataset.k)) wflag(node, 'data-enter', enter);
+      n.replaceChildren(...next.children);
+    },
+  };
+  // The page, drawn as blocks: what the agent added glows, the newest named.
+  WV.map = {
+    icon: 'layout', label: 'The page',
+    make(d) { const n = wel('<div class="v v-map"><div class="v-map-page"></div><ul class="v-map-list"></ul></div>'); WV.map.set(n, d, false); return n; },
+    set(n, d, enter) {
+      const page = n.querySelector('.v-map-page');
+      const list = n.querySelector('.v-map-list');
+      if (d.blocks) {
+        const have = new Map([...page.children].map((i) => [i.dataset.k, i]));
+        let prev = null;
+        for (const b of d.blocks) {
+          let i = have.get(b.k);
+          if (!i) { i = document.createElement('i'); i.dataset.k = b.k; wflag(i, 'data-enter', enter && b.fresh); }
+          i.style.setProperty('--h', `${b.h}px`);
+          wflag(i, 'data-fresh', b.fresh);
+          if (prev ? prev.nextElementSibling !== i : page.firstElementChild !== i) (prev ? prev.after(i) : page.prepend(i));
+          prev = i;
+          have.delete(b.k);
+        }
+        for (const gone of have.values()) gone.remove();
+      }
+      page.hidden = !d.blocks?.length;
+      const names = d.added.slice(-4);
+      const got = new Map([...list.querySelectorAll('li[data-k]')].map((li) => [li.dataset.k, li]));
+      for (const [k, li] of got) if (!names.some((a) => a.name === k)) li.remove();
+      for (const a of names) {
+        if (got.has(a.name)) continue;
+        const li = wel(`<li data-k="${wesc(a.name)}">${WI.plus}<span>${wesc(a.name)}</span>${a.parts?.length ? `<small>${wesc(a.parts.join(' · '))}</small>` : ''}</li>`);
+        wflag(li, 'data-enter', enter);
+        list.append(li);
+      }
+      let more = list.querySelector('.v-map-more');
+      if (d.added.length > names.length) { if (!more) { more = wel('<li class="v-map-more"></li>'); list.prepend(more); } more.textContent = `${d.added.length - names.length} earlier`; } else more?.remove();
+    },
+  };
+  WV.sources = {
+    icon: 'globe', label: 'Sources',
+    row: (r) => (r.q
+      ? `<div class="v-src-q" data-k="q${wesc(r.q)}">${WI.search}<span>${wesc(r.q)}</span></div>`
+      : `<div class="v-src-r" data-k="${wesc(r.site)}${wesc(r.t)}" data-st="${r.st}"><span class="v-fav" style="--h:${r.hue}">${wesc(r.site[0] ?? '?').toUpperCase()}</span><span class="v-src-t"><b>${wesc(r.t || r.site)}</b><small>${wesc(r.site)}</small></span><span class="v-src-st">${r.st === 'skip' ? `${WI.lock}Couldn’t open` : r.st === 'read' ? WI.tick : ''}</span></div>`),
+    make(d) { const n = wel('<div class="v v-src"></div>'); WV.sources.set(n, d, false); return n; },
+    set(n, d, enter) {
+      d.rows.slice(-5).forEach((r, i) => {
+        const next = wel(WV.sources.row(r));
+        const have = [...n.children].find((c) => c.dataset.k === next.dataset.k);
+        if (!have) { wflag(next, 'data-enter', enter); n.append(next); } else if (have.dataset.st !== next.dataset.st) { have.replaceWith(next); }
+      });
+      while (n.children.length > 5) n.firstElementChild.remove();
+    },
+  };
+  WV.tests = {
+    icon: 'dots', label: 'Tests',
+    make(d) {
+      const shown = Math.min(d.total, 120);
+      const n = wel(`<div class="v v-ts"><div class="v-ts-h"><b>${d.passed}</b> of ${d.total} passed${d.total > shown ? ` <small>(${shown} shown)</small>` : ''}</div><div class="v-ts-dots">${Array.from({ length: shown }, (_, i) => `<i data-st="${i < d.failed ? 'fail' : 'pass'}"></i>`).join('')}</div>${d.failed ? `<div class="v-ts-fail">${WI.x}<span>${wesc(d.failLine || `${plural(d.failed, 'test')} failed`)}</span></div>` : ''}</div>`);
+      return n;
+    },
+    set(n, d) { n.replaceWith(WV.tests.make(d)); },
+  };
+  WV.perm = {
+    icon: 'lock', label: 'Permission',
+    make: (d) => wel(`<div class="v v-pm"><p class="v-pm-t">${wesc(d.t)}</p>${d.rows.length ? `<div class="v-pm-rows">${d.rows.map((r) => `<div class="v-pm-r"><b>${wesc(r.k)}</b><span>${wesc(r.v)}</span></div>`).join('')}</div>` : ''}</div>`),
+    set() {},
+  };
+  WV.halt = {
+    icon: 'pause', label: 'Stopped',
+    make: (d) => wel(`<div class="v v-halt">${d.path ? `<div class="f-path"><span class="f-node">Agent</span><span class="f-link"><span>✕</span></span><span class="f-node stuck">${wesc(d.path)}</span></div>` : ''}<p>${wesc(d.line)}</p></div>`),
+    set() {},
+  };
+
+  /** A prompt another chat sent (server/agent/messages.js renders it): each
+   *  block's sender and body, without the reply instructions meant for the agent. */
+  function parseRelayed(text) {
+    const raw = String(text ?? '');
+    if (!raw.startsWith('Message from the conversation "')) return null;
+    const blocks = raw.split(/\n\n---\n\n/).map((block) => {
+      const m = /^Message from the conversation "([^"]*)" \(([^,)]+)[^)]*\):\n\n([\s\S]*?)\n\n(?:\[About: [^\]]*\]\n)?Reply with send_message[^\n]*$/.exec(block.trim());
+      return m ? { title: m[1], id: m[2], body: m[3].trim() } : null;
+    });
+    return blocks.every(Boolean) ? blocks : null;
+  }
+
+  /** The page this chat is on, as blocks: its top-level parts, sized by how
+   *  tall they are, each keyed by its id. Only for the document open here. */
+  function pageOutline() {
+    const root = document.querySelector('main[data-marble-id], article[data-marble-id]') ?? document.body;
+    let parts = [...root.children].filter((el) => el.dataset?.marbleId && !el.matches('script, style, marble-conversation, marble-agent-drawer') && el.getBoundingClientRect().height > 4);
+    // A page wrapped in one container is outlined by what is in it.
+    if (parts.length === 1 && parts[0].children.length > 1) parts = [...parts[0].children].filter((el) => el.dataset?.marbleId && el.getBoundingClientRect().height > 4);
+    const heights = parts.map((el) => el.getBoundingClientRect().height);
+    const total = heights.reduce((a, b) => a + b, 0) || 1;
+    return parts.slice(0, 24).map((el, i) => ({ k: el.dataset.marbleId, el, h: Math.max(3, Math.round((heights[i] / total) * 110)) }));
+  }
+
+  /** An element in the words it goes by: its label, its heading, or the start
+   *  of what it says, and what kind of thing it is when it says nothing. */
+  function partName(el) {
+    if (!el) return '';
+    const own = el.getAttribute?.('aria-label') || (el.matches?.('h1,h2,h3,h4,h5,h6') ? el.textContent : '') || el.querySelector?.('h1,h2,h3,h4,h5,h6,legend,summary')?.textContent || el.textContent || '';
+    const text = trimTo(own, 36);
+    if (text) return `“${text}”`;
+    return { H1: 'the heading', H2: 'a heading', H3: 'a heading', P: 'a paragraph', UL: 'a list', OL: 'a list', LI: 'a list item', IMG: 'a picture', BUTTON: 'a button', SECTION: 'a section', TABLE: 'a table', BODY: 'the page' }[el.tagName] ?? 'an element';
+  }
+  const styleColors = (value) => {
+    const out = [];
+    for (const m of String(value ?? '').matchAll(/(^|;)\s*(color|background(?:-color)?|border(?:-color)?|fill|stroke)\s*:\s*([^;]+)/gi)) {
+      const c = colorsIn(m[3])[0] ?? (toRgb(m[3].trim()) ? m[3].trim() : null);
+      if (c) out.push({ prop: m[2].toLowerCase().startsWith('background') ? 'background' : m[2].toLowerCase(), color: c });
+    }
+    return out;
+  };
+  const cssProp = { background: 'backgroundColor', color: 'color', border: 'borderTopColor', 'border-color': 'borderTopColor', fill: 'fill', stroke: 'stroke' };
+
+  /** One apply_ops call, read for what it changes. `find(id)` is the element
+   *  on this page, before the ops land, or null for another document's.
+   *  Returns rows for the receipt and the data the live views draw. */
+  function readWork(ops, find = () => null) {
+    const work = { rows: [], added: [], colors: [], lines: [] };
+    for (const op of Array.isArray(ops) ? ops : []) {
+      const el = op?.id ? find(op.id) : null;
+      const name = partName(el);
+      switch (op?.type) {
+        case 'insert': {
+          const { name: added, parts } = sketchHtml(op.html);
+          work.added.push({ name: added, parts });
+          work.rows.push({ key: `+${added}`, op: '+', label: `Added ${added}`, parts });
+          break;
+        }
+        case 'setText':
+        case 'setInner': {
+          const before = el ? (el.textContent ?? '').replace(/\s+/g, ' ').trim() : null;
+          const after = op.type === 'setText' ? String(op.text ?? '') : (() => { const t = document.createElement('template'); t.innerHTML = String(op.html ?? ''); return t.content.textContent ?? ''; })().replace(/\s+/g, ' ').trim();
+          if (before === after) break;
+          const where = name || 'Some words';
+          work.lines.push({ where, before, after });
+          work.rows.push({ key: `~w${op.id}`, op: '~', label: `Words in ${where}`, before, after });
+          break;
+        }
+        case 'setAttr': {
+          const found = op.name === 'style' ? styleColors(op.value) : [];
+          if (found.length) {
+            const style = el ? getComputedStyle(el) : null;
+            for (const { prop, color } of found) {
+              const from = style ? style[cssProp[prop] ?? 'color'] : null;
+              const on = prop === 'color' && el ? getComputedStyle(el.parentElement ?? el).backgroundColor : null;
+              const onColor = on && !/rgba\(0, 0, 0, 0\)|transparent/.test(on) ? on : '#ffffff';
+              const label = `${prop === 'background' ? 'Fill' : prop === 'color' ? 'Text colour' : 'Colour'} of ${name || 'an element'}`;
+              work.colors.push({ name: name || 'Colour', prop, from, to: color, on: onColor });
+              work.rows.push({ key: `~c${op.id}${prop}`, op: '~', label, from, to: color });
+            }
+          } else {
+            const what = op.name === 'style' ? 'Look' : op.name === 'hidden' ? (op.value == null ? 'Showed' : 'Hid') : `Setting “${op.name}”`;
+            work.rows.push({ key: `~a${op.id}${op.name}`, op: '~', label: op.name === 'hidden' ? `${what} ${name || 'an element'}` : `${what} of ${name || 'an element'}` });
+          }
+          break;
+        }
+        case 'remove': work.rows.push({ key: `-${op.id}`, op: '-', label: `Took away ${name || 'an element'}` }); break;
+        case 'move': work.rows.push({ key: `m${op.id}`, op: '~', label: `Moved ${name || 'an element'}` }); break;
+        default:
+      }
+    }
+    return work;
+  }
+
+  // The kit's rules stand alone, so the island a page shows while the chat
+  // is closed can draw a live view with the same look.
+  const WORK_VIEW_CSS = `
+    .v { --agent: color-mix(in srgb, #6d55d4 78%, var(--ink)); }
+    /* The kit. Every view is rows or a picture, never a box in the card. */
+    .v { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12.5px; }
+    .v-read { flex-direction: row; flex-wrap: wrap; gap: 4px 6px; }
+    .v-read-c { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--paper-2); font-size: 12px; }
+    .v-read-c svg { width: 11px; height: 11px; color: var(--accent-ink); }
+    .v-sw-rows { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) 16px minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+    .v-sw-lab { font-size: 12px; color: var(--muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-sw-chip { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 34px; padding: 0 9px; border-radius: 8px; background: var(--c); color: var(--t); font-weight: 600; font-size: 14px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); min-width: 0; }
+    .v-sw-chip[data-none] { background: none; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); font-weight: 400; }
+    .v-sw-chip small { font-weight: 500; font-size: 10.5px; text-align: right; opacity: .95; overflow: hidden; }
+    .v-sw-verdict { display: block; }
+    .v-sw-arrow { color: var(--faint); display: grid; place-items: center; }
+    .v-sw-arrow svg { width: 14px; height: 14px; }
+    .v-red-item { display: flex; flex-direction: column; gap: 2px; }
+    .v-red-item + .v-red-item { border-top: 1px solid var(--paper-3); padding-top: 6px; }
+    .v-red-where { font-size: 12px; color: var(--muted); }
+    .v-red-text { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .v-map { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: start; }
+    .v-map-page { display: flex; flex-direction: column; gap: 3px; padding: 6px 5px; border-radius: 5px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+    .v-map-page[hidden] { display: none; }
+    .v-map:has(.v-map-page[hidden]) { grid-template-columns: minmax(0, 1fr); }
+    .v-map-page i { display: block; height: var(--h, 4px); border-radius: 2px; background: var(--paper-3); transition: background-color .4s var(--settle), box-shadow .4s var(--settle); }
+    .v-map-page i[data-fresh] { background: color-mix(in srgb, var(--agent) 32%, var(--card)); box-shadow: inset 0 0 0 1.5px var(--agent); }
+    .v-map-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .v-map-list li { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; font-size: 12.5px; flex-wrap: wrap; }
+    .v-map-list li + li { border-top: 1px solid var(--paper-3); }
+    .v-map-list li svg { width: 11px; height: 11px; color: #3f8a5c; flex: none; transform: translateY(1px); }
+    .v-map-list small { color: var(--muted); font-size: 12px; }
+    .v-map-more { color: var(--faint); font-size: 12px; }
+    .v-src { gap: 0; }
+    .v-src-r, .v-src-q { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; }
+    .v-src > * + * { border-top: 1px solid var(--paper-3); }
+    .v-src-q { grid-template-columns: 22px minmax(0, 1fr); color: var(--muted); }
+    .v-src-q svg { width: 13px; height: 13px; justify-self: center; }
+    .v-fav { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: hsl(var(--h) 45% 48%); color: #fff; font-weight: 700; font-size: 11px; }
+    .v-src-t { min-width: 0; display: flex; flex-direction: column; }
+    .v-src-t b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-src-t small { color: var(--faint); font-size: 12px; }
+    .v-src-st { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--faint); }
+    .v-src-st svg { width: 12px; height: 12px; }
+    .v-src-r[data-st="skip"] .v-src-st { color: var(--danger); }
+    .v-src-r[data-st="read"] .v-src-st { color: #3f8a5c; }
+    .v-ts-h { font-size: 12.5px; color: var(--muted); }
+    .v-ts-h b { color: var(--ink); font-size: 15px; margin-right: 2px; }
+    .v-ts-dots { display: flex; flex-wrap: wrap; gap: 3px; }
+    .v-ts-dots i { width: 8px; height: 8px; border-radius: 50%; background: #3f8a5c; }
+    .v-ts-dots i[data-st="fail"] { background: var(--danger); }
+    .v-ts-fail { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--danger); }
+    .v-ts-fail svg { width: 12px; height: 12px; flex: none; margin-top: 2px; }
+    .v-pm-t { margin: 0; font-size: 13px; color: var(--ink); }
+    .v-pm-rows { display: flex; flex-direction: column; }
+    .v-pm-r { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; padding: 3px 0; font-size: 12px; }
+    .v-pm-r + .v-pm-r { border-top: 1px solid var(--paper-3); }
+    .v-pm-r b { font-weight: 500; color: var(--muted); }
+    .v-pm-r span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-halt p { margin: 0; font-size: 12.5px; color: var(--muted); }
+    .f-path { display: flex; align-items: center; }
+    .f-node { display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 8px; background: var(--paper-2); font-weight: 500; font-size: 12px; }
+    .f-node.stuck { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
+    .f-link { flex: 1; min-width: 24px; position: relative; height: 2px; margin: 0 6px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
+    .f-link span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; background: var(--danger); color: var(--card); }
+    .v-red-text del { color: var(--danger); text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+    .v-red-text ins { text-decoration: none; color: var(--ink); background: color-mix(in srgb, #3f8a5c 16%, transparent); border-radius: 3px; padding: 0 2px; }
+  `;
+
   // ------------------------------------------------------------ the view
 
   // The ask card's rules stand alone so a page drawing the card outside a
@@ -1702,7 +2763,7 @@
     :host([data-chrome="callout"]) .mast:not(:has(.tag)) { display: none; }
     :host([data-chrome="callout"]) .heading,
     :host([data-chrome="callout"]) .target-jump,
-    :host([data-chrome="callout"]) .zone-jump,
+    :host([data-chrome="callout"]) .zone-row,
     :host([data-chrome="callout"]) .also { display: none; }
     :host([data-chrome="callout"]) .log { flex: 0 1 auto; padding: 6px 12px calc(10px + var(--queued-space, 0px)); max-height: min(50vh, 360px); overflow-y: auto; }
     :host([data-chrome="callout"][data-folded]) .log { display: none; }
@@ -1775,8 +2836,20 @@
     .msg.me:first-child { margin-top: 4px; }
     /* A bubble that another agent wrote, not the person: same paper, marked
        down its edge so the transcript reads as one column with a visible
-       seam where someone else spoke. */
-    .msg.me.from-agent { border-left: 2px solid var(--accent-ink); }
+       seam where someone else spoke. The mark is a clean bar, not a border:
+       a border-left on a 10px bubble bent round both corners, and a corner
+       belongs to the bubble, not to what is drawn on it. So it is a straight
+       bar with square ends, lifted inside the edge and stopped a radius short
+       of each end — the same rule a library row wears for its folder. The
+       words' indent is derived from the bar, never typed. */
+    .msg.me.from-agent {
+      --rule-w: 3px; --rule-in: 6px; --rule-gap: 8px;
+      padding-left: calc(var(--rule-in) + var(--rule-w) + var(--rule-gap));
+      background-image: linear-gradient(var(--accent-ink), var(--accent-ink));
+      background-repeat: no-repeat;
+      background-size: var(--rule-w) calc(100% - 20px);
+      background-position: var(--rule-in) center;
+    }
     /* The whole row opens the sending conversation, not just the name in it. */
     .msg.me .from { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; cursor: pointer; }
     .msg.me .from button { all: unset; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); }
@@ -1788,6 +2861,29 @@
     .msg.agent code { font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--paper-2); padding: 1px 4px; border-radius: 4px; }
     .msg.agent pre { background: var(--paper-2); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
     .msg.agent pre code { background: none; padding: 0; }
+    .msg.agent li + li { margin-top: .15em; }
+    .msg.agent .loose > li + li { margin-top: .5em; }
+    .msg.agent li > ul, .msg.agent li > ol { margin: .15em 0 .25em; }
+    .msg.agent li > p { margin: .35em 0 0; }
+    .md-task { list-style: none; margin-left: -1.25em; }
+    .md-task::before { content: '☐'; display: inline-block; width: 1.25em; color: var(--muted); }
+    .md-task[data-done="true"]::before { content: '☑'; }
+    /* A heading is a section of one reply: a step of weight and a little air
+       above, never a title. */
+    .msg .md-h { font-size: 1em; font-weight: 600; line-height: 1.35; margin: 1em 0 .35em; color: var(--ink); }
+    .msg .md-h[data-level="1"] { font-size: 1.14em; }
+    .msg .md-h[data-level="2"] { font-size: 1.07em; }
+    .msg .md-h[data-level="4"] { color: var(--muted); }
+    .msg .md-h:first-child { margin-top: 0; }
+    .msg.agent hr { border: 0; border-top: 1px solid var(--line); margin: .9em 0; }
+    .msg.agent blockquote { margin: .25em 0 .6em; padding: 0 0 0 12px; color: var(--muted); box-shadow: inset 3px 0 0 var(--line); }
+    .msg.agent del { color: var(--muted); }
+    .md-table { overflow-x: auto; margin: .35em 0 .7em; border: 1px solid var(--line); border-radius: 8px; }
+    .md-table table { border-collapse: collapse; width: 100%; font-size: 13px; line-height: 1.45; }
+    .md-table th, .md-table td { text-align: left; vertical-align: top; padding: 6px 10px; overflow-wrap: normal; min-width: 8ch; }
+    .md-table th { font-weight: 600; background: var(--paper-2); border-bottom: 1px solid var(--line); }
+    .md-table tr + tr td { border-top: 1px solid var(--line); }
+    .md-table th + th, .md-table td + td { border-left: 1px solid var(--line); }
     .msg.agent a { color: var(--accent-ink); }
     .tool { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: var(--muted); padding: 1px 2px 1px 2px; }
     .tool::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); transform: translateY(-1px); }
@@ -1818,13 +2914,16 @@
       transition: background-color .13s var(--snap), color .13s var(--snap);
     }
     .zone-jump[hidden] { display: none; }
+    .zone-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    .zone-row[hidden] { display: none; }
+    .zone-row .zone-jump { min-width: 0; }
     .zone-jump:hover { background: color-mix(in srgb, var(--zone-mark) 18%, transparent); color: var(--zone-mark); }
     .zone-jump:focus-visible { outline: 2px solid var(--zone-mark); outline-offset: 2px; }
     .zone-jump .zone-live { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--zone-mark); animation: pulse 1.2s var(--snap) infinite; }
     .zone-jump .zone-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .zone-jump .zone-go { flex: none; opacity: .72; }
     /* A pane hides its mast when there is nothing on it; a live zone is something. */
-    :host([data-chrome="pane"]) .mast:not([hidden]):has(.zone-jump:not([hidden])) { display: flex; }
+    :host([data-chrome="pane"]) .mast:not([hidden]):has(.zone-row:not([hidden])) { display: flex; }
     @media (prefers-reduced-motion: reduce) { .zone-jump .zone-live { animation: none; } }
     ${ASK_CSS}
     .tool[data-state="failed"] { color: var(--danger); } .tool[data-state="failed"]::before { background: var(--danger); }
@@ -1834,7 +2933,212 @@
     .turn-footer button { font: inherit; color: var(--accent-ink); background: none; border: 0; padding: 2px 6px; margin: -2px -6px; border-radius: 6px; cursor: pointer; }
     .turn-footer button:hover { background: var(--accent-soft); }
     .turn-footer button:disabled { color: var(--faint); cursor: default; }
+    /* Above the first turn drawn, when there are turns above it: the footer's
+       text button, set where a system line sits. Usually fetched before it
+       is reached; there for a reader who gets there first. */
+    .earlier { align-self: center; font: inherit; font-size: 12px; color: var(--accent-ink); background: none; border: 0; padding: 4px 8px; margin: 2px 0 10px; border-radius: 6px; cursor: pointer; }
+    .earlier:hover { background: var(--accent-soft); }
+    .earlier:disabled { color: var(--faint); background: none; cursor: default; }
     .turn-footer .watch { color: var(--caution); }
+    /* Simple: the rows are still built and stand back behind the card. An
+       act keeps its line, because it happened in the person's own app. A
+       refusal and a permission prompt are said by the card, in words, with
+       what to do about them; so is Undo, which is one of the card's answers. */
+    .log[data-detail="simple"] > .tool:not([data-reveal]):not([data-kind="act"]),
+    .log[data-detail="simple"] > .tool-group:not([data-reveal]),
+    .log[data-detail="simple"] > .ask:not([data-kind="question"]):not([data-reveal]) { display: none; }
+    .log[data-detail="technical"] > .progress { display: none; }
+    .log[data-detail="simple"] > .turn-footer[data-plain] > :not(.watch, .restore) { display: none; }
+    .log[data-detail="simple"] > .turn-footer[data-plain]:not(:has(.watch)) { display: none; }
+    /* Another chat's message is its words; in Simple, three lines, and a tap for the rest. */
+    .log[data-detail="simple"] .msg.me[data-relayed]:not([data-open]) .msg-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+    /* The turn is the card: one surface, nothing boxed inside it. Live, it is
+       a white sheet with an edge; done, it sits down into the log as the
+       prompt's paper-2, with no edge, and what is inside steps to paper. */
+    .progress {
+      --p-ink: var(--accent-ink);
+      --agent: color-mix(in srgb, #6d55d4 78%, var(--ink));
+      container-type: inline-size;
+      display: flex; flex-direction: column; gap: 9px;
+      margin: 4px 0 8px; padding: 10px 11px 11px;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--card); box-shadow: var(--shadow-rest);
+      font-size: 13px; line-height: 1.4;
+      transition: background-color .3s var(--settle), border-color .3s var(--settle), box-shadow .3s var(--settle);
+    }
+    .progress:not([data-state="running"]):not([data-state="asking"]) {
+      box-shadow: none; border-color: transparent; background: var(--paper-2);
+    }
+    .progress[data-state="failed"] { --p-ink: var(--danger); }
+    .progress:is([data-state="cancelled"], [data-state="interrupted"], [data-state="declined"]) { --p-ink: var(--faint); }
+    .progress[data-state="asking"] {
+      --p-ink: var(--caution);
+      border-color: color-mix(in srgb, var(--caution) 55%, var(--line));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--caution) 14%, transparent), var(--shadow-rest);
+    }
+
+    /* One line: the glyph, what is happening, the four stops, the time. */
+    .w-tick { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .w-glyph { flex: none; width: 22px; height: 22px; display: grid; place-items: center; color: var(--p-ink); }
+    .w-glyph svg { width: 18px; height: 18px; overflow: visible; display: block; }
+    .w-say { flex: 1; min-width: 0; font-weight: 500; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w-time { flex: none; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+    .w-stops { flex: none; display: grid; grid-template-columns: repeat(4, 9px); gap: 2px; }
+    .w-stops i { height: 4px; border-radius: 2px; background: var(--line); transition: background-color .4s var(--snap); }
+    .w-stops i[data-at="past"] { background: var(--p-ink); }
+    .w-stops i[data-at="now"] { background: var(--p-ink); animation: w-breathe 1.6s var(--snap) infinite; }
+    .progress:not([data-state="running"]):not([data-state="asking"]) .w-stops { display: none; }
+    @keyframes w-breathe { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+    .progress[data-state="running"] .g-lens { animation: lens-scan 2.6s ease-in-out infinite; }
+    .progress[data-state="running"] :is(.g-b1, .g-b2, .g-b3) { transform-box: fill-box; animation: block-drop 2.4s var(--settle) infinite; }
+    .progress[data-state="running"] .g-b2 { animation-delay: .22s; }
+    .progress[data-state="running"] .g-b3 { animation-delay: .44s; }
+    .g-tick { stroke-dasharray: 16; }
+    .progress[data-state="running"] .g-tick { animation: tick-draw 1.9s var(--snap) infinite; }
+    .progress[data-state="asking"] .g-ask { transform-box: fill-box; transform-origin: 30% 100%; animation: ask-nudge 2s var(--settle) infinite; }
+    @keyframes lens-scan { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(2px, -1.5px); } 50% { transform: translate(0, -2.5px); } 75% { transform: translate(-2px, -1px); } }
+    @keyframes block-drop { 0% { transform: translateY(-8px); opacity: 0; } 22%, 78% { transform: none; opacity: 1; } 100% { transform: none; opacity: 0; } }
+    @keyframes tick-draw { 0% { stroke-dashoffset: 16; } 45%, 85% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+    @keyframes ask-nudge { 0%, 60%, 100% { transform: none; } 70% { transform: rotate(-8deg); } 80% { transform: rotate(6deg); } 90% { transform: rotate(-3deg); } }
+
+    /* The live view: what is happening now, on the card, no taller than it needs. */
+    .w-live { display: flex; flex-direction: column; gap: 7px; max-height: 260px; overflow: hidden; }
+    .w-live[hidden] { display: none; }
+    .w-vh { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--muted); }
+    .w-vh svg { flex: none; width: 13px; height: 13px; color: var(--p-ink); }
+    .w-vh b { font-weight: 600; color: var(--ink); white-space: nowrap; }
+    .w-vname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w-vbtns { margin-left: auto; display: flex; gap: 2px; }
+    .w-vb { appearance: none; border: 0; background: none; color: var(--faint); font: inherit; font-size: 12px; padding: 2px 6px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+    .w-vb svg { width: 11px; height: 11px; color: currentColor; }
+    .w-vb:hover { background: var(--paper-2); color: var(--ink); }
+    .w-cap { margin: 0; font-size: 12px; color: var(--muted); }
+    .w-cap:empty { display: none; }
+    .w-back { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .w-back[hidden] { display: none; }
+    .w-back button { appearance: none; border: 0; background: none; color: var(--accent-ink); font: inherit; font-size: 12px; padding: 0; cursor: pointer; }
+
+    /* A drawing: the widget a small model draws from the turn's steps
+       (server/agent/drawer.js). Once there is one it is the card's picture,
+       and the kit's own view gives way to it. */
+    .w-drawn { min-height: 0; }
+    .w-drawn[hidden] { display: none; }
+    .w-drawn .visual-frame { display: block; width: 100%; height: 72px; max-height: 300px; border: 0; border-radius: 0; background: transparent; transition: height 300ms var(--settle); }
+    .progress[data-drawn] .w-live { display: none; }
+    .progress[data-drawn]:not([data-state="running"]):not([data-state="asking"]) .w-receipt { display: none; }
+
+    /* Frames: each finished step, the size of a thumbnail. Not shown: the
+       card is the latest state, never a strip of earlier ones. The plan they
+       hold still steers the live view. */
+    .w-strip, .progress .w-strip-h { display: none !important; }
+    .w-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 6px; }
+    /* "Steps" names the strip only once the turn is over and it is a record. */
+    .w-strip:empty, .progress .w-strip-h { display: none; }
+    .progress:not([data-state="running"]):not([data-state="asking"]):not([data-old]) .w-strip-h:has(+ .w-strip:not(:empty)) { display: flex; }
+    .w-frame { appearance: none; border: 0; padding: 0; background: none; font: inherit; color: var(--muted); cursor: pointer; display: flex; flex-direction: column; gap: 3px; text-align: left; min-width: 0; }
+    .w-thumb { position: relative; height: 40px; border-radius: 6px; background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+    .w-thumb > .w-shrink { position: absolute; left: 4px; top: 4px; width: 280px; zoom: .19; pointer-events: none; }
+    .w-frame:hover .w-thumb { box-shadow: inset 0 0 0 1px var(--muted); }
+    .w-frame[data-on] .w-thumb { box-shadow: inset 0 0 0 2px var(--p-ink); }
+    .w-frame[data-st="todo"] { cursor: default; }
+    .w-frame[data-st="todo"] .w-thumb { background: none; box-shadow: inset 0 0 0 1px var(--line); }
+    .w-frame[data-st="now"] .w-thumb { box-shadow: inset 0 0 0 1.5px var(--p-ink); }
+    .w-frame[data-st="halt"] .w-thumb { box-shadow: inset 0 0 0 1px var(--faint); }
+    .w-flab { font-size: 12px; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .w-frame[data-st="todo"] .w-flab { color: var(--faint); }
+    .w-fnum { font-variant-numeric: tabular-nums; color: var(--faint); margin-right: 3px; }
+    .w-foot { display: flex; align-items: center; gap: 2px; margin: -4px -4px -4px -6px; }
+    .w-steer { display: flex; gap: 2px; margin-left: auto; }
+    .w-quiet { flex: none; appearance: none; border: 0; background: none; color: var(--faint); font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+    .w-quiet:hover { background: var(--paper-2); color: var(--ink); }
+    .w-quiet[aria-expanded="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+    .w-quiet:focus-visible, .w-vb:focus-visible, .w-frame:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+
+    /* The receipt: sections of rows with a hairline between, nothing boxed. */
+    .w-receipt { display: flex; flex-direction: column; gap: 12px; }
+    .w-receipt[hidden] { display: none; }
+    .w-sec { display: flex; flex-direction: column; gap: 6px; }
+    .w-sec-h { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
+    .w-docs { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; font-weight: 400; }
+    .w-sec-h .w-review { font-weight: 400; margin-left: auto; }
+    .w-docs + .w-review { margin-left: 0; }
+    .w-cm { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; align-items: start; }
+    .w-cm.w-cm-flat { grid-template-columns: minmax(0, 1fr); }
+    .w-mini { display: flex; flex-direction: column; gap: 3px; padding: 5px 4px; border-radius: 4px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+    .w-mini i { display: block; height: var(--h, 4px); border-radius: 2px; background: var(--paper-3); }
+    .w-mini i[data-pin] { background: color-mix(in srgb, var(--agent) 32%, var(--card)); box-shadow: inset 0 0 0 1.5px var(--agent); }
+    .w-changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .w-change { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 4px 0; font-size: 12.5px; min-width: 0; }
+    .w-change + .w-change { border-top: 1px solid var(--paper-3); }
+    .w-cn { flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 600; background: color-mix(in srgb, var(--agent) 16%, var(--card)); color: var(--agent); }
+    .w-change[data-op="minus"] .w-cn { background: color-mix(in srgb, var(--danger) 12%, var(--card)); color: var(--danger); }
+    .w-ct { flex: 1; min-width: 0; line-height: 1.35; display: flex; flex-direction: column; gap: 1px; }
+    .w-cwords { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w-cwords del, .v-red-text del { color: var(--danger); text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+    .w-cwords ins, .v-red-text ins { text-decoration: none; color: var(--ink); background: color-mix(in srgb, #3f8a5c 16%, transparent); border-radius: 3px; padding: 0 2px; }
+    .w-cfig { flex: none; display: inline-flex; align-items: center; gap: 3px; margin-top: 2px; }
+    .w-cfig svg { width: 10px; height: 10px; color: var(--faint); }
+    .w-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); display: inline-block; }
+    .w-kept { margin: 0; font-size: 12px; color: var(--muted); }
+    .w-proof { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; }
+    .w-proof-fig { position: relative; height: 58px; border-radius: 6px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+    .w-proof-fig > .w-shrink { position: absolute; left: 4px; top: 4px; width: 280px; zoom: .315; pointer-events: none; }
+    .w-proof-line { font-size: 12.5px; color: var(--ink); }
+    .w-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 2px; }
+    .w-bar i { display: block; height: 100%; border-radius: 2px; }
+    .w-bar i[data-k="look"] { background: var(--paper-3); box-shadow: inset 0 0 0 1px var(--line); }
+    .w-bar i[data-k="build"] { background: var(--accent); }
+    .w-bar i[data-k="check"] { background: var(--accent-ink); }
+    .w-bar-key { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .w-bar-key span { display: inline-flex; align-items: center; gap: 5px; }
+    .w-bar-key span::before { content: ''; width: 8px; height: 8px; border-radius: 2px; background: var(--paper-3); box-shadow: inset 0 0 0 1px var(--line); }
+    .w-bar-key span[data-k="build"]::before { background: var(--accent); box-shadow: none; }
+    .w-bar-key span[data-k="check"]::before { background: var(--accent-ink); box-shadow: none; }
+
+    /* Your call: the question, set apart, as buttons. */
+    .progress-next { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--paper-3); }
+    .progress-next[hidden], .progress-said[hidden] { display: none; }
+    .progress-q { margin: 0; font-size: 13px; line-height: 1.4; color: var(--ink); }
+    .progress-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .act {
+      appearance: none; border: 0; font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1; padding: 7px 11px; border-radius: 8px; cursor: pointer;
+      background: var(--paper-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line);
+      transition: background-color .13s var(--snap);
+    }
+    .act:hover { background: var(--paper-3); }
+    .act:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+    .act.primary { background: var(--ink); color: var(--paper); box-shadow: none; }
+    .act.primary:hover { background: color-mix(in srgb, var(--ink) 85%, var(--paper)); }
+    .progress[data-state="asking"] .act.primary { background: var(--caution); color: var(--card); }
+    .progress-said { font-size: 12px; color: var(--muted); padding-top: 8px; border-top: 1px solid var(--paper-3); }
+    .progress-said::before { content: '↳ '; color: var(--faint); }
+    .composer.is-drafting .field { box-shadow: 0 0 0 2px var(--accent-ink); }
+    .progress-chip {
+      display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+      padding: 2px 9px 2px 7px; border-radius: 999px;
+      background: var(--paper-2); color: var(--ink); font-size: 12px; text-decoration: none;
+    }
+    a.progress-chip:hover { background: var(--accent-soft); color: var(--accent-ink); }
+    .progress-chip svg { flex: none; width: 12px; height: 12px; color: var(--accent-ink); }
+    /* Sat down on paper-2, what was paper-2 inside it steps up to paper. */
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-chip, .act:not(.primary), .w-thumb, .v-read-c, .v-src-q) { background: var(--paper); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.act:not(.primary), .w-quiet, .w-vb):hover { background: var(--paper-3); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-said, .progress-next) { border-top-color: var(--paper-3); }
+
+    ${WORK_VIEW_CSS}
+
+    /* Older turns keep what changed, and small frames. */
+    .progress[data-old] :is(.w-live, .w-drawn, .w-proof-sec, .w-time-sec, .progress-next, .w-steer) { display: none; }
+    .progress[data-old] .w-strip { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }
+    .progress[data-old] .w-thumb { height: 28px; }
+    .progress[data-old] .w-flab { display: none; }
+    :host([data-chrome="phone"]) .w-say { font-size: 15px; }
+    /* Only what is new moves: views patch in place, and a node that arrives
+       wears data-enter; nothing already on screen replays. */
+    .progress :is(.w-slot > .v, .v [data-enter], .w-frame[data-enter] .w-thumb, .w-receipt[data-enter])[data-enter],
+    .progress .w-frame[data-enter] .w-thumb { animation: plain-enter .38s var(--settle) both; }
+    @media (prefers-reduced-motion: reduce) { .progress *, .progress { animation: none !important; transition: none !important; } }
+    @keyframes plain-enter { from { opacity: 0; transform: translateY(3px) scale(.98); } }
     .system { align-self: center; font-size: 12px; color: var(--faint); text-align: center; max-width: 90%; padding: 8px 0; }
     .system.error { color: var(--danger); }
     /* Prompts waiting their turn hover over the composer rather than pushing
@@ -1911,7 +3215,7 @@
     }
     .presets-more:not(.is-current) { width: 28px; }
     .presets-more:hover, .presets.is-open .presets-more { color: var(--ink); background: var(--paper-2); }
-    .presets-more, .seg-current, .custom-toggle, .mode { transition: background-color .13s var(--snap), color .13s var(--snap); }
+    .presets-more, .seg-current, .custom-toggle, .failover, .mode { transition: background-color .13s var(--snap), color .13s var(--snap); }
     .presets-more[hidden] { display: none; }
     .presets-more.is-current {
       width: auto; max-width: 100%; min-width: 0; height: auto;
@@ -2062,9 +3366,13 @@
       padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px;
       background: var(--card); color: var(--muted); box-shadow: var(--shadow-rest);
       font-size: 10px; font-weight: 500; white-space: nowrap; pointer-events: none;
+      text-align: left;
       opacity: 0; transform: translateY(3px); transform-origin: 50% 100%;
       transition: opacity .1s var(--snap), transform .1s var(--snap), display .1s allow-discrete, overlay .1s allow-discrete;
     }
+    /* A tip that names a mode wants its second line, so newlines survive —
+       and a tip is still never wide enough to wrap on its own. */
+    .keytip.is-multi { white-space: pre-line; }
     .keytip.is-open {
       display: block; opacity: 1; transform: none;
       transition: opacity .14s var(--settle), transform .14s var(--settle), display .14s allow-discrete, overlay .14s allow-discrete;
@@ -2111,6 +3419,48 @@
        gutter beside them instead of sitting on a line with anything. The 2px
        is what centres it against a single row, so one rule serves both. */
     .mode { flex: none; align-self: flex-start; margin-top: 2px; font: inherit; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 3px 6px; border-radius: 999px; cursor: pointer; }
+    /* Two modes, drawn rather than named. "Auto" read as the Auto permission
+       mode standing in the wrong row, and a bordered capsule made the quietest
+       setting in the strip the loudest thing in it. So it borrows the preset
+       overflow's borderless 22px slot: a baton handed to the next CLI, or a
+       pause. The glyph says which mode is on; the hover tip says its name. */
+    .failover {
+      appearance: none; border: 0; background: none; color: var(--muted);
+      flex: none; align-self: center; margin: 0; font: inherit;
+      min-width: 22px; height: 22px; padding: 0 4px; border-radius: 7px; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    }
+    .failover:hover { color: var(--ink); background: var(--paper-2); }
+    .failover-mark { display: inline-flex; flex: none; }
+    .failover svg { display: block; flex: none; }
+    /* Its neighbour and its twin: how much of the work to show, drawn — three
+       dots for the stops, a prompt for the steps — with its name in the tip. */
+    .detail {
+      appearance: none; border: 0; background: none; color: var(--muted);
+      flex: none; align-self: center; margin: 0; font: inherit;
+      min-width: 22px; height: 22px; padding: 0 4px; border-radius: 7px; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      transition: background-color .13s var(--snap), color .13s var(--snap);
+    }
+    .detail:hover { color: var(--ink); background: var(--paper-2); }
+    .detail-mark { display: inline-flex; flex: none; }
+    .detail svg { display: block; flex: none; }
+    .detail-word { display: none; font-size: 11px; font-weight: 500; }
+    /* The word rides along only where nothing can be hovered to ask: the phone
+       sheet has the room, and a bare glyph there names nothing. */
+    .failover-word { display: none; font-size: 11px; font-weight: 500; }
+    .usage-note {
+      margin: 0 0 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--paper); color: var(--ink); font-size: 12px; line-height: 1.4;
+    }
+    .usage-note[hidden] { display: none; }
+    .usage-note p { margin: 0 0 10px; }
+    .usage-note .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .usage-note button {
+      height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--ink);
+      background: var(--ink); color: var(--paper); font: inherit; font-size: 12px; cursor: pointer;
+    }
+    .usage-note button.quiet { background: transparent; color: var(--ink); }
     .mode:hover { color: var(--ink); background: var(--paper-2); }
     .mode[hidden] { display: none; }
     .dispatch[hidden] { display: none; }
@@ -2327,6 +3677,55 @@
     .stop:hover { background: var(--paper-3); }
     .stop[hidden] { display: none; }
 
+    /* Talk: the microphone left of Send. Drawn like Stop beside it, without
+       the disc: it is a way in, not a state. While it listens it is the cross
+       that throws the clip away. Nothing on it moves at rest. */
+    .talk {
+      flex: none; width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer;
+      display: grid; place-items: center; background: none; color: var(--muted); padding: 0;
+      transition: background-color 180ms var(--settle), color 180ms var(--settle);
+    }
+    .talk:hover { background: var(--paper-3); color: var(--ink); }
+    .talk:active { background: color-mix(in srgb, var(--ink) 12%, var(--paper-3)); }
+    .talk[hidden] { display: none; }
+    .talk > span { display: grid; place-items: center; }
+    .talk .talk-cancel { display: none; }
+    .composer:is([data-voice="listening"], [data-voice="writing"]) .talk .talk-mic { display: none; }
+    .composer:is([data-voice="listening"], [data-voice="writing"]) .talk .talk-cancel { display: grid; }
+    /* Listening, and writing it down, stand where the words will land, at
+       the box's own height. The trace is the one moving thing, and only while
+       there is sound to draw. */
+    .voice-line {
+      grid-area: editor; min-width: 0; box-sizing: border-box; min-height: 28px; padding: 3px 0;
+      display: flex; align-items: center; gap: 8px; color: var(--muted); font-weight: 500; cursor: text;
+    }
+    .voice-line[hidden] { display: none; }
+    .composer:is([data-voice="listening"], [data-voice="writing"], [data-voice="error"]) .editor { visibility: hidden; }
+    .voice-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .voice-trace { flex: none; width: 56px; height: 16px; color: var(--ink); overflow: visible; }
+    .voice-line:not([data-state="listening"]) .voice-trace { display: none; }
+    .voice-line[data-state="error"] { color: var(--danger); font-weight: 400; cursor: default; }
+    .voice-line[data-state="error"] .voice-word { white-space: normal; }
+    .voice-retry, .voice-stop, .read-aloud {
+      flex: none; font: inherit; color: var(--accent-ink); background: none; border: 0;
+      padding: 2px 6px; border-radius: 6px; cursor: pointer;
+    }
+    .voice-retry:hover, .voice-stop:hover, .read-aloud:hover { background: var(--accent-soft); }
+    .voice-retry[hidden] { display: none; }
+    /* Speaking is said in the bar of words under the box, so the box stays
+       free to type the next thing. */
+    .voice-speaking { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+    .voice-speaking[hidden] { display: none; }
+    .voice-speaking .voice-trace { width: 36px; height: 12px; }
+    /* A prompt that was said, not typed. */
+    .msg-said { margin-top: 4px; font-size: 12px; font-weight: 400; color: var(--muted); white-space: normal; }
+    /* Read aloud, under a reply: shown on the latest, and on any other when
+       the pointer or focus is in it. A finger has no hover, so it always is. */
+    .msg-acts { margin: 4px 0 0 -6px; font-size: 12px; visibility: hidden; user-select: none; }
+    .msg.agent:hover > .msg-acts, .msg.agent:focus-within > .msg-acts, .msg.agent[data-latest] > .msg-acts { visibility: visible; }
+    @media (hover: none) { .msg-acts { visibility: visible; } }
+    .log[data-voice-off] .msg-acts { display: none; }
+
     /* The card a pasted thing opens into (the peek), and the fallback strip
        for an old message whose text has no token for its block. */
     .attach {
@@ -2483,6 +3882,23 @@
     :host([data-chrome="phone"]) .stop::before { background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); }
     :host([data-chrome="phone"]) .stop:active::before { background: var(--paper-3); }
     :host([data-chrome="phone"]) .commit { gap: 2px; }
+
+    :host([data-chrome="phone"]) .talk { position: relative; width: 44px; height: 44px; }
+    :host([data-chrome="phone"]) .talk, :host([data-chrome="phone"]) .talk:hover, :host([data-chrome="phone"]) .talk:active { background: none; }
+    :host([data-chrome="phone"]) .talk::before {
+      content: ''; position: absolute; left: 6px; top: 6px; width: 32px; height: 32px;
+      border-radius: 50%; transition: background-color 180ms var(--settle);
+    }
+    :host([data-chrome="phone"]) .talk > * { position: relative; z-index: 1; }
+    :host([data-chrome="phone"]) .talk:active::before { background: var(--paper-3); }
+    /* As in Messages: the microphone stands where Send will, until there are
+       words to send. Listening, Send is back, to send what was said. */
+    :host([data-chrome="phone"]) .composer[data-talk]:not([data-words]):not([data-voice="listening"]) .send { display: none; }
+    :host([data-chrome="phone"]) .composer[data-words]:not([data-voice]) .talk { display: none; }
+    :host([data-chrome="phone"]) .voice-line { min-height: 44px; font-size: 17px; padding: 10px 0; }
+    /* A finger's worth of target for the words that act. */
+    :host([data-chrome="phone"]) .voice-speaking { font-size: 14px; }
+    :host([data-chrome="phone"]) :is(.voice-stop, .voice-retry, .read-aloud) { min-height: 44px; padding: 0 10px; font-size: 14px; }
     :host([data-chrome="phone"]) .editor { min-height: 44px; font-size: 17px; padding: 10px 0; }
     :host([data-chrome="phone"]) .attach { min-height: 44px; }
     /* The sheet the chip opens. It is inside the shadow root because the
@@ -2536,6 +3952,8 @@
     :host([data-chrome="phone"]) .setup-sheet .seg-opts.is-drop .seg-current,
     :host([data-chrome="phone"]) .setup-sheet .presets-more,
     :host([data-chrome="phone"]) .setup-sheet .custom-toggle,
+    :host([data-chrome="phone"]) .setup-sheet .failover,
+    :host([data-chrome="phone"]) .setup-sheet .detail,
     :host([data-chrome="phone"]) .setup-sheet .mode {
       box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
       min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 12px;
@@ -2546,6 +3964,10 @@
       background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--ink);
     }
     :host([data-chrome="phone"]) .setup-sheet .mode { color: var(--accent-ink); align-self: flex-start; margin-top: 0; }
+    :host([data-chrome="phone"]) .setup-sheet .failover { color: var(--ink); gap: 8px; }
+    :host([data-chrome="phone"]) .setup-sheet .failover-word { display: block; font-size: 15px; }
+    :host([data-chrome="phone"]) .setup-sheet .detail { color: var(--ink); gap: 8px; }
+    :host([data-chrome="phone"]) .setup-sheet .detail-word { display: block; font-size: 15px; }
     /* Hidden still means hidden: these selectors are heavier than the [hidden]
        rules they sit under, so they have to say it themselves. */
     :host([data-chrome="phone"]) .setup-sheet .setup[hidden],
@@ -2560,6 +3982,53 @@
       .setup-sheet { transform: none; opacity: calc(1 - var(--at, 1)); transition: opacity 150ms ease; }
       .setup-scrim { transition: opacity 150ms ease; }
     }
+
+    /* ----------------------------------------------------------- the hand
+       What a finger needs, whatever the chrome. Only the phone chrome was
+       sized for one, and a conversation reaches a phone in others too: the
+       drawer on a narrow tablet, the callout at a selection, a tile. There the
+       editor inherited the page's 13–15px, and iOS zooms the whole page in on
+       any field under 16px and leaves it zoomed. So every field is 16px
+       under a finger, and every control that is a word or a small disc keeps
+       its look and gets a 44px reach from an invisible ::after. */
+    @media (pointer: coarse) {
+      .editor, .heading, .queued-text[contenteditable],
+      .ask .ask-other-text, .ask .deny-note { font-size: 16px; }
+      :host(:not([data-chrome="phone"])) .editor { min-height: 32px; padding: 5px 0; }
+      :host(:not([data-chrome="phone"])) :is(.send, .stop) { position: relative; }
+      :host(:not([data-chrome="phone"])) :is(.send, .stop)::after { content: ''; position: absolute; inset: -8px; }
+      :is(.ichip-clear, .selection-clear, .chip-remove, .peek-close, .queued-item button.dequeue,
+        .turn-footer button, .earlier, .queued-bar button, .queued-dispatch) { position: relative; }
+      :is(.ichip-clear, .selection-clear, .chip-remove)::after { content: ''; position: absolute; inset: -14px; }
+      :is(.peek-close, .queued-item button.dequeue)::after { content: ''; position: absolute; inset: -11px; }
+      :is(.turn-footer button, .earlier, .queued-bar button, .queued-dispatch)::after {
+        content: ''; position: absolute; inset: -12px -2px;
+      }
+      /* The setup strip's words. The phone chrome folds them into its chip and
+         a sheet of 44pt rows, which need no reach added. */
+      :host(:not([data-chrome="phone"])) :is(.presets-more, .custom-toggle, .failover, .detail, .mode, .seg-current) { position: relative; }
+      :host(:not([data-chrome="phone"])) :is(.presets-more, .custom-toggle, .failover, .detail, .mode, .seg-current)::after {
+        content: ''; position: absolute; inset: -12px -2px;
+      }
+      /* The radios under them: their reach is the input laid over the label,
+         so it is the input that grows. Not inside a menu, where rows touch. */
+      :host(:not([data-chrome="phone"])) :is(.seg-opts, .preset) input { inset: -11px 0; }
+      :host(:not([data-chrome="phone"])) :is(.seg-opts.is-drop .seg-menu, .presets-menu) input { inset: 0; }
+      /* A menu row, a slash command and an ask's option are read a row at a
+         time and hit with a thumb. */
+      .seg-opts.is-drop .seg-menu span, .presets-menu .preset span, .slash button,
+      .ask .ask-options button, .choice-ask button { min-height: 44px; align-items: center; }
+      .ask .ask-actions button, .usage-note button { min-height: 44px; padding-inline: 14px; }
+      .tool-group-head { min-height: 32px; align-items: center; }
+      /* A long press on chrome is a press, not a selection with a loupe. */
+      .bar, .commit, .queued-bar, .chips, .setup-chip, .also, .zone-jump, .turn-footer button {
+        -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      }
+    }
+    /* The keys cover the home bar, so the composer's floor stops making room
+       for it: the send button sits right on the keyboard, not a strip above. */
+    :host(.marble-keyboard) .composer { padding-bottom: var(--edge); }
+    :host([data-chrome="phone"].marble-keyboard) .composer { padding-bottom: 8px; }
 
     @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { :host, .log, .mast, .composer { transition: none; } .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
@@ -2623,6 +4092,43 @@
     return mark;
   };
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
+  /** Talk: a microphone in the stroke of Send beside it. Cancel, while
+   *  listening, is the cross every sheet closes with. */
+  const MIC_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.6" y="1.6" width="4.8" height="8" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.2 7.6a4.8 4.8 0 0 0 9.6 0M8 12.4v2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  const CANCEL_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  /** The trace: what the microphone or the reply sounds like, as one line. */
+  const TRACE_POINTS = 15;
+  const TRACE_SVG = `<svg class="voice-trace" viewBox="0 0 ${TRACE_POINTS - 1} 16" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" points=""/></svg>`;
+
+  // Whether this drive can hear and speak (runtime/voice.js, /agent/voice):
+  // asked once a page, and again when Settings › Voice changes it.
+  let voiceInfo = null;
+  const readVoice = (fresh = false) => {
+    const api = window.marble?.agent;
+    if (!api?.voice) return Promise.resolve({ available: false, on: false });
+    if (!voiceInfo || fresh) voiceInfo = api.voice().catch(() => ({ available: false, on: false }));
+    return voiceInfo;
+  };
+  addEventListener('marble:voice', () => { readVoice(true); });
+  /** A reply as words for the device's own voice, on a drive with no OpenAI
+   *  key: the host's speakable() is the full version of this. */
+  const plainSpoken = (text) => String(text ?? '')
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/^\s*\|.*\|\s*$/gm, '')
+    .replace(/^\s*(#{1,6}|[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/[*_`~>#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  /** What happens when Claude's usage runs out, in two glyphs. The handoff is a
+   *  baton: an arc leaving the runner it is with and coming down on the next
+   *  one, which is what switching CLI mid-turn actually is. The pause is the
+   *  pause every transport has ever drawn, because inventing one here would
+   *  only make it harder to read. */
+  const HANDOFF_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="2.9" cy="9.4" r="1.3" fill="currentColor"/><circle cx="11.1" cy="9.4" r="1.3" fill="currentColor"/><path d="M2.9 7C2.9 2.8 11.1 2.8 11.1 6.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M9.75 5.5 11.1 6.9 12.45 5.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const PAUSE_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><rect x="4.1" y="3.4" width="1.8" height="7.2" rx=".9" fill="currentColor"/><rect x="8.1" y="3.4" width="1.8" height="7.2" rx=".9" fill="currentColor"/></svg>';
   /** The arrow leaving its box: the one glyph that says a name is a way out of
    *  this chat and into another document. Drawn at the mast's type size so it
    *  sits on the same line as the tags beside it. */
@@ -2834,6 +4340,9 @@
   const flatten = (node) => {
     if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? '';
     if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    // A visual's caption and its two buttons are furniture, not what was said:
+    // the callout's one line would otherwise end "… Two layouts Expand Code".
+    if (node.classList?.contains('visual-head')) return '';
     const inner = [...node.childNodes].map(flatten).join('');
     return INLINE_TEXT.has(node.tagName) ? inner : ` ${inner} `;
   };
@@ -2850,6 +4359,7 @@
     constructor() {
       super();
       const root = this.attachShadow({ mode: 'open' });
+      keepKeys(root);
       root.innerHTML = `<style>${TOKENS}${CONVERSATION_CSS}</style>
         <header class="mast" hidden>
           <h2 class="heading" contenteditable="plaintext-only" spellcheck="false" aria-label="Conversation title"></h2>
@@ -2857,11 +4367,13 @@
             <div class="tags"></div>
             <a class="target-jump" hidden><span class="target-what"></span><span class="target-out" aria-hidden="true">${OUT_ICON}</span></a>
           </div>
-          <button type="button" class="zone-jump" hidden>
-            <span class="zone-live" aria-hidden="true"></span>
-            <span class="zone-what"></span>
-            <span class="zone-go" aria-hidden="true">→</span>
-          </button>
+          <div class="zone-row" hidden>
+            <button type="button" class="zone-jump">
+              <span class="zone-live" aria-hidden="true"></span>
+              <span class="zone-what"></span>
+              <span class="zone-go" aria-hidden="true">→</span>
+            </button>
+          </div>
           <button type="button" class="also" hidden>
             <span class="also-long"></span>
             <span class="also-short"></span>
@@ -2878,6 +4390,20 @@
             </div>
             <div class="peek-body"></div>
           </div>
+          <div class="usage-note" hidden>
+            <p class="usage-note-text">Claude usage stopped. Switch to Cursor?</p>
+            <div class="actions">
+              <button type="button" class="usage-switch">Switch</button>
+              <button type="button" class="usage-leave quiet">Leave it</button>
+            </div>
+          </div>
+          <div class="usage-note credit-note" hidden>
+            <p class="credit-note-text"></p>
+            <div class="actions">
+              <button type="button" class="credit-connect">Connect your Claude</button>
+              <button type="button" class="credit-leave quiet">Not now</button>
+            </div>
+          </div>
           <div class="queued" hidden data-combine="0">
             <div class="queued-bar" hidden role="group" aria-label="How queued prompts are sent">
               <button type="button" class="queued-individually" aria-pressed="true">Send individually</button>
@@ -2887,9 +4413,11 @@
           <div class="row">
             <div class="field">
               <div class="chips" hidden></div>
-              <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" data-empty></div>
+              <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" enterkeyhint="send" autocapitalize="sentences" data-empty></div>
+              <div class="voice-line" hidden aria-live="polite"><span class="voice-word"></span>${TRACE_SVG}<button type="button" class="voice-retry" hidden>Try again</button></div>
               <div class="commit">
                 <button type="button" class="stop" hidden aria-label="Stop">${STOP_ICON}</button>
+                <button type="button" class="talk" hidden aria-label="Talk"><span class="talk-mic">${MIC_ICON}</span><span class="talk-cancel">${CANCEL_ICON}</span></button>
                 <button type="submit" class="send" aria-label="Send" disabled>${SEND_ICON}</button>
               </div>
             </div>
@@ -2899,6 +4427,8 @@
                 <div class="setup-row">
                   <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
                   <button type="button" class="custom-toggle" aria-expanded="false" hidden>Custom</button>
+                  <button type="button" class="failover" data-failover="auto" aria-label="When Claude usage stops"><span class="failover-mark"></span><span class="failover-word"></span></button>
+                  <button type="button" class="detail" data-detail="simple"><span class="detail-mark"></span><span class="detail-word"></span></button>
                   <div class="scrub" role="slider" aria-label="Model setup" aria-valuemin="0" tabindex="-1"></div>
                 </div>
                 <div class="picker">
@@ -2909,6 +4439,7 @@
                 </div>
               </div>
               <div class="selection" hidden></div>
+              <div class="voice-speaking" hidden aria-live="polite"><span class="voice-word">Speaking</span>${TRACE_SVG}<button type="button" class="voice-stop" aria-label="Stop speaking">Stop</button></div>
               <span class="bar-space"></span>
               <div class="dispatch" hidden role="radiogroup" aria-label="How to send while a turn runs"></div>
               <button type="button" class="mode" hidden aria-label="CLI mode — click or Shift+Tab to change"></button>
@@ -2945,6 +4476,36 @@
       this.picker = root.querySelector('.picker');
       this.bar = root.querySelector('.bar');
       this.modeButton = root.querySelector('.mode');
+      this.failoverButton = root.querySelector('.failover');
+      this.failoverMark = root.querySelector('.failover-mark');
+      this.failoverWord = root.querySelector('.failover-word');
+      armHint(this.failoverButton, () => (this.failoverMode() === 'pause'
+        ? 'Pause when Claude usage runs out\nClick to hand off instead'
+        : 'Hand off to Cursor when Claude usage runs out\nClick to pause instead'));
+      this.usageNote = root.querySelector('.usage-note');
+      this.usageNoteText = root.querySelector('.usage-note-text');
+      this.usageSwitch = root.querySelector('.usage-switch');
+      this.usageLeave = root.querySelector('.usage-leave');
+      this.usageLeft = new Set();
+      this.pendingFailover = null;
+      this.failoverButton.addEventListener('click', () => this.flipFailover());
+      this.detailButton = root.querySelector('.detail');
+      this.detailMark = root.querySelector('.detail-mark');
+      this.detailWord = root.querySelector('.detail-word');
+      armHint(this.detailButton, () => (readDetail() === 'simple'
+        ? 'Simple progress\nClick to see every technical step'
+        : 'Every technical step\nClick for simple progress'));
+      this.detailButton.addEventListener('click', () => writeDetail(readDetail() === 'simple' ? 'technical' : 'simple'));
+      this.onDetail = () => this.paintDetail();
+      this.paintDetail();
+      this.creditNote = root.querySelector('.credit-note');
+      this.creditNoteText = root.querySelector('.credit-note-text');
+      root.querySelector('.credit-connect').addEventListener('click', () => {
+        if (!connectClaude()) window.marble?.agent?.openSettings?.('settings');
+      });
+      root.querySelector('.credit-leave').addEventListener('click', () => this.hideCreditNote());
+      this.usageSwitch.addEventListener('click', () => this.switchFromUsage());
+      this.usageLeave.addEventListener('click', () => this.leaveUsage());
       this.dispatchEl = root.querySelector('.dispatch');
       this.agentLabel = root.querySelector('.picker-agent');
       this.agentBox = root.querySelector('[data-seg="agent"]');
@@ -2965,6 +4526,7 @@
       this.sheetWanted = false;
       this.armSetupSheet();
       this.zoneJump = root.querySelector('.zone-jump');
+      this.zoneRow = root.querySelector('.zone-row');
       this.zoneWhat = root.querySelector('.zone-what');
       this.zone = null;
       this.zoneJump.addEventListener('click', () => this.goToZone());
@@ -2985,8 +4547,47 @@
       });
       this.sendButton = root.querySelector('.send');
       this.stopButton = root.querySelector('.stop');
+      this.talkButton = root.querySelector('.talk');
+      this.voiceLine = root.querySelector('.voice-line');
+      this.voiceWord = this.voiceLine.querySelector('.voice-word');
+      this.voiceRetry = this.voiceLine.querySelector('.voice-retry');
+      this.voiceSpeaking = root.querySelector('.voice-speaking');
+      this.voiceStop = root.querySelector('.voice-stop');
+      // Turns this composer sent, and the ones among them that were said
+      // aloud: only those are spoken back, and only in this tab.
+      this.sentTurns = new Set();
+      this.spokenTurns = new Set();
+      this.voiceSession = null;
+      armHint(this.talkButton, () => (this.form.dataset.voice === 'listening' || this.form.dataset.voice === 'writing' ? 'Cancel\nEsc' : 'Talk'));
+      this.talkButton.addEventListener('click', () => {
+        const state = this.form.dataset.voice;
+        if (state === 'listening' || state === 'writing') this.cancelVoice();
+        else this.talk();
+      });
+      this.voiceStop.addEventListener('click', () => this.stopSpeaking());
+      this.voiceRetry.addEventListener('click', () => this.retryVoice());
+      // A press in the box while the words are being written down keeps
+      // them there to read before they go.
+      this.voiceLine.addEventListener('pointerdown', () => {
+        if (this.form.dataset.voice === 'writing') {
+          this.voiceHold = true;
+          this.voiceWord.textContent = 'Writing it down. It will wait here';
+        } else if (this.form.dataset.voice === 'error') {
+          this.setVoice('');
+          requestAnimationFrame(() => this.focusInput());
+        }
+      });
+      this.onVoiceKey = (event) => {
+        if (event.key !== 'Escape' || !this.form.dataset.voice) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.form.dataset.voice === 'speaking') this.stopSpeaking();
+        else this.cancelVoice();
+      };
+      this.onVoiceInfo = () => this.paintVoice();
 
       this.seen = 0;
+      this.seenQueue = 0;
       this.turns = new Map();
       this.prompts = new Map();
       this.live = null;
@@ -3009,20 +4610,25 @@
 
       this.picker.addEventListener('change', (event) => {
         const name = event.target?.name;
+        // Read now: the radio is in a shadow root, and once the event has
+        // been dispatched its target is cleared, so after the await below
+        // `event.target` is null and the bar was never repainted.
+        const track = event.target?.closest?.('.seg-opts') ?? null;
         const run = async () => {
           if (name === 'agent') {
             this.mode = this.currentProvider()?.modes?.[0]?.id ?? this.mode;
-            await this.syncCatalog();
+            await this.syncCatalog({ switched: true });
             this.persistCatalog();
             this.persistMode();
             this.paintStatus();
             this.paintTags();
           }
-          if (name === 'model') { this.syncEfforts(); this.persistCatalog(); this.paintStatus(); this.paintTags(); }
+          if (name === 'model') { this.syncEfforts({ fit: true }); this.persistCatalog(); this.paintStatus(); this.paintTags(); }
           if (name === 'effort') { this.persistCatalog(); this.paintStatus(); this.paintTags(); }
-          const track = event.target?.closest?.('.seg-opts');
-          syncSegCurrent(track);
-          slideThumb(track, { animate: true });
+          if (track) {
+            syncSegCurrent(track);
+            slideThumb(track, { animate: true });
+          }
           closeSegMenus(this.shadowRoot);
           this.paintPresets();
           this.fitSetup();
@@ -3061,6 +4667,12 @@
       syncSegCurrent(this.dispatchEl);
       this.form.addEventListener('submit', (event) => {
         event.preventDefault();
+        // Send while listening sends what was said so far.
+        if (this.form.dataset.voice === 'listening') {
+          this.voiceSendNow = true;
+          this.voiceSession?.send();
+          return;
+        }
         this.submit();
       });
       this.input.addEventListener('keydown', (event) => {
@@ -3076,14 +4688,15 @@
           this.renderChips();
           return;
         }
-        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        // ⌘Enter is always a steer while a turn runs; Enter takes the bar's choice.
+        const steer = event.metaKey || event.ctrlKey;
+        const thumbs = THUMBS.matches && !steer;
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !thumbs) {
           event.preventDefault();
-          // ⌘Enter is always a steer while a turn runs; Enter takes the bar's choice.
-          const steer = event.metaKey || event.ctrlKey;
           this.submit(steer && this.running ? { dispatch: 'steer' } : {});
           return;
         }
-        if (event.key === 'Enter' && event.shiftKey) {
+        if (event.key === 'Enter' && (event.shiftKey || (thumbs && !event.isComposing))) {
           event.preventDefault();
           const item = closestItem(this.input);
           if (item) continueList(this.input, item);
@@ -3176,15 +4789,32 @@
         if (selection.length) this.skipSelection = false;
         this.updateContext();
       };
+      // Whether the reader is at the foot of the transcript, kept as they
+      // scroll, so the log can stay there when it is the log that changes
+      // size: the keyboard coming up takes a third of a phone's height from
+      // the bottom, and the last thing said went under it.
+      this.logStuck = true;
+      this.logEl.addEventListener('scroll', () => {
+        const log = this.logEl;
+        this.logStuck = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+      }, { passive: true });
     }
 
     get api() {
       return window.marble?.agent;
     }
 
+    /** Return's key on the soft keyboard says what Return does here. */
+    paintEnterKey() {
+      this.input.enterKeyHint = THUMBS.matches ? 'enter' : 'send';
+    }
+
     connectedCallback() {
       // In a callout the document is not "this document" but the region you
       // selected, and the placeholder says so.
+      // A page that hosts a conversation for one purpose says what it is for
+      // (the Console's workshop chat asks for a change to the code).
+      if (this.dataset.prompt) this.input.dataset.placeholder = this.dataset.prompt;
       if (this.dataset.chrome === 'callout') {
         this.input.dataset.placeholder = 'Ask about this…';
         // The log is written down several paths — streamed text, a finished
@@ -3202,6 +4832,12 @@
       armScrubKeys();
       this.unwatchTheme = watchPageTheme(this);
       addEventListener('marble:agent-context', this.onContext);
+      addEventListener('marble:chat-detail', this.onDetail);
+      addEventListener('marble:voice', this.onVoiceInfo);
+      this.paintVoice();
+      this.onLeave ??= () => this.saveTail();
+      addEventListener('pagehide', this.onLeave);
+      this.paintDetail();
       this.updateContext();
       this.load();
       this.fitObserver = new ResizeObserver(() => this.fitSetup());
@@ -3210,6 +4846,15 @@
       // every prompt: the log's foot follows it rather than being set once.
       this.queueObserver = new ResizeObserver(() => this.measureQueue());
       this.queueObserver.observe(this.queuedEl);
+      this.logObserver = new ResizeObserver(() => {
+        if (this.logStuck) this.logEl.scrollTop = this.logEl.scrollHeight;
+      });
+      this.logObserver.observe(this.logEl);
+      // The keyboard is up: the composer stops leaving room for the home bar.
+      // A marble- class, so it is never the file's.
+      this.offKeyboard = watchKeys((up) => this.classList.toggle('marble-keyboard', up));
+      this.paintEnterKey();
+      THUMBS.addEventListener?.('change', this.paintEnterKeyBound ??= () => this.paintEnterKey());
     }
 
     disconnectedCallback() {
@@ -3222,9 +4867,24 @@
       this.fitObserver = null;
       this.queueObserver?.disconnect();
       this.queueObserver = null;
+      this.logObserver?.disconnect();
+      this.logObserver = null;
+      this.offKeyboard?.();
+      this.offKeyboard = null;
+      THUMBS.removeEventListener?.('change', this.paintEnterKeyBound);
       this.unwatchTheme?.();
       this.unwatchTheme = null;
       removeEventListener('marble:agent-context', this.onContext);
+      removeEventListener('marble:chat-detail', this.onDetail);
+      removeEventListener('marble:voice', this.onVoiceInfo);
+      // A composer taken off the page stops listening and speaking with it.
+      if (this.form.dataset.voice) {
+        this.voiceSession?.cancel();
+        if (this.form.dataset.voice === 'speaking') this.stopSpeaking();
+        this.setVoice('');
+      }
+      removeEventListener('pagehide', this.onLeave);
+      this.saveTail();
       this.off?.();
       this.offAll?.();
       this.offQueue?.();
@@ -3249,40 +4909,303 @@
       this.input.focus({ preventScroll: true });
     }
 
+    // ---------------------------------------------------------- voice
+    //
+    // Talk, left of Send, listens (runtime/voice.js); the host writes the clip
+    // down and the words go in as a prompt said aloud; when that turn ends its
+    // reply is spoken. Every state is the form's `data-voice` in this shadow
+    // root, so nothing of it is ever filed. docs/AGENTS.md, "Voice".
+
+    async paintVoice() {
+      const info = await readVoice();
+      this.voice = info;
+      const can = Boolean(info.available && info.on && globalThis.marbleVoice);
+      this.talkButton.hidden = !can;
+      this.form.toggleAttribute('data-talk', can);
+      // Read aloud stays where speech is on: in the drive's voice with a key,
+      // in the device's without one.
+      this.logEl.toggleAttribute('data-voice-off', info.on === false);
+      const state = this.form.dataset.voice;
+      if (!can && (state === 'listening' || state === 'writing')) this.cancelVoice();
+      this.updateSendable();
+    }
+
+    setVoice(state, word = '') {
+      if (state) this.form.dataset.voice = state;
+      else delete this.form.dataset.voice;
+      const inBox = state === 'listening' || state === 'writing' || state === 'error';
+      this.voiceLine.hidden = !inBox;
+      this.voiceLine.dataset.state = state;
+      this.voiceWord.textContent = word;
+      this.voiceRetry.hidden = true;
+      this.voiceSpeaking.hidden = state !== 'speaking';
+      const cancel = state === 'listening' || state === 'writing';
+      this.talkButton.setAttribute('aria-label', cancel ? 'Cancel' : 'Talk');
+      this.resetTrace(this.voiceLine);
+      this.resetTrace(this.voiceSpeaking);
+      clearTimeout(this.voiceErrorTimer);
+      // Esc belongs to the voice while it listens or speaks, before anything
+      // else on the page that would close on it.
+      const keys = Boolean(state) && state !== 'error';
+      if (keys && !this.voiceKeys) addEventListener('keydown', this.onVoiceKey, true);
+      if (!keys && this.voiceKeys) removeEventListener('keydown', this.onVoiceKey, true);
+      this.voiceKeys = keys;
+      this.updateSendable();
+    }
+
+    /** The trace: the last few levels as one line, flat when nothing is
+     *  heard, and still under reduced motion. Redrawn only when it changed. */
+    drawTrace(host, level) {
+      const levels = host.traceLevels ?? (host.traceLevels = []);
+      levels.push(Math.max(0, Math.min(1, level || 0)));
+      if (levels.length > TRACE_POINTS) levels.shift();
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const offset = TRACE_POINTS - levels.length;
+      const points = levels.map((v, i) => `${i + offset},${(8 + (i % 2 ? 1 : -1) * Math.round(Math.sqrt(v) * 12) / 2).toFixed(1)}`).join(' ');
+      if (points === host.tracePoints) return;
+      host.tracePoints = points;
+      host.querySelector('.voice-trace polyline')?.setAttribute('points', points);
+    }
+
+    resetTrace(host) {
+      host.traceLevels = [];
+      host.tracePoints = `0,8 ${TRACE_POINTS - 1},8`;
+      host.querySelector('.voice-trace polyline')?.setAttribute('points', host.tracePoints);
+    }
+
+    /** Talk: listen until quiet follows speech, or Send; then write it down. */
+    async talk() {
+      const V = globalThis.marbleVoice;
+      if (!V) return;
+      if (this.form.dataset.voice === 'speaking') this.stopSpeaking();
+      V.unlock();
+      this.voiceHold = false;
+      this.voiceSendNow = false;
+      const session = V.listen({
+        maxSeconds: this.voice?.maxSeconds ?? 120,
+        onLevel: (level) => { if (this.voiceSession === session) this.drawTrace(this.voiceLine, level); },
+      });
+      this.voiceSession = session;
+      this.setVoice('listening', 'Listening');
+      let clip;
+      try {
+        clip = await session.done;
+      } catch (err) {
+        if (this.voiceSession === session) this.voiceError(err.message);
+        return;
+      }
+      if (this.voiceSession !== session) return;
+      if (!clip) {
+        this.voiceSession = null;
+        this.setVoice('');
+        return;
+      }
+      await this.writeDown(session, clip);
+    }
+
+    async writeDown(session, clip, { again = false } = {}) {
+      const V = globalThis.marbleVoice;
+      this.setVoice('writing', 'Writing it down');
+      let text;
+      try {
+        const here = this.api?.context?.() ?? {};
+        text = again ? await V.retry() : await V.transcribe(clip, { doc: here.viewing ?? here.target ?? '' });
+      } catch (err) {
+        if (this.voiceSession === session) this.voiceError(err.message, { retry: Boolean(err.retry) });
+        return;
+      }
+      if (this.voiceSession !== session) return;
+      this.voiceSession = null;
+      this.setVoice('');
+      this.landWords(text);
+    }
+
+    /** The words land in the box after whatever was typed, and go, unless
+     *  the box was held or this drive waits for a look. While a turn runs
+     *  they steer it: talking to someone working is correcting them. */
+    landWords(text) {
+      const words = String(text ?? '').trim();
+      if (!words) return;
+      const before = this.input.value.trim();
+      this.input.value = before ? `${before} ${words}` : words;
+      this.onEdited();
+      this.autosize();
+      const send = !this.voiceHold && (this.voiceSendNow || this.voice?.sendWhenStop !== false);
+      if (!send) {
+        this.focusInput();
+        return;
+      }
+      const dispatch = this.running ? (this.voice?.whileRunning === 'queue' ? 'queue' : 'steer') : null;
+      this.submit({ dispatch, spoken: true });
+    }
+
+    cancelVoice() {
+      const session = this.voiceSession;
+      this.voiceSession = null;
+      session?.cancel?.();
+      this.setVoice('');
+    }
+
+    retryVoice() {
+      const session = { cancel() {} };
+      this.voiceSession = session;
+      this.writeDown(session, null, { again: true });
+    }
+
+    voiceError(message, { retry = false } = {}) {
+      this.voiceSession = null;
+      this.setVoice('error', message);
+      this.voiceRetry.hidden = !retry;
+      this.voiceErrorTimer = setTimeout(() => {
+        if (this.form.dataset.voice === 'error') this.setVoice('');
+      }, retry ? 12_000 : 8_000);
+    }
+
+    /** A turn's reply, spoken: by the host in the drive's voice, or by the
+     *  device where there is no OpenAI key. One reply at a time per tab. */
+    async speakTurn(turn) {
+      const V = globalThis.marbleVoice;
+      if (!V || !turn) return;
+      const info = this.voice ?? await readVoice();
+      const state = this.form.dataset.voice;
+      if (state === 'listening' || state === 'writing') return;
+      let handle = null;
+      const ended = () => {
+        if (this.playing !== handle) return;
+        this.playing = null;
+        if (this.form.dataset.voice === 'speaking') this.setVoice('');
+      };
+      if (info.available) {
+        handle = V.play(`/agent/turns/${encodeURIComponent(turn)}/speech`, {
+          onLevel: (level) => { if (this.playing === handle) this.drawTrace(this.voiceSpeaking, level); },
+          onEnd: ended,
+        });
+      } else {
+        const text = plainSpoken(this.turns.get(turn)?.lastText?.text) || 'Done.';
+        handle = V.say(text, { onEnd: ended });
+      }
+      this.playing = handle;
+      this.setVoice('speaking');
+    }
+
+    stopSpeaking() {
+      const handle = this.playing;
+      this.playing = null;
+      handle?.stop();
+      if (this.form.dataset.voice === 'speaking') this.setVoice('');
+    }
+
+    /** A turn this tab said aloud is spoken back when it ends; with "Always",
+     *  every turn sent from here. Never a turn read back from history. */
+    speakEnded(turn) {
+      const info = this.voice;
+      if (!info?.on || !info.available) return;
+      const spoken = this.spokenTurns.has(turn) && info.readAloud !== 'never';
+      const always = info.readAloud === 'always' && this.sentTurns.has(turn);
+      if (spoken || always) this.speakTurn(turn);
+    }
+
+    /** Read aloud, under a finished reply: any reply, typed or said. */
+    offerReadAloud(turn) {
+      const node = this.turns.get(turn)?.lastText?.node;
+      if (!node?.isConnected || node.querySelector(':scope > .msg-acts')) return;
+      for (const old of this.logEl.querySelectorAll('.msg.agent[data-latest]')) old.removeAttribute('data-latest');
+      node.setAttribute('data-latest', '');
+      const acts = h('div', 'msg-acts');
+      const read = h('button', 'read-aloud', 'Read aloud');
+      read.type = 'button';
+      read.addEventListener('click', () => {
+        globalThis.marbleVoice?.unlock?.();
+        this.speakTurn(turn);
+      });
+      acts.append(read);
+      node.append(acts);
+    }
+
+    /** A first sentence written by something other than the hand: the marks
+     *  layer hands a sketch's reading over this way, as the start of a draft
+     *  the person then edits. Never a replacement — anything already typed
+     *  keeps its place and the new words go after it — because the one thing
+     *  a composer may not do is lose what somebody wrote in it. */
+    draft(text) {
+      if (!text) return;
+      if (!this.input.value.trim()) {
+        this.setValue(text);
+      } else {
+        this.input.append(document.createTextNode(this.input.value.endsWith(' ') ? text : ` ${text}`));
+        this.onEdited();
+      }
+      this.focusInput();
+      placeCaret(this.input);
+    }
+
+    /** Say this, as soon as there is somebody to say it to. A card built a
+     *  moment ago is still asking the host which agents exist, and `submit`
+     *  refuses without one — so a brief handed over by another layer waits for
+     *  the picker instead of failing in front of the person who wrote it. */
+    async sendNow(text) {
+      this.draft(text);
+      await this.whenAgents();
+      return this.submit();
+    }
+
+    whenAgents({ within = 8000 } = {}) {
+      if (this.getAttribute('conversation') || radioValue(this.shadowRoot, 'agent')) return Promise.resolve();
+      return new Promise((resolve) => {
+        const done = () => { clearTimeout(timer); watch.disconnect(); resolve(); };
+        const watch = new MutationObserver(() => { if (radioValue(this.shadowRoot, 'agent')) done(); });
+        watch.observe(this.agentBox ?? this.shadowRoot, { childList: true, subtree: true, attributes: true });
+        // Nobody is coming: `submit` says so in the card, which is where "no
+        // agent is ready on this machine" belongs.
+        const timer = setTimeout(done, within);
+      });
+    }
+
     // ---------------------------------------------------------- loading
 
     async load() {
+      this.saveTail();
+      this.tail = null;
       this.off?.();
       this.off = null;
       this.offQueue?.();
       this.offQueue = null;
-      this.logEl.replaceChildren();
-      for (const item of this.queuedEl.querySelectorAll('.queued-item')) item.remove();
-      this.queuedEl.hidden = true;
-      this.queuedBar.hidden = true;
-      this.measureQueue();
+      this.resetLog();
       this.applyQueueCombine(false);
       this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
       this.renderChips();
       this.clearAttachments();
       this.skipSelection = false;
       this.updateContext();
-      this.seen = 0;
-      this.turns.clear();
-      this.prompts.clear();
-      this.live = null;
       this.editedFiles = new Set();
-      this.setRunning(null);
 
       const id = this.getAttribute('conversation');
       this.loadedId = id;
       const token = Symbol('load');
       this.loading = token;
-      this.skills = await this.api?.skills?.().catch(() => []) ?? [];
+      // Everything a chat opens with is asked for at once. The transcript is
+      // what the person came for, so it is drawn the moment it lands; the
+      // setup around it (models, usage) fills in as its own answers come.
+      const cached = id ? readTail(id) : null;
+      const skills = this.api?.skills?.().catch(() => []) ?? [];
+      const opened = id ? this.api.conversation(id, cached ? { after: cached.seq } : { turns: TAIL_TURNS }) : null;
+      opened?.catch(() => {});
+      const providers = id ? this.api.providers().catch(() => []) : null;
+      const projects = id ? this.api.projects?.().catch(() => []) ?? [] : null;
+      if (cached) {
+        this.meta = cached.meta;
+        this.paintMast();
+        this.replay(cached.events);
+        this.seen = Math.max(this.seen, cached.seq);
+        this.setEarlier(cached);
+        this.tail = { ...cached, events: [...cached.events] };
+      }
+      this.skills = await skills;
 
       if (!id) {
         this.meta = null;
         this.paintMast();
+        this.paintFailover();
         await this.showPicker(token);
         return;
       }
@@ -3291,16 +5214,39 @@
       // A started conversation keeps its project; the picker is for new ones.
       this.projectLabel.hidden = true;
       try {
-        const [{ meta }, providers, projects] = await Promise.all([
-          this.api.conversation(id),
-          this.api.providers().catch(() => []),
-          this.api.projects?.().catch(() => []) ?? [],
-        ]);
+        let slice = await opened;
         if (this.loading !== token) return;
+        let over = Boolean(cached);
+        if (over && (slice.events?.length ?? 0) > CATCH_UP_MAX) {
+          this.resetLog();
+          over = false;
+          slice = await this.api.conversation(id, { turns: TAIL_TURNS });
+          if (this.loading !== token) return;
+        }
+        const { meta } = slice;
+        const events = slice.events ?? [];
         this.meta = meta;
+        this.paintMast();
+        if (over) {
+          // The copy is on screen; what happened since goes on after it.
+          this.replay(events);
+          this.tail.meta = meta;
+          for (const event of events) this.tail.events.push(event);
+        } else {
+          this.replay(events);
+          this.seen = Math.max(this.seen, slice.seq ?? 0);
+          this.setEarlier(slice);
+          this.tail = { meta, events: [...events], earlier: slice.earlier ?? null, older: slice.older ?? [], seq: this.seen };
+        }
+        this.tail.seq = this.seen;
+        this.follow(id, token);
+        const [providerList, projectList] = await Promise.all([providers, projects]);
+        if (this.loading !== token) return;
+        this.pendingFailover = null;
+        this.paintFailover();
         this.applyQueueCombine(Boolean(meta.queueCombine));
-        this.projectList = projects;
-        this.providerList = sortProviders(providers);
+        this.projectList = projectList;
+        this.providerList = sortProviders(providerList);
         this.mode = meta.mode || '';
         this.fillAgents(meta.provider);
         await this.syncCatalog({ model: meta.model, effort: meta.effort });
@@ -3308,20 +5254,18 @@
         this.paintMast();
         this.dispatchEvent(new CustomEvent('meta', { detail: { meta }, bubbles: true, composed: true }));
       } catch (err) {
-        if (this.loading === token) this.system(`This conversation could not be opened: ${err.message}`, true);
+        if (this.loading !== token) return;
+        // A copy of a chat the host no longer has is not the chat.
+        if (cached) {
+          writeTail(id, null);
+          this.tail = null;
+          this.resetLog();
+        }
+        this.system(`This conversation could not be opened: ${err.message}`, true);
         return;
       }
       await this.refreshChrome();
       if (this.loading !== token) return;
-      this.off?.();
-      this.off = this.api.on(id, (event) => {
-        if (this.loading !== token) return;
-        this.receive(event);
-      });
-      this.offQueue = this.api.on(id, (event) => {
-        if (this.loading !== token) return;
-        this.receiveQueue(event);
-      });
       this.offAll?.();
       this.others = new Map();
       this.offAll = this.api.on('*', (summary) => {
@@ -3336,7 +5280,29 @@
         if (summary.id === id && !summary.removed && summary.title && summary.title !== this.meta?.title) {
           this.meta = { ...(this.meta ?? {}), ...summary };
           this.paintMast();
+          this.paintFailover();
           this.dispatchEvent(new CustomEvent('meta', { detail: { meta: this.meta }, bubbles: true, composed: true }));
+        }
+        if (summary.id === id && !summary.removed) {
+          const previous = this.meta ?? {};
+          const setupChanged = summary.provider !== previous.provider
+            || summary.model !== previous.model
+            || summary.effort !== previous.effort;
+          const failoverChanged = summary.failover && summary.failover !== previous.failover;
+          if ((setupChanged && summary.provider) || failoverChanged) {
+            this.meta = {
+              ...previous,
+              provider: summary.provider ?? previous.provider,
+              model: summary.model,
+              effort: summary.effort,
+              failover: summary.failover ?? previous.failover,
+            };
+            this.paintFailover();
+            if (setupChanged && summary.provider) {
+              this.fillAgents(summary.provider);
+              this.syncCatalog({ model: summary.model, effort: summary.effort }).then(() => this.paintPresets());
+            }
+          }
         }
         this.paintAlso();
       });
@@ -3503,8 +5469,9 @@
     }
 
     preferredProvider(usable = []) {
-      const cursor = usable.find((item) => item.id === 'cursor');
-      if (cursor && (this.claudeUnavailable() || Number(this.claudeMeter()?.used) >= 100)) return cursor;
+      // Claude spent: Cursor if it is here, else Codex.
+      const elsewhere = usable.find((item) => item.id === 'cursor') ?? usable.find((item) => item.id === 'codex');
+      if (elsewhere && (this.claudeUnavailable() || Number(this.claudeMeter()?.used) >= 100)) return elsewhere;
       return usable.find((item) => item.default) ?? usable[0] ?? null;
     }
 
@@ -3534,7 +5501,10 @@
       };
     }
 
-    async syncCatalog({ model, effort } = {}) {
+    /** `switched` is a pick of another agent: a model or an effort only the
+     *  last agent knew is left behind, not carried over and saved as this
+     *  one's (gpt-6-astra as Claude's model fails Claude's first turn). */
+    async syncCatalog({ model, effort, switched = false } = {}) {
       const provider = this.currentProvider();
       if (provider?.id && this.api?.skills) {
         this.skills = await this.api.skills(provider.id).catch(() => this.skills ?? []);
@@ -3545,6 +5515,10 @@
       } catch { /* defaults from the provider list */ }
       const id = provider?.id;
       const models = this.pickerModels(provider);
+      // A Claude family id (`opus`) is not a Cursor model. Leaving it checked
+      // when the CLI switches makes the next turn ask Cursor for `opus-high`,
+      // which Cursor rejects by printing its entire model list.
+      const claudeFamily = new Set(['haiku', 'sonnet', 'opus', 'fable']);
       // A started conversation keeps the model it was started with. A composer
       // with no conversation yet opens on the last model this person chose —
       // which is what `settings.models` holds, and what the next conversation
@@ -3556,9 +5530,21 @@
       let effortValue = effort ?? radioValue(this.shadowRoot, 'effort') ?? '';
       if (!effortValue && fresh) effortValue = settings.efforts?.[id] ?? '';
       const split = splitCursorModel(modelValue);
-      if (split.family && models.some((item) => item.id === split.family)) {
+      if (id === 'cursor' && claudeFamily.has(modelValue)) {
+        const saved = settings.models?.[id] ?? '';
+        const savedFamily = splitCursorModel(saved).family;
+        const grok = models.find((item) => item.id !== 'auto' && /grok/i.test(`${item.id} ${item.label ?? ''}`));
+        modelValue = models.some((item) => item.id === savedFamily) ? savedFamily : (grok?.id ?? '');
+        if (!effortValue) effortValue = settings.efforts?.[id] || 'high';
+      } else if (split.family && models.some((item) => item.id === split.family)) {
         if (!effortValue) effortValue = split.effort;
         modelValue = split.family;
+      }
+      if (switched && modelValue && !models.some((item) => item.id === modelValue)) {
+        const saved = settings.models?.[id] ?? '';
+        const savedFamily = splitCursorModel(saved).family || saved;
+        modelValue = models.some((item) => item.id === savedFamily) ? savedFamily : '';
+        effortValue = settings.efforts?.[id] ?? '';
       }
       const lockClaude = this.claudeUnavailable() && String(id ?? '').startsWith('claude');
       this.modelLabel.hidden = !models.length;
@@ -3567,13 +5553,15 @@
         value: modelValue,
         disabled: lockClaude ? new Set(models.map((item) => item.id)) : new Set(),
       });
-      this.syncEfforts({ effort: effortValue });
+      this.syncEfforts({ effort: effortValue, fit: switched });
       if (!this.mode) this.mode = provider?.modes?.[0]?.id ?? '';
       this.paintStatus();
       this.fitSetup();
     }
 
-    syncEfforts({ effort } = {}) {
+    /** `fit` is a pick of another model or agent: an effort this one does not
+     *  take is let go rather than kept as a choice of its own. */
+    syncEfforts({ effort, fit = false } = {}) {
       const family = this.currentModel();
       const nested = family?.efforts ?? [];
       const efforts = nested.length
@@ -3581,9 +5569,12 @@
         : (this.currentProvider()?.efforts ?? []).map((level) => ({ id: level, label: level }));
       this.effortLabel.hidden = !efforts.length;
       const lockClaude = this.claudeUnavailable() && String(this.currentProvider()?.id ?? '').startsWith('claude');
+      const bare = !(nested.length && !family?.hasBare);
+      let value = effort ?? radioValue(this.shadowRoot, 'effort') ?? nested[0]?.id ?? '';
+      if (fit && value && !efforts.some((item) => item.id === value)) value = bare ? '' : nested[0]?.id ?? '';
       fillRadios(this.effortBox, 'effort', efforts, {
-        empty: nested.length && !family?.hasBare ? null : 'Default',
-        value: effort ?? radioValue(this.shadowRoot, 'effort') ?? nested[0]?.id ?? '',
+        empty: bare ? 'Default' : null,
+        value,
         disabled: lockClaude ? new Set(efforts.map((item) => item.id)) : new Set(),
       });
       this.fitSetup();
@@ -3650,7 +5641,32 @@
       const models = this.pickerModels(provider);
       if (models.some((item) => item.id === preset.model)) return preset.model;
       if (preset.provider === 'cursor') return models.find((item) => /grok/i.test(item.id))?.id || preset.model;
+      if (preset.provider === 'codex') return models[0]?.id || preset.model;
       return preset.model;
+    }
+
+    /** The words a setup wears. Opus and Grok take the version from the
+     *  catalog ("Opus 5.5", "Grok 4.7") so a newer model does not keep wearing
+     *  last month's number. Effort is the other axis and is written after.
+     *  Sonnet and Fable keep the name on the preset. */
+    presetShownName(preset) {
+      const word = EFFORT_WORD[preset?.effort] ?? '';
+      const numbered = preset?.model === 'opus' || /grok/i.test(preset?.model ?? '') || preset?.provider === 'cursor' || preset?.provider === 'codex';
+      if (!numbered) return preset?.name ?? '';
+      const provider = this.resolvePresetProvider(preset);
+      const id = provider ? this.resolvePresetModel(preset, provider) : preset.model;
+      const fromCatalog = modelHead((provider ? this.pickerModels(provider) : []).find((item) => item.id === id)?.label);
+      const head = fromCatalog || presetHead(preset);
+      if (!word || head.toLowerCase().endsWith(` ${word.toLowerCase()}`)) return head;
+      return `${head} ${word}`;
+    }
+
+    /** The model half of a setup's name, for the scrubber, where effort has
+     *  its own axis and must not be repeated under the stop. */
+    presetModelName(preset) {
+      const shown = this.presetShownName(preset);
+      const word = EFFORT_WORD[preset?.effort] ?? '';
+      return word && shown.endsWith(` ${word}`) ? shown.slice(0, -(word.length + 1)) : shown;
     }
 
     matchingPreset() {
@@ -3663,6 +5679,33 @@
           && this.resolvePresetModel(preset, provider) === model
           && preset.effort === effort;
       }) ?? null;
+    }
+
+    /** What this setup is called when no saved one matches it — Opus tuned up
+     *  to Max, or Haiku picked in the custom row. The model names itself and
+     *  wears its effort, in the same shape a setup's name has, so the word in
+     *  the bar is a true answer to "what am I about to run as" rather than a
+     *  guess. Empty only when there is no model to name; the callers say
+     *  "Custom" for that. */
+    customSetupName() {
+      const model = this.currentModel()?.label ?? '';
+      if (!model) return '';
+      const word = EFFORT_WORD[radioValue(this.shadowRoot, 'effort')] ?? '';
+      return word && !model.toLowerCase().endsWith(word.toLowerCase()) ? `${model} ${word}` : model;
+    }
+
+    /** The name and brand the packed setups control falls back to, written on
+     *  the track for fitPresets to read. Refreshed immediately before every
+     *  fit rather than at paint time: syncCatalog and the setup sheet fit the
+     *  row too, and a stale word here is the whole bug this guards against. */
+    markCustomSetup() {
+      if (!this.presetsEl) return;
+      const custom = this.matchingPreset() ? '' : (this.customSetupName() || 'Custom');
+      const provider = String(this.currentProvider()?.id ?? '');
+      this.presetsEl.dataset.custom = custom;
+      this.presetsEl.dataset.customBrand = custom
+        ? (provider.startsWith('claude') ? 'anthropic' : provider === 'cursor' || provider === 'codex' ? provider : '')
+        : '';
     }
 
     paintPresets({ initial = false } = {}) {
@@ -3690,7 +5733,7 @@
           input.checked = match?.id === preset.id && !this.presetDisabled(preset);
           input.disabled = this.presetDisabled(preset);
           const span = document.createElement('span');
-          span.innerHTML = `${BRAND[preset.brand] ?? ''}${preset.name}`;
+          span.innerHTML = `${BRAND[preset.brand] ?? ''}${this.presetShownName(preset)}`;
           label.append(input, span);
           this.presetsEl.append(label);
         }
@@ -3701,6 +5744,8 @@
           const preset = presets.find((item) => item.id === input.value);
           input.checked = match?.id === input.value && !this.presetDisabled(preset);
           input.disabled = this.presetDisabled(preset);
+          const span = input.nextElementSibling;
+          if (span && preset) span.innerHTML = `${BRAND[preset.brand] ?? ''}${this.presetShownName(preset)}`;
         }
         slideThumb(this.presetsEl, { animate: !initial });
       }
@@ -3740,13 +5785,13 @@
       this.paintPresets();
     }
 
-    /** The stops, weakest first. A slider is pushed right to turn something
-     *  up, so the strongest setup belongs at the right end — the menu reads
-     *  top-down and keeps its own order, which is a list, not a dial.
+    /** The stops, weakest first — the same order as the menu. A slider is
+     *  pushed right to turn something up, so the strongest setup belongs at
+     *  the right end.
      *  A setup you cannot pick is not a stop: landing on one and letting go
      *  would be a no-op the scrubber had promised. */
     scrubStops() {
-      return this.availablePresets().filter((preset) => !this.presetDisabled(preset)).reverse();
+      return this.availablePresets().filter((preset) => !this.presetDisabled(preset));
     }
 
     /** The efforts the stop you are on can be tuned through, weakest first.
@@ -3775,7 +5820,7 @@
       track.append(h('div', 'scrub-rail'), h('div', 'scrub-fill'), h('div', 'scrub-knob'));
       for (const preset of presets) {
         const stop = h('div', 'scrub-stop');
-        const name = h('span', 'scrub-name', presetHead(preset));
+        const name = h('span', 'scrub-name', this.presetModelName(preset));
         // Each model's own effort, under its own name: the second axis is
         // remembered per model, and this is where you can see that.
         stop.append(h('div', 'scrub-dot'), name, effortStack(this.scrubEfforts(preset), 'scrub-stop-effort'));
@@ -3840,11 +5885,13 @@
       const knob = this.scrubEl.querySelector('.scrub-knob');
       [...this.scrubEl.querySelectorAll('.scrub-stop')].forEach((stop, index) => {
         stop.classList.toggle('is-at', index === at);
+        const name = stop.querySelector('.scrub-name');
+        if (name && presets[index]) name.textContent = this.presetModelName(presets[index]);
       });
       // BRAND is this file's own constant, not anything an agent said.
       const model = this.scrubEl.querySelector('.scrub-model');
       model.innerHTML = BRAND[preset.brand] ?? '';
-      model.append(document.createTextNode(presetHead(preset)));
+      model.append(document.createTextNode(this.presetModelName(preset)));
       // Light the word and the bars rather than rewriting them: the stack is
       // already as wide as its longest word, so nothing beside it moves, and
       // the word being replaced is still there to leave while the new one
@@ -3880,7 +5927,7 @@
         knob.style.transition = '';
       }
       this.scrubEl.setAttribute('aria-valuenow', String(at));
-      this.scrubEl.setAttribute('aria-valuetext', [presetHead(preset), EFFORT_WORD[here] ?? here].filter(Boolean).join(', '));
+      this.scrubEl.setAttribute('aria-valuetext', [this.presetModelName(preset), EFFORT_WORD[here] ?? here].filter(Boolean).join(', '));
     }
 
     /** The effort remembered for the stop the scrubber is on. */
@@ -3937,11 +5984,16 @@
     }
 
     fitSetup() {
-      requestAnimationFrame(() => {
+      // Once a frame: every turn a transcript reads back starts and stops the
+      // running state, and each fit lays the whole pane out.
+      if (this.fitFrame) return;
+      this.fitFrame = requestAnimationFrame(() => {
+        this.fitFrame = 0;
         // One row first; the fits below wrap the bar only if they must.
         delete this.bar.dataset.wrap;
         delete this.setupRow?.dataset.wrap;
         if (!this.picker?.hidden) fitPicker(this.picker);
+        this.markCustomSetup();
         fitPresets(this.presetsEl);
       });
     }
@@ -3962,7 +6014,8 @@
       const provider = this.currentProvider();
       const modes = provider?.modes ?? [];
       const mode = modes.find((item) => item.id === this.mode);
-      const parts = [provider?.label || 'Agent', this.matchingPreset()?.name || this.currentModel()?.label || 'Custom'];
+      const preset = this.matchingPreset();
+      const parts = [provider?.label || 'Agent', (preset ? this.presetShownName(preset) : '') || this.customSetupName() || 'Custom'];
       if (mode && modes[0] && mode.id !== modes[0].id) parts.push(mode.label);
       return parts.join(' · ');
     }
@@ -4067,6 +6120,10 @@
       if (!this.setupSheet || this.setup?.hidden) return;
       const first = !this.sheetWanted;
       this.sheetWanted = true;
+      // Nothing in the sheet is typed, and a keyboard left up would sit over
+      // half of it: tapping the chip in mid-sentence puts the keys away, as
+      // tapping a picker in Messages does. The draft keeps its words.
+      if (first && keysUp() && this.shadowRoot.activeElement === this.input) this.input.blur();
       if (this.setupSheet.hidden) {
         this.setupHome = document.createComment('setup');
         this.setup.replaceWith(this.setupHome);
@@ -4185,7 +6242,7 @@
      *  It is the only thing in a chat that points back out at the document. */
     showZone(zone) {
       this.zone = zone && Array.isArray(zone.ids) && zone.ids.length ? zone : null;
-      this.zoneJump.hidden = !this.zone;
+      this.zoneRow.hidden = !this.zone;
       if (!this.zone) {
         this.dispatchEvent(new CustomEvent('zone', { detail: { zone: null }, bubbles: true, composed: true }));
         return;
@@ -4198,6 +6255,7 @@
       this.zoneJump.setAttribute('aria-label', this.zoneJump.title);
       this.dispatchEvent(new CustomEvent('zone', { detail: { zone: this.zone }, bubbles: true, composed: true }));
     }
+
 
     /** Same document: scroll to it. Another document: the jump is a navigation,
      *  and the ids ride in the hash so collab.js can land you on them. */
@@ -4249,12 +6307,24 @@
 
     // ---------------------------------------------------------- sending
 
+    /** Words that go in front of whatever is typed, written by the page rather
+     *  than the hand: Describe mode sets this to the reading of its marks, so
+     *  the card it borrows sends "I marked up the page: …" ahead of the
+     *  sentence without ever putting those words in the box. */
+    get briefText() {
+      try { return String(this.brief?.() ?? '').trim(); } catch { return ''; }
+    }
+
     updateSendable() {
       const noAgent = !this.getAttribute('conversation') && !radioValue(this.shadowRoot, 'agent');
       const canSend = Boolean(this.input.value.trim())
+        || Boolean(this.briefText)
         || this.attachments.length > 0
         || this.composerChips.some((chip) => chip.kind === 'skill' || chip.kind === 'compact');
       this.sendButton.disabled = this.sending || noAgent || !canSend;
+      // On a phone the microphone takes Send's place while the box is empty.
+      this.form.toggleAttribute('data-words', canSend);
+      if (this.form.dataset.voice === 'listening') this.sendButton.disabled = false;
     }
 
     /** Whether the person has started a message here: the same test the send
@@ -4353,8 +6423,14 @@
       this.fitSetup();
     }
 
-    async submit({ dispatch = null } = {}) {
+    async submit({ dispatch = null, spoken = false } = {}) {
       if (this.sending) return;
+      // A drafted question was for this one message.
+      if (this.draftPlaceholder != null) {
+        this.input.dataset.placeholder = this.draftPlaceholder;
+        this.draftPlaceholder = null;
+        this.form.classList.remove('is-drafting');
+      }
       const mode = dispatch ?? (this.running ? radioValue(this.shadowRoot, 'dispatch') || 'queue' : 'queue');
       let typed = this.input.value.trim();
       const slash = this.matchSlash(typed);
@@ -4383,9 +6459,10 @@
       }
       const skillChips = this.composerChips.filter((chip) => chip.kind === 'skill');
       const compactChip = this.composerChips.some((chip) => chip.kind === 'compact');
-      if (!typed && !skillChips.length && !compactChip && !this.attachments.length) return;
+      const brief = this.briefText;
+      if (!typed && !brief && !skillChips.length && !compactChip && !this.attachments.length) return;
 
-      let prompt = typed;
+      let prompt = brief && !['skill', 'compact'].includes(slash?.kind) && !skillChips.length && !compactChip ? `${brief} ${typed}`.trim() : typed;
       if (compactChip || slash?.kind === 'compact') prompt = '/compact';
       else if (slash?.kind === 'skill') prompt = `/${slash.id}${slash.rest ? ` ${slash.rest}` : ''}`;
       else if (skillChips.length) prompt = `${skillChips.map((chip) => `/${chip.id}`).join(' ')}${typed ? ` ${typed}` : ''}`.trim();
@@ -4412,6 +6489,7 @@
             effort: picks.effort,
             mode: picks.mode,
             project,
+            failover: this.pendingFailover === 'pause' ? 'pause' : 'auto',
           });
           this.setAttribute('conversation', id);
           this.agentLabel.hidden = false;
@@ -4419,6 +6497,7 @@
           this.fillAgents(provider);
           this.meta = {
             id,
+            failover: this.pendingFailover === 'pause' ? 'pause' : 'auto',
             provider,
             model: picks.model,
             effort: picks.effort,
@@ -4428,9 +6507,17 @@
           };
           this.paintMast();
           this.paintPresets();
+          this.paintFailover();
           this.dispatchEvent(new CustomEvent('conversation', { detail: { id }, bubbles: true, composed: true }));
         }
-        await this.api.send(id, { prompt, dispatch: mode, ...context });
+        const sent = await this.api.send(id, { prompt, dispatch: mode, ...context, ...(spoken ? { spoken: true } : {}) });
+        if (sent?.turnId) {
+          this.sentTurns.add(sent.turnId);
+          if (spoken) this.spokenTurns.add(sent.turnId);
+        }
+        // Whoever lent this composer out learns the words left it: Describe
+        // mode steps back as soon as its brief is on its way.
+        this.dispatchEvent(new CustomEvent('sent', { detail: { id, prompt }, bubbles: true, composed: true }));
         // A reply in the person's own words answers the question too.
         for (const record of this.turns.values()) {
           record.choice?.remove();
@@ -4832,6 +6919,13 @@
 
     /** What a sent message looks like: its attachments as the cards they were,
      *  then whatever the person actually typed around them. */
+    relayedMessage(block) {
+      const node = this.userMessage(block.body, { conversation: block.id, title: block.title });
+      node.dataset.relayed = '';
+      node.querySelector('.msg-text')?.addEventListener('click', () => node.toggleAttribute('data-open'));
+      return node;
+    }
+
     userMessage(text, from = null) {
       const { blocks, rest } = splitPasted(text);
       const node = h('div', 'msg me');
@@ -4913,18 +7007,215 @@
 
     // ---------------------------------------------------------- receiving
 
+    /** An empty log, and none of what the last one knew about its turns. */
+    resetLog() {
+      this.logEl.replaceChildren();
+      for (const item of this.queuedEl.querySelectorAll('.queued-item')) item.remove();
+      this.queuedEl.hidden = true;
+      this.queuedBar.hidden = true;
+      this.measureQueue();
+      this.seen = 0;
+      this.seenQueue = 0;
+      this.turns.clear();
+      this.usageLeft = new Set();
+      this.hideUsageNote();
+      this.hideCreditNote();
+      this.prompts.clear();
+      this.live = null;
+      this.lastAsk = null;
+      this.earlier = null;
+      this.olderTurns = new Set();
+      this.heldOlder = [];
+      this.fetchingEarlier = null;
+      this.setRunning(null);
+    }
+
+    /** This tab's copy of the chat's end, for the next page (readTail). */
+    saveTail() {
+      if (!this.tail || !this.loadedId) return;
+      writeTail(this.loadedId, { ...this.tail, meta: this.meta ?? this.tail.meta, seq: this.seen });
+    }
+
+    /** A conversation's history, drawn in one pass: nothing is measured or
+     *  scrolled until the last event is in, and then the log is laid out
+     *  once and left at its foot. */
+    replay(events) {
+      const log = this.logEl;
+      const stuck = !log.childElementCount || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+      this.replaying = true;
+      try {
+        for (const event of events) {
+          this.receive(event);
+          this.receiveQueue(event);
+        }
+      } finally {
+        this.replaying = false;
+      }
+      this.focusAsk();
+      this.measureQueue();
+      if (stuck) log.scrollTop = log.scrollHeight;
+      // The turns read back started and stopped the running state without
+      // saying so; say once where it ended.
+      this.dispatchEvent(new CustomEvent('running', { detail: this.running ?? { turn: null }, bubbles: true, composed: true }));
+    }
+
+    /** Whether there are turns above the ones drawn, and the row at the top
+     *  of the log that fetches them as the reader scrolls toward it. */
+    setEarlier({ earlier = null, older = [] } = {}) {
+      this.earlier = earlier;
+      this.olderTurns = new Set(older);
+      if (!earlier) {
+        this.earlierEl?.remove();
+        return;
+      }
+      if (!this.earlierEl) {
+        this.earlierEl = h('button', 'earlier', 'Show earlier messages');
+        this.earlierEl.type = 'button';
+        this.earlierEl.addEventListener('click', () => this.loadEarlier());
+        // Well before it is reached: a screen's worth of scrolling is time
+        // enough to fetch and draw the turns above.
+        this.earlierWatch = new IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) this.loadEarlier();
+        }, { root: this.logEl, rootMargin: '1200px 0px 0px 0px' });
+        this.earlierWatch.observe(this.earlierEl);
+      }
+      this.earlierEl.disabled = false;
+      this.earlierEl.textContent = 'Show earlier messages';
+      if (this.logEl.firstChild !== this.earlierEl) this.logEl.prepend(this.earlierEl);
+    }
+
+    loadEarlier() {
+      const id = this.getAttribute('conversation');
+      if (!id || !this.earlier || this.fetchingEarlier) return this.fetchingEarlier;
+      const token = this.loading;
+      this.earlierEl.disabled = true;
+      this.fetchingEarlier = (async () => {
+        try {
+          const slice = await this.api.conversation(id, { turns: EARLIER_TURNS, before: this.earlier });
+          if (this.loading !== token) return;
+          this.backfill(slice.events ?? []);
+          this.setEarlier(slice);
+          this.releaseHeld(slice.events ?? []);
+        } catch {
+          if (this.loading !== token || !this.earlierEl) return;
+          this.earlierEl.disabled = false;
+          this.earlierEl.textContent = 'Couldn’t load earlier messages. Try again';
+          return;
+        } finally {
+          if (this.loading === token) this.fetchingEarlier = null;
+        }
+        // Still within reach (a short slice, a tall pane): the watcher saw it
+        // once and will not say so again, so keep going from here.
+        const log = this.logEl;
+        if (this.earlier && this.earlierEl?.isConnected && log.scrollTop < 1200) this.loadEarlier();
+      })();
+      return this.fetchingEarlier;
+    }
+
+    /** Late news of turns now drawn, that their own fetch did not carry. */
+    releaseHeld(fetched) {
+      if (!this.heldOlder.length) return;
+      const got = new Set(fetched.map((event) => event.seq));
+      const still = [];
+      // Drawn on its turn and nothing else: it is an old turn's news.
+      this.backfilling = true;
+      try {
+        for (const event of this.heldOlder) {
+          if (this.olderTurns.has(event.turn)) still.push(event);
+          else if (!got.has(event.seq)) {
+            this.receive(event);
+            this.receiveQueue(event);
+          }
+        }
+      } finally {
+        this.backfilling = false;
+      }
+      this.heldOlder = still;
+    }
+
+    /** Earlier turns, drawn out of sight and then set in above the ones on
+     *  screen, with the reader left looking at what they were reading. The
+     *  drawing is the same as any history's; what it must not touch is the
+     *  state of now — the live turn, what is running, the chat's target. */
+    backfill(events) {
+      const log = this.logEl;
+      const holder = h('div');
+      holder.hidden = true;
+      holder.dataset.detail = log.dataset.detail;
+      log.before(holder);
+      const saved = { live: this.live, running: this.running, meta: this.meta, lastAsk: this.lastAsk, fresh: this.fresh };
+      const had = new Set(this.turns.keys());
+      this.live = null;
+      this.logEl = holder;
+      this.replaying = true;
+      this.backfilling = true;
+      try {
+        for (const event of events) {
+          this.receive(event);
+          this.receiveQueue(event);
+        }
+      } finally {
+        this.logEl = log;
+        this.replaying = false;
+        this.backfilling = false;
+        Object.assign(this, saved);
+      }
+      // Every one of these was followed by a turn already on screen, so each
+      // card folds down the way a newer prompt folds it.
+      for (const [turn, record] of this.turns) {
+        if (had.has(turn) || !record.progress || record.progress.running) continue;
+        record.progress.el.dataset.old = '';
+        this.settle(turn, '');
+      }
+      const fromFoot = log.scrollHeight - log.scrollTop;
+      if (this.earlierEl?.isConnected) this.earlierEl.after(...holder.childNodes);
+      else log.prepend(...holder.childNodes);
+      holder.remove();
+      log.scrollTop = log.scrollHeight - fromFoot;
+      this.paintMast();
+    }
+
+    /** Live events from where the history ended. */
+    follow(id, token) {
+      this.off?.();
+      this.offQueue?.();
+      const after = this.seen;
+      this.off = this.api.on(id, (event) => {
+        if (this.loading !== token) return;
+        if (event?.seq > this.seen) this.tail?.events.push(event);
+        this.receive(event);
+      }, { after });
+      this.offQueue = this.api.on(id, (event) => {
+        if (this.loading !== token) return;
+        this.receiveQueue(event);
+      }, { after });
+    }
+
     receive(event) {
       const id = this.getAttribute('conversation');
       if (!eventBelongsToConversation(event, id)) return;
-      if (event.seq) {
+      if (event.seq && !this.backfilling) {
         if (event.seq <= this.seen) return;
         this.seen = event.seq;
       }
-      const stuck = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
+      // A turn above the part drawn so far comes whole when it is scrolled
+      // to; news of it now (an undo) has nowhere to go yet, so it waits for
+      // the turn (loadEarlier), in case it missed the fetch that brings it.
+      if (event.turn && !this.backfilling && this.olderTurns?.has(event.turn)) {
+        this.heldOlder.push(event);
+        return;
+      }
+      // Read back as one batch, the log is laid out once at the end rather
+      // than once an event: 2,000 events measured one by one took seconds.
+      const stuck = !this.replaying && this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
       const turn = event.turn;
+      // Live, or history being replayed as the conversation opens. Only live
+      // news may move: a transcript read back should arrive already still.
+      this.fresh = !event.t || Date.now() - event.t < 5000;
       switch (event.type) {
         case 'user': {
           this.endLive();
+          if (!this.backfilling) this.plainSettleAll();
           // What was typed, not what was attached: a title and a queue row are
           // both one line, and a pasted file would be all of it.
           const said = splitPasted(event.text).rest || String(event.text ?? '');
@@ -4938,7 +7229,16 @@
             };
             this.paintMast();
           }
-          this.append(turn, this.userMessage(event.text, event.from ?? null));
+          // A message relayed from another chat is that chat's words, not
+          // the envelope the agent reads them in.
+          const relayed = parseRelayed(event.text);
+          if (relayed) for (const block of relayed) this.append(turn, this.relayedMessage(block));
+          else {
+            const node = this.userMessage(event.text, event.from ?? null);
+            // Said, not typed: the words are the prompt, and the audio is gone.
+            if (event.spoken) node.append(h('div', 'msg-said', 'Said aloud'));
+            this.append(turn, node);
+          }
           break;
         }
         case 'turn.queued':
@@ -4973,10 +7273,13 @@
         case 'ops.applied':
           this.opsApplied(turn, event);
           break;
+        case 'progress.drawn':
+          this.plainDrawn(turn, event);
+          break;
         // The construction zone this turn is drawing on its document, sent here
         // too because the chat may be read from another page entirely.
         case 'zone':
-          this.showZone(event.ids?.length ? event : null);
+          if (!this.backfilling) this.showZone(event.ids?.length ? event : null);
           break;
         case 'document.changed':
           this.documentChanged(turn, event);
@@ -4992,6 +7295,8 @@
           // An ask needs an answer, so a folded callout unfolds itself.
           this.removeAttribute('data-folded');
           this.ask(turn, event);
+          // Said aloud, it says it needs an OK; the OK itself is a press.
+          if (!this.backfilling && !this.replaying && this.spokenTurns.has(turn)) this.speakTurn(turn);
           break;
         case 'ask.answered':
         case 'ask.void':
@@ -5003,12 +7308,23 @@
         case 'turn.interrupted':
           this.endLive();
           this.finish(turn, event);
+          if (event.type === 'turn.failed' && event.usageStopped && this.failoverMode() === 'pause' && !this.backfilling) this.showUsageNote(event);
+          if (event.type === 'turn.failed' && event.creditUsedUp && !this.backfilling) this.creditUsedUp();
+          if (event.type === 'turn.completed' && this.meta?.provider === 'claude-credit' && !this.backfilling) this.checkCreditLeft();
           break;
         case 'turn.undone':
           this.undone(turn, event);
           break;
         case 'handoff':
           this.system(event.from ? 'Continued from an earlier conversation.' : 'Continued in a new conversation.');
+          break;
+        case 'usage.continued':
+          if (!this.backfilling) this.hideUsageNote();
+          this.system(`Claude usage stopped. Continuing on ${event.label}.`);
+          break;
+        case 'usage.left':
+          if (event.turn) this.usageLeft?.add(event.turn);
+          if (this.usageAsk?.turn === event.turn) this.hideUsageNote();
           break;
         case 'message':
           this.endLive();
@@ -5023,7 +7339,7 @@
     }
 
     record(turn) {
-      if (!this.turns.has(turn)) this.turns.set(turn, { tools: new Map(), applies: [], applied: 0, footer: null, asks: new Map() });
+      if (!this.turns.has(turn)) this.turns.set(turn, { tools: new Map(), applies: [], applied: 0, footer: null, asks: new Map(), progress: null });
       return this.turns.get(turn);
     }
 
@@ -5044,7 +7360,17 @@
       card = this.buildAskCard(event, submit);
       this.record(turn).asks.set(event.requestId, card);
       this.append(turn, card);
-      card.querySelector('button')?.focus({ preventScroll: true });
+      if (event.kind !== 'question') this.plainAsk(turn, event, card);
+      // Read back, most asks were answered a few events later; only the one
+      // still open when the history ends is focused (replay, below).
+      this.lastAsk = { card, kind: event.kind };
+      if (!this.replaying) this.focusAsk();
+    }
+
+    focusAsk() {
+      const { card, kind } = this.lastAsk ?? {};
+      if (!card?.isConnected) return;
+      if (this.logEl.dataset.detail !== 'simple' || kind === 'question') card.querySelector('button')?.focus({ preventScroll: true });
     }
 
     /** The card an ask becomes: a permission prompt with Allow / Deny and a
@@ -5187,6 +7513,7 @@
       if (!card) return;
       card.remove();
       record.asks.delete(event.requestId);
+      this.plainAskClosed(turn, event, card);
       if (event.type === 'ask.void' && event.why !== 'cancelled') this.system('The agent stopped waiting for that answer.');
     }
 
@@ -5198,20 +7525,127 @@
     append(turn, node) {
       if (turn && node.classList?.contains('msg')) node.dataset.turn = turn;
       const footer = turn ? this.turns.get(turn)?.footer : null;
-      if (footer?.isConnected) this.logEl.insertBefore(node, footer);
+      // The card is the turn's latest word: whatever the turn says next goes
+      // in above it. The card itself never moves, because moving it would
+      // restart every animation inside it.
+      const card = turn ? this.turns.get(turn)?.progress?.el : null;
+      const before = card && card !== node && card.isConnected ? card : footer?.isConnected ? footer : null;
+      if (before) this.logEl.insertBefore(node, before);
       else this.logEl.append(node);
+    }
+
+    failoverMode() {
+      if (this.meta?.failover === 'pause' || this.meta?.failover === 'auto') return this.meta.failover;
+      return this.pendingFailover === 'pause' ? 'pause' : 'auto';
+    }
+
+    paintFailover() {
+      if (!this.failoverButton) return;
+      const pause = this.failoverMode() === 'pause';
+      this.failoverButton.dataset.failover = pause ? 'pause' : 'auto';
+      if (this.failoverMark) this.failoverMark.innerHTML = pause ? PAUSE_ICON : HANDOFF_ICON;
+      if (this.failoverWord) this.failoverWord.textContent = pause ? 'Pause' : 'Hand off';
+      this.failoverButton.setAttribute('aria-label', pause
+        ? 'Pause when Claude usage stops. Click to hand off to Cursor instead.'
+        : 'Hand off to Cursor when Claude usage stops. Click to pause instead.');
+    }
+
+    flipFailover() {
+      const next = this.failoverMode() === 'pause' ? 'auto' : 'pause';
+      this.pendingFailover = next;
+      if (this.meta) this.meta = { ...this.meta, failover: next };
+      this.paintFailover();
+      const id = this.getAttribute('conversation');
+      if (!id) return;
+      this.api.update(id, { failover: next }).catch((err) => this.system(err.message, true));
+    }
+
+    showUsageNote(event) {
+      if (!this.usageNote || this.usageLeft?.has(event.turn)) return;
+      this.usageAsk = event;
+      const can = event.canSwitch !== false;
+      this.usageNoteText.textContent = can
+        ? (event.next === 'grok'
+          ? 'This model stopped. Switch to Grok?'
+          : 'Claude usage stopped. Switch to Cursor?')
+        : String(event.stay || 'Cursor is unavailable, so this chat stayed on Claude').replace(/^—\s*/, '');
+      this.usageSwitch.hidden = !can;
+      this.usageNote.hidden = false;
+    }
+
+    hideUsageNote() {
+      if (this.usageNote) this.usageNote.hidden = true;
+      this.usageAsk = null;
+    }
+
+    /** Starter credit, in the composer's line: used up, with the sheet
+     *  opened once; or under a dollar left, said once on this drive. */
+    showCreditNote(text) {
+      if (!this.creditNote) return;
+      this.creditNoteText.textContent = text;
+      this.creditNote.hidden = false;
+    }
+
+    hideCreditNote() {
+      if (this.creditNote) this.creditNote.hidden = true;
+    }
+
+    creditUsedUp() {
+      this.showCreditNote('Starter credit used up. Connect your Claude to keep going.');
+      if (!creditSheetOpened) {
+        creditSheetOpened = true;
+        connectClaude();
+      }
+    }
+
+    async checkCreditLeft() {
+      try {
+        if (localStorage.getItem(CREDIT_LOW_SAID)) return;
+      } catch { /* private mode: said at most once a page */ }
+      let credit = null;
+      try {
+        credit = await this.api?.credit?.({ fresh: true });
+      } catch {
+        return;
+      }
+      if (!credit?.active || !credit.low) return;
+      try { localStorage.setItem(CREDIT_LOW_SAID, '1'); } catch { /* private mode */ }
+      this.showCreditNote(`Under a dollar of ${credit.by ? `${credit.by}\u2019s ` : ''}starter credit left.`);
+    }
+
+    switchFromUsage() {
+      const id = this.getAttribute('conversation');
+      if (!id) return;
+      this.api.failover(id).then(() => this.hideUsageNote()).catch((err) => this.system(err.message, true));
+    }
+
+    leaveUsage() {
+      const id = this.getAttribute('conversation');
+      const turn = this.usageAsk?.turn;
+      if (turn) this.usageLeft?.add(turn);
+      this.hideUsageNote();
+      if (!id || !turn) return;
+      this.api.leaveUsage(id, turn).catch((err) => this.system(err.message, true));
     }
 
     system(message, error = false) {
       this.logEl.append(h('div', error ? 'system error' : 'system', message));
-      this.logEl.scrollTop = this.logEl.scrollHeight;
+      if (!this.replaying) this.logEl.scrollTop = this.logEl.scrollHeight;
     }
 
     /** The callout's one line: whatever the log said last, on one line. Any
      *  other chrome leaves the button hidden, so this costs nothing there. */
     tick() {
       if (this.dataset.chrome !== 'callout' || !this.ticker) return;
-      const last = [...this.logEl.children].reverse().find((el) => !el.classList.contains('turn-footer'));
+      const simple = this.logEl.dataset.detail === 'simple';
+      const last = [...this.logEl.children].reverse().find((el) => !el.classList.contains('turn-footer')
+        && (simple ? !(el.matches('.tool, .tool-group') && getComputedStyle(el).display === 'none') : !el.classList.contains('progress')));
+      if (last?.classList.contains('progress')) {
+        const said = last.querySelector('.w-say')?.textContent ?? '';
+        this.ticker.textContent = said;
+        this.ticker.hidden = !said;
+        return;
+      }
       // Not textContent: a paragraph followed by a list would run together
       // into onesentence. Blocks are spaced, inline runs are not, so bold
       // text keeps its punctuation.
@@ -5224,22 +7658,89 @@
       if (!this.live || this.live.turn !== turn) {
         this.endLive();
         const node = h('div', 'msg agent live');
-        this.live = { turn, node };
+        this.live = { turn, node, raw: '' };
         this.append(turn, node);
       }
-      this.live.node.append(text);
+      this.live.raw += text;
+      // The cheap path is the only one until a visual opens. After that the
+      // live message is rebuilt from the whole delta each time, because half a
+      // visual is markup and markup is not what the log shows.
+      if (!this.live.visual && !VISUAL_OPEN.test(this.live.raw)) {
+        this.live.node.append(text);
+        return;
+      }
+      this.live.visual = true;
+      const mod = window.marbleAgentUI?.maskStreamingVisuals;
+      if (!mod) {
+        // Nothing is shown until the module that knows what to hide is here.
+        // If it never comes, this falls back to the plain streaming it
+        // replaced rather than waiting on a promise that has already settled.
+        if (this.visualGone) {
+          this.live.node.append(text);
+          return;
+        }
+        loadVisual().then((loaded) => {
+          this.visualGone = !loaded;
+          if (this.live?.turn === turn) this.delta(turn, '');
+        });
+        return;
+      }
+      const { text: shown, visuals } = mod(this.live.raw);
+      this.live.node.replaceChildren(shown);
+      this.styleVisuals(window.marbleAgentUI?.VISUAL_CSS);
+      for (let i = 0; i < visuals; i += 1) this.live.node.append(h('div', 'visual-pending'));
+    }
+
+    /** The hook renderText calls for a ```marble-visual block: a shell now, and
+     *  the frame that fills it as soon as the module lands. */
+    visualHook() {
+      return (info, body) => {
+        const card = h('figure', 'visual');
+        card.setAttribute('role', 'group');
+        card.append(h('div', 'visual-pending'));
+        loadVisual().then((loaded) => {
+          if (loaded) {
+            this.styleVisuals(loaded.VISUAL_CSS);
+            loaded.mountVisual(card, { info, body, view: this });
+            return;
+          }
+          // A host that cannot serve the module — an older one, or a reload
+          // that lost the network — shows the markup as what it is. A
+          // placeholder that shimmers for ever is the one thing worse.
+          const pre = h('pre');
+          pre.append(h('code', '', body));
+          card.replaceChildren(pre);
+        });
+        return card;
+      };
+    }
+
+    /** The card's own sheet, added to this root the first time one appears. */
+    styleVisuals(css) {
+      if (this.visualStyled || !css) return;
+      this.visualStyled = true;
+      const style = document.createElement('style');
+      style.textContent = css;
+      this.shadowRoot.append(style);
+    }
+
+    /** The palette again, for frames that were mounted before it changed. */
+    repaintVisuals() {
+      if (!this.visualStyled) return;
+      visualModule?.then?.((mod) => mod?.paintVisuals(this));
     }
 
     text(turn, text) {
+      const visual = this.visualHook();
       if (this.live && this.live.turn === turn) {
         this.live.node.classList.remove('live');
-        this.live.node.replaceChildren(renderText(text));
+        this.live.node.replaceChildren(renderText(text, { visual }));
         this.record(turn).lastText = { text, node: this.live.node };
         this.live = null;
         return;
       }
       const node = h('div', 'msg agent');
-      node.append(renderText(text));
+      node.append(renderText(text, { visual }));
       this.append(turn, node);
       this.record(turn).lastText = { text, node };
     }
@@ -5342,11 +7843,13 @@
       // Kept so a refusal or a failure can say which step it was, instead of
       // replacing the label with the bare tool name.
       row.dataset.was = label;
+      if (event.name === 'act') row.dataset.kind = 'act';
       if (source) row.dataset.source = source;
       const record = this.record(turn);
       record.tools.set(event.callId, row);
       if (event.name === 'apply_ops') record.applies.push({ row, path: event.input?.path });
       this.append(turn, row);
+      this.plainCall(turn, event);
     }
 
     /** The nodes that belong to a turn: everything between the previous
@@ -5365,11 +7868,24 @@
 
     regroup(turn) {
       collapseToolRows(this.turnNodes(turn));
+      if (this.turns.get(turn)?.progress?.open) this.markReveal(turn);
     }
 
     toolResult(turn, event) {
       const row = this.record(turn).tools.get(event.callId);
       if (!row || row.dataset.state === 'refused') return;
+      this.plainResult(turn, row, event);
+      // The one row its result is allowed to rewrite. "Pressing sort-btn" is
+      // the call; "Pressed Sort · 12 changes" is what happened, and only the
+      // host — which read the control's own words and counted the ops — can
+      // say it. Its result leads with that line.
+      if (row.dataset.kind === 'act' && event.ok) {
+        const said = String(event.summary ?? '').trim().split('\n')[0];
+        if (said && said.length <= 80) {
+          row.textContent = said;
+          row.dataset.was = said;
+        }
+      }
       if (row.dataset.state === 'pending' && event.ok && row.dataset.name !== 'apply_ops') {
         row.dataset.state = 'done';
         this.regroup(turn);
@@ -5383,8 +7899,9 @@
         // access when most of it was the agent tripping over its own shell.
         const denied = Boolean(event.denied);
         row.dataset.state = denied ? 'refused' : 'failed';
+        this.plainFailed(turn, row, event);
         row.title = event.summary ?? '';
-        if (!['list_documents', 'read_document', 'apply_ops', 'create_document', 'read_guide', 'check_document'].includes(row.dataset.name)) {
+        if (!['list_documents', 'read_document', 'apply_ops', 'create_document', 'read_guide', 'check_document', 'affordance_script'].includes(row.dataset.name)) {
           // The label already says what the step was ("Ran the runner tests");
           // keep it, because what was refused is the useful half.
           row.textContent = `${denied ? 'Blocked' : 'Failed'}: ${row.dataset.was ?? row.dataset.name}`;
@@ -5403,6 +7920,7 @@
       if (event.path) {
         this.editedFiles.add(event.path);
         this.paintStatus();
+        this.plainMade(turn, event.path);
       }
       const record = this.record(turn);
       record.applied += event.count;
@@ -5417,6 +7935,7 @@
       if (event.path) {
         this.editedFiles.add(event.path);
         this.paintStatus();
+        this.plainMade(turn, event.path);
       }
       const record = this.record(turn);
       record.changed = (record.changed ?? 0) + 1;
@@ -5442,6 +7961,11 @@
     receiveQueue(event) {
       const id = this.getAttribute('conversation');
       if (!eventBelongsToConversation(event, id)) return;
+      if (event.seq && !this.backfilling) {
+        if (event.seq <= this.seenQueue) return;
+        this.seenQueue = event.seq;
+      }
+      if (event.turn && !this.backfilling && this.olderTurns?.has(event.turn)) return;
       const turn = event.turn;
       switch (event.type) {
         case 'turn.queued':
@@ -5524,6 +8048,7 @@
     /** Hold the foot of the log open by however tall the floating stack is,
      *  and stay at the bottom if that is where the reader already was. */
     measureQueue() {
+      if (this.replaying) return;
       const space = this.queuedEl.hidden ? 0 : Math.round(this.queuedEl.getBoundingClientRect().height);
       if (space === this.queuedSpace) return;
       const stuck = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
@@ -5619,6 +8144,7 @@
         this.logEl.append(record.footer);
       }
       record.footer.dataset.status = status;
+      if (record.progress) record.footer.dataset.plain = '';
       record.footer.replaceChildren();
       if (status === 'running') {
         record.footer.append(h('span', 'pulse'), h('span', 'status', 'Working…'));
@@ -5641,6 +8167,7 @@
         interrupted: 'Interrupted when the host stopped',
       }[status];
       footer.append(h('span', 'status', `${words}${took}`));
+      this.plainFinish(turn, status, event);
 
       if ((applied || docs) && !record.undone) {
         const undo = h('button', 'undo', 'Undo turn');
@@ -5675,6 +8202,8 @@
       }
       if (this.running?.turn === turn) this.setRunning(null);
       this.offerChoices(turn);
+      if (status === 'completed') this.offerReadAloud(turn);
+      if (!this.backfilling && !this.replaying) this.speakEnded(turn);
     }
 
     undone(turn, event) {
@@ -5686,6 +8215,8 @@
     }
 
     setRunning(turn) {
+      // Earlier turns drawn in above started and stopped long ago.
+      if (this.backfilling) return;
       // Nothing is running, so nothing is being worked on: the zone on the
       // document is already gone and the row that points at it goes with it.
       if (!turn) this.showZone(null);
@@ -5696,7 +8227,664 @@
       else requestAnimationFrame(() => slideThumb(this.dispatchEl, { animate: false }));
       // The chooser takes room from the setup; refit it, or wrap the bar.
       this.fitSetup();
+      if (this.replaying) return;
       this.dispatchEvent(new CustomEvent('running', { detail: this.running ?? { turn: null }, bubbles: true, composed: true }));
+    }
+
+    // ---------------------------------------------------------- simple progress (v2: the work, shown)
+
+    paintDetail() {
+      const mode = readDetail();
+      this.logEl.dataset.detail = mode;
+      if (!this.detailButton) return;
+      this.detailButton.dataset.detail = mode;
+      this.detailMark.innerHTML = DETAIL_ICONS[mode];
+      this.detailWord.textContent = mode === 'simple' ? 'Simple progress' : 'Technical steps';
+      this.detailButton.setAttribute('aria-label', mode === 'simple'
+        ? 'Showing simple progress. Click to see every technical step.'
+        : 'Showing every technical step. Click for simple progress.');
+    }
+
+    /** The turn's card, made the first time the turn does anything. */
+    plainCard(turn) {
+      const record = this.record(turn);
+      if (record.progress) return record.progress;
+      const el = wel(`<div class="progress" data-state="running">
+        <div class="w-tick"><span class="w-glyph"></span><span class="w-say"></span><span class="w-stops" role="img" aria-label="Explore, stop 1 of 4"><i></i><i></i><i></i><i></i></span><span class="w-time"></span></div>
+        <div class="w-live" hidden><div class="w-vh"></div><div class="w-slot"></div><p class="w-cap"></p><div class="w-back" hidden><span></span><button type="button">Back to now</button></div></div>
+        <div class="w-drawn" hidden></div>
+        <div class="w-receipt" hidden></div>
+        <div class="w-sec-h w-strip-h">Steps</div>
+        <div class="w-strip"></div>
+        <div class="progress-said" hidden></div>
+        <div class="progress-next" hidden><p class="progress-q"></p><div class="progress-acts"></div></div>
+        <div class="w-foot"><button type="button" class="w-quiet w-det progress-more" aria-expanded="false">Details</button><span class="w-steer"></span></div>
+      </div>`);
+      const q = (s) => el.querySelector(s);
+      const card = {
+        el, turn, glyph: q('.w-glyph'), glyphStage: '', say: q('.w-say'), stops: q('.w-stops'), time: q('.w-time'),
+        live: q('.w-live'), vh: q('.w-vh'), slot: q('.w-slot'), cap: q('.w-cap'), back: q('.w-back'),
+        receipt: q('.w-receipt'), drawn: q('.w-drawn'), drawing: null, strip: q('.w-strip'), said: q('.progress-said'), next: q('.progress-next'), q: q('.progress-q'), acts: q('.progress-acts'),
+        more: q('.w-det'), steer: q('.w-steer'),
+        stage: null, reached: -1, built: false, running: true, open: false,
+        docs: new Map(), files: new Set(), todoList: [], plan: null, stageIdx: -1,
+        frames: [], cur: null, shown: null, spent: { look: 0, build: 0, check: 0 }, lastAt: null,
+        changes: new Map(), added: [], colors: [], lines: [], sources: [], reads: [], tests: null, stuck: null, ask: null,
+      };
+      card.more.addEventListener('click', () => this.revealSteps(turn, !card.open));
+      card.back.querySelector('button').addEventListener('click', () => this.recallFrame(card, null));
+      card.strip.addEventListener('click', (e) => {
+        const f = e.target.closest('.w-frame');
+        if (f && f.dataset.st !== 'todo') this.recallFrame(card, card.frames[Number(f.dataset.i)]);
+      });
+      card.vh.addEventListener('click', (e) => {
+        if (e.target.closest('button[data-a="reply"]')) this.replyAbout(card);
+      });
+      record.progress = card;
+      if (record.footer) record.footer.dataset.plain = '';
+      this.append(turn, el);
+      this.setNext(turn, 'running');
+      this.tickClock(card);
+      return card;
+    }
+
+    /** The time on the line, every second while it works. */
+    tickClock(card) {
+      const record = this.turns.get(card.turn);
+      const paint = () => {
+        const from = record?.started ?? card.firstAt ?? Date.now();
+        card.time.textContent = wclock(Date.now() - from);
+      };
+      paint();
+      clearInterval(card.timer);
+      card.timer = setInterval(() => {
+        if (!card.running || !card.el.isConnected) { clearInterval(card.timer); return; }
+        paint();
+      }, 1000);
+    }
+
+    /** Where the time went: each gap between steps goes to the stage it was spent in. */
+    spend(card, at) {
+      const t = at ?? Date.now();
+      if (card.lastAt != null && card.stage) card.spent[card.stage] = (card.spent[card.stage] ?? 0) + Math.max(0, t - card.lastAt);
+      card.lastAt = t;
+    }
+
+    plainCall(turn, event) {
+      const card = this.plainCard(turn);
+      const input = event.input ?? {};
+      const step = plainStep(event.name, input, card.built);
+      this.spend(card, event.t);
+      card.firstAt ??= event.t;
+      if (event.name === 'TodoWrite' || event.name === 'updateTodos') this.plainTodos(card, input);
+      if (step.makes) this.plainMade(turn, step.makes);
+      if (step.file) this.plainFile(card, step.file);
+      const stage = step.stage ?? card.stage ?? 'look';
+      if (stage === 'build') card.built = true;
+      this.plainPaint(card, stage, step.say, step.note);
+
+      // A stage in the agent's note ("Stage 2 of 5: the cards") is the plan.
+      const staged = /^\s*stage\s+(\d+)\s+of\s+(\d+)\s*[:—-]?\s*(.*)$/i.exec(String(input.note ?? ''));
+      if (event.name === 'apply_ops' && staged) this.planFromNote(card, Number(staged[1]), Number(staged[2]), staged[3]);
+
+      if (event.name === 'apply_ops' && input.path) {
+        const here = this.onThisPage(input.path);
+        const work = readWork(input.ops, (id) => (here ? document.querySelector(`[data-marble-id="${CSS.escape(String(id))}"]`) : null));
+        for (const row of work.rows) { card.changes.delete(row.key); card.changes.set(row.key, { ...row, path: input.path }); }
+        card.added.push(...work.added);
+        card.colors.push(...work.colors);
+        card.lines.push(...work.lines);
+        const note = String(input.note ?? '').trim();
+        const doc = docName(input.path);
+        if (work.colors.length) this.showView(card, 'swatch', { rows: card.colors }, { name: doc, cap: note, key: `sw:${input.path}` });
+        else if (work.lines.length && !work.added.length) this.showView(card, 'redline', { lines: card.lines }, { name: doc, cap: note, key: `red:${input.path}` });
+        else if (work.added.length || work.rows.length) {
+          this.showView(card, 'map', { blocks: here ? this.outlineBlocks(card) : null, added: card.added }, { name: doc, cap: note, key: `map:${input.path}`, here });
+          if (here) card.awaitOutline = input.path;
+        }
+      }
+      if (/^(WebFetch|WebSearch|web_search)$/.test(event.name)) {
+        const fetch = event.name === 'WebFetch';
+        const site = fetch ? hostOf(input.url) : '';
+        const row = fetch
+          ? { site, t: trimTo(String(input.url ?? '').replace(/^https?:\/\/[^/]+/, '') || '/', 48), st: 'reading', hue: [...site].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 360, 7), callId: event.callId }
+          : { q: trimTo(input.search_term || input.query || '', 60), callId: event.callId };
+        card.sources.push(row);
+        this.showView(card, 'sources', { rows: card.sources }, { name: '', key: 'sources' });
+      }
+      if (event.name === 'read_document' && input.path) {
+        const doc = docName(input.path);
+        if (!card.reads.includes(doc)) card.reads.push(doc);
+      }
+      if (card.open) this.markReveal(turn);
+    }
+
+    /** A step's result: a test run is counted, a page that would not open is marked. */
+    plainResult(turn, row, event) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      const src = card.sources.find((s) => s.callId === event.callId);
+      if (src && !src.q) {
+        src.st = event.ok ? 'read' : 'skip';
+        this.showView(card, 'sources', { rows: card.sources }, { name: '', key: 'sources' });
+      }
+      const name = row.dataset.name;
+      const said = row.dataset.was ?? '';
+      if (/^(Bash|Shell|shell)$/.test(name) && CHECK_WORDS.test(said)) {
+        const counts = readTests(event.summary);
+        if (counts) {
+          card.tests = counts;
+          this.showView(card, 'tests', counts, { name: '', key: `tests:${event.callId}`, cap: counts.failed ? '' : 'All passing' });
+        }
+      }
+    }
+
+    onThisPage(path) {
+      const here = this.api?.context?.().viewing;
+      return Boolean(here) && String(path ?? '').replace(/\.mrbl$/, '') === String(here).replace(/\.mrbl$/, '');
+    }
+
+    /** The outline of this page as blocks, with what this turn added lit. */
+    outlineBlocks(card) {
+      card.seen ??= new Set(pageOutline().map((b) => b.k));
+      return pageOutline().map((b) => ({ k: b.k, h: b.h, fresh: !card.seen.has(b.k) }));
+    }
+
+    plainPaint(card, stage, say, note = '') {
+      const at = stageIndex(stage);
+      card.stage = stage;
+      card.reached = Math.max(card.reached, at);
+      card.el.dataset.stage = stage;
+      this.glyphFor(card, stage);
+      if (card.say.textContent !== say) {
+        card.say.textContent = say;
+        card.say.title = say;
+        if (this.fresh && card.el.isConnected) card.say.animate?.([{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.22, 1, .36, 1)' });
+      }
+      [...card.stops.children].forEach((stop, i) => { stop.dataset.at = i === at ? 'now' : i <= card.reached ? 'past' : ''; });
+      card.stops.setAttribute('aria-label', `${STAGES[at]?.name ?? ''}, stop ${at + 1} of 4`);
+      if (note) card.say.title = `${say} — ${note}`;
+      this.publishLine(card);
+    }
+
+    glyphFor(card, key) {
+      if (card.glyphStage === key) return;
+      card.glyph.innerHTML = STAGE_GLYPHS[key] ?? '';
+      card.glyphStage = key;
+    }
+
+    /** The turn's line, for the island a page shows while this chat is closed. */
+    publishLine(card) {
+      if (!this.isConnected || !this.fresh) return;
+      const record = this.turns.get(card.turn);
+      const target = record?.target ?? this.meta?.target ?? null;
+      dispatchEvent(new CustomEvent('marble-work:line', { detail: {
+        conversation: this.getAttribute('conversation'),
+        target,
+        state: card.el.dataset.state,
+        say: card.say.textContent,
+        started: record?.started ?? card.firstAt ?? null,
+        took: card.running ? '' : card.time.textContent,
+        changes: [...card.changes.values()].some((c) => this.onThisPage(c.path)),
+        view: card.live.hidden ? null : card.slot.firstElementChild,
+      } }));
+    }
+
+    // ---------------------------------------------------------- the live view and its frames
+
+    /** Show a view. The same kind, for the same thing, is set in place; a
+     *  new one files the old into its frame and takes the stage. */
+    showView(card, kind, d, meta = {}) {
+      const K = WV[kind];
+      const enter = this.fresh;
+      if (card.cur && card.cur.meta.key === meta.key && card.cur.kind === kind) {
+        card.cur.d = d;
+        Object.assign(card.cur.meta, meta);
+        if (kind === 'tests') { card.cur.node = K.make(d); if (!card.shown) card.slot.replaceChildren(card.cur.node); } else K.set(card.cur.node, d, enter);
+        if (!card.shown) { card.cap.textContent = meta.cap ?? ''; this.paintViewHead(card, card.cur); }
+        if (card.cur.frame) this.refreshFrame(card, card.cur);
+        return;
+      }
+      if (card.cur) this.fileFrame(card, card.cur);
+      const v = { kind, d, node: K.make(d), meta };
+      card.cur = v;
+      card.shown = null;
+      this.paintLive(card, v, enter);
+      if (card.plan) {
+        v.frame = card.frames[Math.max(0, card.stageIdx)];
+        if (v.frame) { v.frame.v = v; this.refreshFrame(card, v); }
+      } else {
+        v.frame = this.addFrame(card, v, enter);
+      }
+      this.publishLine(card);
+    }
+
+    paintViewHead(card, v) {
+      const K = WV[v.kind];
+      card.vh.innerHTML = `${WI[K.icon] ?? ''}<b>${wesc(v.meta.label ?? K.label)}</b>${v.meta.name ? `<span class="w-vname">· ${wesc(v.meta.name)}</span>` : ''}<span class="w-vbtns"><button type="button" class="w-vb" data-a="reply">${WI.reply}Reply</button></span>`;
+    }
+
+    paintLive(card, v, enter) {
+      card.live.hidden = false;
+      this.paintViewHead(card, v);
+      card.slot.replaceChildren(v.node);
+      card.cap.textContent = v.meta.cap ?? '';
+      if (enter) { v.node.setAttribute('data-enter', ''); }
+      const past = card.shown && card.shown !== card.cur;
+      card.back.hidden = !past;
+      if (past) card.back.querySelector('span').textContent = card.running ? 'An earlier step.' : 'A step from this turn.';
+      for (const f of card.strip.children) wflag(f, 'data-on', past && card.frames[Number(f.dataset.i)]?.v === card.shown);
+    }
+
+    thumbOf(v) {
+      const w = document.createElement('div');
+      w.className = 'w-shrink';
+      const c = v.node.cloneNode(true);
+      c.removeAttribute('data-enter');
+      for (const x of c.querySelectorAll('[data-enter]')) x.removeAttribute('data-enter');
+      for (const b of c.querySelectorAll('button')) b.tabIndex = -1;
+      w.append(c);
+      return w;
+    }
+
+    addFrame(card, v, enter) {
+      const i = card.frames.length;
+      const label = v.meta.flab ?? (v.meta.name ? `${WV[v.kind].label} · ${v.meta.name}` : WV[v.kind].label);
+      const f = { el: wel(`<button type="button" class="w-frame" data-i="${i}" data-st="now"><span class="w-thumb"></span><span class="w-flab">${wesc(label)}</span></button>`), v };
+      f.el.querySelector('.w-thumb').append(this.thumbOf(v));
+      f.el.setAttribute('aria-label', `Show the step: ${label}`);
+      wflag(f.el, 'data-enter', enter);
+      card.frames.push(f);
+      card.strip.append(f.el);
+      return f;
+    }
+
+    refreshFrame(card, v) {
+      const f = v.frame;
+      if (!f) return;
+      f.v = v;
+      f.el.querySelector('.w-thumb').replaceChildren(this.thumbOf(v));
+    }
+
+    fileFrame(card, v) {
+      if (!v.frame) return;
+      this.refreshFrame(card, v);
+      if (!card.plan) v.frame.el.dataset.st = 'done';
+    }
+
+    recallFrame(card, frame) {
+      if (!frame || frame.v === card.cur) {
+        card.shown = null;
+        if (!card.running) { card.live.hidden = true; for (const f of card.strip.children) wflag(f, 'data-on', false); return; }
+        if (card.cur) this.paintLive(card, card.cur, false);
+        return;
+      }
+      if (!frame.v) return;
+      card.shown = frame.v;
+      this.paintLive(card, frame.v, false);
+      card.back.hidden = false;
+      card.back.querySelector('button').textContent = card.running ? 'Back to now' : 'Close';
+    }
+
+    /** The agent's own plan, from a stage note or its to-do list, as frames
+     *  that fill as it goes: done, now, and still to do. */
+    planFromNote(card, at, of, name) {
+      if (!card.plan || card.plan.length !== of) {
+        const carried = card.plan ? card.frames : [];
+        card.plan = Array.from({ length: of }, (_, i) => card.plan?.[i] ?? `Stage ${i + 1}`);
+        card.strip.replaceChildren();
+        card.frames = card.plan.map((label, i) => this.planFrame(card, i, label, carried[i]?.v ?? null));
+      }
+      if (name) {
+        card.plan[at - 1] = name;
+        const lab = card.frames[at - 1]?.el.querySelector('.w-flab');
+        if (lab) lab.innerHTML = `<span class="w-fnum">${at}</span>${wesc(name)}`;
+      }
+      this.planAt(card, at - 1);
+    }
+
+    planFrame(card, i, label, v) {
+      const f = { el: wel(`<button type="button" class="w-frame" data-i="${i}" data-st="${v ? 'done' : 'todo'}"><span class="w-thumb"></span><span class="w-flab"><span class="w-fnum">${i + 1}</span>${wesc(label)}</span></button>`), v };
+      if (v) f.el.querySelector('.w-thumb').append(this.thumbOf(v));
+      f.el.setAttribute('aria-label', `Stage ${i + 1}: ${label}`);
+      wflag(f.el, 'data-enter', this.fresh);
+      card.strip.append(f.el);
+      return f;
+    }
+
+    planAt(card, i) {
+      if (card.cur) this.fileFrame(card, card.cur);
+      card.stageIdx = i;
+      card.frames.forEach((f, k) => { f.el.dataset.st = k < i ? 'done' : k === i ? 'now' : f.v && k < i ? 'done' : 'todo'; });
+      // The live view belongs to the stage it is drawn in.
+      if (card.cur) card.cur.frame = card.frames[i];
+    }
+
+    plainTodos(card, input) {
+      const read = readTodos(input);
+      if (!read) return;
+      if (read.merge && card.todoList.length) {
+        for (const todo of read.todos) {
+          const at = card.todoList.findIndex((t) => t.id === todo.id);
+          if (at < 0) card.todoList.push(todo);
+          else card.todoList[at] = { ...card.todoList[at], status: todo.status, text: todo.text || card.todoList[at].text };
+        }
+      } else {
+        card.todoList = read.todos;
+      }
+      const list = card.todoList.filter((t) => t.text && t.status !== 'dropped');
+      if (!list.length) return;
+      const names = list.map((t) => t.text);
+      if (!card.plan || card.plan.length !== names.length || card.plan.some((n, i) => n !== names[i])) {
+        const carried = card.frames;
+        card.plan = names;
+        card.strip.replaceChildren();
+        card.frames = names.map((label, i) => this.planFrame(card, i, label, carried[i]?.v ?? null));
+      }
+      const now = list.findIndex((t) => t.status === 'now');
+      const firstOpen = list.findIndex((t) => t.status !== 'done');
+      this.planAt(card, now >= 0 ? now : firstOpen >= 0 ? firstOpen : list.length - 1);
+      list.forEach((t, k) => { if (t.status === 'done') card.frames[k].el.dataset.st = 'done'; });
+    }
+
+    /** Reply about this view: it goes in the message box, so "darker" means that swatch. */
+    replyAbout(card) {
+      const v = card.shown ?? card.cur;
+      if (!v) return;
+      const about = `About the ${(v.meta.label ?? WV[v.kind].label).toLowerCase()}${v.meta.name ? ` in ${v.meta.name}` : ''}: `;
+      this.act(card.turn, { kind: 'draft', text: about, placeholder: 'What about it?' });
+    }
+
+    // ---------------------------------------------------------- chips
+
+    /** A document the turn is making, kept for the receipt's links. */
+    plainMade(turn, path) {
+      if (!path) return;
+      const card = this.plainCard(turn);
+      const key = String(path).replace(/\.mrbl$/, '');
+      if (!card.docs.has(key)) card.docs.set(key, docName(key));
+      card.built = true;
+      // Once the ops have landed on this page, the outline can show what came.
+      if (card.awaitOutline && this.onThisPage(card.awaitOutline) && card.cur?.kind === 'map') {
+        requestAnimationFrame(() => {
+          if (card.cur?.kind !== 'map') return;
+          card.cur.d = { ...card.cur.d, blocks: this.outlineBlocks(card) };
+          WV.map.set(card.cur.node, card.cur.d, this.fresh);
+          this.refreshFrame(card, card.cur);
+        });
+      }
+    }
+
+    /** Files that are not documents are counted, not named. */
+    plainFile(card, file) {
+      if (!file || /\.mrbl$/.test(file)) return;
+      card.files.add(file);
+    }
+
+    // ---------------------------------------------------------- asks, failures, the end
+
+    /** A permission, drawn in the live view in words, with the answers under it. */
+    plainAsk(turn, event, askCard) {
+      const card = this.plainCard(turn);
+      card.ask = { requestId: event.requestId, askCard, choice: null };
+      card.el.dataset.state = 'asking';
+      this.glyphFor(card, 'ask');
+      card.say.textContent = askSay(event);
+      const input = event.input ?? {};
+      const rows = [];
+      if (input.command) rows.push({ k: 'Command', v: trimTo(input.command, 80) });
+      if (input.file_path || input.path) rows.push({ k: 'File', v: tail(input.file_path ?? input.path) });
+      if (input.url) rows.push({ k: 'Site', v: hostOf(input.url) });
+      this.showView(card, 'perm', { t: plainAskOf(event), rows }, { name: '', key: `perm:${event.requestId}` });
+      this.setNext(turn, 'asking');
+      this.publishLine(card);
+    }
+
+    plainAskClosed(turn, event, askCard) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card?.ask || card.ask.askCard !== askCard) return;
+      const allowed = event.type === 'ask.answered' && event.response?.behavior === 'allow';
+      const voided = event.type === 'ask.void';
+      card.ask = null;
+      if (!card.running) return;
+      card.el.dataset.state = 'running';
+      card.glyphStage = '';
+      this.settle(turn, voided ? '' : allowed ? 'You allowed it' : 'You didn’t allow it');
+      this.plainPaint(card, card.stage ?? 'look', askClosedSay(event));
+      this.setNext(turn, 'running');
+    }
+
+    /** A step that failed is the agent's to fix; kept so a failed turn can say where it got stuck. */
+    plainFailed(turn, row, event) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      const step = plainStep(row.dataset.name, {}, card.built);
+      card.stuck = {
+        what: event.denied ? 'Your OK' : step.say.replace(/^(\w)/, (c) => c.toUpperCase()),
+        why: stuckWhy(event),
+        denied: Boolean(event.denied),
+      };
+    }
+
+    /** The turn's widget as the drawer last drew it. Only the newest is
+     *  shown; a transcript read back draws its last one once. */
+    plainDrawn(turn, event) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card || typeof event.html !== 'string' || !event.html.trim()) return;
+      card.drawing = event.html;
+      if (card.drawPending) return;
+      card.drawPending = true;
+      loadVisual().then((mod) => {
+        card.drawPending = false;
+        if (!mod?.mountDrawing || !card.drawing) return;
+        card.el.dataset.drawn = '';
+        card.drawn.hidden = false;
+        mod.mountDrawing(card.drawn, { html: card.drawing, view: this });
+      });
+    }
+
+    plainFinish(turn, status, event) {
+      const record = this.turns.get(turn);
+      const card = record?.progress;
+      if (!card) return;
+      this.spend(card, event.t);
+      card.running = false;
+      clearInterval(card.timer);
+      const declined = status === 'failed' && card.stuck?.denied;
+      const state = declined ? 'declined' : status;
+      card.el.dataset.state = state;
+      const took = record.started && event.t ? seconds(event.t - record.started) : '';
+      card.say.textContent = endSay(state, { names: [...card.docs.values()], built: card.built });
+      card.say.title = card.say.textContent;
+      card.time.textContent = took;
+      this.glyphFor(card, state === 'completed' ? 'done' : state === 'failed' ? 'failed' : 'stopped');
+      if (card.cur) this.fileFrame(card, card.cur);
+      for (const f of card.strip.children) if (f.dataset.st === 'now') f.dataset.st = state === 'completed' ? 'done' : 'halt';
+      card.shown = null;
+
+      // Stopped, failed or turned down: the live view stays, frozen where it
+      // stopped, and says what was done and what was not.
+      if (state !== 'completed') {
+        const done = card.plan ? card.frames.filter((f) => f.el.dataset.st === 'done').length : null;
+        const line = state === 'failed' || state === 'declined'
+          ? failedLine({ stuck: card.stuck, error: event.error })
+          : `${state === 'interrupted' ? 'Marble restarted' : 'Stopped'}${took ? ` after ${took}` : ''}.${done != null ? ` ${done} of ${card.plan.length} stages done; nothing was lost.` : ' Nothing was lost.'}`;
+        const v = { kind: 'halt', d: { line, path: (state === 'failed' || state === 'declined') && card.stuck ? card.stuck.what : '' }, meta: { label: state === 'failed' ? 'Where it got stuck' : 'Stopped', key: 'halt' } };
+        v.node = WV.halt.make(v.d);
+        card.cur = v;
+        this.paintLive(card, v, this.fresh);
+      } else if (card.cur) {
+        // Done: the last thing it showed stays, whole, as the result.
+        this.paintLive(card, card.cur, false);
+      } else {
+        card.live.hidden = true;
+      }
+      this.drawReceipt(card, record, event, state);
+      const undoable = Boolean((event.applied ?? record.applied) || record.changed) && !record.undone;
+      this.setNext(turn, state, { docs: [...card.docs.keys()], undoable });
+      this.publishLine(card);
+    }
+
+    /** The receipt: what changed (named by its part, with what changed in
+     *  it), what was checked, where the time went. The agent's own words are
+     *  the message above it; the question is the row below. */
+    drawReceipt(card, record, event, state) {
+      const R = card.receipt;
+      R.replaceChildren();
+      const changes = [...card.changes.values()];
+      if (changes.length) {
+        const here = [...card.docs.keys()].some((p) => this.onThisPage(p));
+        const blocks = here ? this.outlineBlocks(card) : null;
+        let n = 0;
+        const rows = changes.slice(-8).map((c) => {
+          n += 1;
+          const fig = c.from || c.to ? `<span class="w-cfig">${c.from ? `<i class="w-dot" style="--c:${wesc(c.from)}"></i>${WI.arrowR}` : ''}<i class="w-dot" style="--c:${wesc(c.to)}"></i></span>` : '';
+          const words = c.before != null || c.after != null ? `<span class="w-cwords">${(c.before == null ? [['+', c.after]] : wordDiff(c.before, c.after)).filter(([op]) => op !== '=').slice(0, 2).map(([op, t]) => (op === '-' ? `<del>${wesc(trimTo(t, 40))}</del>` : `<ins>${wesc(trimTo(t, 40))}</ins>`)).join(' ')}</span>` : '';
+          const parts = c.parts?.length ? `<span class="w-cwords">${wesc(c.parts.join(' · '))}</span>` : '';
+          return `<li class="w-change" data-op="${c.op === '+' ? 'plus' : c.op === '-' ? 'minus' : 'change'}"><span class="w-cn">${n}</span><span class="w-ct">${wesc(c.label)}${words}${parts}</span>${fig}</li>`;
+        }).join('');
+        const more = changes.length > 8 ? `<p class="w-kept">${plural(changes.length - 8, 'earlier change')} not listed</p>` : '';
+        const mini = blocks?.length ? `<div class="w-mini" aria-hidden="true">${blocks.map((b) => `<i style="--h:${Math.max(3, Math.round(b.h * 0.6))}px"${b.fresh ? ' data-pin' : ''}></i>`).join('')}</div>` : '';
+        const docs = [...card.docs.entries()].map(([path, name]) => {
+          const href = window.marble?.href?.(path);
+          return href ? `<a class="progress-chip" href="${wesc(href)}" title="Open ${wesc(path)}">${DOC_GLYPH}${wesc(name)}</a>` : `<span class="progress-chip">${DOC_GLYPH}${wesc(name)}</span>`;
+        }).join('');
+        const sec = wel(`<div class="w-sec"><div class="w-sec-h">What changed${docs ? `<span class="w-docs">${docs}</span>` : ''}${here ? '<button type="button" class="w-quiet w-review">Review on the page</button>' : ''}</div><div class="w-cm${mini ? '' : ' w-cm-flat'}">${mini}<ul class="w-changes">${rows}</ul></div>${more}</div>`);
+        // The walk through the changes starts only when asked for.
+        sec.querySelector('.w-review')?.addEventListener('click', () => dispatchEvent(new CustomEvent('marble-work:review', { detail: { conversation: this.getAttribute('conversation') } })));
+        R.append(sec);
+      } else if (card.docs.size) {
+        const docs = [...card.docs.entries()].map(([path, name]) => `<span class="progress-chip">${DOC_GLYPH}${wesc(name)}</span>`).join('');
+        R.append(wel(`<div class="w-sec"><div class="w-sec-h">Worked on<span class="w-docs">${docs}</span></div></div>`));
+      }
+      if (card.files.size) R.append(wel(`<p class="w-kept">${plural(card.files.size, 'file')} changed behind the scenes</p>`));
+
+      // Checked: the proof itself, with one line.
+      const proof = card.tests
+        ? { kind: 'tests', line: card.tests.failed ? `${card.tests.passed} of ${card.tests.total} tests passed` : `All ${card.tests.total} tests passed` }
+        : card.sources.some((s) => !s.q)
+          ? { kind: 'sources', line: `Read ${plural(card.sources.filter((s) => s.st === 'read').length, 'source')}${card.sources.some((s) => s.st === 'skip') ? `, ${card.sources.filter((s) => s.st === 'skip').length} couldn’t be opened` : ''}` }
+          : null;
+      // The proof in one line; the picture of it is the live view above,
+      // when that is what the turn showed last.
+      if (proof && card.cur?.kind !== proof.kind) {
+        R.append(wel(`<div class="w-sec w-proof-sec"><div class="w-sec-h">Checked</div><div class="w-proof-line">${wesc(proof.line)}</div></div>`));
+      }
+
+      const spent = card.spent;
+      const total = spent.look + spent.build + spent.check;
+      if (total > 4000) {
+        const names = { look: 'Reading', build: 'Making', check: 'Checking' };
+        const parts = ['look', 'build', 'check'].filter((k) => spent[k] > 0);
+        R.append(wel(`<div class="w-sec w-time-sec"><div class="w-sec-h">Where the time went</div><div class="w-bar">${parts.map((k) => `<i data-k="${k}" style="flex:${spent[k]}"></i>`).join('')}</div><div class="w-bar-key">${parts.map((k) => `<span data-k="${k}">${names[k]} ${seconds(spent[k])}</span>`).join('')}</div></div>`));
+      }
+      R.hidden = !R.children.length;
+      wflag(R, 'data-enter', this.fresh);
+    }
+
+    // ---------------------------------------------------------- next steps
+
+    setNext(turn, state, ctx = {}) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      const next = nextSteps(state, ctx);
+      // While it works the offer is two quiet words beside Details; after,
+      // it is a question with answers under the receipt.
+      card.steer.replaceChildren(...(next?.quiet ? next.acts.map((action) => {
+        const b = h('button', 'w-quiet', action.label);
+        b.type = 'button';
+        b.addEventListener('click', () => this.act(turn, action));
+        return b;
+      }) : []));
+      card.next.hidden = !next || next.quiet;
+      if (!next || next.quiet) return;
+      card.q.textContent = next.q ?? '';
+      card.acts.replaceChildren(...next.acts.map((action) => {
+        const b = h('button', action.primary ? 'act primary' : 'act', action.label);
+        b.type = 'button';
+        b.addEventListener('click', () => this.act(turn, action));
+        return b;
+      }));
+    }
+
+    settle(turn, said) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      card.next.hidden = true;
+      if (said) {
+        card.said.textContent = said;
+        card.said.hidden = false;
+      }
+    }
+
+    /** Anything new from the person makes an earlier turn's questions moot,
+     *  and folds that turn's card down to what it changed. */
+    plainSettleAll() {
+      for (const [turn, record] of this.turns) {
+        const card = record.progress;
+        if (!card || card.running) continue;
+        card.el.dataset.old = '';
+        card.live.hidden = true;
+        if (!card.next.hidden) this.settle(turn, '');
+      }
+    }
+
+    act(turn, action) {
+      const record = this.turns.get(turn);
+      const card = record?.progress;
+      switch (action.kind) {
+        case 'send':
+          this.settle(turn, `You said “${action.text}”`);
+          this.input.value = action.text;
+          this.submit();
+          break;
+        case 'draft':
+          this.draftPlaceholder ??= this.input.dataset.placeholder ?? '';
+          this.input.value = action.text ?? '';
+          this.input.dataset.placeholder = action.placeholder || this.draftPlaceholder;
+          this.input.focus();
+          this.form.classList.remove('is-drafting');
+          void this.form.offsetWidth;
+          this.form.classList.add('is-drafting');
+          break;
+        case 'stop':
+          this.api.cancel(turn).catch((err) => this.system(err.message, true));
+          break;
+        case 'undo':
+          this.settle(turn, 'You undid it');
+          this.api.undo(turn).catch((err) => this.system(err.message, true));
+          break;
+        case 'open': {
+          const href = window.marble?.href?.(String(action.value).replace(/\.mrbl$/, ''));
+          if (href) window.location.assign(href);
+          break;
+        }
+        case 'choose': {
+          const ask = card?.ask;
+          if (!ask) return;
+          ask.choice = action.value;
+          ask.askCard.querySelector(action.value === 'allow' ? 'button.allow' : 'button.deny')?.click();
+          break;
+        }
+        default:
+      }
+    }
+
+    revealSteps(turn, open) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      card.open = open;
+      card.more.setAttribute('aria-expanded', String(open));
+      card.more.textContent = open ? 'Hide details' : 'Details';
+      this.markReveal(turn);
+    }
+
+    /** One turn's steps shown in the simple view, without switching every conversation over. */
+    markReveal(turn) {
+      const open = Boolean(this.turns.get(turn)?.progress?.open);
+      for (const node of this.turnNodes(turn)) {
+        if (node.classList?.contains('tool') || node.classList?.contains('tool-group') || node.classList?.contains('ask')) node.toggleAttribute('data-reveal', open);
+      }
     }
   }
 
@@ -5727,6 +8915,27 @@
     .agent select { grid-column: 2; }
     input[type="text"], input[type="password"], select { font: inherit; color: var(--ink); background: var(--paper-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
     .key { display: flex; gap: 6px; align-items: center; }
+    /* Claude's one switch: which sign-in pays for it. A segmented pair, and
+       the API key field right under it only while "API key" is on. */
+    .claude-auth { grid-column: 2; display: inline-flex; justify-self: start; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .claude-auth label { position: relative; padding: 4px 10px; font-size: 12px; color: var(--muted); cursor: pointer; }
+    .claude-auth label + label { border-left: 1px solid var(--line); }
+    .claude-auth input { position: absolute; opacity: 0; pointer-events: none; }
+    .claude-auth label:has(input:checked) { background: var(--paper-2); color: var(--ink); }
+    .claude-auth label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+    .claude-key { grid-column: 2; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+    .claude-key[hidden] { display: none; }
+    /* Starter credit: whose it is and how much is used, then the two ways
+       off it. Quiet until it matters, so no colour and no meter. */
+    .claude-credit { grid-column: 2; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+    .claude-credit[hidden] { display: none; }
+    .claude-credit p { margin: 0; }
+    .claude-credit .credit-used { color: var(--muted); font-size: 12px; }
+    .credit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; }
+    .claude-plan { grid-column: 2; display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: var(--muted); }
+    .claude-plan[hidden] { display: none; }
+    .claude-plan button.link { padding-left: 0; font-size: 12px; }
+    .claude-plan span + button.link { padding-left: 6px; }
     .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
     .project { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
     .project code { font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
@@ -5741,7 +8950,21 @@
     .status { font-size: 12px; color: var(--faint); min-height: 1.2em; }
     .status.error { color: var(--danger); }
     .pane-usage { display: flex; flex-direction: column; gap: 16px; }
-    .pane-usage[hidden], .body[hidden] { display: none; }
+    .pane-voice { display: flex; flex-direction: column; gap: 14px; }
+    .pane-voice[hidden] { display: none; }
+    .pane-voice .empty { margin: 0; color: var(--faint); font-size: 13px; }
+    .pane-voice select { flex: 1; }
+    .voice-usage h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+    .voice-usage p { margin: 0; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .pane-usage[hidden], .body[hidden], .pane-chat[hidden] { display: none; }
+    /* Chat: how agents show up on the page, and the keys. */
+    .pane-chat { display: flex; flex-direction: column; gap: 14px; }
+    .pref { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; font-size: 13px; cursor: pointer; }
+    .pref input { margin: 3px 0 0; accent-color: var(--accent-ink); }
+    .pref .detail { grid-column: 2; color: var(--muted); font-size: 12px; }
+    .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
+    .keys dt { font-family: inherit; font-size: 13px; line-height: 1.5; letter-spacing: .06em; color: var(--muted); }
+    .keys dd { margin: 0; }
     .pane-usage .empty { margin: 0; color: var(--faint); font-size: 13px; }
     .usage-group h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
     .usage-group .subhead { margin: 10px 0 6px; font-size: 11.5px; color: var(--muted); }
@@ -5768,7 +8991,46 @@
     .usage-group .meter[data-kind="share"] .meter-bar i { background: var(--muted); }
     .usage-group .meter-pct { font-size: 12.5px; font-variant-numeric: tabular-nums; font-weight: 500; text-align: right; }
     .usage-group .reset { grid-column: 2 / 4; font-size: 11.5px; color: var(--faint); }
+    /* Under a finger. The fields are 16px, or iOS zooms the page in on the
+       key field and leaves it there; the buttons and tabs are 44pt; and the
+       sheet centres on the strip a person can see, so with the keyboard up
+       the field being typed into is not under it. */
+    @media (pointer: coarse) {
+      input:not([type="checkbox"]):not([type="radio"]), select { font-size: 16px; min-height: 44px; }
+      button, .tabs button { min-height: 44px; }
+      .claude-auth label { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; }
+      .sheet { top: calc(var(--vv-top, 0px) + var(--vv-h, 100dvh) / 2);
+        max-height: calc(var(--vv-h, 100dvh) - 24px - env(safe-area-inset-top, 0px)); overscroll-behavior: contain; }
+      .sheet[data-tab="usage"] { max-height: calc(var(--vv-h, 100dvh) - 24px - env(safe-area-inset-top, 0px)); }
+    }
   `;
+
+  // How agents show up on the page, in this browser. Until v4 these were
+  // switches in the launcher's tray; a switch is a setting, and the tray keeps
+  // to things to do. Each layer reads its own key (agent-nudge.js,
+  // agent-callout.js, agent-glints.js, agent-work.js, change-rules.js) and hears
+  // `marble-agent-prefs` from this tab, `storage` from another.
+  const PAGE_PREFS = [
+    { key: 'marble-ask-offers', byDefault: true, label: 'Offer a next step after I edit', detail: 'A quiet chip by what you changed, when there is an obvious next step.' },
+    { key: 'marble-ask-rest', byDefault: false, label: 'Offer to ask when I rest the pointer', detail: 'Rest on a part of the page and its ask bubble appears.' },
+    { key: 'marble-agent-dots', byDefault: false, label: 'Show agent dots', detail: 'A dot where an agent is working, and on the parts agents changed.' },
+    // Off unless asked for: dragging one part to change every part like it is
+    // a power tool, not something every page offers (change-rules.js).
+    { key: 'marble-reshape', byDefault: false, label: 'Reshape by hand', detail: 'Reshape in the chat button\'s menu: drag a part\'s corner or edge and every part like it follows.' },
+  ];
+  const prefOn = (pref) => {
+    try {
+      const value = localStorage.getItem(pref.key);
+      return value === null ? pref.byDefault : value === '1';
+    } catch { return pref.byDefault; }
+  };
+  const TABS = new Set(['settings', 'chat', 'voice', 'usage']);
+  const CHAT_KEYS = [
+    ['⌘J', 'Ask about the selection, or what the pointer is on'],
+    ['⌘⇧J', 'Show or hide the chat'],
+    ['⌘⇧O', 'New chat'],
+    ['⌘⇧D', 'Describe a change by drawing on the page'],
+  ];
 
   class MarbleAgentSettings extends HTMLElement {
     constructor() {
@@ -5780,9 +9042,13 @@
           <h2 id="agent-settings-title">Agent settings</h2>
           <div class="tabs" role="tablist" aria-label="Settings sections">
             <button type="button" role="tab" data-tab="settings" aria-selected="true">Settings</button>
+            <button type="button" role="tab" data-tab="chat" aria-selected="false">Chat</button>
+            <button type="button" role="tab" data-tab="voice" aria-selected="false">Voice</button>
             <button type="button" role="tab" data-tab="usage" aria-selected="false">Usage</button>
           </div>
           <div class="body" data-pane="settings"></div>
+          <div class="pane-chat" data-pane="chat" hidden></div>
+          <div class="pane-voice" data-pane="voice" hidden></div>
           <div class="pane-usage" data-pane="usage" hidden></div>
           <p class="status"></p>
           <div class="actions">
@@ -5791,6 +9057,8 @@
           </div>
         </div>`;
       this.body = root.querySelector('.body');
+      this.chatPane = root.querySelector('.pane-chat');
+      this.voicePane = root.querySelector('.pane-voice');
       this.usagePane = root.querySelector('.pane-usage');
       this.status = root.querySelector('.status');
       this.saveButton = root.querySelector('.save');
@@ -5832,7 +9100,7 @@
     }
 
     open(tab) {
-      if (tab) this.tab = tab === 'usage' ? 'usage' : 'settings';
+      if (tab) this.tab = TABS.has(tab) ? tab : 'settings';
       this.setAttribute('data-open', 'true');
       this.fill();
     }
@@ -5843,31 +9111,60 @@
     }
 
     setTab(tab) {
-      this.tab = tab === 'usage' ? 'usage' : 'settings';
+      this.tab = TABS.has(tab) ? tab : 'settings';
       for (const button of this.shadowRoot.querySelectorAll('[role="tab"]')) {
         button.setAttribute('aria-selected', String(button.dataset.tab === this.tab));
       }
       this.body.hidden = this.tab !== 'settings';
+      this.chatPane.hidden = this.tab !== 'chat';
+      this.voicePane.hidden = this.tab !== 'voice';
       this.usagePane.hidden = this.tab !== 'usage';
       this.shadowRoot.querySelector('.sheet').dataset.tab = this.tab;
       this.saveButton.hidden = this.tab === 'usage';
       this.closeButton.textContent = this.tab === 'usage' ? 'Close' : 'Cancel';
     }
 
+    /** Read straight from this browser, so it is there before the host answers. */
+    fillChat() {
+      const page = document.createElement('fieldset');
+      page.append(h('legend', '', 'On the page'));
+      for (const pref of PAGE_PREFS) {
+        const row = h('label', 'pref');
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.dataset.pref = pref.key;
+        box.checked = prefOn(pref);
+        row.append(box, h('span', '', pref.label), h('span', 'detail', pref.detail));
+        page.append(row);
+      }
+      const keys = document.createElement('fieldset');
+      keys.append(h('legend', '', 'Keys'));
+      const list = h('dl', 'keys');
+      for (const [key, what] of CHAT_KEYS) list.append(h('dt', '', key), h('dd', '', what));
+      keys.append(list);
+      this.chatPane.replaceChildren(page, keys);
+    }
+
     async fill() {
       this.status.textContent = '';
       this.status.classList.remove('error');
+      this.loaded = false;
+      this.fillChat();
       this.body.replaceChildren(h('p', 'status', 'Loading…'));
       this.usagePane.replaceChildren(h('p', 'empty', 'Loading…'));
       this.setTab(this.tab);
       let providers = [];
-      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, cursor: false } };
+      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, claude: false, cursor: false, openai: false } };
       let usage = { meters: [] };
+      let voice = null;
+      this.voicePane.replaceChildren(h('p', 'empty', 'Loading…'));
+      this.voiceLoaded = false;
       try {
-        [providers, settings, usage] = await Promise.all([
+        [providers, settings, usage, voice] = await Promise.all([
           this.api.providers(),
           this.api.settings(),
           this.api.usage().catch(() => ({ meters: [] })),
+          this.api.voice ? this.api.voice().catch(() => null) : null,
         ]);
       } catch (err) {
         this.body.replaceChildren();
@@ -5914,15 +9211,17 @@
           fillSelect(mode, provider.modes, { value: settings.modes?.[provider.id] ?? '' });
           row.append(mode);
         }
+        if (provider.id.startsWith('claude')) row.append(...this.claudeSwitch(settings));
         agents.append(row);
       }
       const keys = document.createElement('fieldset');
       keys.append(h('legend', '', 'API keys'));
-      keys.append(this.keyRow('anthropic', 'Claude API key', settings.keys?.anthropic));
+      // Codex runs on this key when one is set, and on the ChatGPT login when not.
+      keys.append(this.keyRow('openai', 'OpenAI API key, for Codex', settings.keys?.openai));
       keys.append(this.keyRow('cursor', 'Cursor API key', settings.keys?.cursor));
       const projects = document.createElement('fieldset');
       projects.append(h('legend', '', 'Projects'));
-      projects.append(h('p', 'hint', 'A full agent runs with your own Claude Code (or Cursor) configuration — your plugins, skills, hooks, MCP servers and permission rules — in the project you choose. It is exactly as capable, and as powerful, as the terminal. What it may run is decided there, not here: in Auto, Claude Code\u2019s classifier refuses some commands outright, and the cure is a permission rule in your own settings.'));
+      projects.append(h('p', 'hint', 'A full agent runs with your own Claude Code, Codex or Cursor configuration — your plugins, skills, hooks, MCP servers and permission rules — in the project you choose. It is exactly as capable, and as powerful, as the terminal. What it may run is decided there, not here: in Auto, Claude Code\u2019s classifier refuses some commands outright, and the cure is a permission rule in your own settings.'));
       let list = [];
       try {
         list = await this.api.projects();
@@ -5954,6 +9253,10 @@
       const dir = document.createElement('input');
       dir.placeholder = '/absolute/path/to/repo';
       dir.name = 'project-path';
+      // A path, typed on a phone: no capital, no correction, no spelling.
+      dir.autocapitalize = 'off';
+      dir.setAttribute('autocorrect', 'off');
+      dir.spellcheck = false;
       dir.setAttribute('aria-label', 'Project path');
       const button = h('button', 'link', 'Add project');
       button.type = 'button';
@@ -5969,7 +9272,10 @@
       add.append(name, dir, button);
       projects.append(add);
       this.body.replaceChildren(agents, keys, projects);
+      this.loaded = true;
+      this.fillVoice(voice, settings);
       fillUsageDetail(this.usagePane, usage.meters ?? []);
+      this.fillVoiceUsage(voice);
       this.loadHistory();
     }
 
@@ -5996,15 +9302,228 @@
       }
     }
 
-    keyRow(name, label, set) {
+
+    /** Settings › Voice: whether chats listen, when replies are read aloud,
+     *  in which voice, and the OpenAI key they need (the one Codex uses). */
+    fillVoice(info, settings) {
+      if (!info) {
+        this.voicePane.replaceChildren(h('p', 'empty', "Couldn't read the voice settings."));
+        return;
+      }
+      const chosen = settings.voice ?? info;
+      const speech = document.createElement('fieldset');
+      speech.append(h('legend', '', 'Speech'));
+      const check = (name, label, detail, on) => {
+        const row = h('label', 'pref');
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.name = name;
+        box.checked = on;
+        row.append(box, h('span', '', label), h('span', 'detail', detail));
+        return row;
+      };
+      speech.append(
+        check('voice-on', 'Talk to chats', 'A microphone left of Send. What you say goes in as the prompt.', chosen.on !== false),
+        check('voice-send', 'Send when I stop', 'Off, the words wait in the box for a look before they go.', chosen.sendWhenStop !== false),
+      );
+      const choice = (legend, name, options, value) => {
+        const set = document.createElement('fieldset');
+        set.append(h('legend', '', legend));
+        for (const [id, label, detail] of options) {
+          const row = h('label', 'pref');
+          const radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.name = name;
+          radio.value = id;
+          radio.checked = id === value;
+          row.append(radio, h('span', '', label));
+          if (detail) row.append(h('span', 'detail', detail));
+          set.append(row);
+        }
+        return set;
+      };
+      const reading = choice('Read replies aloud', 'voice-read', [
+        ['spoken', 'When I spoke', 'A reply to something you said is said back.'],
+        ['always', 'Always', 'Every reply to a message sent from this page.'],
+        ['never', 'Never', 'Read aloud under a reply still reads it.'],
+      ], chosen.readAloud ?? 'spoken');
+      const running = choice('Said while a chat is working', 'voice-running', [
+        ['steer', 'Steer it', 'The words reach the agent while it works.'],
+        ['queue', 'Queue it', 'The words wait until it is done.'],
+      ], chosen.whileRunning ?? 'steer');
+      const sound = document.createElement('fieldset');
+      sound.append(h('legend', '', 'Voice'));
+      const row = h('div', 'key');
+      const select = document.createElement('select');
+      select.name = 'voice-voice';
+      select.setAttribute('aria-label', 'Voice');
+      for (const id of info.voices ?? ['marin', 'cedar']) {
+        const option = h('option', '', id[0].toUpperCase() + id.slice(1));
+        option.value = id;
+        select.append(option);
+      }
+      select.value = chosen.voice ?? 'marin';
+      const sample = h('button', 'link', 'Play sample');
+      sample.type = 'button';
+      sample.disabled = !info.available;
+      sample.addEventListener('click', () => this.playSample(select.value, sample));
+      row.append(select, sample);
+      sound.append(row, h('p', 'hint', 'Replies are read by an OpenAI voice. What you say is sent to OpenAI to be written down, and is not kept.'));
+      const key = document.createElement('fieldset');
+      key.append(h('legend', '', 'OpenAI key'));
+      if (!info.available) key.append(h('p', 'hint', 'Voice needs an OpenAI key on this drive.'));
+      key.append(this.keyRow('openai', 'OpenAI API key, shared with Codex', settings.keys?.openai, { field: 'key-openai-voice' }));
+      this.voicePane.replaceChildren(speech, reading, running, sound, key);
+      this.voiceLoaded = true;
+    }
+
+    /** Minutes heard and spoken this month, from the host's counts. */
+    fillVoiceUsage(info) {
+      const usage = info?.usage;
+      if (!usage || (!usage.heardSeconds && !usage.spokenChars)) return;
+      const minutes = (n) => (n < 1 ? 'under a minute' : `${Math.round(n)} min`);
+      // About 15 characters a second, at the pace the voice is asked for.
+      const line = `${minutes(usage.heardSeconds / 60)} heard · ${minutes(usage.spokenChars / 900)} spoken`;
+      const section = h('section', 'voice-usage');
+      section.append(h('h3', '', 'Voice this month'), h('p', '', line[0].toUpperCase() + line.slice(1)));
+      this.usagePane.prepend(section);
+    }
+
+    async playSample(voice, button) {
+      const V = globalThis.marbleVoice;
+      if (!V) return;
+      V.unlock();
+      button.disabled = true;
+      try {
+        const response = await fetch('/agent/voice/sample', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice }),
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "OpenAI didn't answer. Try again.");
+        const url = URL.createObjectURL(await response.blob());
+        V.play(url, { onEnd: () => { URL.revokeObjectURL(url); button.disabled = false; } });
+      } catch (err) {
+        button.disabled = false;
+        this.status.textContent = err.message;
+        this.status.classList.add('error');
+      }
+    }
+
+    /** Claude signs in with the Claude login or an API key: one agent, one
+     *  switch. The key field shows only while "API key" is on; under the
+     *  login, the person's own plan, connected from here (Connect your
+     *  Claude) or disconnected. A drive the door gave starter credit has a
+     *  third way, and while it is on, the line says whose credit and how much
+     *  of it is used. */
+    claudeSwitch(settings) {
+      const credit = settings.credit ?? null;
+      const ways = [...(credit ? [['credit', 'Starter credit']] : []), ['login', 'Claude login'], ['api', 'API key']];
+      const auth = ways.some(([value]) => value === settings.claudeAuth) ? settings.claudeAuth : 'login';
+      const group = document.createElement('div');
+      group.className = 'claude-auth';
+      group.setAttribute('role', 'radiogroup');
+      group.setAttribute('aria-label', 'Claude signs in with');
+      const key = document.createElement('div');
+      key.className = 'claude-key';
+      key.append(this.keyRow('anthropic', 'Claude API key', settings.keys?.anthropic));
+      key.hidden = auth !== 'api';
+      const onCredit = credit ? this.creditLine(credit, () => choose('api')) : null;
+      if (onCredit) onCredit.hidden = auth !== 'credit';
+      const plan = this.claudePlan(settings);
+      plan.hidden = auth !== 'login';
+      const radios = new Map();
+      const choose = (value) => {
+        const radio = radios.get(value);
+        if (radio) radio.checked = true;
+        key.hidden = value !== 'api';
+        if (onCredit) onCredit.hidden = value !== 'credit';
+        plan.hidden = value !== 'login';
+        if (value === 'api') key.querySelector('input')?.focus();
+      };
+      for (const [value, text] of ways) {
+        const label = document.createElement('label');
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'claude-auth';
+        radio.value = value;
+        radio.checked = value === auth;
+        radio.addEventListener('change', () => {
+          key.hidden = value !== 'api';
+          if (onCredit) onCredit.hidden = value !== 'credit';
+          plan.hidden = value !== 'login';
+        });
+        radios.set(value, radio);
+        label.append(radio, document.createTextNode(text));
+        group.append(label);
+      }
+      return onCredit ? [group, onCredit, key, plan] : [group, key, plan];
+    }
+
+    /** "On Bryan's starter credit · $3.90 of $5 used", with the two ways off
+     *  it: the person's own Claude plan, or a key. */
+    creditLine(credit, useKey) {
+      const line = h('div', 'claude-credit');
+      line.append(h('p', 'credit-whose', creditWhose(credit)), h('p', 'credit-used', creditUsed(credit)));
+      const actions = h('div', 'credit-actions');
+      const connect = h('button', '', 'Connect your Claude');
+      connect.type = 'button';
+      connect.addEventListener('click', () => {
+        // Nothing drew the sheet: the key is the other way in.
+        if (connectClaude()) this.close();
+        else useKey();
+      });
+      const instead = h('button', 'link', 'Use an API key instead');
+      instead.type = 'button';
+      instead.addEventListener('click', useKey);
+      actions.append(connect, instead);
+      line.append(actions);
+      return line;
+    }
+
+    /** The plan Claude's login runs on when it was connected from the
+     *  browser, and the way to connect one: the sheet, by its event. */
+    claudePlan(settings) {
+      const plan = h('div', 'claude-plan');
+      if (settings.keys?.claude) {
+        const off = h('button', 'link', 'Disconnect');
+        off.type = 'button';
+        off.addEventListener('click', async () => {
+          try {
+            await this.api.saveSettings({ keys: { claude: '' } });
+            dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+            await this.fill();
+          } catch (err) {
+            this.status.textContent = err.message;
+            this.status.classList.add('error');
+          }
+        });
+        plan.append(h('span', '', 'On your Claude plan'), off);
+        return plan;
+      }
+      const connect = h('button', 'link', 'Connect your Claude');
+      connect.type = 'button';
+      connect.addEventListener('click', () => {
+        this.close();
+        document.dispatchEvent(new CustomEvent('marble:connect-claude'));
+      });
+      plan.append(connect);
+      return plan;
+    }
+
+    keyRow(name, label, set, { field = `key-${name}` } = {}) {
       const wrap = document.createElement('label');
       wrap.append(document.createTextNode(label));
       const row = document.createElement('div');
       row.className = 'key';
       const input = document.createElement('input');
       input.type = 'password';
-      input.name = `key-${name}`;
+      input.name = field;
       input.autocomplete = 'off';
+      input.autocapitalize = 'off';
+      input.setAttribute('autocorrect', 'off');
+      input.spellcheck = false;
       input.placeholder = set ? 'Set — paste to replace' : 'Not set';
       const clear = document.createElement('button');
       clear.type = 'button';
@@ -6028,6 +9547,18 @@
 
     async save() {
       this.status.classList.remove('error');
+      for (const pref of PAGE_PREFS) {
+        const box = this.chatPane.querySelector(`input[data-pref="${pref.key}"]`);
+        if (!box || box.checked === prefOn(pref)) continue;
+        try { localStorage.setItem(pref.key, box.checked ? '1' : '0'); } catch { /* private mode */ }
+        dispatchEvent(new CustomEvent('marble-agent-prefs', { detail: { key: pref.key, on: box.checked } }));
+      }
+      // The agent half is only sent once it has been read: saving a form that
+      // never loaded would clear every model it did not show.
+      if (!this.loaded) {
+        this.close();
+        return;
+      }
       const defaultProvider = this.shadowRoot.querySelector('input[name="default"]:checked')?.value;
       const models = {};
       for (const input of this.shadowRoot.querySelectorAll('[data-model]')) {
@@ -6043,15 +9574,34 @@
       }
       const patch = { models, efforts, modes };
       if (defaultProvider) patch.defaultProvider = defaultProvider;
+      const claudeAuth = this.shadowRoot.querySelector('input[name="claude-auth"]:checked')?.value;
+      if (claudeAuth) patch.claudeAuth = claudeAuth;
       const keys = {};
       const anthropic = this.shadowRoot.querySelector('input[name="key-anthropic"]')?.value.trim();
       const cursor = this.shadowRoot.querySelector('input[name="key-cursor"]')?.value.trim();
+      const openai = this.shadowRoot.querySelector('input[name="key-openai"]')?.value.trim();
       if (anthropic) keys.anthropic = anthropic;
       if (cursor) keys.cursor = cursor;
+      if (openai) keys.openai = openai;
       if (Object.keys(keys).length) patch.keys = keys;
+      const $ = (selector) => this.shadowRoot.querySelector(selector);
+      if (this.voiceLoaded) {
+        patch.voice = {
+          on: Boolean($('input[name="voice-on"]')?.checked),
+          sendWhenStop: Boolean($('input[name="voice-send"]')?.checked),
+          readAloud: $('input[name="voice-read"]:checked')?.value ?? 'spoken',
+          whileRunning: $('input[name="voice-running"]:checked')?.value ?? 'steer',
+          voice: $('select[name="voice-voice"]')?.value ?? 'marin',
+        };
+      }
+      // A key given for voice is checked with OpenAI before it is kept, as
+      // Codex's is; it is the same key.
+      const voiceKey = $('input[name="key-openai-voice"]')?.value.trim();
       try {
+        if (voiceKey && !keys.openai) await this.api.voiceKey(voiceKey);
         await this.api.saveSettings(patch);
         dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+        dispatchEvent(new CustomEvent('marble:voice'));
         this.close();
       } catch (err) {
         this.status.textContent = err.message;
@@ -6061,6 +9611,452 @@
   }
 
   customElements.define('marble-agent-settings', MarbleAgentSettings);
+
+  // ------------------------------------------------------------ first visit
+
+  // A drive that can run no agent — Claude with neither a login nor a key,
+  // and Codex the same — said nothing until a turn failed. On the first page
+  // of a visit this asks the host (GET /agent/setup) and, when none can run,
+  // offers a key field right away: for Claude, for Codex, or a choice of the
+  // two when the drive has both. The host checks the key with Anthropic or
+  // OpenAI before keeping it; the page never holds it past the request.
+  // "Not now" is kept for the drive (POST /agent/setup/later), so a new tab or
+  // another device does not ask again; the tab also remembers it, so moving
+  // between documents does not wait on the host to know.
+  const SETUP_DISMISSED = 'marble-agent-setup-dismissed';
+  const SETUP_CSS = `
+    dialog {
+      width: min(420px, calc(100vw - 32px)); box-sizing: border-box; margin: auto;
+      padding: 22px 22px 18px; border: 1px solid var(--line); border-radius: 16px;
+      background: var(--card); color: var(--ink); box-shadow: var(--shadow-lift);
+      font: inherit;
+    }
+    dialog::backdrop { background: rgba(20, 18, 14, .28); }
+    h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+    .lede { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+    input {
+      font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink);
+      background: var(--paper-2); border: 1px solid var(--line); border-radius: 8px;
+      padding: 8px 10px; width: 100%; box-sizing: border-box;
+    }
+    /* Under 16px, iOS zooms the page in to show a focused field. */
+    @media (pointer: coarse) { input { font-size: 16px; } }
+    input::placeholder { color: var(--placeholder); }
+    input:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+    .hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+    .hint a { color: var(--accent-ink); }
+    .status { min-height: 1.3em; margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+    .status.error { color: var(--danger); }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+    button { font: inherit; cursor: pointer; border-radius: 8px; padding: 6px 14px; border: 1px solid var(--line); background: var(--paper-2); color: var(--ink); }
+    button.save { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    button.save:disabled { opacity: .55; cursor: progress; }
+    button.link { border: 0; background: none; color: var(--muted); padding: 6px 8px; }
+    button[hidden] { display: none; }
+    button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+    .alt { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); }
+    /* Which agent the key is for: a setting, so an outline, the chosen half one
+       shade back — the same control as Claude's login / API key switch. */
+    .agent-choice { display: inline-flex; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .agent-choice[hidden] { display: none; }
+    .agent-choice label { position: relative; flex-direction: row; align-items: center; gap: 6px; padding: 6px 14px; font-size: 13px; color: var(--muted); cursor: pointer; transition: background var(--t, 200ms) var(--ease, ease), color var(--t, 200ms) var(--ease, ease); }
+    .agent-choice label + label { border-left: 1px solid var(--line); }
+    .agent-choice input { position: absolute; opacity: 0; pointer-events: none; width: auto; }
+    .agent-choice label:has(input:checked) { background: var(--paper-2); color: var(--ink); }
+    .agent-choice label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+    .agent-choice .brand { width: 13px; height: 13px; flex: none; }
+    @media (pointer: coarse) { .agent-choice label { min-height: 44px; padding: 0 18px; } }
+    /* The buttons are 44pt for a thumb, and the dialog stands in the strip a
+       person can see: centred on the window, the key field went under the
+       keyboard the moment it was tapped. */
+    @media (pointer: coarse) {
+      button { min-height: 44px; }
+      dialog { top: var(--vv-top, 0px); bottom: var(--kb, 0px); max-height: calc(var(--vv-h, 100dvh) - 24px); overflow: auto; overscroll-behavior: contain; }
+    }
+    @media (prefers-reduced-motion: reduce) { .agent-choice label { transition: none; } }
+  `;
+
+  // What the popup says about each agent: where its key comes from, what one
+  // looks like, and who checks it.
+  const SETUP_AGENTS = {
+    claude: { name: 'Claude', company: 'Anthropic', placeholder: 'sk-ant-…', link: 'https://console.anthropic.com/settings/keys', site: 'console.anthropic.com', account: 'a Claude account' },
+    codex: { name: 'Codex', company: 'OpenAI', placeholder: 'sk-proj-…', link: 'https://platform.openai.com/api-keys', site: 'platform.openai.com', account: 'a ChatGPT account' },
+  };
+  /** The agent a pasted key belongs to, read off its prefix: Anthropic's keys
+   *  start sk-ant-, OpenAI's sk- and something else. */
+  const keyAgent = (key) => (/^sk-ant-/.test(key) ? 'claude' : /^sk-/.test(key) ? 'codex' : null);
+
+  class MarbleAgentSetup extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>${TOKENS}${SETUP_CSS}</style>
+        <dialog aria-labelledby="agent-setup-title" aria-describedby="agent-setup-lede">
+          <form>
+            <h2 id="agent-setup-title">Connect Claude</h2>
+            <p class="lede" id="agent-setup-lede">Agents on this drive run on Claude. Paste an Anthropic API key to turn them on.</p>
+            <div class="agent-choice" role="radiogroup" aria-label="Agent" hidden>
+              <label>${BRAND.anthropic}<input type="radio" name="agent" value="claude" checked>Claude</label>
+              <label>${BRAND.codex}<input type="radio" name="agent" value="codex">Codex</label>
+            </div>
+            <label>API key
+              <input name="key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="sk-ant-…">
+            </label>
+            <p class="hint">Make one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>. It stays on this drive and is never shown again.</p>
+            <p class="status" role="status" aria-live="polite"></p>
+            <div class="actions">
+              <button type="button" class="link later">Not now</button>
+              <button type="submit" class="save">Connect</button>
+            </div>
+            <p class="alt">Or ask whoever runs this drive to sign it in to a Claude account.</p>
+          </form>
+        </dialog>`;
+      this.dialog = root.querySelector('dialog');
+      this.form = root.querySelector('form');
+      this.input = root.querySelector('input[name="key"]');
+      this.status = root.querySelector('.status');
+      this.saveButton = root.querySelector('.save');
+      this.laterButton = root.querySelector('.later');
+      this.choice = root.querySelector('.agent-choice');
+      this.heading = root.querySelector('h2');
+      this.lede = root.querySelector('.lede');
+      this.hint = root.querySelector('.hint');
+      this.alt = root.querySelector('.alt');
+      this.offers = ['claude'];
+      this.agent = 'claude';
+      this.done = false;
+    }
+
+    get api() {
+      return window.marble?.agent;
+    }
+
+    connectedCallback() {
+      this.unwatchTheme = watchPageTheme(this);
+      this.form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (this.done) this.dialog.close();
+        else this.connect();
+      });
+      this.laterButton.addEventListener('click', () => this.later());
+      this.choice.addEventListener('change', (event) => {
+        if (event.target.name !== 'agent') return;
+        this.choose(event.target.value);
+        this.input.focus();
+      });
+      // A pasted key says whose it is; the choice follows it.
+      this.input.addEventListener('input', () => {
+        const owner = keyAgent(this.input.value.trim());
+        if (owner && owner !== this.agent && this.offers.includes(owner)) this.choose(owner);
+      });
+      // Escape: the dialog's own cancel, which is the same as Not now.
+      this.dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        this.later();
+      });
+      this.check();
+    }
+
+    disconnectedCallback() {
+      this.unwatchTheme?.();
+      this.unwatchTheme = null;
+    }
+
+    async check() {
+      // A page drawn inside another (the Drive's live previews) is not a visit.
+      if (window.top !== window) return;
+      try {
+        if (sessionStorage.getItem(SETUP_DISMISSED)) return;
+      } catch {
+        // Storage refused: ask anyway, and Not now lasts this page.
+      }
+      let state = null;
+      try {
+        state = await this.api?.setup();
+      } catch {
+        return;
+      }
+      if (!state?.needed || state.later || !this.isConnected) return;
+      this.present(state);
+    }
+
+    /** Opened on request (the line's Set up, change-line.js), whatever Not
+     *  now said for this tab or the drive: someone asked for it. Answers whether the host
+     *  had anything to connect. */
+    async offer() {
+      let state = null;
+      try {
+        state = await this.api?.setup();
+      } catch {
+        return false;
+      }
+      if (!state?.needed || !this.isConnected) return false;
+      this.present(state);
+      return true;
+    }
+
+    present(state) {
+      // Starter credit used up: the way on is the person's own Claude, in
+      // its sheet. The key field is for when nothing draws one.
+      if (state.credit?.usedUp && connectClaude()) return;
+      const offers = (Array.isArray(state.offers) ? state.offers : ['claude']).filter((id) => SETUP_AGENTS[id]);
+      this.offers = offers.length ? offers : ['claude'];
+      this.choice.hidden = this.offers.length < 2;
+      this.choose(this.offers[0]);
+      this.open();
+    }
+
+    /** Point the popup at one agent: its key, its link, its words. */
+    choose(agent) {
+      this.agent = SETUP_AGENTS[agent] ? agent : 'claude';
+      const it = SETUP_AGENTS[this.agent];
+      const both = this.offers.length > 1;
+      for (const radio of this.choice.querySelectorAll('input[name="agent"]')) radio.checked = radio.value === this.agent;
+      this.heading.textContent = both ? 'Connect an agent' : `Connect ${it.name}`;
+      this.lede.textContent = both
+        ? 'Agents on this drive run on Claude or Codex. Paste an API key for either to turn them on.'
+        : `Agents on this drive run on ${it.name}. Paste an ${it.company} API key to turn them on.`;
+      this.input.placeholder = it.placeholder;
+      const link = this.hint.querySelector('a');
+      link.href = it.link;
+      link.textContent = it.site;
+      this.alt.textContent = `Or ask whoever runs this drive to sign it in to ${both ? 'a Claude or ChatGPT account' : it.account}.`;
+      this.say('');
+    }
+
+    open() {
+      if (this.dialog.open) return;
+      this.say('');
+      this.dialog.showModal();
+      this.input.focus();
+    }
+
+    later() {
+      try {
+        sessionStorage.setItem(SETUP_DISMISSED, '1');
+      } catch {
+        // Nothing to remember it in; the drive still keeps it.
+      }
+      this.dialog.close();
+      // For the drive, so the next tab does not ask. A host that cannot keep
+      // it leaves this tab's answer standing.
+      this.api?.setupLater?.().catch(() => {});
+    }
+
+    async connect() {
+      const key = this.input.value.trim();
+      if (!key) {
+        this.say('Paste the key first.', true);
+        this.input.focus();
+        return;
+      }
+      this.saveButton.disabled = true;
+      const { company } = SETUP_AGENTS[this.agent];
+      this.say(`Checking the key with ${company}…`);
+      try {
+        const answer = await this.api.connectAgent(this.agent, key);
+        this.input.value = '';
+        dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+        this.done = true;
+        this.laterButton.hidden = true;
+        this.input.disabled = true;
+        for (const radio of this.choice.querySelectorAll('input')) radio.disabled = true;
+        if (answer.checked) {
+          this.say('Connected. Agents are ready.');
+          setTimeout(() => this.dialog.close(), 900);
+        } else {
+          // Kept, but the company could not be asked: say so, and let it be read.
+          this.say(`Saved. ${company} couldn't be reached to check it, so the first chat will say if it's wrong.`);
+          this.saveButton.textContent = 'Done';
+        }
+      } catch (err) {
+        this.say(err.message || "Couldn't save the key.", true);
+        this.input.select();
+      }
+      this.saveButton.disabled = false;
+    }
+
+    say(text, error = false) {
+      this.status.textContent = text;
+      this.status.classList.toggle('error', error);
+    }
+  }
+
+  customElements.define('marble-agent-setup', MarbleAgentSetup);
+
+  // ------------------------------------------------------------ connect your Claude
+
+  // The person's own Claude plan, from the browser: the host runs `claude
+  // setup-token` (server/agent/claude-signin.js) and answers its sign-in
+  // address; this opens it in a new tab, she signs in there and is shown a
+  // code, and the code pasted here goes back to the same run. The one action
+  // is the sign-in until a code is in the field, then it is Connect.
+  //
+  // Opened from Agents › Settings › Claude, and by any page that fires
+  // `document.dispatchEvent(new CustomEvent('marble:connect-claude'))` (the
+  // credit line, Start here, a chat that ran out). "Use an API key instead"
+  // is the key popup above, opened for Claude whatever Not now said.
+  const CONNECT_CSS = `
+    .steps { margin: 0 0 16px; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 8px; }
+    .steps li { counter-increment: step; display: grid; grid-template-columns: 1.4em 1fr; font-size: 13.5px; color: var(--ink); }
+    .steps li::before { content: counter(step); color: var(--muted); font-variant-numeric: tabular-nums; }
+    .actions { justify-content: space-between; align-items: center; }
+    button.link.key { padding-left: 0; }
+    button.link.key:hover { color: var(--ink); }
+  `;
+
+  class MarbleClaudeConnect extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>${TOKENS}${SETUP_CSS}${CONNECT_CSS}</style>
+        <dialog aria-labelledby="claude-connect-title" aria-describedby="claude-connect-lede">
+          <form>
+            <h2 id="claude-connect-title">Connect your Claude</h2>
+            <p class="lede" id="claude-connect-lede">Agents on this drive then run on your Claude plan, not on credit.</p>
+            <ol class="steps">
+              <li>Sign in to Claude in the tab this opens</li>
+              <li>Copy the code it shows you and paste it here</li>
+            </ol>
+            <label>Code from Claude
+              <input name="code" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+            </label>
+            <p class="status" role="status" aria-live="polite"></p>
+            <div class="actions">
+              <button type="button" class="link key">Use an API key instead</button>
+              <button type="submit" class="save">Open Claude sign-in</button>
+            </div>
+          </form>
+        </dialog>`;
+      this.dialog = root.querySelector('dialog');
+      this.form = root.querySelector('form');
+      this.input = root.querySelector('input[name="code"]');
+      this.status = root.querySelector('.status');
+      this.action = root.querySelector('.save');
+      this.keyButton = root.querySelector('.key');
+      // A sign-in the host started for this sheet and has not finished.
+      this.started = false;
+      this.busy = false;
+    }
+
+    get api() {
+      return window.marble?.agent;
+    }
+
+    connectedCallback() {
+      this.unwatchTheme = watchPageTheme(this);
+      // Cancelled, so whoever fired it knows the sheet is drawn.
+      this.onAsk = (event) => { event.preventDefault(); this.open(); };
+      document.addEventListener('marble:connect-claude', this.onAsk);
+      this.form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (this.busy) return;
+        if (this.input.value.trim()) this.connect();
+        else this.signIn();
+      });
+      // The action follows the field: a code in it is a code to send.
+      this.input.addEventListener('input', () => this.label());
+      this.keyButton.addEventListener('click', () => {
+        this.close();
+        document.querySelector('marble-agent-setup')?.present({ offers: ['claude'] });
+      });
+      this.dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        this.close();
+      });
+      // A press on the backdrop is outside the form: the sheet goes.
+      this.dialog.addEventListener('click', (event) => {
+        if (event.target === this.dialog) this.close();
+      });
+    }
+
+    disconnectedCallback() {
+      this.unwatchTheme?.();
+      this.unwatchTheme = null;
+      document.removeEventListener('marble:connect-claude', this.onAsk);
+    }
+
+    label() {
+      this.action.textContent = this.input.value.trim() ? 'Connect' : 'Open Claude sign-in';
+    }
+
+    open() {
+      if (this.dialog.open) return;
+      this.input.value = '';
+      this.input.disabled = false;
+      this.label();
+      this.say('');
+      this.dialog.showModal();
+      this.action.focus();
+    }
+
+    /** Closed before the code came back: the run the host is holding for it
+     *  is ended now rather than at its timeout. */
+    close() {
+      if (this.started) this.api?.claudeSignInCancel?.().catch(() => {});
+      this.started = false;
+      this.dialog.close();
+    }
+
+    async signIn() {
+      // The tab opens on the press, before the host answers, or a browser
+      // that blocks pop-ups blocks it; it is pointed at the address once
+      // there is one, and cut off from this page.
+      const tab = window.open('', '_blank');
+      if (tab) tab.opener = null;
+      this.busy = true;
+      this.action.disabled = true;
+      this.say('Starting Claude sign-in…');
+      try {
+        const { url } = await this.api.claudeSignIn();
+        this.started = true;
+        if (tab && !tab.closed) tab.location.href = url;
+        else if (!window.open(url, '_blank', 'noopener')) throw new Error('The browser blocked the new tab. Allow pop-ups for this drive and try again.');
+        this.say('Signed in? Paste the code from Claude here.');
+        this.input.focus();
+      } catch (err) {
+        tab?.close();
+        this.say(err.message || "Claude's sign-in didn't start. Try again.", true);
+      }
+      this.busy = false;
+      this.action.disabled = false;
+    }
+
+    async connect() {
+      const code = this.input.value.trim();
+      this.busy = true;
+      this.action.disabled = true;
+      this.input.disabled = true;
+      this.say('Connecting…');
+      try {
+        await this.api.claudeSignInCode(code);
+        this.started = false;
+        this.input.value = '';
+        dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+        this.say('Connected. Agents now run on your Claude plan.');
+        setTimeout(() => this.dialog.close(), 900);
+      } catch (err) {
+        this.input.disabled = false;
+        // The run that would have taken it is over: back to the sign-in.
+        if (err.status === 409 || err.status === 400) {
+          this.started = false;
+          this.input.value = '';
+          this.label();
+        }
+        this.say(err.message || "Couldn't connect. Open Claude sign-in again.", true);
+      }
+      this.busy = false;
+      this.action.disabled = false;
+    }
+
+    say(text, error = false) {
+      this.status.textContent = text;
+      this.status.classList.toggle('error', error);
+    }
+  }
+
+  customElements.define('marble-claude-connect', MarbleClaudeConnect);
 
   // ------------------------------------------------------------ the drawer
 
@@ -6072,25 +10068,103 @@
   const WIDTH_OVERLAY_KEY = 'marble-agent:width';
   const WIDTH_PINNED_KEY = 'marble-agent:width-pinned';
   const TOOLS = new Set(['button', 'select', 'textarea', 'input', 'a']);
+  // How long a pointer rests on the launcher before its menu rises.
+  const TRAY_REST = 90;
 
   const DRAWER_CSS = `
     /* The host is an anchor for two fixed children, not a surface: left
        clickable it swallows whatever sits in the bottom-right corner of the
        page behind it — which is where a composer's send and stop buttons are. */
     :host { position: fixed; inset: auto 0 0 auto; z-index: 2147483000; pointer-events: none; }
-    /* The marks toolbar measures this button through the shadow root and
-       stacks itself on top of it, taking its inset from what it measures —
-       so this rule sets the inset for two pieces of chrome, not one, and the
-       safe-area terms here are the only ones either of them applies. */
-    .launcher { pointer-events: auto; position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    /* The tray. At rest it is one round button in the corner, and the air
+       above it is page the hand can still click through. Hovering it (or
+       focusing it) hangs a small menu over it: the things an agent can do
+       from here, each a row with its words and its key.
+
+       --tray-inset is how far the pinned panel has pushed the page across.
+       Keeping it here is the whole reason the tray can stay up beside a
+       pinned panel: it sits at the page's corner, never the panel's. */
+    .tray { pointer-events: none; position: fixed;
+      right: calc(20px + env(safe-area-inset-right, 0px) + var(--tray-inset, 0px));
+      bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+      display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 10px;
+      transition: opacity 200ms var(--settle), right 220ms var(--settle); }
+    /* An overlay panel covers the page the tools act on; a pinned one does not. */
+    .tray[data-away="true"] { opacity: 0; }
+    /* Build mode puts the chat's button in the shell's bar (runtime/shell.js):
+       the corner is the app's. */
+    :host([data-launcher-away]) .tray { display: none; }
+    .tray[data-away="true"] * { pointer-events: none !important; }
+
+    .launcher { pointer-events: auto; position: relative;
       width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink);
-      box-shadow: var(--shadow-lift); cursor: pointer; display: grid; place-items: center;
+      box-shadow: var(--shadow-lift); cursor: pointer; display: grid; place-items: center; padding: 0;
       transition: opacity 200ms var(--settle); }
     .launcher svg { width: 20px; height: 20px; }
-    .launcher-dot { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-ink); box-shadow: 0 0 0 2px var(--card); }
+    /* One mark on the launcher, in the words every list of chats uses
+       (STATE_CSS): a dot that breathes while an agent works, a ring while one
+       needs you, ink when one finished and is unread, danger when one failed.
+       Until v4 this corner had a dot and a spinning arc at once: two things
+       moving to say one. */
+    .launcher-dot { position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%;
+      box-sizing: border-box; background: var(--ink); box-shadow: 0 0 0 2px var(--card); }
     .launcher-dot[hidden] { display: none; }
-    .launcher.running::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); animation: spin 1s linear infinite; }
-    :host([data-open-state="open"]) .launcher { opacity: 0; pointer-events: none; }
+    .launcher-dot[data-state="working"] { background: var(--accent-ink); animation: launcher-breathe 1.6s ease-in-out infinite; }
+    .launcher-dot[data-state="waiting"] { background: var(--card); border: 2px solid var(--caution); }
+    .launcher-dot[data-state="failed"] { background: var(--danger); }
+    @keyframes launcher-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+    /* The menu is one card, so the hand has a surface to stay on while it
+       chooses, and every row says what it does in words. Until v4 the tools
+       were loose rounds with a name only under the pointer, and the gaps
+       between them were page: the column closed under a hand on its way up.
+       Only what can be done here is a row (Ask here while there is a
+       selection, Hide work while an agent's work is drawn); a switch for how
+       agents behave is a setting, in Agent settings › Chat.
+       column-reverse: the first tool in the DOM is the one nearest the
+       thumb, so Tab walks the card bottom-up the way the eye does. */
+    .tools { pointer-events: none; position: relative; visibility: hidden; opacity: 0;
+      display: flex; flex-direction: column-reverse; gap: 1px; min-width: 15rem; box-sizing: border-box;
+      padding: 5px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow-lift);
+      transform: translateY(3px) scale(.98); transform-origin: 100% 100%;
+      transition: opacity 200ms var(--settle), transform 200ms var(--settle), visibility 0s linear 200ms; }
+    .tools:empty { display: none; }
+    /* The air between the card and the launcher is the card's, to the hand:
+       crossing it never puts the menu away. */
+    .tools::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 12px; }
+    .tray[data-open="true"] .tools { pointer-events: auto; visibility: visible; opacity: 1; transform: none;
+      transition: opacity 200ms var(--settle), transform 200ms var(--settle), visibility 0s; }
+    .tool { flex: none; display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; margin: 0;
+      padding: 0 9px; box-sizing: border-box; border: 0; border-radius: 8px; background: none;
+      font: inherit; font-size: 13px; line-height: 1; color: var(--ink); text-align: left; cursor: pointer;
+      transition: background-color 140ms var(--settle), color 140ms var(--settle); }
+    .tool[hidden] { display: none; }
+    .tool-icon { flex: none; display: grid; place-items: center; width: 18px; height: 18px; color: var(--muted); }
+    .tool-icon svg { width: 17px; height: 17px; }
+    .tool-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Keys in the interface's own face, as a Mac menu sets them: in a
+       monospace the ⇧ shrinks to a speck and O reads as zero. */
+    .tool-key { flex: none; margin-left: 12px; font-family: inherit; font-size: 12px; font-weight: 400; line-height: 1; letter-spacing: .06em; color: var(--muted); }
+    .tool-key:empty { display: none; }
+    .tool:hover, .tool:focus-visible { background: var(--paper-3); outline: none; }
+    .tool:hover .tool-icon, .tool:focus-visible .tool-icon { color: var(--ink); }
+    .tool:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-ink); }
+    .tool:active { background: color-mix(in srgb, var(--ink) 9%, var(--card)); }
+    /* Some tools are modes (Point at something, Describe a change). While
+       one is on, its row wears the accent, so the menu says which. */
+    .tool[data-active="true"], .tool[data-active="true"] .tool-icon { color: var(--accent-ink); }
+    .tool[data-active="true"] { background: var(--accent-soft); }
+    /* No hover to open it with, so the rows that only apply now simply stand
+       there, and the card with them; there are seldom more than one. The
+       ones always available do not, because on a phone they would be
+       permanent furniture, and the drawer's own bar already carries New. */
+    @media (hover: none) {
+      .tools { pointer-events: auto; visibility: visible; opacity: 1; transform: none; transition: none; min-width: 0; }
+      .tool { height: 44px; }
+      .tool[data-always="true"] { display: none; }
+      .tool-key { display: none; }
+      .tools:not(:has(.tool:not([hidden]):not([data-always="true"]))) { display: none; }
+    }
 
     .panel { pointer-events: auto; position: fixed; top: 0; right: 0; bottom: 0; width: ${WIDTH}px; max-width: 100vw; display: flex; flex-direction: column;
       box-sizing: border-box;
@@ -6098,6 +10172,22 @@
       border-left: 1px solid var(--line); box-shadow: -18px 0 40px color-mix(in srgb, var(--ink) 12%, transparent);
       transform: translateX(100%); will-change: transform; visibility: hidden; }
     .panel[data-pinned="true"] { box-shadow: none; background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    /* Inside the shell the chat is one of its three panels: under its bar, and
+       in Float a card like the tree, with the shell's own layout switch in
+       place of this panel's pin. */
+    .panel[data-shell="float"] { border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+      box-shadow: var(--shadow-lift); }
+    /* Between Fit and Float the card moves with the shell's own panels. The
+       slide itself stays the spring's: a transition on transform would fight it.
+       Only a card that was already showing glides; one arriving takes its
+       place at once, off-screen, or the conversation inside would be resized
+       on every frame of the slide. */
+    .panel[data-glide] { transition: top 340ms var(--settle), right 340ms var(--settle), bottom 340ms var(--settle),
+      border-radius 340ms var(--settle), box-shadow 340ms var(--settle), background-color 340ms var(--settle); }
+    .panel[data-shell] .pin { display: none; }
+    /* The card clips its corners, so its edge sits just inside it. */
+    .panel[data-shell="float"] .resize { margin-left: 0; }
+    .panel[data-shell="float"] .resize::before { top: 14px; bottom: 14px; left: 2px; }
     .panel[data-resizing="true"] { cursor: ew-resize; user-select: none; }
     @media (prefers-reduced-transparency: reduce) { .panel { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 
@@ -6135,8 +10225,23 @@
     .menu [role="menuitem"]:hover, .menu [role="menuitem"]:focus-visible { background: var(--paper-2); outline: none; }
     .menu [role="menuitem"] small { font-size: 11.5px; color: var(--faint); }
     .menu .empty { font-size: 12px; color: var(--faint); padding: 8px 10px; }
+    /* The chat switcher in two: this app's agents first, then the rest. */
+    .menu .seg { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 8px 10px 3px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+    .menu .seg small { font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .menu .seg-rule { height: 1px; margin: 6px 8px 2px; background: var(--line); }
+    .menu [role="menuitem"].is-hidden > span { color: var(--muted); }
 
     marble-conversation { flex: 1; min-height: 0; }
+
+    /* The sidebar's other views (Build mode's marks, Pieces and History,
+       added with addView): one at a time in place of the chat, under the
+       same edge, width and motion. The chat stays laid out beneath, unseen
+       and out of reach, so it keeps its place and scroll for coming back. */
+    .views { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; min-height: 0; }
+    .views[hidden] { display: none; }
+    .views > [data-view] { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+    .views > [data-view][hidden] { display: none; }
+    .panel:not([data-view="chat"]) > :is(.bar, .usage, .where, .menu, marble-conversation) { visibility: hidden; }
 
     @media ${PHONE} {
       .panel { top: 0; left: 0; width: 100vw; border-left: 0; transform: translateY(100%); }
@@ -6144,12 +10249,39 @@
       .resize { display: none; }
       .bar { padding-top: calc(18px + env(safe-area-inset-top, 0px)); }
       .pin { display: none; }
+      /* With the keyboard up the sheet is the strip a person can see, not the
+         window: iOS covers the bottom of the window with the keys and slides
+         what is visible down it to keep the caret clear, so a sheet pinned to
+         the window had its composer under the keys and its bar off the top.
+         Only while the keys are up (watchKeys): a pinch-zoom moves the
+         visible strip too, and the sheet must not chase that. */
+      :host(.marble-keyboard) .panel { top: var(--vv-top, 0px); bottom: var(--kb, 0px); }
+    }
+    /* Typing, in the page or in the chat, the corner button and its tools
+       step aside: on Android the keyboard lifts the page's foot, and a round
+       button riding up on it covers the line being typed. On a phone they
+       also step aside while the page has a menu or a modal sheet open
+       (marble-covered): the corner is where a sheet's own buttons and an app
+       bar's are, and the launcher sits over everything. */
+    :host(.marble-keyboard) .tray, :host(.marble-covered) .tray {
+      visibility: hidden; opacity: 0; transition: opacity 200ms var(--settle), visibility 0s linear 200ms; }
+    /* A finger needs 44pt where a pointer needed 30, so the bar's buttons
+       grow; the drawings in them stay the size they were. */
+    @media (pointer: coarse) {
+      .icon { width: 44px; height: 44px; border-radius: 10px; }
+      .icon:active { background: var(--paper-3); color: var(--ink); }
+      .title { min-height: 44px; }
+      .title:active { background: var(--paper-2); }
+      .menu [role="menuitem"] { min-height: 44px; justify-content: center; }
+      .menu [role="menuitem"]:active { background: var(--paper-2); }
+      .bar { -webkit-user-select: none; -webkit-touch-callout: none; }
     }
     @media (prefers-reduced-motion: reduce) {
       .panel { transition: opacity 150ms linear; }
-      .launcher.running::after { animation: none; }
+      .launcher-dot { animation: none; }
+      .tray, .tools, .tool { transition: none; }
+      .tools { transform: none; }
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
   `;
 
   const ICONS = {
@@ -6159,6 +10291,11 @@
     more: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg>',
     pin: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.5 3v10" stroke="currentColor" stroke-width="1.5"/></svg>',
     close: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    // Tray tools. Ask here borrows the callout's own mark — the beaked bubble
+    // that hangs at a selection — because it summons exactly that, and a
+    // second glyph for one affordance would be a second affordance. Drawn on
+    // the 24-box the callout's mark was drawn on.
+    ask: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(2.6 -.6) scale(.8)"><path d="M6.5 15.1A8 8 0 1 1 10.9 18.2L4.9 21.1a.6.6 0 0 1-.72-.85Z" stroke-width="2.2"/></g><path d="M4.5 21.4h15" stroke-width="2.2"/></svg>',
   };
 
   class MarbleAgentDrawer extends HTMLElement {
@@ -6166,7 +10303,10 @@
       super();
       const root = this.attachShadow({ mode: 'open' });
       root.innerHTML = `<style>${TOKENS}${DRAWER_CSS}</style>
-        <button type="button" class="launcher" aria-label="Agent (⌘J)" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
+        <div class="tray" data-open="false" data-away="false">
+          <button type="button" class="launcher" aria-label="Chat" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
+          <div class="tools" role="group" aria-label="Agent tools"></div>
+        </div>
         <aside class="panel" role="dialog" aria-label="Agent" data-open="false" data-pinned="false" inert>
           <span class="grip" aria-hidden="true"></span>
           <button type="button" class="resize" aria-label="Resize sidebar"></button>
@@ -6184,9 +10324,12 @@
           <div class="menu recent" role="menu" aria-label="Recent conversations" hidden></div>
           <div class="menu actions" role="menu" aria-label="Conversation actions" hidden></div>
           <marble-conversation project="drive"></marble-conversation>
+          <div class="views" hidden></div>
         </aside>`;
       this.launcher = root.querySelector('.launcher');
       this.dot = root.querySelector('.launcher-dot');
+      this.tray = root.querySelector('.tray');
+      this.tools = root.querySelector('.tools');
       this.panel = root.querySelector('.panel');
       this.bar = root.querySelector('.bar');
       this.usageEl = root.querySelector('.usage');
@@ -6199,6 +10342,10 @@
       this.pinButton = root.querySelector('.pin');
       this.resizeEl = root.querySelector('.resize');
       this.view = root.querySelector('marble-conversation');
+      this.viewsEl = root.querySelector('.views');
+      this.views = new Map();
+      this.viewName = 'chat';
+      this.panel.dataset.view = 'chat';
 
       this.progress = 0;
       this.width = WIDTH;
@@ -6209,6 +10356,10 @@
       this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
       this.summaries = new Map();
       this.labels = new Map();
+      this.toolSpecs = new Map();
+      this.toolEls = new Map();
+      this.trayOpen = false;
+      this.trayTimer = null;
     }
 
     get api() {
@@ -6221,9 +10372,19 @@
       this.pinned = api.storage.get(PIN_KEY) === '1';
       this.width = this.clampWidth(this.readStoredWidth());
       const current = api.current();
-      if (current) this.view.setAttribute('conversation', current);
+      // A conversation handed over by something else: the Drive, once it has made
+      // a document from a template and briefed an agent at it; a link somebody
+      // sent. It sits beside collab's `#at=<ids>`, which lands you on elements
+      // rather than on a chat — and it outranks what was last remembered here,
+      // because being handed one is a decision somebody just made.
+      const handed = /(?:^|[#&])chat=([\w-]+)/.exec(location.hash)?.[1] ?? null;
+      if (handed) api.remember(handed);
+      const showing = handed ?? current;
+      if (showing) this.view.setAttribute('conversation', showing);
 
-      this.launcher.addEventListener('click', () => this.open());
+      // Pinned, the launcher does not go away, so it has to be able to say
+      // "enough" as well as "come here".
+      this.launcher.addEventListener('click', () => (this.isOpen ? this.close() : this.open()));
       this.root('.close').addEventListener('click', () => this.close());
       this.root('.new').addEventListener('click', () => this.startNew());
       this.pinButton.addEventListener('click', () => this.setPinned(!this.pinned));
@@ -6247,18 +10408,50 @@
       });
 
       this.onKey = (event) => {
-        if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+        const mod = (event.metaKey || event.ctrlKey) && !event.altKey;
+        // ⌘⇧J shows and hides the chat, the way ⌘⇧\ does the tree (shell.js).
+        // ⌘⇧O is New chat, from any page: the panel opens on a fresh
+        // conversation. Both hold while typing, in the page or the chat; the
+        // moment you most want a new chat is mid-sentence in the wrong one.
+        // Read by code as well as key: with ⇧ held, some layouts report
+        // the key's other character.
+        if (mod && event.shiftKey && (event.code === 'KeyJ' || event.key.toLowerCase() === 'j')) {
           event.preventDefault();
-          // One key for "agent", and the selection decides where the agent
-          // appears: the callout layer takes it when it can draw a card at
-          // what you are holding.
-          const selected = window.marble?.agent?.context?.().selection?.length;
-          if (selected && !dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
-          if (this.isOpen) this.close();
-          else this.open();
-        } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null) {
+          event.stopPropagation();
+          if (!event.repeat) this.toggleChat();
+          return;
+        }
+        if (mod && event.shiftKey && (event.code === 'KeyO' || event.key.toLowerCase() === 'o')) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!event.repeat) this.startNew({ keys: true });
+          return;
+        }
+        if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+          // Where the shell can open, it hears ⌘J first (shell.js), the same way.
+          if (window.marbleShell?.takesKeys) return;
+          event.preventDefault();
+          // ⌘J asks in place: the callout layer draws a card at the
+          // selection, the caret's block or what the pointer is over. With
+          // nothing to ask about, the chat opens, or takes the keys if it is
+          // open. Escape is how it closes.
+          if (!dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
+          if (!this.isOpen) this.open();
+          else this.view?.focusInput?.();
+        // On another view (Build mode's Marks, Pieces, History) Escape is the
+        // view's: letting go of what is picked there, not closing the sidebar.
+        } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null && this.viewName === 'chat') {
           if (!this.recent.hidden || !this.actions.hidden) this.hideMenus();
-          else this.close();
+          // The shell's chat is one of its panels, not a sheet over the page:
+          // Escape hands the keys back to the page and leaves it where it is.
+          else if (this.shell) {
+            let focused = document.activeElement;
+            while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+            focused?.blur?.();
+          } else this.close();
+        } else if (event.key === 'Escape' && this.trayOpen) {
+          this.setTray(false);
+          this.launcher.focus({ preventScroll: true });
         }
       };
       addEventListener('keydown', this.onKey, true);
@@ -6269,6 +10462,8 @@
       this.onCloseRequest = () => this.close();
       addEventListener('marble:agent-open', this.onOpenRequest);
       addEventListener('marble:agent-close', this.onCloseRequest);
+      this.onShell = (event) => this.applyShell(event.detail);
+      addEventListener('marble-shell:layout', this.onShell);
       this.onSettingsSaved = async () => {
         try {
           this.labels.clear();
@@ -6279,6 +10474,21 @@
       addEventListener('marble:agent-settings-saved', this.onSettingsSaved);
       this.onViewport = () => this.render();
       this.phone.addEventListener('change', this.onViewport);
+      // The keys up or down: the sheet stands on them and the corner button
+      // steps aside. A marble- class, so never the file's.
+      this.offKeyboard = watchKeys((up) => this.classList.toggle('marble-keyboard', up));
+      // On a phone the mast's "Also working here" count is a button, and the
+      // list it opens here is the chat switcher, which puts this page's chats first.
+      this.onWorkingHere = (event) => {
+        event.stopPropagation();
+        if (this.recent.hidden) this.toggleMenu(this.recent, this.titleButton, () => this.fillRecent());
+      };
+      this.view.addEventListener('marble:agent-working-here', this.onWorkingHere);
+      // Whether the page has a menu or a modal sheet open, asked again after
+      // anything that could open or close one. A popover says so with a
+      // toggle event, which does not bubble but is heard on the way down.
+      this.onMaybeCovered = () => requestAnimationFrame(() => this.paintCovered());
+      for (const type of ['toggle', 'click', 'keyup']) document.addEventListener(type, this.onMaybeCovered, true);
       this.onOutside = (event) => {
         if (!event.composedPath().some((node) => node === this.recent || node === this.actions || node === this.titleButton || node?.classList?.contains?.('more'))) this.hideMenus();
       };
@@ -6286,6 +10496,7 @@
 
       this.bindDrag();
       this.bindResize();
+      this.bindTray();
       this.onWindowResize = () => {
         this.applyWidth(this.readStoredWidth(), { persist: false });
         this.render();
@@ -6295,6 +10506,11 @@
       api.conversations().then((list) => {
         for (const summary of list) this.summaries.set(summary.id, summary);
         this.showLauncherState();
+        // Opened before the list arrived — handed a conversation by a link,
+        // or open from the last visit — it could not tell then whether what
+        // it is showing had finished unseen. Now it can: showing it is seeing it.
+        const id = this.view.getAttribute('conversation');
+        if (this.isOpen && id && this.summaries.get(id)?.needsReview) this.markSeen(id);
       }).catch(() => {});
       this.offSummaries = api.on('*', (summary) => {
         if (summary?.removed) {
@@ -6311,9 +10527,19 @@
         this.showMeta(this.meta);
       }).catch(() => {});
 
-      if (api.storage.get(OPEN_KEY) === '1') this.open({ animate: false });
+      // Handed a conversation, the drawer opens whether or not it was left open:
+      // arriving at a document to watch something being built in it and finding
+      // the panel shut is arriving at nothing.
+      if (window.marbleShell?.layout) this.applyShell(window.marbleShell.layout);
+      if (handed || (!this.shell && api.storage.get(api.here(OPEN_KEY)) === '1')) this.open({ animate: false });
       else this.render();
       this.unwatchUsage = watchUsage(this.usageEl);
+      this.fillTray();
+      // Scripts load in order and collab.js comes after this one, so its
+      // registration lands on a tray that already exists. This is for the
+      // other case — a drawer mounted late, or remounted — where whoever
+      // asked first was told there was no tray.
+      dispatchEvent(new CustomEvent('marble-tray:ready'));
     }
 
     disconnectedCallback() {
@@ -6322,8 +10548,19 @@
       removeEventListener('keydown', this.onKey, true);
       removeEventListener('marble:agent-open', this.onOpenRequest);
       removeEventListener('marble:agent-close', this.onCloseRequest);
+      removeEventListener('marble-shell:layout', this.onShell);
       removeEventListener('marble:agent-settings-saved', this.onSettingsSaved);
+      removeEventListener('marble-tray:register', this.onTrayRegister);
+      removeEventListener('marble-tray:update', this.onTrayUpdate);
+      removeEventListener('marble-tray:unregister', this.onTrayRemove);
+      removeEventListener('marble:agent-context', this.onContext);
+      clearTimeout(this.trayTimer);
+      if (this.onCalm) removeEventListener('pointermove', this.onCalm, true);
       this.phone.removeEventListener('change', this.onViewport);
+      this.offKeyboard?.();
+      this.offKeyboard = null;
+      this.view.removeEventListener('marble:agent-working-here', this.onWorkingHere);
+      for (const type of ['toggle', 'click', 'keyup']) document.removeEventListener(type, this.onMaybeCovered, true);
       removeEventListener('resize', this.onWindowResize);
       this.offSummaries?.();
       this.unwatchUsage?.();
@@ -6335,26 +10572,177 @@
       return this.shadowRoot.querySelector(selector);
     }
 
+    /** On a phone, whether something of the page's is open over it that the
+     *  corner button would sit on: an open popover or a modal dialog, in the
+     *  page or one shadow root down (the shell's sheets). */
+    paintCovered() {
+      let covered = false;
+      if (this.phone.matches) {
+        const open = ':popover-open, dialog[open], [aria-modal="true"]';
+        // The runtime's own layers (callout, marks, review) are popovers held
+        // open for good, and let every touch through; they are not a menu.
+        const shown = (el) => {
+          if (el === this || this.contains(el) || !(el.checkVisibility?.() ?? true)) return false;
+          const box = el.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 && getComputedStyle(el).pointerEvents !== 'none';
+        };
+        const roots = [document, ...[...document.querySelectorAll('body > *')].map((el) => el !== this && el.shadowRoot).filter(Boolean)];
+        try {
+          covered = roots.some((root) => [...root.querySelectorAll(open)].some(shown));
+        } catch { /* an engine without :popover-open */ }
+      }
+      this.classList.toggle('marble-covered', covered);
+    }
+
+    /** Showing a finished conversation is seeing it. Said aloud as well as
+     *  filed, because a list that was read a moment before the host heard
+     *  (the shell's Agents, runtime/shell.js) would otherwise go on calling
+     *  it unread. */
+    // ------------------------------------------------------------- views
+    //
+    // Other things the sidebar can show in place of the chat (Build mode's
+    // marks, Pieces and History). Each is a node of its own, styled by the
+    // CSS it brings, which is put in this shadow root once. The chat is the
+    // view named 'chat' and is always there.
+
+    addView(name, { node, css = '' } = {}) {
+      if (!name || name === 'chat' || !node) return;
+      if (!this.views.has(name) && css) {
+        const style = document.createElement('style');
+        style.dataset.view = name;
+        style.textContent = css;
+        this.shadowRoot.append(style);
+      }
+      node.dataset.view = name;
+      node.hidden = this.viewName !== name;
+      this.viewsEl.append(node);
+      this.views.set(name, { node });
+    }
+
+    /** Show a view in the sidebar, open or not; 'chat' is the conversation. */
+    showView(name) {
+      const next = this.views.has(name) ? name : 'chat';
+      const was = this.viewName;
+      this.viewName = next;
+      this.panel.dataset.view = next;
+      for (const [key, view] of this.views) view.node.hidden = key !== next;
+      const other = next !== 'chat';
+      this.viewsEl.hidden = !other;
+      for (const el of [this.bar, this.usageEl, this.where, this.view]) el.inert = other;
+      if (other) this.hideMenus();
+      else {
+        const id = this.view.getAttribute('conversation');
+        if (this.isOpen && id && this.summaries.get(id)?.needsReview) this.markSeen(id);
+      }
+      if (next !== was) this.announceView();
+    }
+
+    /** A view's button: shows the sidebar on that view, or puts the sidebar
+     *  away when it is showing that view already. */
+    toggleView(name) {
+      const next = this.views.has(name) ? name : 'chat';
+      if (this.isOpen && this.viewName === next) { this.close(); return false; }
+      this.showView(next);
+      if (!this.isOpen) this.open();
+      else if (next === 'chat') this.view.focusInput();
+      return true;
+    }
+
+    /** Which view is showing, and whether the sidebar is out: said whenever
+     *  either changes. */
+    announceView() {
+      const key = `${this.viewName}:${this.isOpen}`;
+      if (key === this.viewSaid) return;
+      this.viewSaid = key;
+      dispatchEvent(new CustomEvent('marble-agent:view', { detail: { view: this.viewName, shown: this.isOpen } }));
+    }
+
+    markSeen(id) {
+      // Read only when it is the chat that is in view.
+      if (this.viewName !== 'chat') return;
+      this.api.markReviewed(id)
+        .then(() => dispatchEvent(new CustomEvent('marble-agent:seen', { detail: { id } })))
+        .catch(() => {});
+    }
+
     // ---------------------------------------------------------- open, close
 
     open({ animate = true } = {}) {
+      if (this.shell) {
+        // Floating, a view brought out on purpose (Build mode's Marks, Pieces,
+        // History) stays out until put away; the chat comes on reach.
+        const hold = this.viewName !== 'chat';
+        if (!this.shell.chat) window.marbleShell.setChat(true);
+        else if (this.shell.chatShown === false) window.marbleShell.reveal('chat', { focus: !hold, hold });
+        else this.view.focusInput();
+        return;
+      }
       this.isOpen = true;
-      this.api.storage.set(OPEN_KEY, '1');
+      this.api.storage.set(this.api.here(OPEN_KEY), '1');
       this.animateTo(1, { animate });
       this.view.focusInput();
       const id = this.view.getAttribute('conversation');
-      if (id && this.summaries.get(id)?.needsReview) this.api.markReviewed(id).catch(() => {});
+      if (id && this.summaries.get(id)?.needsReview) this.markSeen(id);
     }
 
     close() {
+      if (this.shell) {
+        // On hover, closing puts the chat back at its edge; pinned, it
+        // unpins it, which puts it there too. Put away on purpose, it slides
+        // out at the pace it came in, not at a hand's leaving pace.
+        this.closing = true;
+        setTimeout(() => { this.closing = false; }, 0);
+        if (window.marbleShell.autoHide) window.marbleShell.conceal('chat');
+        else window.marbleShell.setChat(false);
+        this.launcher.focus({ preventScroll: true });
+        return;
+      }
       this.isOpen = false;
-      this.api.storage.set(OPEN_KEY, '0');
+      this.api.storage.set(this.api.here(OPEN_KEY), '0');
       this.hideMenus();
       this.animateTo(0);
       this.launcher.focus({ preventScroll: true });
     }
 
-    animateTo(target, { animate = true, velocity = 0 } = {}) {
+    /** The shell (runtime/shell.js) says where the chat sits while it is
+     *  open: under its bar, docked in Fit or a card in Float, and shown or not
+     *  by its chat button rather than by this panel's remembered state. Closing
+     *  the shell takes the chat with it — App alone is the app, and the
+     *  launcher is how the chat comes back by itself. */
+    applyShell(layout) {
+      const first = this.shellSeen !== true;
+      this.shellSeen = true;
+      const was = this.shell;
+      this.shell = layout?.open ? layout : null;
+      // A wider tree can leave less room for the chat than it had.
+      if (this.shell && this.width > this.widthMax()) this.applyWidth(this.width);
+      // In Float the chat is out only while the shell says it is reached for
+      // (`chatShown`); in Fit, whenever it is on.
+      const want = this.shell ? Boolean(this.shell.chat && this.shell.chatShown !== false) : was ? false : this.isOpen;
+      if (want === this.isOpen) {
+        if (want && layout?.focusChat) this.view.focusInput();
+        this.render();
+        return;
+      }
+      this.isOpen = want;
+      if (!want) this.hideMenus();
+      // The shell's panels and the page ease over 340ms; this spring is tuned
+      // to land with them rather than a beat behind. A card on hover leaves
+      // faster than it came, as the tree does: the hand has already gone.
+      const away = !want && this.shell?.mode === 'float' && !this.closing;
+      this.closing = false;
+      this.animateTo(want ? 1 : 0, { animate: !first, response: want ? 0.25 : away ? 0.16 : 0.3 });
+      if (want && !first) {
+        // The caret goes in when the chat was asked for — the shell opening,
+        // its button, a conversation opened — and never because a pointer
+        // passing the edge brought it out.
+        if (!was || layout.focusChat) this.view.focusInput();
+        const id = this.view.getAttribute('conversation');
+        if (id && this.summaries.get(id)?.needsReview) this.markSeen(id);
+      }
+    }
+
+    animateTo(target, { animate = true, velocity = 0, response } = {}) {
       this.cancelMotion?.();
       this.cancelMotion = null;
       if (!animate || this.reduced.matches) {
@@ -6366,6 +10754,7 @@
         from: this.progress,
         to: target,
         velocity,
+        ...(response ? { response } : {}),
         onFrame: (value) => {
           this.progress = value;
           this.render();
@@ -6378,11 +10767,25 @@
     }
 
     render() {
+      this.announceView();
       const phone = this.phone.matches;
       const p = Math.max(0, Math.min(1, this.progress));
       const visible = this.isOpen || p > 0.001;
+      // A chat leaving with the shell leaves from where the shell had it, and
+      // only takes its own place again once it is out of sight.
+      if (this.shell && !phone) this.lastShell = this.shell;
+      else if (!visible) this.lastShell = null;
+      const shell = phone ? null : this.shell ?? (this.isOpen ? null : this.lastShell);
+      const gap = shell?.mode === 'float' ? shell.gap : 0;
       this.panel.dataset.open = String(this.isOpen);
-      this.panel.dataset.pinned = String(this.pinned && !phone);
+      this.panel.dataset.pinned = String(shell ? shell.mode === 'fit' : this.pinned && !phone);
+      this.panel.toggleAttribute('data-glide', Boolean(this.wasInShell && shell && this.isOpen));
+      this.wasInShell = Boolean(shell && this.isOpen);
+      if (shell) this.panel.dataset.shell = shell.mode;
+      else delete this.panel.dataset.shell;
+      this.panel.style.top = shell ? `${shell.top}px` : '';
+      this.panel.style.right = gap ? `${gap}px` : '';
+      this.panel.style.bottom = gap ? `${gap}px` : '';
       this.panel.inert = !this.isOpen;
       this.panel.style.visibility = visible ? 'visible' : 'hidden';
       this.launcher.setAttribute('aria-expanded', String(this.isOpen));
@@ -6393,11 +10796,34 @@
         this.panel.style.opacity = this.isOpen ? '1' : '0';
       } else {
         this.panel.style.opacity = '';
-        this.panel.style.transform = phone ? `translateY(${(1 - p) * 100}%)` : `translateX(${(1 - p) * 100}%)`;
+        this.panel.style.transform = phone ? `translateY(${(1 - p) * 100}%)`
+          : gap ? `translateX(calc(${(1 - p) * 100}% + ${(1 - p) * (gap + 24)}px))`
+          : `translateX(${(1 - p) * 100}%)`;
       }
       this.pinButton.setAttribute('aria-pressed', String(this.pinned));
       this.panel.style.width = phone ? '' : `${this.width}px`;
-      this.dock(this.isOpen && this.pinned && !phone);
+      // On a phone the drawer is a full-screen sheet, which is what the phone
+      // chrome was drawn for (the Agents page's): thumb-sized send and setup,
+      // type a thumb reads, and the title left to this sheet's own bar. Only
+      // ever set or taken off here, and only on a change: the conversation
+      // moves its setup row between the bar and a sheet on every set.
+      const chrome = this.view.getAttribute('data-chrome');
+      if (phone && chrome !== 'phone') this.view.setAttribute('data-chrome', 'phone');
+      else if (!phone && chrome === 'phone') this.view.removeAttribute('data-chrome');
+      const docked = this.isOpen && !phone && (shell ? shell.mode === 'fit' : this.pinned);
+      this.dock(docked, this.isOpen && !phone && !docked ? this.width + gap : 0);
+      // Pinned, the page is still there to act on and the tray goes with it.
+      // Over the page — the overlay, or the shell's card on hover — the panel
+      // is where the chat is, and the launcher goes until it has gone: a
+      // button beside the card is somewhere a hand on the card heads for, and
+      // leaving the card for it puts the card away. It comes back in the
+      // corner, never sliding there from beside the card.
+      const away = !docked && (this.isOpen || (!phone && p > 0.05));
+      if (this.tray.dataset.away === 'true' && !away) this.calmTray();
+      this.tray.dataset.away = String(away);
+      const inset = docked ? this.width : 0;
+      this.tray.style.setProperty('--tray-inset', `${inset}px`);
+      if (this.isOpen) this.setTray(false);
     }
 
     setPinned(pinned) {
@@ -6408,11 +10834,13 @@
     }
 
     widthKey() {
-      return this.pinned ? WIDTH_PINNED_KEY : WIDTH_OVERLAY_KEY;
+      return this.pinned || this.shell ? WIDTH_PINNED_KEY : WIDTH_OVERLAY_KEY;
     }
 
     widthMax() {
-      return Math.max(WIDTH_MIN, Math.min(Math.round(innerWidth * 0.72), innerWidth - 200));
+      // Inside the shell the tree takes its share of the window first.
+      const side = this.shell?.side ?? 0;
+      return Math.max(WIDTH_MIN, Math.min(Math.round(innerWidth * 0.72), innerWidth - 200 - side));
     }
 
     clampWidth(px) {
@@ -6436,23 +10864,191 @@
     }
 
     /** Docking moves the page, which is the whole point of pinning — and is
-     *  done with a transient stylesheet, so nothing about the document changes. */
-    dock(on) {
+     *  done with a transient stylesheet, so nothing about the document changes.
+     *  A chat that floats over the page instead moves nothing, but says how
+     *  much of the window's right side it covers (--marble-chat-cover), so a
+     *  menu the page opens near that edge can open clear of it. */
+    dock(on, cover = 0) {
       const existing = document.getElementById('marble-agent-dock');
-      if (on) {
-        const css = `html { margin-inline-end: ${this.width}px !important; }`;
-        if (existing) {
-          existing.textContent = css;
-          return;
-        }
-        const style = document.createElement('style');
-        style.id = 'marble-agent-dock';
-        style.setAttribute('data-marble-transient', '');
-        style.textContent = css;
-        document.head.append(style);
-      } else if (existing) {
-        existing.remove();
+      // The width is said as well as taken, so chrome that centres itself on
+      // the page (Describe's toolbar) can centre on what is left of it.
+      const css = on ? `html { margin-inline-end: ${this.width}px !important; --marble-dock-right: ${this.width}px; }`
+        : cover ? `html { --marble-chat-cover: ${cover}px; }`
+        : '';
+      if (!css) {
+        existing?.remove();
+        return;
       }
+      if (existing) {
+        existing.textContent = css;
+        return;
+      }
+      const style = document.createElement('style');
+      style.id = 'marble-agent-dock';
+      style.setAttribute('data-marble-transient', '');
+      style.textContent = css;
+      document.head.append(style);
+    }
+
+    // ---------------------------------------------------------------- tray
+
+    /** A tool is a small named action that only appears when it applies. The
+     *  drawer owns the tray; anything else that wants a slot in it — collab.js's
+     *  work toggle, the callout's Point at something, Describe — asks by dispatching a *cancelable*
+     *  `marble-tray:register`, and the tray answers by preventing it. An
+     *  unanswered ask means there is no tray on this page (a page with
+     *  `<meta name="marble-agent" content="custom">` mounts no drawer), and
+     *  the asker is expected to draw its own affordance instead. */
+    bindTray() {
+      this.onTrayRegister = (event) => {
+        if (!event.detail?.id) return;
+        event.preventDefault();
+        this.addTool(event.detail);
+      };
+      this.onTrayUpdate = (event) => {
+        if (event.detail?.id) this.addTool(event.detail, { merge: true });
+      };
+      this.onTrayRemove = (event) => {
+        const id = event.detail?.id;
+        if (!id) return;
+        this.toolSpecs.delete(id);
+        this.fillTray();
+      };
+      addEventListener('marble-tray:register', this.onTrayRegister);
+      addEventListener('marble-tray:update', this.onTrayUpdate);
+      addEventListener('marble-tray:unregister', this.onTrayRemove);
+
+      // Ask here summons the callout at the selection — a door ⌘J also
+      // opens. It is in the tray only while there is a selection to hang it
+      // on. New chat is the row nearest the hand: it is the one most used.
+      // All agents left the tray in v4: the chat's More menu and the drive's
+      // tree both open the Agents page, and the tray keeps to things to do.
+      this.addTool({
+        id: 'ask',
+        order: 5,
+        label: 'Ask here',
+        key: '⌘J',
+        icon: ICONS.ask,
+        hidden: true,
+        onSelect: () => {
+          if (!dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
+          this.open();
+        },
+      });
+      this.addTool({ id: 'new', order: 1, label: 'New chat', key: '⌘⇧O', icon: ICONS.plus, always: true, onSelect: () => this.startNew() });
+
+      this.onContext = () => {
+        const selected = this.api?.context?.().selection?.length ?? 0;
+        this.addTool({ id: 'ask', hidden: !selected }, { merge: true });
+      };
+      addEventListener('marble:agent-context', this.onContext);
+      this.onContext();
+
+      const leave = () => {
+        clearTimeout(this.trayTimer);
+        this.trayCalm = false;
+        this.trayTimer = setTimeout(() => this.setTray(false), 180);
+      };
+      // The gaps between the buttons do not take a pointer — the page under
+      // them is still the page — so crossing one leaves the tray for a frame.
+      // The delay is what makes the column one surface to the hand.
+      // Opening asks for a moment's rest on it, so a pointer on its way to the
+      // edge or the page's corner passes over the launcher and raises nothing;
+      // a launcher that has just come back under a still pointer waits until
+      // that pointer has left it once.
+      this.tray.addEventListener('pointerenter', () => {
+        if (this.trayCalm) return;
+        if (this.trayOpen) { this.setTray(true); return; }
+        clearTimeout(this.trayTimer);
+        this.trayTimer = setTimeout(() => this.setTray(true), TRAY_REST);
+      });
+      this.tray.addEventListener('pointerleave', leave);
+      // Keys open it; the focus a closing panel hands back to the launcher
+      // does not, or putting the chat away would hang the menu up.
+      this.tray.addEventListener('focusin', (event) => {
+        if (event.target.matches?.(':focus-visible')) this.setTray(true);
+      });
+      this.tray.addEventListener('focusout', (event) => {
+        if (!this.tray.contains(event.relatedTarget)) leave();
+      });
+    }
+
+    addTool(spec, { merge = false } = {}) {
+      const existing = this.toolSpecs.get(spec.id);
+      const next = merge && existing ? { ...existing, ...spec } : { ...spec };
+      // A selection change asks about Ask here on every keystroke. Answering
+      // "same as before" by rebuilding the column would move DOM under a
+      // hovering pointer for nothing.
+      if (existing && Object.keys(next).every((key) => next[key] === existing[key])
+        && Object.keys(existing).length === Object.keys(next).length) return;
+      this.toolSpecs.set(spec.id, next);
+      this.fillTray();
+    }
+
+    fillTray() {
+      const wanted = [...this.toolSpecs.values()].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+      for (const [id, el] of this.toolEls) {
+        if (!this.toolSpecs.has(id)) { el.remove(); this.toolEls.delete(id); }
+      }
+      for (const spec of wanted) {
+        let el = this.toolEls.get(spec.id);
+        if (!el) {
+          el = h('button', 'tool');
+          el.type = 'button';
+          el.dataset.tool = spec.id;
+          el.append(h('span', 'tool-icon'), h('span', 'tool-label'), h('kbd', 'tool-key'));
+          el.addEventListener('click', () => {
+            this.setTray(false);
+            this.toolSpecs.get(spec.id)?.onSelect?.();
+          });
+          this.toolEls.set(spec.id, el);
+        }
+        const icon = el.querySelector('.tool-icon');
+        if (icon.dataset.icon !== spec.icon) {
+          icon.dataset.icon = spec.icon ?? '';
+          icon.innerHTML = spec.icon ?? '';
+        }
+        el.querySelector('.tool-label').textContent = spec.label ?? '';
+        // The key that does the same, shown beside the words, so the key is
+        // learned by using the row.
+        el.querySelector('.tool-key').textContent = spec.key ?? '';
+        el.setAttribute('aria-label', spec.label ?? '');
+        if (spec.key) el.setAttribute('aria-keyshortcuts', spec.key.replace('⌘', 'Meta+').replace('⇧', 'Shift+'));
+        else el.removeAttribute('aria-keyshortcuts');
+        el.dataset.always = String(Boolean(spec.always));
+        // Only a tool that says whether it is active is a toggle; the rest are
+        // actions, and pressing an action is not a state to announce.
+        if ('active' in spec) {
+          el.dataset.active = String(Boolean(spec.active));
+          el.setAttribute('aria-pressed', String(Boolean(spec.active)));
+        }
+        el.hidden = Boolean(spec.hidden);
+        if (el.parentNode !== this.tools) this.tools.append(el);
+      }
+      const order = wanted.map((spec) => this.toolEls.get(spec.id));
+      if (order.some((el, i) => this.tools.children[i] !== el)) this.tools.replaceChildren(...order);
+      for (const el of this.toolEls.values()) el.tabIndex = this.trayOpen ? 0 : -1;
+    }
+
+    /** The launcher is back where a pointer may already be resting. Until
+     *  that pointer moves somewhere else, hovering it is not a request. */
+    calmTray() {
+      this.trayCalm = true;
+      removeEventListener('pointermove', this.onCalm, true);
+      this.onCalm = (event) => {
+        if (event.composedPath().includes(this.tray)) return;
+        this.trayCalm = false;
+        removeEventListener('pointermove', this.onCalm, true);
+      };
+      addEventListener('pointermove', this.onCalm, { capture: true, passive: true });
+    }
+
+    setTray(open) {
+      clearTimeout(this.trayTimer);
+      if (this.trayOpen === open) return;
+      this.trayOpen = open;
+      this.tray.dataset.open = String(open);
+      for (const el of this.toolEls.values()) el.tabIndex = open ? 0 : -1;
     }
 
     // ---------------------------------------------------------- dragging
@@ -6462,7 +11058,7 @@
       // A title click opens the recent menu; only the bar's empty space starts a drag.
       this.titleButton.addEventListener('pointerdown', (event) => event.stopPropagation());
       this.bar.addEventListener('pointerdown', (event) => {
-        if (!this.isOpen || event.button !== 0) return;
+        if (!this.isOpen || this.shell || event.button !== 0) return;
         if (event.composedPath().some((node) => TOOLS.has(node?.localName) && node !== this.titleButton)) return;
         drag = { id: event.pointerId, start: this.phone.matches ? event.clientY : event.clientX, moved: false, history: [] };
         this.bar.setPointerCapture(event.pointerId);
@@ -6502,7 +11098,7 @@
         const resting = offset + project(velocity);
         if (resting > size / 2) {
           this.isOpen = false;
-          this.api.storage.set(OPEN_KEY, '0');
+          this.api.storage.set(this.api.here(OPEN_KEY), '0');
           this.animateTo(0, { velocity: -velocity / size });
         } else {
           this.animateTo(1, { velocity: -velocity / size });
@@ -6570,8 +11166,9 @@
 
     // ---------------------------------------------------------- content
 
-    startNew() {
+    startNew({ keys = false } = {}) {
       this.hideMenus();
+      if (keys && !this.isOpen) this.keepReturn();
       this.api.remember(null);
       this.view.removeAttribute('conversation');
       this.meta = null;
@@ -6580,12 +11177,64 @@
       else this.view.focusInput();
     }
 
+    /** ⌘⇧J. Inside the shell the chat is one of its sides, so this pins and
+     *  unpins it, as ⌘⇧\ pins and unpins the tree; a chat out on hover is
+     *  put back at its edge. Without the shell, the panel opens and closes.
+     *  Put away by key, the caret goes back where it was before the chat
+     *  took it, rather than to the launcher. */
+    toggleChat() {
+      // Out on another view (Build mode's Marks, Pieces, History): ⌘⇧J is the
+      // way to the chat, not away from the sidebar.
+      if (this.isOpen && this.viewName !== 'chat') {
+        this.showView('chat');
+        this.view.focusInput();
+        return;
+      }
+      if (this.isOpen) {
+        const back = this.returnTo;
+        this.returnTo = null;
+        let focused = document.activeElement;
+        while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+        // Only a caret in the chat is handed back: one the person has since
+        // put somewhere else on the page stays where they put it.
+        let node = focused;
+        while (node && node !== this) node = node.parentNode ?? node.host ?? null;
+        const inChat = node === this;
+        if (this.shell) {
+          if (window.marbleShell.autoHide) window.marbleShell.conceal('chat');
+          else window.marbleShell.setChat(false);
+        } else {
+          this.isOpen = false;
+          this.api.storage.set(this.api.here(OPEN_KEY), '0');
+          this.hideMenus();
+          this.animateTo(0);
+        }
+        if (inChat) {
+          focused?.blur?.();
+          if (back?.isConnected) back.focus({ preventScroll: true });
+        }
+        return;
+      }
+      this.keepReturn();
+      if (this.shell) {
+        window.marbleShell.setChat(true);
+        this.view.focusInput();
+      } else this.open();
+    }
+
+    /** Where the caret was before a key brought the chat out. */
+    keepReturn() {
+      let focused = document.activeElement;
+      while (focused?.shadowRoot?.activeElement && focused !== this) focused = focused.shadowRoot.activeElement;
+      this.returnTo = focused && focused !== document.body && focused !== this ? focused : null;
+    }
+
     switchTo(id) {
       this.hideMenus();
       if (this.view.getAttribute('conversation') === id) return;
       this.api.remember(id);
       this.view.setAttribute('conversation', id);
-      if (this.summaries.get(id)?.needsReview && this.isOpen) this.api.markReviewed(id).catch(() => {});
+      if (this.summaries.get(id)?.needsReview && this.isOpen) this.markSeen(id);
     }
 
     showMeta(meta) {
@@ -6608,11 +11257,23 @@
       }
     }
 
+    /** The launcher's one mark: the most pressing state among the chats.
+     *  Needs you outranks working, which outranks a failure, which outranks
+     *  something finished and unread. The chat showing in the panel is being
+     *  read, so it is never unread. */
     showLauncherState() {
       const list = [...this.summaries.values()].filter((s) => !s.archived);
-      this.launcher.classList.toggle('running', list.some((s) => s.status === 'running'));
       const openId = this.isOpen ? this.view.getAttribute('conversation') : null;
-      this.dot.hidden = !list.some((s) => s.needsReview && s.id !== openId);
+      const states = new Set(list.map((s) => {
+        const state = stateOf(s);
+        return s.id === openId && (state === 'unseen' || state === 'failed') ? 'idle' : state;
+      }));
+      const state = ['waiting', 'working', 'failed', 'unseen'].find((one) => states.has(one)) ?? null;
+      this.dot.hidden = !state;
+      if (state) this.dot.dataset.state = state;
+      else delete this.dot.dataset.state;
+      const words = { waiting: 'an agent needs you', working: 'an agent is working', failed: 'a chat failed', unseen: 'a chat finished' };
+      this.launcher.setAttribute('aria-label', state ? `Chat, ${words[state]}` : 'Chat');
     }
 
     // ---------------------------------------------------------- menus
@@ -6621,6 +11282,14 @@
       const opening = menu.hidden;
       this.hideMenus();
       if (!opening) return;
+      // Hung from the bar wherever its foot is (a phone's bar is taller, for
+      // the thumb), and never taller than the sheet has left under it: with a
+      // keyboard up that is about half a phone, and a menu past it scrolled
+      // its last rows in under the keys.
+      const panel = this.panel.getBoundingClientRect();
+      const top = Math.round(this.bar.getBoundingClientRect().bottom - panel.top + 4);
+      menu.style.top = `${top}px`;
+      menu.style.maxHeight = `${Math.max(160, Math.round(Math.min(panel.height * 0.6, panel.height - top - 12)))}px`;
       menu.hidden = false;
       button.setAttribute('aria-expanded', 'true');
       fill();
@@ -6658,18 +11327,57 @@
       }
       this.recent.replaceChildren();
       if (!list.length) this.recent.append(h('div', 'empty', 'No conversations yet.'));
-      for (const summary of list.slice(0, 20)) {
+      // Split in two: the agents working on this app first, in a segment of
+      // their own, then every other chat with the document it is about.
+      // Hovering one of this app's rows outlines its element on the page.
+      const here = window.marble?.app ?? null;
+      const inApp = here ? list.filter((s) => s.target === here).slice(0, 12) : [];
+      const elsewhere = list.filter((s) => !inApp.includes(s)).slice(0, 20);
+      let hidden = new Set();
+      try { hidden = new Set(JSON.parse(localStorage.getItem(`marble-glints-hidden:${here}`) || '[]')); } catch { /* private mode */ }
+      const word = (summary) => (summary.asking ? 'Needs you' : summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status);
+      const row = (summary, detail) => {
         this.summaries.set(summary.id, summary);
+        // Choosing a chat is following it: its work may be drawn on the page.
+        const item = this.item(this.recent, summary.title || 'New Chat', detail, () => {
+          this.api.attend?.(summary.id);
+          this.switchTo(summary.id);
+        });
+        if (summary.target === here) {
+          const point = (on) => dispatchEvent(new CustomEvent('marble-glints:point', { detail: { id: on ? summary.id : null } }));
+          item.addEventListener('pointerenter', () => point(true));
+          item.addEventListener('pointerleave', () => point(false));
+          item.addEventListener('click', () => point(false));
+        }
+        return item;
+      };
+      const seg = (label, note) => {
+        const el = h('div', 'seg', label);
+        if (note) el.append(h('small', '', note));
+        this.recent.append(el);
+      };
+      if (inApp.length) {
+        seg('In this app', document.title || here);
+        for (const summary of inApp) {
+          const item = row(summary, hidden.has(summary.id) ? `${word(summary)} · Hidden` : word(summary));
+          item.classList.toggle('is-hidden', hidden.has(summary.id));
+        }
+        if (elsewhere.length) {
+          this.recent.append(h('div', 'seg-rule'));
+          seg('Elsewhere');
+        }
+      }
+      for (const summary of elsewhere) {
         const provider = this.labels.get(summary.provider)?.label ?? summary.provider;
-        const state = summary.asking ? 'Needs you' : summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status;
-        this.item(this.recent, summary.title || 'New Chat', `${provider} · ${state}`, () => this.switchTo(summary.id));
+        const where = inApp.length && summary.target ? String(summary.target).split('/').pop() : provider;
+        row(summary, `${where} · ${word(summary)}`);
       }
       this.recent.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
     }
 
     async fillActions() {
       this.actions.replaceChildren();
-      this.item(this.actions, 'Settings', 'Default agent, model, and API keys', () => {
+      this.item(this.actions, 'Settings', 'Agent and model, keys, and what agents do on the page', () => {
         this.hideMenus();
         this.api.openSettings();
       });
@@ -6723,29 +11431,52 @@
     document.body.append(el);
   };
 
-  // ⌘⇧O is New chat, the chord the CLI and the desktop app use. The Agents
-  // page answers it in its own script, where the Focus stage and the folders
-  // are in scope; this is the fallback for a page whose script predates that,
-  // and it presses the page's own New button so both routes do exactly the
-  // same thing. A page that has the chord says so in `marbleAgentNewChatKey`,
-  // and then nothing here fires.
+  // ⌘⇧O is New chat, the chord the CLI and the desktop app use. On a page
+  // with the drawer, the drawer answers it (MarbleAgentDrawer.onKey): the
+  // side chat opens on a new conversation, wherever you are. The Agents page
+  // has no drawer and answers it in its own script, where the Focus stage and
+  // the folders are in scope; this is the fallback for a page with no drawer
+  // whose script predates that, and it presses the page's own New chat
+  // button so both routes do exactly the same thing. A page that has the
+  // chord says so in `marbleAgentNewChatKey`, and then nothing here fires.
+  // Never the Drive's New: that makes a document, not a chat.
   let newChatKeyBound = false;
   const bindNewChatKey = () => {
     if (newChatKeyBound) return;
     newChatKeyBound = true;
     addEventListener('keydown', (event) => {
-      if (window.marbleAgentNewChatKey) return;
+      if (window.marbleAgentNewChatKey || event.defaultPrevented) return;
+      if (document.querySelector('marble-agent-drawer')) return;
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey || event.repeat) return;
       if (event.code !== 'KeyO' && String(event.key).toLowerCase() !== 'o') return;
-      const button = document.querySelector('header.topbar .new');
+      if (!document.querySelector('meta[name="marble-agent"][content="custom"]')) return;
+      const button = document.querySelector('header.topbar .new, header [data-cmd="new"]');
       if (!button) return;
       event.preventDefault();
       button.click();
     });
   };
 
+  // Every page, the Agents page too: a visit can begin on any of them.
+  const mountSetup = () => {
+    if (window.top !== window || document.querySelector('marble-agent-setup')) return;
+    const el = document.createElement('marble-agent-setup');
+    el.setAttribute('data-marble-transient', '');
+    document.body.append(el);
+  };
+
+  // Connect your Claude waits for its event on every top-level page.
+  const mountConnect = () => {
+    if (window.top !== window || document.querySelector('marble-claude-connect')) return;
+    const el = document.createElement('marble-claude-connect');
+    el.setAttribute('data-marble-transient', '');
+    document.body.append(el);
+  };
+
   const mount = () => {
     mountSettings();
+    mountSetup();
+    mountConnect();
     const pageUsage = document.querySelector('header.topbar > .usage');
     if (pageUsage) watchUsage(pageUsage);
     bindNewChatKey();
@@ -6757,8 +11488,8 @@
   };
 
   const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
-  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
-  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName });
+  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, watchPageTheme, keepKeys, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName, toolLabel, WORK_VIEW_CSS });
 
   if (window.marble?.agent) mount();
   else addEventListener('marble:agent', mount, { once: true });

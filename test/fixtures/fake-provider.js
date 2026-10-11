@@ -19,7 +19,12 @@ export function createFakeProvider({ scripts = {}, id = 'fake' } = {}) {
     detect: async () => ({ installed: true, signedIn: true, detail: 'scripted' }),
     lostSession: (error) => /no conversation found/i.test(error),
     spawn({ mcp, prompt, resume, env }) {
-      const name = /^script:(\S+)/.exec(prompt)?.[1];
+      // At the start of the prompt; or, in a Build mode brief (which opens
+      // with its own words), in the note that carries it. Only a brief: a
+      // delivered message names its sender, whose first prompt may be a
+      // script that is not this conversation's to run.
+      const name = /^script:(\S+)/.exec(prompt)?.[1]
+        ?? (/^Build mode\b/.test(prompt) ? /(?:^|[\s"“])script:([\w-]+)/.exec(prompt)?.[1] : undefined);
       return {
         command: process.execPath,
         args: [AGENT],

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { INSTRUCTIONS } from '../server/agent/instructions.js';
 import { createClaudeProvider, parseClaudeLine } from '../server/agent/providers/claude.js';
+import { PLUGIN_DIR } from '../server/agent/skills.js';
 
 const instructionsModule = await import('../server/agent/instructions.js');
 
@@ -130,7 +132,7 @@ test('ids, labels, catalog, and the documents spawn', () => {
   assert.equal(sub.id, 'claude-subscription');
   assert.equal(sub.label, 'Claude');
   assert.equal(api.id, 'claude-api');
-  assert.equal(api.label, 'KIXLAB API');
+  assert.equal(api.label, 'Claude');
 
   const spec = sub.spawn({ workspace: '/w', prompt: 'Rename it', resume: 'sess-1', model: 'claude-haiku-4-5', effort: 'high', env: { PATH: '/bin' } });
   assert.equal(spec.command, 'claude');
@@ -146,7 +148,13 @@ test('ids, labels, catalog, and the documents spawn', () => {
   assert.deepEqual(api.spawn({ workspace: '/w', prompt: 'x', env: {} }).env, { ANTHROPIC_API_KEY: 'sk-test' });
   assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--resume'));
   assert.deepEqual(sub.models.map((m) => m.id), ['haiku', 'sonnet', 'opus', 'fable']);
-  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 5', 'Opus 5', 'Fable 5.1']);
+  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 5', 'Opus 5.5', 'Fable 5.1']);
+  const oldCli = createClaudeProvider({ version: '2.1.278' });
+  const pinned = oldCli.spawn({ workspace: '/w', prompt: 'x', model: 'opus', env: {} });
+  assert.equal(pinned.args[pinned.args.indexOf('--model') + 1], 'opus', '2.1.278 rejects claude-opus-5-5; the bare alias is the one it runs');
+  const current = createClaudeProvider({ version: '2.1.280' });
+  const opus = current.spawn({ workspace: '/w', prompt: 'x', model: 'opus', env: {} });
+  assert.equal(opus.args[opus.args.indexOf('--model') + 1], 'claude-opus-5-5[1m]', '2.1.280 and newer can pin Opus 5.5');
   assert.deepEqual(sub.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
   assert.deepEqual(sub.modes.map((m) => m.id), ['auto', 'acceptEdits', 'plan', 'manual', 'bypassPermissions']);
 });
@@ -168,12 +176,14 @@ test('detect: signed in, signed out, not installed, and the API key', async () =
   };
   const signedIn = createClaudeProvider({ exec: exec({ code: 0, stdout: '{"loggedIn": true, "authMethod": "claude.ai"}', stderr: '', missing: false }), env: { ANTHROPIC_API_KEY: 'k', PATH: '/bin' } });
   assert.deepEqual(await signedIn.detect(), { installed: true, signedIn: true, detail: 'signed in (claude.ai)' });
-  assert.equal(calls.at(-1).command, 'claude');
-  assert.deepEqual(calls.at(-1).args, ['auth', 'status']);
-  assert.equal(calls.at(-1).env.ANTHROPIC_API_KEY, undefined, 'probing the subscription without the key');
+  const auth = calls.find((call) => call.args[0] === 'auth');
+  assert.equal(auth.command, 'claude');
+  assert.deepEqual(auth.args, ['auth', 'status']);
+  assert.equal(auth.env.ANTHROPIC_API_KEY, undefined, 'probing the subscription without the key');
 
   const signedOut = createClaudeProvider({ exec: exec({ code: 1, stdout: '{"loggedIn": false}', stderr: '', missing: false }), env: {} });
   assert.equal((await signedOut.detect()).signedIn, false);
+  assert.equal((await signedOut.detect()).detail, 'run `claude` once to sign in');
 
   const missing = createClaudeProvider({ exec: exec({ code: null, stdout: '', stderr: '', missing: true }), env: {} });
   assert.deepEqual(await missing.detect(), { installed: false, signedIn: false, detail: 'claude is not installed' });
@@ -195,12 +205,22 @@ test('detect: signed in, signed out, not installed, and the API key', async () =
   assert.equal(late.spawn({ workspace: '/w', prompt: 'x' }).env.ANTHROPIC_API_KEY, 'sk-from-file');
 });
 
+// A probe that ran past runCommand's clock (exec.js sets `timedOut`) never
+// learned whether the person is signed in. That is not the same thing as
+// having asked and heard no — change-line.js's ready() tells the two apart
+// by this detail, so a cold CLI cannot read as "not set up".
+test('detect: an auth-status probe past its clock is marked as timed out, not as a plain sign-out', async () => {
+  const exec = async () => ({ code: null, stdout: '', stderr: '', missing: false, timedOut: true });
+  const provider = createClaudeProvider({ exec, env: {} });
+  assert.deepEqual(await provider.detect(), { installed: true, signedIn: false, detail: 'claude auth status timed out' });
+});
+
 test('detection probes get the allowlisted environment, never the drive secret', async () => {
   const { ENV_ALLOWLIST } = await import('../server/agent/env.js');
   const host = { PATH: '/bin', HOME: '/h', MARBLE_DRIVE_SECRET: 's3cret', ANTHROPIC_API_KEY: 'k', GITHUB_TOKEN: 'g', NODE_OPTIONS: '--x' };
   const seen = [];
   const exec = async (command, args, options) => {
-    seen.push(options?.env);
+    if (args[0] === 'auth') seen.push(options?.env);
     return { code: 0, stdout: '{"loggedIn": true}', stderr: '', missing: false };
   };
   await createClaudeProvider({ auth: 'subscription', exec, env: host }).detect();
@@ -223,7 +243,7 @@ test('a lost session is recognised by what the CLI says', () => {
 test('Claude (API key) with no key refuses to start rather than use the login', () => {
   const api = createClaudeProvider({ auth: 'api', env: { PATH: '/bin' } });
   assert.throws(() => api.spawn({ workspace: '/w', prompt: 'x', env: {} }), {
-    message: 'ANTHROPIC_API_KEY is not set, so KIXLAB API cannot run — set it or choose Claude',
+    message: 'No Claude API key is set — add one in Agents settings, or switch Claude to your login',
   });
   assert.deepEqual(createClaudeProvider({ auth: 'subscription', env: {} }).spawn({ workspace: '/w', prompt: 'x', env: {} }).env, {});
 });
@@ -258,6 +278,18 @@ test('background work is counted from the CLI\'s own task lifecycle', () => {
   assert.deepEqual(ended('gone', 'stopped'), [{ type: 'background', pending: 0 }]);
 });
 
+test('the CLI\'s list of background tasks corrects a count that missed a notification', () => {
+  const state = {};
+  const line = (value) => parseClaudeLine(JSON.stringify(value), state);
+  const listed = (...ids) => line({ type: 'system', subtype: 'background_tasks_changed', tasks: ids.map((task_id) => ({ task_id, task_type: 'local_bash', description: task_id })) });
+  line({ type: 'system', subtype: 'task_started', task_id: 'tests', description: 'tests' });
+  line({ type: 'system', subtype: 'task_started', task_id: 'lost', description: 'lost' });
+  assert.deepEqual(listed('tests'), [{ type: 'background', pending: 1 }]);
+  assert.deepEqual(listed(), [{ type: 'background', pending: 0 }]);
+  // The notification that follows the list still counts for nothing more.
+  assert.deepEqual(line({ type: 'system', subtype: 'task_notification', task_id: 'tests', status: 'completed' }), [{ type: 'background', pending: 0 }]);
+});
+
 test('a subagent\'s deltas and tool results are not the turn\'s', () => {
   const delta = { type: 'stream_event', parent_tool_use_id: 'toolu_1', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'inner' } } };
   const result = { type: 'user', parent_tool_use_id: 'toolu_1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't9', content: 'inner' }] } };
@@ -280,6 +312,15 @@ test('each capability and project kind gets its own instructions', () => {
   assert.match(DRIVE_INSTRUCTIONS, /apply_ops/);
   assert.match(DRIVE_INSTRUCTIONS, /Grep/);
   assert.match(DRIVE_INSTRUCTIONS, /check_document/);
+  // Both drive texts send an agent to the design pages before it styles
+  // anything: a documents agent has no skills to find them by.
+  for (const text of [DOCS, DRIVE_INSTRUCTIONS]) {
+    assert.match(text, /"Design System"/);
+    assert.match(text, /"Design Don'ts"/);
+  }
+  assert.match(DRIVE_INSTRUCTIONS, /marble-drive:design-system/);
+  // A skill the person asks for is theirs: it goes in their drive.
+  assert.match(DRIVE_INSTRUCTIONS, /\.claude\/skills\/<name>/);
 
   assert.equal(instructionsFor('full', 'project'), PROJECT_INSTRUCTIONS);
   assert.match(PROJECT_INSTRUCTIONS, /usual coding agent/);
@@ -310,6 +351,8 @@ test('a full-capability spawn is the terminal\'s, with Marble added and prompts 
     '--permission-mode', 'auto',
     '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
     '--mcp-config', path.join('/w', 'mcp.json'),
+    // The app's own skills, wherever the drive is.
+    '--plugin-dir', PLUGIN_DIR,
     '--append-system-prompt', DRIVE_INSTRUCTIONS,
   ]);
   for (const gone of ['--restricted', '--tools', '--settings', '--strict-mcp-config', '--setting-sources', '--model', '--effort']) {
@@ -318,6 +361,9 @@ test('a full-capability spawn is the terminal\'s, with Marble added and prompts 
   const lines = spec.stdin.trim().split('\n').map((line) => JSON.parse(line));
   assert.deepEqual(lines[0], { type: 'control_request', request_id: 'marble-init', request: { subtype: 'initialize', hooks: {} } });
   assert.deepEqual(lines[1], { type: 'user', message: { role: 'user', content: 'Rewrite it' } });
+  // A whole test suite in one command: the CLI's ten-minute ceiling is raised
+  // for a full agent, and only the ceiling.
+  assert.deepEqual(spec.env, { BASH_MAX_TIMEOUT_MS: String(30 * 60_000) });
 
   const project = sub.spawn({ workspace: '/w', prompt: 'x', capability: 'full', kind: 'project', cwd: '/repo', model: 'fable', effort: 'high', resume: 's1', mode: 'manual', env: {} });
   assert.equal(project.args[project.args.indexOf('--append-system-prompt') + 1], PROJECT_INSTRUCTIONS);
@@ -378,4 +424,45 @@ test('a permission prompt on stdout becomes an ask, the initialize reply becomes
     { type: 'session', id: 's' },
     { type: 'catalog', skills: [{ id: 'compact', name: 'compact', description: '' }, { id: 'apple-design', name: 'apple-design', description: '' }], agents: ['Explore'] },
   ]);
+});
+
+test('no shipped host, page code or template names a lab', () => {
+  const found = spawnSync('git', ['grep', '-l', 'KIXLAB', '--', 'server', 'runtime', 'templates', 'starters', 'agent-plugin'], { encoding: 'utf8' });
+  assert.equal(found.stdout.trim(), '');
+});
+
+test('a model or effort another agent left on the chat is not handed to Claude', () => {
+  const sub = createClaudeProvider({ auth: 'subscription', env: {} });
+  const run = (model, effort) => sub.spawn({ workspace: '/w', prompt: 'x', capability: 'full', kind: 'drive', cwd: '/d', model, effort, env: {} }).args;
+  for (const model of ['gpt-6-astra', 'gpt-5.5', 'grok-4.7', 'composer-2.5', 'auto']) {
+    assert.ok(!run(model, null).includes('--model'), model);
+  }
+  for (const effort of ['ultra', 'minimal', 'high-fast']) {
+    assert.ok(!run('opus', effort).includes('--effort'), effort);
+  }
+  // Claude's own still go through, family or full id.
+  const own = run('claude-sonnet-5', 'max');
+  assert.equal(own[own.indexOf('--model') + 1], 'claude-sonnet-5');
+  assert.equal(own[own.indexOf('--effort') + 1], 'max');
+});
+
+// A plan connected from the browser (Connect your Claude) is a long-lived
+// token in the keys file. The login provider is asked about it and runs on
+// it; the API provider never sees it, so a key someone chose still pays.
+test('the login runs on a connected plan token; the API key provider never gets it', async () => {
+  const seen = [];
+  const exec = async (command, args, options) => {
+    if (args[0] === 'auth') seen.push(options?.env);
+    return { code: 0, stdout: '{"loggedIn": true}', stderr: '', missing: false };
+  };
+  const secrets = () => ({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-plan', ANTHROPIC_API_KEY: 'sk-ant-api03-key' });
+  const login = createClaudeProvider({ auth: 'subscription', exec, env: { PATH: '/bin' }, secrets });
+  const api = createClaudeProvider({ auth: 'api', exec, env: { PATH: '/bin' }, secrets });
+  await login.detect();
+  await api.detect();
+  assert.deepEqual(seen[0], { PATH: '/bin', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-plan' });
+  assert.deepEqual(seen[1], { PATH: '/bin', ANTHROPIC_API_KEY: 'sk-ant-api03-key' });
+  assert.equal(login.spawn({ workspace: '/w', prompt: 'x' }).env.CLAUDE_CODE_OAUTH_TOKEN, 'sk-ant-oat01-plan');
+  assert.equal(login.spawn({ workspace: '/w', prompt: 'x' }).env.ANTHROPIC_API_KEY, undefined);
+  assert.equal(api.spawn({ workspace: '/w', prompt: 'x' }).env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
 });

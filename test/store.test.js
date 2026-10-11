@@ -174,6 +174,26 @@ test('the tree carries files, ordered behind the documents', async () => {
   assert.deepEqual(paper.map((e) => e.kind), ['doc', 'file', 'file']);
 });
 
+test('a tree can leave the files out, for a caller that draws only documents', async () => {
+  const paper = (await store.tree({ folder: 'paper', files: false })).children;
+  assert.deepEqual(paper.map((e) => e.kind), ['doc']);
+});
+
+test('what a document says of itself is remembered only until the file changes', async () => {
+  await store.write('facts', doc('First'));
+  assert.equal((await store.stat('facts')).title, 'First');
+  // Through the host, and behind its back — an agent's editor, a copy from
+  // Finder — the next stat reads the file again.
+  await store.write('facts', doc('Second'));
+  assert.equal((await store.stat('facts')).title, 'Second');
+  await fsp.writeFile(path.join(ROOT, 'facts.mrbl'), doc('Third').replace('<p data-marble-id="p">hello</p>', ''));
+  const info = await store.stat('facts');
+  assert.equal(info.title, 'Third');
+  assert.equal(info.nodes, 1);
+  await fsp.rm(path.join(ROOT, 'facts.mrbl'));
+  assert.equal(await store.stat('facts'), null);
+});
+
 test('a file with no extension, and a name the grammar refuses', async () => {
   await fsp.writeFile(path.join(ROOT, 'paper', 'Makefile'), 'all:');
   // A leading dot is how the store hides its own bookkeeping, so a file named
@@ -218,3 +238,15 @@ test('every method refuses a path that leaves the drive', async () => {
 });
 
 test.after(() => fsp.rm(ROOT, { recursive: true, force: true }));
+
+test('a document\'s own favicon rides along; the marble every document starts with does not', async () => {
+  const { link } = await import('../server/favicon.js');
+  const own = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+  const withIcon = (href) => doc('Icon').replace('</title>', `</title><link rel="icon" href="${href}">`);
+  await store.write('icons/own', withIcon(own));
+  await store.write('icons/marble', doc('Marble').replace('</title>', `</title>${link('doc')}`));
+  await store.write('icons/remote', withIcon('https://example.com/icon.png'));
+  assert.equal((await store.stat('icons/own')).icon, own);
+  assert.equal('icon' in (await store.stat('icons/marble')), false);
+  assert.equal('icon' in (await store.stat('icons/remote')), false, 'only a picture carried in the file');
+});

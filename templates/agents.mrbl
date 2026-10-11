@@ -90,7 +90,7 @@ __ICON__
     display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
   }
   [data-marble-editable] { outline: none; border-radius: 4px; transition: background var(--t-fast) var(--snap); }
-  [data-marble-editable]:hover, [data-marble-editable]:focus-within { background: var(--accent-soft); }
+  [data-marble-editable]:not([contenteditable="false"]):hover, [data-marble-editable]:not([contenteditable="false"]):focus-within { background: var(--accent-soft); }
   [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
   button { font: inherit; }
   button, .conv {
@@ -196,6 +196,31 @@ __ICON__
     font: inherit; font-size: .75rem; color: var(--accent-ink);
   }
   .filter-clear:hover, .filter-clear:focus-visible { text-decoration: underline; outline: none; }
+  /* Glance is words on the bare bar, like Filter: the lead in ink, the chat
+     it is about in muted, and a wash only under the pointer. It gives before
+     the meters do: the chat's line truncates first, and goes below desk width,
+     where the lead is enough and the tip still names the chat. */
+  .glance {
+    appearance: none; border: 0; background: none; color: var(--ink);
+    display: inline-flex; align-items: center; gap: .45rem; flex: 0 10 auto;
+    padding: .2rem .55rem; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: 12.5px; line-height: 1.25; white-space: nowrap;
+    transition: background-color var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .glance:hover, .glance:focus-visible { background: var(--paper-3); outline: none; }
+  .glance:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .glance:active { background: var(--paper-3); filter: brightness(.95); transition-duration: var(--t-fast); }
+  .glance-lead { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .glance-sub { min-width: 0; max-width: 22rem; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  .glance-sub:empty { display: none; }
+  /* Nothing to open: the lead is context, not a control. */
+  .glance:disabled { cursor: default; color: var(--muted); background: none; filter: none; }
+  /* Only the chat's line may give, so only with it showing may the button
+     go under its content; below that the meters give instead. */
+  @media (min-width: 1100px) { .glance { min-width: 0; } }
+  @media (max-width: 1099px) { .glance-sub { display: none; } }
+  /* The phone's bar is one row already: open asks, the worst meter, ⋯. */
+  @media (max-width: 719px) { .topbar .glance { display: none; } }
   /* The idle cut. Its value is a duration, and the durations that matter here
      run from five minutes to a fortnight — a range no linear track can hold.
      So the track carries the logistic of the log: position is a sigmoid over
@@ -237,6 +262,12 @@ __ICON__
     width: 14px; height: 14px; box-sizing: border-box;
     border-radius: 50%; background: var(--card);
     border: 1px solid var(--line); box-shadow: var(--shadow-lift);
+  }
+  /* Under a finger the track is a 44pt strip, not a 14px line: the input's own
+     box is what takes the touch. The margins give the extra height back, so
+     the histogram and the scale sit where they always did. */
+  @media (pointer: coarse) {
+    .idle-range { height: 2.75rem; margin: -15px 0; }
   }
   .idle-range:focus-visible { outline: none; }
   .idle-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -587,10 +618,10 @@ __ICON__
   .focus-card[data-lod="full"] .focus-card-head { cursor: grab; }
   .focus-card[data-lod="full"] { z-index: 3; }
   .focus-card[data-lod="digest"] { z-index: 2; }
-  .focus-card[data-lod="chip"] {
-    z-index: 1;
-    border-left: 3px solid var(--folder, var(--line));
-  }
+  /* A chip wears its group the same way every other card does: on the square
+     tick in its head. A coloured left border had to follow the card's own
+     12px corner, so the rule bowed away from the edge at both ends. */
+  .focus-card[data-lod="chip"] { z-index: 1; }
   .focus-card[data-selected="true"] {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 70%, transparent), var(--shadow-lift);
   }
@@ -635,7 +666,6 @@ __ICON__
   .focus-card[data-lod="full"]:hover .focus-card-actions,
   .focus-card:focus-within .focus-card-actions { opacity: 1; visibility: visible; transition-delay: 0s; }
   .focus-card[data-lod="chip"] .focus-card-actions { display: none; }
-  .focus-card[data-lod="chip"] .focus-folder,
   .focus-card[data-lod="chip"] .focus-pin,
   .focus-card[data-lod="chip"] .focus-keep,
   .focus-card[data-lod="chip"] .focus-collapse,
@@ -1018,26 +1048,72 @@ __ICON__
   .focus.marble-snapping .focus-seam { transition: left var(--t-snap) var(--ease-out); }
   /* Nothing hovers on a touch screen, so the grip simply stays visible. */
   @media (hover: none) { .focus-seam::after { opacity: .4; } }
+  /* ---- The peek. A card says which chat this is; the peek says what it was
+     about — the last thing you asked, the last thing that came back — for as
+     long as the pointer rests on the card. Hovered it is transient: it takes
+     no pointer events and it never scrolls, because a peek you have to scroll
+     is a window you should have opened. Held (Space) it stays and is read. */
   .focus-look {
     position: fixed; z-index: 12;
-    width: min(28rem, calc(100vw - 2rem)); max-height: 70vh; overflow: auto;
-    padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 12px;
+    width: min(26rem, calc(100vw - 2rem)); max-height: min(28rem, 70vh); overflow: hidden;
+    padding: .85rem .95rem; border: 1px solid var(--line); border-radius: 12px;
     background: rgba(var(--card-rgb), .86);
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     box-shadow: var(--shadow-lift);
+    display: grid; gap: .55rem; align-content: start;
+    animation: look-in 120ms var(--ease-out);
   }
-  .focus-look h3 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 500; }
-  .focus-look .look-meta { color: var(--muted); font-size: .8rem; margin: 0 0 .75rem; }
-  .focus-look .look-events { margin: 0; padding-left: 1.1rem; color: var(--ink); font-size: .85rem; }
+  @keyframes look-in { from { opacity: 0; transform: translateY(4px); } }
+  /* The delay is the gesture; the arrival is instant. A peek that fades in
+     again on every card is a peek you wait for twice. */
+  .focus-look[data-moved] { animation: none; }
+  .focus-look:not([data-held]) { pointer-events: none; }
+  .focus-look[data-held] { max-height: 70vh; overflow: auto; }
+  .look-head { display: flex; align-items: center; gap: .45rem; }
+  .focus-look h3 { margin: 0; flex: 1; min-width: 0; font-size: .98rem; font-weight: 500; line-height: 1.3; }
+  .look-head .age { flex: none; color: var(--faint); font-size: .75rem; }
+  .focus-look .look-meta {
+    margin: -.4rem 0 0; color: var(--muted); font-size: .78rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .focus-look .look-meta:empty { display: none; }
+  .look-part { display: grid; gap: .18rem; }
+  .look-label { margin: 0; font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  /* Clamped rather than scrolled, and clamped by the register: what a glance
+     holds is three lines of the ask and six of the answer. */
+  .look-body {
+    margin: 0; font-size: .85rem; line-height: 1.45; color: var(--ink);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;
+    -webkit-line-clamp: 6; line-clamp: 6;
+  }
+  .look-body[data-part="asked"] { color: var(--muted); -webkit-line-clamp: 3; line-clamp: 3; }
+  .focus-look[data-held] .look-body { -webkit-line-clamp: 24; line-clamp: 24; }
+  .look-doing { margin: 0; padding: 0; list-style: none; display: grid; gap: .15rem; font-size: .82rem; color: var(--muted); }
+  .look-doing li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .look-doing li:last-child { color: var(--ink); }
+  .look-touched { margin: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
   /* ---- Focus on a phone: one column, one scalar. A card's size is its
      distance from the one in your hand; the pane sits over the Full. */
   /* The home indicator is not a place to put the last card: the column ends
      where the hand does, and `phoneRoom()` subtracts the same inset. */
-  .focus[data-phone] { position: relative; overflow: hidden; height: calc(var(--vv-h, 100vh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0 0 env(safe-area-inset-bottom, 0px); }
+  .focus[data-phone] { position: relative; top: var(--vv-top, 0px); overflow: hidden; height: calc(var(--vv-h, 100dvh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0 0 env(safe-area-inset-bottom, 0px); }
   /* Folder colour rides every tier, not the chip alone: the leading rule is
-     how a thumb reads which region it is passing through. */
-  .focus[data-phone] .focus-card { position: absolute; left: .75rem; right: .75rem; width: auto; margin: 0; overflow: hidden; border-radius: 12px; border-left: 3px solid var(--folder, var(--line)); transition: none; transform: none; }
+     how a thumb reads which region it is passing through. It is a clean bar,
+     not a border: a border-left had to follow the card's 12px corner and
+     bowed away from the edge at both ends, the fault the desk chip already
+     dropped it for. So it is straight with square ends, lifted inside the
+     edge and stopped a radius short of each end, and the words' indent is
+     derived from it. */
+  .focus[data-phone] .focus-card { --rule-w: 3px; --rule-in: 4px; --rule-gap: 7px; position: absolute; left: .75rem; right: .75rem; width: auto; margin: 0; overflow: hidden; border-radius: 12px; transition: none; transform: none; }
+  .focus[data-phone] .focus-card::before {
+    content: ""; position: absolute; z-index: 1; pointer-events: none;
+    left: var(--rule-in); top: 12px; bottom: 12px; width: var(--rule-w);
+    background: var(--folder, var(--line));
+  }
+  .focus[data-phone] .focus-card-head,
+  .focus[data-phone] .focus-card-body { padding-left: calc(var(--rule-in) + var(--rule-w) + var(--rule-gap)); }
   /* A sliver still holds its place in the column — the pile is drawn from the
      run it makes — but it is not what you see. Seven hairlines read as ruled
      paper; one deck seen edge-on reads as the rest of the stack. */
@@ -1334,17 +1410,23 @@ __ICON__
   /* The sill is where the keyboard is, not where the screen ends: `--kb` is
      the keyboard's height and the sheet stands on top of it. `pan-y` so a
      tall sheet scrolls under the same finger that could dismiss it. */
-  .sheet { position: fixed; left: 0; right: 0; bottom: var(--kb, 0px); z-index: 41; background: var(--paper); border-radius: var(--pane-r) var(--pane-r) 0 0; box-shadow: var(--shadow-lift); padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px)); max-height: calc(var(--vv-h, 100vh) * .88); overflow-y: auto; overscroll-behavior: contain; transform: translateY(100%); touch-action: pan-y; will-change: transform; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: var(--kb, 0px); z-index: 41; background: var(--paper); border-radius: var(--pane-r) var(--pane-r) 0 0; box-shadow: var(--shadow-lift); padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px)); max-height: calc(var(--vv-h, 100dvh) * .88); overflow-y: auto; overscroll-behavior: contain; transform: translateY(100%); touch-action: pan-y; will-change: transform; }
   .sheet[hidden] { display: none; }
+  /* With the keyboard up the home indicator is under the keys, so the inset
+     that keeps Start off it would only be a gap between Start and the keys. */
+  html[data-marble-keyboard] .sheet { padding-bottom: 1rem; }
   .sheet-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 8px auto 12px; }
-  .sheet-body { display: grid; gap: .5rem; }
+  /* One column that is the sheet's width and no wider. A grid track is as
+     wide as its widest row's longest line by default, so one long title in
+     the Working here list pushed every row, and its age, past the right edge. */
+  .sheet-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: .5rem; }
   .sheet-body h3 { margin: .25rem 0 .5rem; font-size: 1rem; }
   /* A sheet says what it is before it says what it does. */
   .sheet-head { display: grid; gap: .15rem; padding: .1rem .25rem .5rem; }
   .sheet-head .sheet-name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sheet-head .sheet-sub { font-size: .8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Grouped lists: one card, hairlines inset past the label, 48pt rows. */
-  .sheet-group { display: grid; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .sheet-group { display: grid; grid-template-columns: minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .sheet-group + .sheet-group { margin-top: .35rem; }
   .sheet-group .sheet-row { background: none; border: 0; border-radius: 0; padding: 0 1rem; }
   .sheet-group .sheet-row + .sheet-row::before { content: ''; position: absolute; left: 16px; right: 0; top: 0; height: 1px; background: var(--line); }
@@ -1377,6 +1459,8 @@ __ICON__
      is a plain stack, and it goes home the way it came. */
   .sheet .filter-pop { display: flex; position: static; width: auto; inset: auto; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
   .sheet .filter-pop .search { min-height: 2.75rem; font-size: 17px; }
+  /* "All" is one short word, and a thumb is not: every chip is a 44pt box. */
+  .sheet .filter-pop .seg button { min-width: 2.75rem; }
   body[data-sheet] .deck, body[data-sheet] .focus, body[data-sheet] .library { transform: scale(.96); transition: transform 200ms var(--ease-out); transform-origin: 50% 0; }
   /* Translucency is a luxury the reduced-transparency setting declines. */
   @media (prefers-reduced-transparency: reduce) {
@@ -1458,6 +1542,15 @@ __ICON__
   .column .conv {
     border-radius: 10px; background: var(--card); border: 1px solid var(--line);
     padding: .65rem .75rem;
+  }
+  /* A board card is rounded, so the folder's colour cannot be its left
+     border: a coloured side on a radius bends round both corners into a
+     fingernail. It is the straight inset rule the Folders and Library views
+     draw, and the card's edge stays one line all the way round, phone too. */
+  .board .column .conv, body[data-phone] .board .column .conv { border-left: 1px solid var(--line); }
+  .board .column .conv[data-color] {
+    background-image: linear-gradient(color-mix(in srgb, var(--folder) 55%, transparent), color-mix(in srgb, var(--folder) 55%, transparent));
+    background-repeat: no-repeat; background-size: 3px calc(100% - 20px); background-position: .3rem center;
   }
   /* Too thin for three abreast — one column of three stages, scrolling as one. */
   .board[data-stack] { flex-direction: column; overflow-y: auto; overflow-x: hidden; gap: .75rem; }
@@ -1881,7 +1974,7 @@ __ICON__
   }
 
   @media (max-width: 719px) {
-    :root { --vv-h: 100vh; --topbar-h: calc(2.75rem + env(safe-area-inset-top, 0px)); --thumb-h: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
+    :root { --vv-h: 100dvh; --vv-top: 0px; --topbar-h: calc(2.75rem + env(safe-area-inset-top, 0px)); --thumb-h: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
     /* The thumb bar: always at the sill, translucent, content scrolling under. */
     .thumb { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: .5rem; height: var(--thumb-h); padding: 0 .75rem env(safe-area-inset-bottom, 0px) 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-top: 1px solid var(--edge-lit); }
     .thumb::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 12px; background: linear-gradient(transparent, rgba(var(--paper-rgb), .9)); pointer-events: none; }
@@ -1893,6 +1986,14 @@ __ICON__
     /* Every list view can start a conversation. Focus is a stack of chats you
        already have, and an open conversation has its own composer. */
     body[data-open] .thumb, body[data-view="focus"] .thumb { display: none; }
+    /* With the keyboard up the bar steps aside. Whatever raised it (a sheet's
+       field) stands on the keys itself, and on Android, where the layout
+       shrinks instead, the bar would ride up into the sheet's way. */
+    html[data-marble-keyboard] .thumb { display: none; }
+    /* Focus ends where the hand does, which with the keys up is their top
+       edge: the home indicator is under them, so its inset is not room the
+       column has to give up. `phoneRoom()` reads the padding back. */
+    html[data-marble-keyboard] .focus[data-phone] { padding-bottom: 0; }
     @media (prefers-reduced-transparency: reduce) { .thumb { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
     /* Title + the view bar + Filter + New stay on the first wrap. The bar
        scrolls sideways if it cannot fit; the filter panel opens under the
@@ -1901,7 +2002,11 @@ __ICON__
        The five-row header was a third of the screen. */
     html, body { overscroll-behavior: none; }
     body { -webkit-tap-highlight-color: transparent; }
-    .topbar { position: sticky; top: 0; z-index: 30; flex-wrap: nowrap; align-items: center; gap: .5rem; min-height: var(--topbar-h); height: var(--topbar-h); padding: env(safe-area-inset-top, 0px) .5rem 0 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-bottom: 0; }
+    /* `--vv-top` is how far down the layout viewport the visible strip now
+       starts. Sticky pins the topbar to the layout viewport, which with the
+       keyboard up is above the screen — so it rides down by that much and the
+       conversation's own header stays where it can be read. */
+    .topbar { transform: translateY(var(--vv-top, 0px)); position: sticky; top: 0; z-index: 30; flex-wrap: nowrap; align-items: center; gap: .5rem; min-height: var(--topbar-h); height: var(--topbar-h); padding: env(safe-area-inset-top, 0px) .5rem 0 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-bottom: 0; }
     .topbar::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 12px; background: linear-gradient(rgba(var(--paper-rgb), .9), transparent); pointer-events: none; }
     .topbar h1 { order: 0; flex: 1 1 auto; min-width: 0; margin: 0 .35rem 0 0; font-size: 1rem; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
     .topbar .toggles, .topbar .filterbox, .topbar .settings, .topbar .new, .topbar .usage { display: none; }
@@ -1946,7 +2051,7 @@ __ICON__
     .filter-pop { left: .75rem; right: .75rem; width: auto; }
     /* Every height on a phone is measured against the visual viewport: with
        the keyboard up, `vh` is a promise the screen no longer keeps. */
-    .focus-look { max-height: calc(var(--vv-h, 100vh) * .7); }
+    .focus-look { max-height: calc(var(--vv-h, 100dvh) * .7); }
     /* The disclosure arrow is drawn, not typed: a text '▾' carries the font's
        own weight and baseline and matches none of the icons beside it. */
     .band-toggle::after {
@@ -2051,11 +2156,27 @@ __ICON__
     body[data-open] .list { display: none; }
     /* One conversation takes the screen, under the topbar and over everything
        else; it enters from the right and leaves by the same edge. */
-    body[data-open] .pane { display: grid; position: fixed; left: 0; right: 0; top: var(--topbar-h); height: calc(var(--vv-h) - var(--topbar-h)); min-height: 0; z-index: 20; background: var(--paper); will-change: transform; }
+    body[data-open] .pane { display: grid; position: fixed; left: 0; right: 0; top: calc(var(--vv-top, 0px) + var(--topbar-h)); height: calc(var(--vv-h, 100dvh) - var(--topbar-h)); min-height: 0; z-index: 20; background: var(--paper); will-change: transform; }
     body[data-view="deck"][data-open] .deck { display: none; }
     body[data-view="deck"][data-open] .library { display: block; }
     .pane-hint { bottom: 7.5rem; }
 
+    /* ---- Folders on a phone. The rail is the view, edge to edge: the desk
+       keeps a second column for the panes beside it, and here that column
+       was an empty strip down the right of the screen (the track itself is
+       set with the resizable widths, at the foot of the page). Rows take the
+       size the List's rows have, and the last one clears the thumb bar. */
+    body[data-view="folders"] .folder-rail {
+      border-right: 0; padding-bottom: calc(var(--thumb-h) + 1rem); overscroll-behavior: contain;
+    }
+    .folder-header { min-height: 2.75rem; padding: 0 1rem; font-size: 15px; font-weight: 600; }
+    .folder-count { font-size: 13px; }
+    .folder-tab { min-height: 3rem; justify-content: center; padding: .4rem 1rem .4rem 1.75rem; font-size: 15px; color: var(--ink); }
+    .folder-tab .tab-age { font-size: 13px; }
+    .folder-tab .tab-target { font-size: 13px; color: var(--muted); }
+    /* 13px at 600 in the ink of a label, as the Deck's band heads are. */
+    .folder-ungrouped-label { padding: .5rem 1rem .25rem; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); }
+    .folder-new-chat { min-height: 2.75rem; padding: 0 1rem; font-size: 15px; }
     .board { scroll-snap-type: x mandatory; }
     .column { flex: 0 0 min(20rem, 85vw); scroll-snap-align: start; }
     body[data-view="board"][data-panel="open"] {
@@ -2071,16 +2192,16 @@ __ICON__
     }
     body[data-view="board"][data-panel="open"] .pane { height: auto; }
   }
-  /* ---- One dot vocabulary, drawn once. Five states, five looks, and every
+  /* ---- One dot vocabulary, drawn once. Six states, six looks, and every
      surface that shows a conversation's state wears the same one: a List or
      Deck row, a Focus card, an ask card, the topbar's title. The state is on
      the dot itself rather than on whatever encloses it, so the rule does not
      care which of them it is inside; `:is(…)` gives it the one point of
      specificity it needs to sit over the runtime's STATE_CSS, which is
      appended to the head after this sheet.
-       running  accent, breathing      asking  a danger ring
+       running  accent, breathing      asking  a caution ring, the drive's needs-you everywhere
        review   ink, filled            failed  danger, filled
-       idle     a hairline ring — present, asking for nothing. */
+       quiet    an accent ring, still   idle    a hairline ring — present, asking for nothing. */
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state] {
     flex: none; width: 8px; height: 8px; border-radius: 999px; box-sizing: border-box;
     background: var(--faint); border: 0; box-shadow: none; animation: none;
@@ -2092,7 +2213,14 @@ __ICON__
     background: var(--accent); animation: dot-breath 2s ease-in-out infinite;
   }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="asking"] {
-    background: transparent; border: 2px solid var(--danger);
+    background: transparent; border: 2px solid var(--caution);
+  }
+  /* Quiet: in a turn, with no step for a while (runtime/agent-status.js).
+     Working's colour without the breath, and a ring so it reads apart by
+     shape too: the stillness is the signal. Maybe a long command, maybe
+     stuck; either way worth a look. */
+  :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="quiet"] {
+    background: transparent; border: 2px solid var(--accent);
   }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="review"] { background: var(--ink); }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="failed"] { background: var(--danger); }
@@ -2128,6 +2256,24 @@ __ICON__
     .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more,
     .topbar button, .thumb button, .band-toggle, .sheet-row, .deck-ask-head { min-height: 2.75rem; }
     .dock-close { min-width: 2.75rem; height: 100%; }
+    .folder-header, .folder-tab, .folder-new-chat { min-height: 2.75rem; }
+    /* A held finger opens the rail's menu; it must not also raise the
+       selection loupe or the system's own callout over the row. */
+    .folder-header, .folder-tab, .folder-ungrouped-label, .folder-new-chat {
+      -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+    }
+    /* A folder's tick is an 11px swatch and a finger is not: the box a press
+       lands in is 44pt, centred on it, and the swatch stays the size it is. */
+    .folder-tick, .focus-folder { position: relative; }
+    .folder-tick::before, .focus-folder::before { content: ''; position: absolute; inset: calc((2.75rem - 100%) / -2); }
+    /* The menus a held finger opens stay beside it, as on a desk, with rows a
+       thumb can take and a height that never leaves the visible strip. */
+    .rail-menu, .focus-folder-menu {
+      max-height: calc(var(--vv-h, 100dvh) - 16px); overflow-y: auto; overscroll-behavior: contain;
+    }
+    .rail-menu button, .focus-folder-menu button { min-height: 2.75rem; font-size: 15px; }
+    .folder-palette { width: auto; max-width: calc(100vw - 2rem); gap: .25rem; }
+    .folder-palette button { width: 2.75rem; height: 2.75rem; border-radius: 10px; }
     /* Without a pointer there is no hover to answer a finger, so every control
        answers on the way down: rows take the paper wash, things shaped like
        buttons give a little. 100ms, ease-out — under that it reads as a flash. */
@@ -2143,6 +2289,14 @@ __ICON__
       .topbar .phone-back:active, .thumb-new:active, .sheet-start:active,
       .sheet-seg button:active, .conv .manage .more:active, .deck-ask .ask-actions button:active { transform: none; }
     }
+  }
+  /* A field under 16px makes iOS zoom the page when it takes the caret, and
+     it never zooms back. That is true on a tablet's desk layout too, where
+     these keep the page's 14px, so the rule follows the finger, not the width. */
+  @media (pointer: coarse) {
+    /* Last in the sheet, so it outranks each field's own size above. */
+    input.search, .folder-save input,
+    .folder-name[contenteditable="true"], .folder-name[contenteditable="plaintext-only"] { font-size: max(16px, 1em); }
   }
 </style>
 </head>
@@ -2169,7 +2323,7 @@ __ICON__
   <div class="filterbox" data-marble-id="__ID__">
     <button type="button" class="filter-toggle" aria-haspopup="dialog" aria-expanded="false" data-marble-id="__ID__">Filter<span class="filter-count" data-marble-transient></span></button>
     <div class="filter-pop" role="dialog" aria-label="Filter and search conversations" data-marble-id="__ID__">
-      <input class="search" type="search" placeholder="Search conversations" autocomplete="off" aria-label="Search conversations" data-marble-id="__ID__">
+      <input class="search" type="search" placeholder="Search conversations" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Search conversations" data-marble-id="__ID__">
       <div class="filter-row" data-marble-id="__ID__">
         <span class="filter-name" data-marble-id="__ID__">Status</span>
         <div class="seg filters" role="group" aria-label="Status" data-marble-id="__ID__">
@@ -2395,12 +2549,17 @@ __ICON__
       if (summary?.needsReview) return 'review';
       return 'completed';
     };
-    const stateOf = (summary) => window.marbleAgentUI?.stateOf?.(summary) ?? 'idle';
-    /** The dot's own five-word vocabulary, named for what a person would say
+    // The runtime's five states and Quiet: a working chat that has taken no
+    // step for five minutes, read off its summary's last step and turn start
+    // (runtime/agent-status.js). Quiet is drawn here, where many chats are
+    // seen at once; the drawer and the glints keep the five.
+    const statusLib = () => window.marbleAgentStatus;
+    const stateOf = (summary) => statusLib()?.stateOf?.(summary) ?? window.marbleAgentUI?.stateOf?.(summary) ?? 'idle';
+    /** The dot's own six-word vocabulary, named for what a person would say
      *  about the conversation rather than for the runtime's internal state.
      *  Set on the dot itself wherever one is painted (rows, Focus cards, ask
      *  cards, the topbar title), so one rule set draws all of them. */
-    const DOT_STATE = { waiting: 'asking', working: 'running', failed: 'failed', unseen: 'review', idle: 'idle' };
+    const DOT_STATE = { waiting: 'asking', working: 'running', quiet: 'quiet', failed: 'failed', unseen: 'review', idle: 'idle' };
     const paintDot = (dot, summary) => {
       if (dot) dot.dataset.state = DOT_STATE[stateOf(summary)] ?? 'idle';
     };
@@ -2847,6 +3006,9 @@ __ICON__
     let focusPrimaryId = null;
     let focusHoveredId = null;
     let focusLookId = null;
+    // Held: opened with Space and staying until Escape, as against the
+    // transient one a pointer resting on a card brings up.
+    let focusLookHeld = false;
     let focusSuppressClick = false;
     let focusDecayTimer = null;
     let focusLayoutQueued = false;
@@ -2928,6 +3090,9 @@ __ICON__
       const input = document.createElement('input');
       input.type = 'text';
       input.placeholder = suggested;
+      input.enterKeyHint = 'done';
+      input.setAttribute('autocorrect', 'off');
+      input.spellcheck = false;
       input.setAttribute('data-marble-transient', '');
       const confirm = document.createElement('button');
       confirm.type = 'button';
@@ -2954,6 +3119,12 @@ __ICON__
         } catch { /* create failed */ }
       });
       dismiss.addEventListener('click', () => hideFolderSave());
+      // The key that says Done does what the button beside it says.
+      input.addEventListener('keydown', (event) => {
+        if (event.isComposing) return;
+        if (event.key === 'Enter') { event.preventDefault(); confirm.click(); }
+        if (event.key === 'Escape') { event.preventDefault(); hideFolderSave(); }
+      });
       pop.append(input, confirm, dismiss);
       folderRail.append(pop);
       folderSaveEl = pop;
@@ -3132,6 +3303,11 @@ __ICON__
     const bindFolderTabDrag = (tab, dragId) => {
       tab.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
+        // On a phone there is no room of panes to drop a tab into, and a
+        // finger moving down the rail is reading it: the drag would only
+        // fight the scroll. A held finger opens the rail's menu instead,
+        // which files a chat the way the drag would have.
+        if (event.pointerType === 'touch' && narrowView.matches) return;
         closeRailMenu();
         // The drag carries the selection when the tab is in one: picking
         // several chats and dragging them is the other half of the gesture the
@@ -3295,6 +3471,11 @@ __ICON__
       closeFolderPalettes();
       name.setAttribute('contenteditable', 'true');
       name.setAttribute('role', 'textbox');
+      // Enter commits a name, so the key says Done; a name is not prose, so
+      // the phone neither corrects it nor underlines it while it is typed.
+      name.setAttribute('enterkeyhint', 'done');
+      name.setAttribute('autocorrect', 'off');
+      name.setAttribute('spellcheck', 'false');
       name.focus();
       const range = document.createRange();
       range.selectNodeContents(name);
@@ -3309,6 +3490,7 @@ __ICON__
         const next = (name.textContent || '').trim().slice(0, 40);
         name.removeAttribute('contenteditable');
         name.removeAttribute('role');
+        for (const attr of ['enterkeyhint', 'autocorrect', 'spellcheck']) name.removeAttribute(attr);
         if (!commit || !next || next === prev) {
           name.textContent = prev;
           return;
@@ -3628,6 +3810,58 @@ __ICON__
       openRailMenu(event);
     });
 
+    // A held finger is the right-click. iOS never sends `contextmenu` for one,
+    // so on an iPhone the rail's menu (and with it Rename, Colour and New
+    // folder) had no way in; double-click, the desk's way to rename, is not a
+    // gesture a phone keeps either. Android does send it, a beat after this
+    // fires, and that second one is swallowed. The release that ends the hold
+    // is not a tap: the click it makes opens nothing.
+    (() => {
+      const HOLD_MS = 450;
+      let hold = null;
+      // Never, rather than zero: a page younger than a second would read a
+      // hold at time zero as one that just happened and eat the right-click.
+      let heldAt = -Infinity;
+      let swallowClick = false;
+      const cancel = () => {
+        if (hold) clearTimeout(hold.timer);
+        hold = null;
+      };
+      folderRail?.addEventListener('pointerdown', (event) => {
+        swallowClick = false;
+        if (event.pointerType !== 'touch' || !agent) return;
+        if (event.target.closest?.('.folder-name[contenteditable], .folder-palette')) return;
+        cancel();
+        const { target, clientX, clientY } = event;
+        hold = {
+          x: clientX,
+          y: clientY,
+          timer: setTimeout(() => {
+            hold = null;
+            heldAt = performance.now();
+            swallowClick = true;
+            openRailMenu({ target, clientX, clientY });
+          }, HOLD_MS),
+        };
+      });
+      folderRail?.addEventListener('pointermove', (event) => {
+        if (hold && Math.hypot(event.clientX - hold.x, event.clientY - hold.y) > 10) cancel();
+      });
+      folderRail?.addEventListener('pointerup', cancel);
+      folderRail?.addEventListener('pointercancel', cancel);
+      folderRail?.addEventListener('click', (event) => {
+        if (!swallowClick) return;
+        swallowClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }, true);
+      folderRail?.addEventListener('contextmenu', (event) => {
+        if (performance.now() - heldAt > 1000) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }, true);
+    })();
+
     /** Right-click a pane. The chat in it is the subject — that one chat,
      *  never the rail's selection: a menu opened over a pane must not
      *  rearrange the panes behind it before anything has been chosen. */
@@ -3799,7 +4033,7 @@ __ICON__
       const label = document.createElement('div');
       label.className = 'folder-ungrouped-label';
       label.setAttribute('data-marble-transient', '');
-      label.textContent = 'ungrouped';
+      label.textContent = 'Ungrouped';
       const ungroupedTabs = document.createElement('div');
       ungroupedTabs.className = 'folder-tabs';
       ungroupedTabs.setAttribute('data-marble-transient', '');
@@ -3873,10 +4107,24 @@ __ICON__
 
     const effectiveFocusMode = () => (focusMode === 'active' ? 'active' : focusModeFolder() ? 'group' : 'pinned');
 
+    // Every lens keeps its own arrangement of the stage. The stage is the
+    // person's to lay out, so a lens that takes it over has to hand back what
+    // it took: without this, a moment in Active and home again found the
+    // pinned tree gone — every leaf taken out as its chat left the stage, and
+    // a default grid built in its place. Keyed by the lens, holding the
+    // id-named form a filed tree takes, and this page's, like the dock.
+    const focusStages = new Map();
+    const focusStageKey = () => {
+      if (focusMode === 'active') return 'active';
+      const folder = focusModeFolder();
+      return folder ? `group:${folder.id}` : 'pinned';
+    };
+
     const setFocusMode = (next, { quiet = false } = {}) => {
       const value = next === 'active' || (typeof next === 'string' && next.startsWith('group:')) ? next : 'pinned';
       closeFocusModesMenu();
       if (value === focusMode) return;
+      stashFocusStage();
       focusMode = value;
       remember(FOCUS_MODE_KEY, value === 'pinned' ? null : value);
       if (!quiet) paintFocus();
@@ -4112,9 +4360,8 @@ __ICON__
     const leaveFocusView = () => {
       endFocusDrag();
       clearFocusPane();
-      document.querySelector('.focus-look')?.remove();
+      closeFocusLook();
       closeFolderPalettes();
-      focusLookId = null;
       stopFocusDecay();
     };
 
@@ -4199,12 +4446,13 @@ __ICON__
       else convo.removeAttribute('conversation');
       normalizeExtras();
       const keys = [PRIMARY, ...dock.extras.map((extra) => extra.key)];
-      // A stage arranged before a reload comes back if it names these very pins.
-      if (dock.saved?.tree && dock.extras.length) {
+      // A stage arranged before a reload, or before a lens took it over, comes
+      // back if it names these very pins. The tree filed at unload is tried
+      // first: it is the one this very stage was showing.
+      if (dock.extras.length) {
         const keyOfId = new Map([[primary, PRIMARY], ...dock.extras.map((extra) => [extra.id, extra.key])]);
-        const tree = savedToTree(dock.saved.tree, keyOfId);
-        const have2 = tree ? treeLeaves(tree) : [];
-        if (tree && have2.length === keys.length && keys.every((key) => have2.includes(key))) dock.tree = tree;
+        const tree = restoreStageTree(keys, keyOfId, dock.saved?.tree, focusStages.get(focusStageKey()));
+        if (tree) dock.tree = tree;
       }
       dock.saved = null;
       dock.tree = dock.extras.length ? reconcileTree(dock.tree, keys) : null;
@@ -4555,52 +4803,257 @@ __ICON__
       paintFocus({ quiet: true });
     };
 
-    const closeFocusLook = () => {
-      document.querySelector('.focus-look')?.remove();
-      focusLookId = null;
+    // ---- The peek. What a chat was about, beside the card the pointer is on.
+    //
+    // A card carries a title a namer wrote, a path and one line of activity.
+    // That is enough to find a chat and not enough to remember it: the two
+    // things that tell one from another are the last thing you asked and the
+    // last thing that came back, and neither fits in a digest's four lines.
+    //
+    // One object, two registers. Hovered, it is transient — no pointer
+    // events, no scrolling, and it leaves with the pointer. Held, by Space,
+    // it stays until Escape and can be read properly. Neither is a review:
+    // seeing a pane clears Needs review, resting a pointer on a card does
+    // not, because deciding whether to open it is the whole point.
+
+    const PEEK_DELAY = 420;
+    const PEEK_GRACE = 120;
+    const hoverPointer = matchMedia('(hover: hover)');
+    /** One digest per chat, kept until that chat next changes. The route
+     *  answers with the whole event log — hundreds of kilobytes on a long
+     *  chat — which is far too much to ask for on every pass of a pointer and
+     *  exactly right to ask for once. */
+    const peekCache = new Map();
+    let peekTimer = 0;
+    let peekLeaveTimer = 0;
+
+    const peekKeyOf = (summary) => [summary?.updatedAt ?? 0, summary?.activity ?? '', summary?.running ? 1 : 0].join('|');
+
+    const loadPeek = async (id) => {
+      const key = peekKeyOf(summaries.get(id));
+      const hit = peekCache.get(id);
+      if (hit && hit.key === key) return hit.peek;
+      let detail = null;
+      try { detail = await agent.conversation(id, { turns: 3 }); } catch { return hit?.peek ?? null; }
+      const peek = window.marbleAgentFolders?.peekOf?.(detail) ?? null;
+      // A hover sweep across a full canvas would otherwise keep every chat it
+      // crossed alive for the life of the page.
+      if (peekCache.size > 24) peekCache.delete(peekCache.keys().next().value);
+      peekCache.delete(id);
+      peekCache.set(id, { key, peek });
+      return peek;
     };
 
-    const openFocusLook = async (id) => {
+    /** One line for a tool call, in the drawer's own words. */
+    const peekToolLine = (call) => {
+      const ui = window.marbleAgentUI;
+      const label = ui?.toolLabel?.(call?.name, call?.input ?? {})?.label;
+      if (label) return label;
+      const short = ui?.toolShortName?.(call?.name) ?? call?.name ?? 'Tool';
+      const arg = Object.values(call?.input ?? {}).find((v) => typeof v === 'string' && v.trim()) ?? '';
+      return arg ? `${short} ${arg.replace(/\s+/g, ' ').trim().slice(0, 60)}` : short;
+    };
+
+    const lookPart = (label, body) => {
+      const part = document.createElement('section');
+      part.className = 'look-part';
+      const head = document.createElement('p');
+      head.className = 'look-label';
+      head.textContent = label;
+      part.append(head, body);
+      return part;
+    };
+
+    const lookProse = (text, part) => {
+      const p = document.createElement('p');
+      p.className = 'look-body';
+      p.dataset.part = part;
+      p.textContent = text;
+      return p;
+    };
+
+    const lookCalls = (calls) => {
+      const list = document.createElement('ul');
+      list.className = 'look-doing';
+      for (const call of calls) {
+        const li = document.createElement('li');
+        li.textContent = peekToolLine(call);
+        list.append(li);
+      }
+      return list;
+    };
+
+    /** Where it works, on what, and how far in. */
+    const fillLookMeta = (meta, summary, peek) => {
+      const turns = peek?.turns ?? 0;
+      meta.textContent = [
+        summary.target || targets.get(summary.id) || '',
+        turns ? `${turns} turn${turns === 1 ? '' : 's'}` : '',
+      ].filter(Boolean).join(' · ');
+    };
+
+    const fillLookBody = (look, summary, peek) => {
+      for (const el of look.querySelectorAll('.look-part, .look-touched')) el.remove();
+      if (!peek) return;
+      if (peek.asked) look.append(lookPart('You asked', lookProse(peek.asked, 'asked')));
+      // What it is doing beats what it last said while it is still going; the
+      // other way round once it has stopped.
+      const running = statusOf(summary) === 'running';
+      if (running && peek.doing.length) look.append(lookPart(summary.asking ? 'Waiting on you' : 'Now', lookCalls(peek.doing)));
+      else if (peek.said) look.append(lookPart('It said', lookProse(peek.said, 'said')));
+      else if (peek.doing.length) look.append(lookPart('Last', lookCalls(peek.doing)));
+      if (peek.touched.length) {
+        const row = document.createElement('p');
+        row.className = 'look-touched';
+        for (const path of peek.touched) {
+          const tag = document.createElement('span');
+          tag.className = 'tag';
+          tag.dataset.kind = 'path';
+          tag.dataset.hue = '5';
+          tag.textContent = tailOfTarget(path);
+          tag.title = path;
+          row.append(tag);
+        }
+        look.append(row);
+      }
+    };
+
+    const focusLookEl = () => document.querySelector('.focus-look');
+
+    const closeFocusLook = () => {
+      clearTimeout(peekTimer);
+      peekTimer = 0;
+      clearTimeout(peekLeaveTimer);
+      peekLeaveTimer = 0;
+      focusLookEl()?.remove();
+      focusLookId = null;
+      focusLookHeld = false;
+    };
+
+    /** Beside the card, on whichever side has the room; under it, or over it,
+     *  when a wide card has left no side at all. Never across the card it
+     *  points at, and never past the edge of the window — a peek that grew
+     *  off the screen is a peek with its answer cut off. Measured after the
+     *  body lands, because until then it has no height worth clamping to. */
+    const placeFocusLook = (look, id) => {
+      const card = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
+      const box = card?.getBoundingClientRect();
+      const size = look.getBoundingClientRect();
+      const w = size.width || Math.min(26 * 16, window.innerWidth - 32);
+      const h = size.height || 160;
+      const GAP = 12;
+      const EDGE = 16;
+      const clamp = (v, max) => Math.min(Math.max(EDGE, v), Math.max(EDGE, max));
+      if (!box) {
+        look.style.left = `${Math.max(EDGE, (window.innerWidth - w) / 2)}px`;
+        look.style.top = `${window.innerHeight * 0.12}px`;
+        return;
+      }
+      let left;
+      let top = clamp(box.top, window.innerHeight - h - EDGE);
+      if (box.right + GAP + w <= window.innerWidth - EDGE) left = box.right + GAP;
+      else if (box.left - GAP - w >= EDGE) left = box.left - GAP - w;
+      else {
+        // No side: under the card, else over it, aligned to its left edge.
+        left = clamp(box.left, window.innerWidth - w - EDGE);
+        top = box.bottom + GAP + h <= window.innerHeight - EDGE
+          ? box.bottom + GAP
+          : clamp(box.top - GAP - h, window.innerHeight - h - EDGE);
+      }
+      look.style.left = `${left}px`;
+      look.style.top = `${top}px`;
+    };
+
+    const openFocusLook = async (id, { held = false, moved = false } = {}) => {
       if (!id || !agent) return;
+      const replacing = Boolean(focusLookEl());
       closeFocusLook();
-      let detail = null;
-      try { detail = await agent.conversation(id); } catch { /* preview still shows summary */ }
-      const summary = detail?.meta ?? summaries.get(id) ?? {};
+      const summary = summaries.get(id) ?? {};
       const look = document.createElement('div');
       look.className = 'focus-look';
+      look.dataset.id = id;
+      look.dataset.state = stateOf(summary);
+      if (held) look.setAttribute('data-held', '');
+      if (moved || replacing) look.setAttribute('data-moved', '');
       look.setAttribute('data-marble-transient', '');
       look.setAttribute('role', 'dialog');
       look.setAttribute('aria-label', 'Quick Look');
+
+      const head = document.createElement('header');
+      head.className = 'look-head';
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.setAttribute('aria-hidden', 'true');
       const title = document.createElement('h3');
       title.textContent = summary.title || 'New Chat';
+      const when = document.createElement('span');
+      when.className = 'age';
+      when.textContent = age(summary.updatedAt);
+      head.append(dot, title, when);
       const meta = document.createElement('p');
       meta.className = 'look-meta';
-      meta.textContent = [summary.target || targets.get(id) || '', statusOf(summary), summary.activity || ''].filter(Boolean).join(' · ');
-      const list = document.createElement('ul');
-      list.className = 'look-events';
-      const events = (detail?.events ?? []).slice(-8);
-      for (const row of events) {
-        const li = document.createElement('li');
-        li.textContent = row.type || row.text || '';
-        list.append(li);
-      }
-      look.append(title, meta, list);
+      fillLookMeta(meta, summary, null);
+      look.append(head, meta);
+
+      // The head is drawn from what the page already knows, so the peek is
+      // there the instant the wait is over; the body lands when the chat's
+      // own record does.
       document.body.append(look);
-      const card = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
-      const box = card?.getBoundingClientRect();
-      const width = Math.min(28 * 16, window.innerWidth - 32);
-      let left;
-      if (box) {
-        left = box.right + 12;
-        if (left + width > window.innerWidth - 16) left = box.left - width - 12;
-        left = Math.min(Math.max(16, left), window.innerWidth - width - 16);
-      } else {
-        left = Math.max(16, (window.innerWidth - width) / 2);
-      }
-      const top = box ? Math.min(Math.max(16, box.top), window.innerHeight - 120) : window.innerHeight * 0.12;
-      look.style.left = `${left}px`;
-      look.style.top = `${top}px`;
       focusLookId = id;
+      focusLookHeld = held;
+      placeFocusLook(look, id);
+
+      const peek = await loadPeek(id);
+      if (focusLookId !== id || !look.isConnected) return;
+      fillLookMeta(meta, summary, peek);
+      fillLookBody(look, summary, peek);
+      placeFocusLook(look, id);
+    };
+
+    /** Only where a peek is the right answer: a card that is not already a
+     *  pane, on a canvas nobody is dragging, under a pointer that hovers. */
+    const peekable = (id) => {
+      if (!id || !agent || narrowView.matches || !hoverPointer.matches) return false;
+      if ((document.body.getAttribute('data-view') || 'library') !== 'focus') return false;
+      if (focusDrag || focusSuppressClick) return false;
+      const card = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
+      // A Full card has its pane on top of it: the conversation is open
+      // already, and a picture of it beside itself says nothing.
+      return Boolean(card) && card.dataset.lod !== 'full' && !card.hasAttribute('data-seated');
+    };
+
+    const armPeek = (id) => {
+      // A held peek belongs to the keyboard; the pointer does not take it.
+      if (focusLookHeld) return;
+      clearTimeout(peekTimer);
+      peekTimer = 0;
+      // Not peekable: any close already pending stands, so moving from a card
+      // onto its pane puts the peek away rather than freezing it there.
+      if (!peekable(id)) return;
+      clearTimeout(peekLeaveTimer);
+      peekLeaveTimer = 0;
+      if (focusLookId === id) return;
+      const open = () => {
+        peekTimer = 0;
+        if (focusHoveredId === id && peekable(id)) openFocusLook(id, { moved: Boolean(focusLookId) });
+      };
+      // The wait is for the first one. Once a peek is up, the next card's is
+      // the answer to a pointer that is already asking.
+      if (focusLookId) open();
+      else peekTimer = setTimeout(open, PEEK_DELAY);
+    };
+
+    const disarmPeek = () => {
+      clearTimeout(peekTimer);
+      peekTimer = 0;
+      if (focusLookHeld) return;
+      clearTimeout(peekLeaveTimer);
+      // A grace, so crossing the gap between two cards does not flicker.
+      peekLeaveTimer = setTimeout(() => {
+        peekLeaveTimer = 0;
+        if (focusHoveredId) return;
+        closeFocusLook();
+      }, PEEK_GRACE);
     };
 
     /** A basin is the region the packer allocated, not the bounding box of
@@ -5603,7 +6056,7 @@ __ICON__
         const next = window.marbleAgentFolders?.nearestCard?.(cards, fromId, arrows[event.key]);
         if (next) {
           selectFocusCard(next.id, event);
-          if (focusLookId) openFocusLook(next.id);
+          if (focusLookId) openFocusLook(next.id, { held: focusLookHeld, moved: true });
         }
         return true;
       }
@@ -5614,7 +6067,7 @@ __ICON__
         const row = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
         if (row?.dataset.lod === 'full' && !focusLookId) return true;
         if (focusLookId === id) closeFocusLook();
-        else openFocusLook(id);
+        else openFocusLook(id, { held: true });
         return true;
       }
       if (event.key === 'Enter') {
@@ -5829,6 +6282,7 @@ __ICON__
 
         const begin = () => {
           focusSuppressClick = true;
+          closeFocusLook();
           const ids = focusSelectedIds.includes(id) && focusSelectedIds.length > 1
             ? [id, ...focusSelectedIds.filter((row) => row !== id)]
             : [id];
@@ -5928,14 +6382,17 @@ __ICON__
         event.preventDefault();
         pinFocus(card.dataset.id, { keepOpen: event.shiftKey });
       });
-      // Hover is remembered for Quick Look, and nothing else: a card that
-      // grew under the pointer pushed its column and the pointer off itself.
-      card.addEventListener('pointerenter', () => {
+      // Hover is remembered, and the card itself never answers it: a card
+      // that grew under the pointer pushed its column and the pointer off
+      // itself. What it opens instead is the peek, beside the card.
+      card.addEventListener('pointerenter', (event) => {
         if (focusSuppressClick) return;
         focusHoveredId = card.dataset.id;
+        if (event.pointerType !== 'touch') armPeek(card.dataset.id);
       });
       card.addEventListener('pointerleave', () => {
         if (focusHoveredId === card.dataset.id) focusHoveredId = null;
+        disarmPeek();
       });
       card.querySelector('.focus-pin')?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -6386,7 +6843,9 @@ __ICON__
      *  be told. The target is the fallback rather than a line of its own: on
      *  a running row "reading Hollan 1985" is the news and the path is not. */
     const secondLine = (summary) => {
-      if (summary.asking) return { text: 'Needs you', tone: 'asking' };
+      // Waiting on you, the line is what it waits for: its question, or that
+      // it needs your OK, as its card says.
+      if (summary.asking) return { text: summary.activity || 'Needs you', tone: 'asking' };
       if (summary.running || summary.queued || summary.status === 'running') {
         return { text: summary.activity || 'Working', tone: 'running' };
       }
@@ -6948,6 +7407,19 @@ __ICON__
       return splitNode(saved.dir, kids, sizes && sizes.every((size) => size > 0) ? sizes : null);
     };
 
+    /** The first of `candidates` — id-named trees, most wanted first — that
+     *  names exactly `keys`. A layout that no longer matches its panes is
+     *  discarded, not repaired. */
+    const restoreStageTree = (keys, keyOfId, ...candidates) => {
+      for (const saved of candidates) {
+        if (!saved) continue;
+        const tree = savedToTree(saved, keyOfId);
+        const have = tree ? treeLeaves(tree) : [];
+        if (tree && have.length === keys.length && keys.every((key) => have.includes(key))) return tree;
+      }
+      return null;
+    };
+
     // An empty pane is not remembered: a tree naming a leaf that will not
     // come back is no tree at all, so it is dropped with the pane.
     const savedDock = (record) => {
@@ -6960,7 +7432,16 @@ __ICON__
         file: record === dock ? convo.getAttribute('conversation') : (record.file ?? null),
       };
     };
+    /** File the stage's arrangement under the lens showing it. This runs
+     *  wherever the dock is filed, so what a lens hands back is the last tree
+     *  it had rather than the one it had the first time it was left. */
+    const stashFocusStage = () => {
+      const tree = docks.focus.extras.length && docks.focus.tree ? savedDock(docks.focus).tree : null;
+      focusStages.set(focusStageKey(), tree);
+    };
+
     const rememberDock = () => {
+      stashFocusStage();
       remember(DOCK_KEY, JSON.stringify({ v: 3, page: savedDock(docks.page), focus: savedDock(docks.focus) }));
     };
 
@@ -7476,11 +7957,16 @@ __ICON__
         if (room && room.key === key) {
           intentKey = key;
           clearTimeout(intentTimer);
+          intentTimer = 0;
           openRoom(plan, id);
-        } else if (intentKey !== key) {
+        } else if (intentKey !== key || !intentTimer) {
+          // A new edge — or the same edge with no room and nothing on its way
+          // to one, which is a room that was let go under the hand. Intent
+          // once spent used to stay spent, so a lost room never came back
+          // until the pointer left the edge and returned to it.
           intentKey = key;
           clearTimeout(intentTimer);
-          intentTimer = setTimeout(() => { if (roomLive && intentKey === key) openRoom(plan, id); }, room ? 70 : 130);
+          intentTimer = setTimeout(() => { intentTimer = 0; if (roomLive && intentKey === key) openRoom(plan, id); }, room ? 70 : 130);
         }
       } else if (mode === 'swap') {
         intentKey = null;
@@ -7492,10 +7978,11 @@ __ICON__
         if (swapPreview && swapPreview.source === res.source && swapPreview.target === plan.target) {
           swapIntentKey = key;
           clearTimeout(swapIntentTimer);
-        } else if (swapIntentKey !== key) {
+          swapIntentTimer = 0;
+        } else if (swapIntentKey !== key || !swapIntentTimer) {
           swapIntentKey = key;
           clearTimeout(swapIntentTimer);
-          swapIntentTimer = setTimeout(() => { if (roomLive && swapIntentKey === key) showSwap(res.source, plan.target); }, swapPreview ? 70 : 120);
+          swapIntentTimer = setTimeout(() => { swapIntentTimer = 0; if (roomLive && swapIntentKey === key) showSwap(res.source, plan.target); }, swapPreview ? 70 : 120);
         }
       } else {
         intentKey = null;
@@ -7663,7 +8150,7 @@ __ICON__
       paintBars();
       if (!id || !agent) return;
       try {
-        const detail = await agent.conversation(id);
+        const detail = await agent.conversation(id, { turns: 1 });
         const target = lastTarget(detail) ?? detail.meta?.target;
         if (target) targets.set(id, target);
       } catch { /* header still has the title */ }
@@ -7878,29 +8365,85 @@ __ICON__
       setTimeout(drop, 700);
     };
 
+    /** The tree a card in the air is showing, rebuilt on whatever the
+     *  committed tree has just become. applyDock runs on every paint — an
+     *  agent's event, a patch, a resize — and it used to take the room each
+     *  time, so the first thing the page heard after a room opened dropped
+     *  the ghost and eased the space closed under a hand still holding it.
+     *  A preview is not a drop: it is rebased, not taken. A pin that came or
+     *  went under the drag moves the panes, and the room, or the swap, moves
+     *  with them. Null when nothing is in the air, or when the edge the room
+     *  was opening no longer exists — then it lets go. */
+    const previewTree = () => {
+      const base = treeOf();
+      const have = new Set(treeLeaves(base));
+      if (room && !room.closing && !room.held) {
+        const { plan } = room;
+        if (plan.root || have.has(plan.target)) {
+          room.tree = plan.root
+            ? insertAtRoot(cloneTree(base), plan.side, room.ghostKey)
+            : insertBeside(cloneTree(base), plan.target, plan.side, room.ghostKey);
+          return room.tree;
+        }
+        dropPreview();
+        return null;
+      }
+      if (swapPreview) {
+        if (have.has(swapPreview.source) && have.has(swapPreview.target)) {
+          swapPreview.tree = swapTreeOf(swapPreview.source, swapPreview.target);
+          return swapPreview.tree;
+        }
+        dropPreview();
+      }
+      return null;
+    };
+
+    /** Let a preview go without animating anything: the caller is about to
+     *  lay the committed tree out. The intent goes with it, so the next move
+     *  over the same edge can ask again. */
+    const dropPreview = () => {
+      takeRoom()?.ghost.remove();
+      intentKey = null;
+      clearTimeout(intentTimer);
+      intentTimer = 0;
+      swapPreview = null;
+      swapIntentKey = null;
+      clearTimeout(swapIntentTimer);
+      swapIntentTimer = 0;
+    };
+
     const applyDock = () => {
       ensurePrimaryBar();
       clearTimeout(collapseTimer);
-      const handOver = takeRoom();
+      // A drop (`held`) hands its slot over to the chat that takes it; a
+      // preview stays with the hand.
+      const handOver = room && !room.closing && !room.held ? null : takeRoom();
       const view = document.body.getAttribute('data-view') || 'library';
       const animated = !reduceMotion.matches && !narrowView.matches;
       if (view === 'focus' && pane.style.display === 'none') {
         // Nothing pinned: the pane is off the canvas, and there is nothing to lay out.
         handOver?.ghost.remove();
+        dropPreview();
         leaveTreeMode();
         paintBars();
         return;
       }
       normalizeExtras();
       dock.tree = reconcileTree(dock.tree, [PRIMARY, ...dock.extras.map((extra) => extra.key)]);
+      const shown = previewTree();
       if (!dock.tree) {
         // Down to one pane: fold the others away, then hand the layout back to
         // the grid, which puts the primary chat exactly where the stage had it.
         if (pane.getAttribute('data-dock') === 'tree') {
           syncLeaves(animated, handOver);
-          layoutDock(leafNode(PRIMARY));
-          if (animated) collapseTimer = setTimeout(() => { if (!dock.extras.length) leaveTreeMode(); }, ROOM_MS + 60);
-          else leaveTreeMode();
+          if (shown) {
+            // One pane and a room beside it: the stage stays up for the ghost.
+            layoutDock(shown);
+          } else {
+            layoutDock(leafNode(PRIMARY));
+            if (animated) collapseTimer = setTimeout(() => { if (!dock.extras.length) leaveTreeMode(); }, ROOM_MS + 60);
+            else leaveTreeMode();
+          }
         } else {
           handOver?.ghost.remove();
         }
@@ -7910,7 +8453,7 @@ __ICON__
       const fresh = pane.getAttribute('data-dock') !== 'tree';
       if (fresh) enterTreeMode();
       syncLeaves(animated, handOver);
-      layoutDock(dock.tree);
+      layoutDock(shown ?? dock.tree);
       paintBars();
     };
 
@@ -8191,7 +8734,7 @@ __ICON__
       el.querySelector('.manage').append(menu);
       more?.setAttribute('aria-expanded', 'true');
       let detail = null;
-      try { if (agent) detail = await agent.conversation(id); } catch { /* archive still works */ }
+      try { if (agent) detail = await agent.conversation(id, { turns: 0 }); } catch { /* archive still works */ }
       if (!menu.isConnected) return;
       const turn = undoable(detail?.turns);
       if (turn) add('Undo last turn', 'undo', async () => { await agent.undo(turn.id); if (openId === id) fillChrome(id); });
@@ -8262,7 +8805,7 @@ __ICON__
           el.style.removeProperty('--swipe-x');
           const job = (async () => {
             try {
-              const { turns } = await agent.conversation(el.dataset.id);
+              const { turns } = await agent.conversation(el.dataset.id, { turns: 0 });
               const last = undoable(turns);
               if (last) await agent.undo(last.id);
             } catch (err) { showEmpty(err.message); }
@@ -8308,12 +8851,65 @@ __ICON__
       }
       paintFolderRail();
       paintFocus();
+      paintGlance();
     };
 
     /** A chat that is gone from the drive rather than filed away: its row,
      *  its card, its pane and everything this page remembers of it go too.
      *  Archiving hides a chat and keeps it; this is for the one case where
      *  there was never anything to keep. */
+    // ---- Glance: the one fact that wants you most, on the bar. A question
+    // waiting, then work going on, then results to read; the words are the
+    // runtime's, so the Drive and the phone will say it the same way.
+    // Made here rather than written in the file: everything it says is the
+    // summaries', so none of it is the page's to keep. After Filter, so it
+    // sits in the bar's open middle, before the meters.
+    const glanceEl = document.createElement('button');
+    glanceEl.type = 'button';
+    glanceEl.className = 'glance';
+    glanceEl.setAttribute('data-marble-transient', '');
+    glanceEl.disabled = true;
+    glanceEl.innerHTML = '<span class="dot" data-state="idle" aria-hidden="true"></span><span class="glance-lead">Nothing working</span><span class="glance-sub"></span>';
+    if (filterBox) filterBox.after(glanceEl);
+    else $('.topbar')?.append(glanceEl);
+    const paintGlance = () => {
+      const lib = statusLib();
+      if (!glanceEl.isConnected || !lib?.glance) return;
+      const { lead } = lib.glance(summaries.values());
+      const said = lead.count ? `${lead.count} ${lead.words}` : lead.words;
+      glanceEl.dataset.lead = lead.state;
+      glanceEl.dataset.chat = lead.chat ?? '';
+      glanceEl.disabled = !lead.chat;
+      glanceEl.querySelector('.dot').dataset.state = DOT_STATE[lead.state] ?? 'idle';
+      glanceEl.querySelector('.glance-lead').textContent = said;
+      glanceEl.querySelector('.glance-sub').textContent = lead.chat ? lead.sub : '';
+      // The chat's line goes below desk width; the tip keeps it, and says
+      // what a press does.
+      glanceEl.title = lead.chat ? `${lead.sub} · press to open it` : '';
+      glanceEl.setAttribute('aria-label', lead.chat ? `${said}. ${lead.sub}. Open it` : said);
+    };
+    glanceEl.addEventListener('click', () => {
+      const id = glanceEl.dataset.chat;
+      if (!id) return;
+      const view = document.body.getAttribute('data-view') || 'library';
+      if (view === 'board') openBoardPanel();
+      // Deck has no pane of its own at desk width; List shows the thread.
+      if (view === 'deck' && !narrowView.matches) setView('library');
+      open(id);
+    });
+    // A chat goes quiet with nothing arriving to say so: every half minute
+    // the working ones are asked again, and any whose state moved is
+    // repainted everywhere it shows.
+    const sweepQuiet = () => {
+      for (const summary of summaries.values()) {
+        if (!summary.running) continue;
+        const el = nodes.get(summary.id);
+        if (el && el.dataset.state !== stateOf(summary)) upsert(summary);
+      }
+      paintGlance();
+    };
+    paintGlance();
+
     const forget = (id) => {
       if (!id) return;
       const slot = slotOf(id);
@@ -8331,6 +8927,7 @@ __ICON__
       }
       paintFolderRail();
       paintFocus();
+      paintGlance();
     };
 
     const undoable = (turns) => {
@@ -8352,7 +8949,7 @@ __ICON__
         if (existing != null) {
           focusSlot(existing, id);
           if (!summaries.has(id) && agent) {
-            try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
+            try { upsert((await agent.conversation(id, { turns: 0 })).meta); } catch { /* opened from a stale id */ }
           }
           markSeen(id);
           await fillChrome(id);
@@ -8390,7 +8987,7 @@ __ICON__
         dock.focus = 'primary';
       }
       if (id && !summaries.has(id) && agent) {
-        try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
+        try { upsert((await agent.conversation(id, { turns: 0 })).meta); } catch { /* opened from a stale id */ }
       }
       markSeen(id);
       paintOpen();
@@ -9013,7 +9610,7 @@ __ICON__
     };
 
     const runningTurnOf = async (id) => {
-      const { turns } = await agent.conversation(id);
+      const { turns } = await agent.conversation(id, { turns: 0 });
       return turns.find((t) => t.status === 'running' || t.status === 'queued') ?? null;
     };
 
@@ -9118,6 +9715,10 @@ __ICON__
         const prompt = document.createElement('textarea');
         prompt.className = 'sheet-prompt';
         prompt.placeholder = 'What should it do?';
+        // A request is sentences, and Return is a new line in one: Start is
+        // the button under the field, a thumb's width from it.
+        prompt.setAttribute('autocapitalize', 'sentences');
+        prompt.enterKeyHint = 'enter';
         prompt.value = text;
         const start = document.createElement('button');
         start.type = 'button';
@@ -9228,14 +9829,37 @@ __ICON__
 
     // ---- Phone chrome. The keyboard is just less room: the visual viewport
     // writes one variable and every phone layout reads it.
-    const syncViewport = () => {
+    //
+    // The keyboard does not only take room, it moves the room: to keep the
+    // caret clear the browser slides the visual viewport down the layout
+    // viewport, and everything the page fixed to the layout viewport is then
+    // that much too high. `--vv-top` is where the visible strip starts and
+    // `--kb` is where it ends; between them they place every fixed surface on
+    // the screen the person is actually looking at.
+    //
+    // runtime/phone.js now measures that strip for every page and publishes
+    // it in a style of its own. This page takes its numbers from the same
+    // measurement rather than a second one, so the two can never disagree,
+    // and still mirrors them inline on <html> for one reader: the Focus
+    // fisheye asks for `--kb` inside a drag frame, and an inline property
+    // reads back without a style recalc. What phone.js cannot know is the
+    // part this page adds: Focus re-lays its column for the room it has now.
+    const measureViewport = () => {
+      const phone = window.marblePhone?.state?.();
+      if (phone) return phone;
       const vv = window.visualViewport;
-      const h = vv?.height ?? window.innerHeight;
-      document.documentElement.style.setProperty('--vv-h', `${Math.round(h)}px`);
-      // The keyboard is the strip of the layout viewport the visual viewport
-      // no longer covers. Anything standing on the sill stands on `--kb`.
-      const kb = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
-      document.documentElement.style.setProperty('--kb', `${kb}px`);
+      return {
+        h: Math.round(vv?.height ?? window.innerHeight),
+        top: vv ? Math.max(0, Math.round(vv.offsetTop)) : 0,
+        kb: vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0,
+      };
+    };
+    const syncViewport = () => {
+      const { h, top, kb } = measureViewport();
+      const root = document.documentElement;
+      root.style.setProperty('--vv-h', `${h}px`);
+      root.style.setProperty('--vv-top', `${top}px`);
+      root.style.setProperty('--kb', `${kb}px`);
       if (narrowView.matches && (document.body.getAttribute('data-view') || 'library') === 'focus') paintFocus({ quiet: true });
     };
     syncViewport();
@@ -9355,7 +9979,11 @@ __ICON__
         if (summary) el.querySelector('.age').textContent = age(summary.updatedAt);
       }
     };
-    setInterval(() => { if (document.visibilityState === 'visible') paintAges(); }, 30_000);
+    setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      paintAges();
+      sweepQuiet();
+    }, 30_000);
 
     // ---- Back by the edge. 1:1 from the left edge; commit by the sign of
     // the velocity at release, and the pane leaves the way it came.
@@ -9791,6 +10419,18 @@ __ICON__
       startNew({ folderId });
     });
 
+    // A peek is tied to the card it points at, so anything that moves the
+    // canvas under it takes it away: scrolling, and a press anywhere but
+    // inside a held one.
+    focusEl?.addEventListener('scroll', () => {
+      if (focusLookId) closeFocusLook();
+    }, { passive: true });
+    document.addEventListener('pointerdown', (event) => {
+      if (!focusLookId) return;
+      if (event.target?.closest?.('.focus-look')) return;
+      closeFocusLook();
+    }, true);
+
     (() => {
       let grab = null;
       let history = [];
@@ -10097,7 +10737,7 @@ __ICON__
         // splits a seat for it instead of the open swapping out a pin.
         if ((document.body.getAttribute('data-view') || 'library') === 'focus') {
           if (!summaries.has(id)) {
-            try { upsert((await agent.conversation(id)).meta); } catch { /* the stream will bring it */ }
+            try { upsert((await agent.conversation(id, { turns: 0 })).meta); } catch { /* the stream will bring it */ }
           }
           await pinFocus(id, { keepOpen: true });
         }
@@ -10122,6 +10762,14 @@ __ICON__
       query = search.value.trim().toLowerCase();
       applyFilters();
     });
+    // The list filters as you type, so the keyboard's Search key has nothing
+    // left to run. On a phone it is how you put the keys away to read what
+    // is left; at a desk there are no keys to put away, and Enter stays inert.
+    search.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.isComposing || !matchMedia('(pointer: coarse)').matches) return;
+      event.preventDefault();
+      search.blur();
+    });
     // Focus the search only where there is a keyboard to type on; on a phone
     // it would throw the keyboard up over the list the person came to filter.
     filterToggle.addEventListener('click', () => setFilterOpen(!filterOpen, { focus: matchMedia('(hover: hover)').matches }));
@@ -10135,13 +10783,43 @@ __ICON__
       remember(IDLE_KEY, 'all');
       await setFilter('all');
     });
+    // A press outside the panel dismisses it — unless it is the same hand
+    // still working a control inside it. The idle track ends a dozen pixels
+    // from the panel's edge and both its answers live at the ends, so a drag
+    // to All chats or to 5 min overshoots into the page; letting go out there
+    // and pressing again to carry on read as "dismiss", and the panel went out
+    // from under a slider that was still being dragged. A press that lands
+    // where an inside drag has just let go, a moment after it, is that drag
+    // carrying on — the pointer never went anywhere else.
+    const CARRY_ON_MS = 400;
+    const CARRY_ON_PX = 40;
+    let handOnPanel = null;   // the pointer of a press that began inside
+    let handLeftOff = null;   // where and when such a press last ended
+    const handCarryingOn = (event) => {
+      if (handOnPanel != null) return true;
+      if (!handLeftOff) return false;
+      return event.timeStamp - handLeftOff.at < CARRY_ON_MS &&
+        Math.hypot(event.clientX - handLeftOff.x, event.clientY - handLeftOff.y) < CARRY_ON_PX;
+    };
+    filterBox.addEventListener('pointerdown', (event) => { handOnPanel = event.pointerId; });
+    // Any release ends the hold, whichever pointer it was: a flag that only
+    // its own pointer can clear is a flag that can stick, and a stuck one
+    // would leave a panel nothing outside it could put away.
+    addEventListener('pointerup', (event) => {
+      if (handOnPanel == null) return;
+      handOnPanel = null;
+      handLeftOff = { x: event.clientX, y: event.clientY, at: event.timeStamp };
+    });
+    addEventListener('pointercancel', () => { handOnPanel = null; });
     document.addEventListener('pointerdown', (event) => {
       // While the panel is on loan to a sheet the sheet owns its dismissal;
       // the desk's outside-click would only fight it.
       if (filterOnLoan()) return;
-      if (filterOpen && !event.target.closest?.('.filterbox')) setFilterOpen(false);
+      if (filterOpen && !event.target.closest?.('.filterbox') && !handCarryingOn(event)) setFilterOpen(false);
     });
     filterBox.addEventListener('focusout', (event) => {
+      // A hand on the panel is not the panel losing interest.
+      if (handOnPanel != null) return;
       if (filterOpen && event.relatedTarget && !filterBox.contains(event.relatedTarget)) setFilterOpen(false);
     });
     filterBox.addEventListener('keydown', (event) => {
@@ -10277,22 +10955,29 @@ __ICON__
       restoreView();
       deriveFilters();
       marble.register?.(() => {
-        // pageOnly stops filing data-view; it does not stop syncAttrs copying
-        // the file's data-view="library" onto a live board session.
-        restoreView();
-        placeAll();
-        deriveFilters();
-        applyFilters();
-        // The same patch strips the popover's page-only open state.
-        setFilterOpen(filterOpen);
-        restoreOpen();
-        // A patch strips the inline geometry the panes are placed by. While a
-        // room is open that geometry is the room's, not the committed tree's:
-        // laying the committed one out here would close the space back up
-        // without removing anything, which looks the same from the outside.
-        // The same goes for a swap preview: the panes have traded places and
-        // a patch must not snap them back while the hand is still down.
-        layoutDock(room && !room.closing ? room.tree : (swapPreview ? swapPreview.tree : undefined));
+        // The same patch strips the popover's page-only open state, and the
+        // rebuild below is a long way to fall: anything in it that throws
+        // used to leave the panel shut with `filterOpen` still true, so the
+        // next press on Filter only turned the flag off again. The restore
+        // is the one part of this hook that is owed whatever else happens.
+        try {
+          // pageOnly stops filing data-view; it does not stop syncAttrs copying
+          // the file's data-view="library" onto a live board session.
+          restoreView();
+          placeAll();
+          deriveFilters();
+          applyFilters();
+          restoreOpen();
+          // A patch strips the inline geometry the panes are placed by. While a
+          // room is open that geometry is the room's, not the committed tree's:
+          // laying the committed one out here would close the space back up
+          // without removing anything, which looks the same from the outside.
+          // The same goes for a swap preview: the panes have traded places and
+          // a patch must not snap them back while the hand is still down.
+          layoutDock(room && !room.closing ? room.tree : (swapPreview ? swapPreview.tree : undefined));
+        } finally {
+          setFilterOpen(filterOpen);
+        }
       });
       const start = async (api) => {
         agent = api;
@@ -10497,7 +11182,13 @@ __ICON__
   /* Nothing hovers on a touch screen, so the grips simply stay visible. */
   @media (hover: none) { .rz::after, .rz-col::after { opacity: .55; } }
   /* One column of everything: there is no seam left to drag. */
-  @media (max-width: 719px) { .rz, .rz-col { display: none !important; } }
+  @media (max-width: 719px) {
+    .rz, .rz-col { display: none !important; }
+    /* No seam on a phone, so no track for one: the folder rail is the whole
+       width, not a desk rail with an empty column beside it. */
+    body[data-view="folders"] .folders,
+    body[data-view="folders"] .library { grid-template-columns: minmax(0, 1fr); }
+  }
 </style>
   <script data-marble-id="rzjs7a1x">
   // Drag the seam beside a bar, or between two board columns. The width is

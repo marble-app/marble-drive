@@ -57,10 +57,14 @@ export const usageHistoryStub = (weeks = 26) => {
   return { source: 'claude-code-local', tz: 'America/Los_Angeles', generatedAt: '2026-09-18T20:00:00.000Z', from: days[0].date, to: days.at(-1).date, days };
 };
 
-export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null } = {}) {
+// `launchOptions` reach Chromium as they are: a voice test launches it with a
+// fake microphone. `keys` are written to the drive's key file before it
+// starts, as Settings would have kept them.
+export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [], signedOut = [], env = {}, launchOptions = {}, keys = null } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-work-'));
   const keysFile = path.join(workdir, 'agent-keys.local');
+  if (keys) await fsp.writeFile(keysFile, JSON.stringify(keys), { mode: 0o600 });
   const config = loadConfig({
     ...process.env,
     MARBLE_DRIVE_ROOT: root,
@@ -77,10 +81,19 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     MARBLE_DRIVE_AGENT_KEYS: keysFile,
     MARBLE_DRIVE_BACKUP_DIR: '',
     MARBLE_DRIVE_BACKUP_CMD: '',
+    ...env,
   });
   const drive = await createDrive(config, {
     log: quiet,
-    agentProviders: new Map([['fake', createFakeProvider({ scripts })]]),
+    // `providers` adds scripted stand-ins under real ids (claude-subscription,
+    // claude-api, cursor) for tests of what the page does with those ids.
+    // `signedOut` names the ones among them that report no sign-in, `fake`
+    // too, for a drive with nothing set up to run.
+    agentProviders: new Map(['fake', ...providers].map((id) => {
+      const provider = createFakeProvider({ scripts, id });
+      if (signedOut.includes(id)) provider.detect = async () => ({ installed: true, signedIn: false, detail: 'signed out' });
+      return [id, provider];
+    })),
     genui,
     usageHistory: async ({ weeks = 26 } = {}) => usageHistoryStub(weeks),
     usage: async () => ({
@@ -118,19 +131,61 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
   for (const [docPath, source] of Object.entries(documents)) await drive.createDocument(docPath, source, { label: 'test' });
   const port = await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', () => resolve(drive.server.address().port)));
   const base = `http://127.0.0.1:${port}`;
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
 
   return {
     drive,
     base,
+    root,
     async reset() {
       for (const [docPath, source] of Object.entries(documents)) await drive.createDocument(docPath, source, { label: 'reset' });
       // The composer remembers the model a person picks, so one test's pick is
       // the next test's default. A reset drive has not picked anything yet.
       await drive.agents?.store.saveSettings({ models: {}, efforts: {} });
     },
-    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1 } = {}) {
+    // `attending` names the chats this tab starts out following, as a tab
+    // that asked for the work would: only those draw a zone on the page
+    // (collab.js); any other agent is a glint.
+    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1, attending = [], detail = 'technical', shell = true, build = false } = {}) {
       const context = await browser.newContext({ viewport, reducedMotion, colorScheme, hasTouch, isMobile, deviceScaleFactor });
+      // Build mode (runtime/build-mode.js). The suites written before it test
+      // Describe as a mode you turn on, so a page has Build mode off unless a
+      // test asks for it. `build: true` opens each app in build mode, as if it
+      // was left in it here, which the suites written for it expect; `build:
+      // 'closed'` has it on the page but opens the app in normal use, as an
+      // app nobody has built in this browser opens.
+      await context.addInitScript((on) => {
+        try {
+          if (!on) { localStorage.setItem('marble-build', 'off'); return; }
+          localStorage.removeItem('marble-build');
+          const app = decodeURIComponent(location.pathname.replace(/^\/a\//, ''));
+          const key = `marble-build:describe:${app}`;
+          if (on === true && location.pathname.startsWith('/a/') && localStorage.getItem(key) === null) localStorage.setItem(key, 'on');
+        } catch { /* opaque origin */ }
+      }, build);
+      // A page with the shell turned off, as a document turns it off for
+      // itself (<meta name="marble-shell" content="off">): the Drive then
+      // draws its own bars, as it does on a phone. The meta is in the head
+      // long before the shell's script, which is the last thing in the body.
+      if (!shell) {
+        await context.addInitScript(() => {
+          new MutationObserver((_, watch) => {
+            if (!document.head) return;
+            watch.disconnect();
+            const meta = document.createElement('meta');
+            meta.name = 'marble-shell';
+            meta.content = 'off';
+            meta.setAttribute('data-marble-transient', '');
+            document.head.append(meta);
+          }).observe(document, { childList: true, subtree: true });
+        });
+      }
+      if (attending.length) {
+        await context.addInitScript((ids) => { try { sessionStorage.setItem('marble-attending', JSON.stringify(ids)); } catch { /* opaque origin */ } }, attending);
+      }
+      // Chats open in Simple for people; these tests are about the steps
+      // underneath, so they read the Technical view unless they ask otherwise.
+      if (detail) await context.addInitScript((mode) => { try { localStorage.setItem('marble:chat-detail', mode); } catch { /* opaque origin */ } }, detail);
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', (err) => errors.push(err.message));

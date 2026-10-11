@@ -1,3 +1,6 @@
+// The arithmetic the marks tools stand on: what a rectangle means on a page of
+// addressed boxes, what a drawn stroke means, and how a stroke is held to the
+// element it was drawn on.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -59,69 +62,6 @@ test('threshold is an option', () => {
   assert.deepEqual(G().idsInRect(rect(30, 100, 700, 113), PAGE, { threshold: 0.5 }), ['p']);
 });
 
-test('project is the exponential-decay form, not v²/2a', () => {
-  // 1000 px/s at 0.998 lands 499px out.
-  assert.equal(Math.round(G().project(1000)), 499);
-  assert.equal(G().project(0), 0);
-  assert.ok(G().project(-400) < 0, 'sign follows velocity');
-  assert.ok(Math.abs(G().project(1000, 0.99)) < Math.abs(G().project(1000)), 'a snappier rate lands shorter');
-});
-
-test('nearestCorner reads the quadrant', () => {
-  const field = { width: 1000, height: 600 };
-  assert.equal(G().nearestCorner({ x: 10, y: 10 }, field), 'tl');
-  assert.equal(G().nearestCorner({ x: 990, y: 10 }, field), 'tr');
-  assert.equal(G().nearestCorner({ x: 10, y: 590 }, field), 'bl');
-  assert.equal(G().nearestCorner({ x: 990, y: 590 }, field), 'br');
-  assert.equal(G().nearestCorner({ x: 2000, y: -50 }, field), 'tr', 'a projection past the field still picks a corner');
-});
-
-const fly = (damping, { seconds = 2, dt = 1 / 120 } = {}) => {
-  let state = { x: 0, v: 0 };
-  let peak = 0;
-  for (let t = 0; t < seconds; t += dt) {
-    state = G().spring(state, 100, dt, { damping, response: 0.4 });
-    peak = Math.max(peak, state.x);
-  }
-  return { state, peak };
-};
-
-test('a critically damped spring reaches the target without overshoot', () => {
-  const { state, peak } = fly(1);
-  assert.ok(Math.abs(state.x - 100) < 0.5, `ends at ${state.x}`);
-  assert.ok(peak <= 100.5, `peaked at ${peak}`);
-  assert.ok(G().settled(state, 100));
-});
-
-test('an underdamped spring overshoots and still settles', () => {
-  const { state, peak } = fly(0.8);
-  assert.ok(peak > 101, `peaked at ${peak}`);
-  assert.ok(Math.abs(state.x - 100) < 0.5, `ends at ${state.x}`);
-});
-
-test('the spring moves the same distance whatever the frame rate', () => {
-  const advance = (dt) => {
-    let state = { x: 0, v: 0 };
-    for (let t = 0; t < 0.2 - 1e-9; t += dt) state = G().spring(state, 100, dt, { damping: 0.8, response: 0.4 });
-    return state.x;
-  };
-  const slow = advance(1 / 60);
-  const fast = advance(1 / 120);
-  assert.ok(Math.abs(slow - fast) < 0.5, `60Hz reached ${slow}, 120Hz reached ${fast}`);
-});
-
-test('a spring started with velocity carries it', () => {
-  const still = G().spring({ x: 0, v: 0 }, 100, 1 / 120, { damping: 1 });
-  const thrown = G().spring({ x: 0, v: 2000 }, 100, 1 / 120, { damping: 1 });
-  assert.ok(thrown.x > still.x);
-});
-
-test('settled needs both a near position and a slow velocity', () => {
-  assert.equal(G().settled({ x: 100.2, v: 0 }, 100), true);
-  assert.equal(G().settled({ x: 100.2, v: 50 }, 100), false);
-  assert.equal(G().settled({ x: 103, v: 0 }, 100), false);
-});
-
 // The Drive's own home page: a sidebar holding a visible pins list, a visible
 // recents list, and `<ul class="folder-tints" hidden>` between them. A hidden
 // element has a zero-area box, so it can never be a candidate — and a rule
@@ -143,4 +83,102 @@ test('a parent whose only children are zero-area is still chosen on its own', ()
     { id: 'ghost', parent: 'wrap', left: 0, top: 0, width: 0, height: 0 },
   ];
   assert.deepEqual(G().idsInRect(rect(-10, -10, 210, 110), empty), ['wrap']);
+});
+
+// ---------------------------------------------------------------- strokes
+
+/** A hand, not a plotter: every point is nudged off the ideal line, so a
+ *  reading that only works on clean geometry fails here. */
+const wobble = (points, amount = 1.5) => points.map((p, i) => ({
+  x: p.x + Math.sin(i * 2.3) * amount,
+  y: p.y + Math.cos(i * 1.7) * amount,
+}));
+const line = (from, to, steps = 24) => Array.from({ length: steps + 1 }, (_, i) => ({
+  x: from.x + ((to.x - from.x) * i) / steps,
+  y: from.y + ((to.y - from.y) * i) / steps,
+}));
+const boxStroke = (left, top, right, bottom) => [
+  ...line({ x: left, y: top }, { x: right, y: top }),
+  ...line({ x: right, y: top }, { x: right, y: bottom }),
+  ...line({ x: right, y: bottom }, { x: left, y: bottom }),
+  ...line({ x: left, y: bottom }, { x: left, y: top }),
+];
+const circle = (cx, cy, r, steps = 48) => Array.from({ length: steps + 1 }, (_, i) => ({
+  x: cx + r * Math.cos((i / steps) * 2 * Math.PI),
+  y: cy + r * Math.sin((i / steps) * 2 * Math.PI),
+}));
+
+test('a hand-drawn box around something is a box', () => {
+  assert.equal(G().readStroke(wobble(boxStroke(40, 140, 640, 200))), 'box');
+});
+
+test('a circle drawn round something is a box too — it encloses, which is what the reading says', () => {
+  assert.equal(G().readStroke(wobble(circle(300, 170, 90))), 'box');
+});
+
+test('a stroke from one place to another is an arrow', () => {
+  assert.equal(G().readStroke(wobble(line({ x: 60, y: 60 }, { x: 560, y: 300 }))), 'arrow');
+});
+
+test('a scribble that happens to end where it started is still ink', () => {
+  const scribble = [];
+  for (let i = 0; i <= 200; i += 1) {
+    const t = (i / 200) * Math.PI * 8;
+    scribble.push({ x: 300 + 120 * Math.sin(t), y: 200 + 60 * Math.sin(t * 2.7) });
+  }
+  assert.equal(G().readStroke(scribble), 'ink');
+});
+
+test('a stroke over a line of words is ink, and a tap is ink rather than an arrow of no length', () => {
+  assert.equal(G().readStroke(wobble(line({ x: 40, y: 100 }, { x: 160, y: 104 }), 6)), 'ink');
+  assert.equal(G().readStroke([{ x: 10, y: 10 }, { x: 11, y: 10 }, { x: 11, y: 11 }]), 'ink');
+  assert.equal(G().readStroke([{ x: 10, y: 10 }]), 'ink');
+  assert.equal(G().readStroke(null), 'ink');
+});
+
+test('a short stroke at the end of an arrow is its head, and which end says which way it points', () => {
+  const shaft = line({ x: 60, y: 60 }, { x: 560, y: 300 });
+  const arrow = { kind: 'arrow', points: shaft };
+  const head = [{ x: 540, y: 270 }, { x: 560, y: 300 }, { x: 520, y: 300 }];
+  assert.equal(G().arrowHeadFor(arrow, head, { elapsed: 120 }), 'end');
+  const atStart = [{ x: 80, y: 40 }, { x: 60, y: 60 }, { x: 90, y: 70 }];
+  assert.equal(G().arrowHeadFor(arrow, atStart, { elapsed: 120 }), 'start');
+});
+
+test('a mark of its own is not a head: too late, too long, too far away, or not on an arrow', () => {
+  const shaft = line({ x: 60, y: 60 }, { x: 560, y: 300 });
+  const arrow = { kind: 'arrow', points: shaft };
+  const head = [{ x: 540, y: 270 }, { x: 560, y: 300 }, { x: 520, y: 300 }];
+  assert.equal(G().arrowHeadFor(arrow, head, { elapsed: 900 }), null, 'a minute later is a new mark');
+  assert.equal(G().arrowHeadFor(arrow, line({ x: 500, y: 300 }, { x: 100, y: 320 }), { elapsed: 100 }), null, 'as long as the shaft is not a head');
+  assert.equal(G().arrowHeadFor(arrow, [{ x: 300, y: 500 }, { x: 320, y: 510 }, { x: 300, y: 520 }], { elapsed: 100 }), null, 'nowhere near either end');
+  assert.equal(G().arrowHeadFor({ kind: 'box', points: shaft }, head, { elapsed: 100 }), null, 'a box has no head');
+  assert.equal(G().arrowHeadFor(null, head, { elapsed: 100 }), null);
+});
+
+test('a stroke is kept as fractions of its anchor, so it survives the element moving and resizing', () => {
+  const box = { left: 100, top: 100, width: 200, height: 100 };
+  const points = [{ x: 100, y: 100 }, { x: 200, y: 150 }, { x: 340, y: 210 }];
+  const pairs = G().toFractions(box, points);
+  assert.deepEqual(pairs[0], [0, 0]);
+  assert.deepEqual(pairs[1], [0.5, 0.5]);
+  assert.deepEqual(pairs[2], [1.2, 1.1], 'a stroke may run past its anchor');
+  assert.deepEqual(G().fromFractions(box, pairs), points, 'round trip');
+  // Scrolled 40px up and grown by half: the stroke is where the element is.
+  const moved = { left: 100, top: 60, width: 300, height: 100 };
+  assert.deepEqual(G().fromFractions(moved, pairs)[1], { x: 250, y: 110 });
+});
+
+test('a zero-sized anchor does not divide by it', () => {
+  const pairs = G().toFractions({ left: 0, top: 0, width: 0, height: 0 }, [{ x: 5, y: 5 }]);
+  assert.deepEqual(pairs, [[0, 0]]);
+});
+
+test('bounds, length and centroid are the three things a reading is made of', () => {
+  const points = [{ x: 0, y: 0 }, { x: 30, y: 40 }, { x: 30, y: 0 }];
+  assert.deepEqual(G().boundsOf(points), { left: 0, top: 0, width: 30, height: 40 });
+  assert.equal(G().lengthOf(points), 90);
+  assert.deepEqual(G().centroidOf(points), { x: 20, y: 40 / 3 });
+  assert.deepEqual(G().boundsOf([]), { left: 0, top: 0, width: 0, height: 0 });
+  assert.deepEqual(G().centroidOf([]), { x: 0, y: 0 });
 });

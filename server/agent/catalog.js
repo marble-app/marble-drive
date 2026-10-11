@@ -1,6 +1,6 @@
 // Shared catalog helpers for the Agents picker: Cursor’s model list bakes
-// effort and speed into the id, Claude’s does not, and each CLI has its own
-// Shift+Tab mode cycle.
+// effort and speed into the id, Claude’s and Codex’s do not, and each CLI has
+// its own Shift+Tab mode cycle.
 
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,18 @@ export const CLAUDE_MODES = [
   { id: 'plan', label: 'Plan' },
   { id: 'manual', label: 'Ask me' },
   { id: 'bypassPermissions', label: 'Bypass permissions' },
+];
+
+// Codex in exec has no channel for asking, so a mode is how much its sandbox
+// lets it do, chosen up front. Full access is the terminal's own reach, the
+// way Cursor's Run Everything is; auto-review is not offered, because in exec
+// it blocks the network and never escalates (checked 2026-10-01).
+export const CODEX_MODES = [
+  { id: 'full', label: 'Full access' },
+  { id: 'workspace', label: 'Workspace' },
+  // Its shell only reads; Marble's tools still edit documents, so the word
+  // says that rather than "read only".
+  { id: 'read', label: 'Documents only' },
 ];
 
 export const CURSOR_MODES = [
@@ -66,7 +78,14 @@ export function composeCursorModel(family, effort) {
   return `${family}-${effort}`;
 }
 
+const CLAUDE_PICKER_IDS = new Set(['haiku', 'sonnet', 'opus', 'fable']);
+
 export function resolveCursorModel(model, effort, fallback) {
+  // A Claude picker id (`opus`) composed with an effort is `opus-high`, which
+  // Cursor rejects and answers with its whole model list. The Claude API pin
+  // (`claude-opus-5-5[1m]`) is the same kind of miss. A real Cursor family
+  // such as `claude-opus-5-5` still composes.
+  if (CLAUDE_PICKER_IDS.has(String(model ?? '')) || /\[1m\]/.test(String(model ?? ''))) return fallback;
   const raw = model || fallback;
   if (!raw) return fallback;
   const parts = splitCursorModel(raw);
@@ -122,7 +141,7 @@ export function pickCursorPickerModels(models) {
   return [auto, best].filter(Boolean);
 }
 
-export const PICKER_PROVIDER_ORDER = ['claude-subscription', 'cursor', 'claude-api'];
+export const PICKER_PROVIDER_ORDER = ['claude-subscription', 'claude-credit', 'codex', 'cursor', 'claude-api'];
 
 export function sortProviders(list) {
   const rank = (id) => {

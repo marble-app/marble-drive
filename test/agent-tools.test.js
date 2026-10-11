@@ -12,8 +12,8 @@ process.env.MARBLE_DRIVE_BACKUP_CMD = '';
 
 const { createDrive } = await import('../server/app.js');
 const { loadConfig } = await import('../server/config.js');
-const { enginePath } = await import('../server/engine.js');
-const { build } = await import('../server/gallery.js');
+const { enginePath, examine } = await import('../server/engine.js');
+const { build, composeScript } = await import('../server/gallery.js');
 const { createTools, TOOL_SCHEMAS } = await import('../server/agent/tools.js');
 
 const drive = await createDrive(loadConfig(), { log: { log() {}, error() {} } });
@@ -54,7 +54,7 @@ async function freshTurn(conversationId = `c${++n}`) {
 
 test('the schemas name the marble tools', () => {
   assert.deepEqual(TOOL_SCHEMAS.map((t) => t.name).sort(), [
-    'apply_ops', 'check_document', 'create_document', 'list_agents', 'list_documents', 'read_document', 'read_guide', 'send_message', 'wait_for_reply',
+    'affordance_script', 'apply_ops', 'build_plan', 'check_document', 'create_document', 'fan_out', 'list_agents', 'list_documents', 'read_document', 'read_guide', 'send_message', 'wait_for_reply',
   ]);
   for (const t of TOOL_SCHEMAS) assert.equal(t.inputSchema.type, 'object');
 });
@@ -215,6 +215,14 @@ test('list and guide', async () => {
   assert.match(section.text, /setInner/);
   const grow = await tools.call('read_guide', { section: 'growing the open page' }, turn);
   assert.match(grow.text, /insert a stub/i);
+  // The section carries the whole staged method, subsections included: the
+  // splitter cuts on "## " and a "### " heading is not one.
+  assert.match(grow.text, /### What a stage is/);
+  assert.match(grow.text, /### Filler/);
+  assert.match(grow.text, /Whole\./);
+  assert.match(grow.text, /Continuous\./);
+  assert.match(grow.text, /Named\./);
+  assert.match(grow.text, /Stage 2 of 4/);
 });
 
 test('a path outside the drive is an error', async () => {
@@ -270,6 +278,177 @@ test('an insert of several elements is undone whole', async () => {
   assert.deepEqual(result, { reverted: 2, kept: 0, errors: [] });
   const after = await drive.store.read(turn.target);
   assert.doesNotMatch(after, /two|three/);
+});
+
+test('undo looks before each batch and hands writeOps a matching after-presence', async () => {
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  await tools.call('apply_ops', { path: turn.target, note: 'x', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] }, turn);
+  const looks = [];
+  const presences = [];
+  const recordingWriteOps = async (docPath, ops, options) => {
+    const result = await drive.writeOps(docPath, ops, options);
+    presences.push(options.presence);
+    return result;
+  };
+  const result = await undoTurn({
+    records: turn.undo,
+    writeOps: recordingWriteOps,
+    client: `agent-undo:${turn.conversationId}`,
+    turn: turn.id,
+    look: (docPath, ids, extra) => looks.push({ docPath, ids, extra }),
+  });
+  assert.equal(result.reverted, 1);
+  assert.equal(looks.length, 1);
+  assert.equal(looks[0].docPath, turn.target);
+  assert.deepEqual(looks[0].ids, ['h']);
+  assert.deepEqual(looks[0].extra, { stage: 'before', turn: turn.id, parts: ['h'] });
+  assert.deepEqual(presences[0], { stage: 'after', turn: turn.id, parts: ['h'] });
+});
+
+test('undoing a remove reinserts the element, and names its id in the presence frames', async () => {
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  await tools.call('apply_ops', { path: turn.target, note: 'x', ops: [{ type: 'remove', id: 'q2' }] }, turn);
+  const looks = [];
+  const presences = [];
+  const recordingWriteOps = async (docPath, ops, options) => {
+    const result = await drive.writeOps(docPath, ops, options);
+    presences.push(options.presence);
+    return result;
+  };
+  const result = await undoTurn({
+    records: turn.undo,
+    writeOps: recordingWriteOps,
+    client: `agent-undo:${turn.conversationId}`,
+    turn: turn.id,
+    look: (docPath, ids, extra) => looks.push({ docPath, ids, extra }),
+  });
+  assert.equal(result.reverted, 1);
+  assert.equal(looks.length, 1, 'the inverse of a remove is still one look, even though its own op carries no id');
+  assert.deepEqual(looks[0].ids, ['q2']);
+  assert.deepEqual(looks[0].extra, { stage: 'before', turn: turn.id, parts: ['q2'] });
+  assert.deepEqual(presences[0], { stage: 'after', turn: turn.id, parts: ['q2'] });
+  assert.match(await drive.store.read(turn.target), /data-marble-id="q2">How\?</, 'the element itself came back');
+});
+
+/** A writeOps that runs `prepare` against `doc` in memory, for undo alone. */
+function memoryWrites(doc) {
+  const state = { doc };
+  const { applyOps } = engine;
+  state.writeOps = async (_path, _ops, options) => {
+    const { ops } = await options.prepare(state.doc);
+    state.doc = applyOps(state.doc, ops);
+    return { applied: ops.length };
+  };
+  return state;
+}
+const engine = await import('../server/engine.js');
+const { inverseSteps } = await import('../server/agent/inverse.js');
+
+test('the redo an undo saves is the inverse of every inverse it ran, read from the page as it ran', async () => {
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  for (const ops of [
+    [{ type: 'setText', id: 'h', text: 'Backlog' }],
+    [{ type: 'setAttr', id: 'q', name: 'class', value: 'tidy' }],
+    [{ type: 'insert', html: '<li data-marble-id="q3">When?</li><li data-marble-id="q4">Who?</li>', parentId: 'q', beforeId: 'q2' }],
+    [{ type: 'remove', id: 'q1' }],
+    [{ type: 'move', id: 'q2', parentId: 'q', beforeId: 'q3' }],
+    [{ type: 'setInner', id: 'h', html: 'Back<b data-marble-id="hb">log</b>' }],
+  ]) {
+    const result = await tools.call('apply_ops', { path: turn.target, note: 'x', ops }, turn);
+    assert.ok(result.applied, JSON.stringify(result));
+  }
+  const afterTurn = await drive.store.read(turn.target);
+
+  // What the redo was before: inverseSteps of each inverse, from the page
+  // right before it ran.
+  const expected = [];
+  let current = afterTurn;
+  for (const step of turn.undo.flatMap((record) => record.steps).reverse()) {
+    if (!step.inverse) continue;
+    expected.push(...inverseSteps(current, [step.inverse]));
+    current = engine.applyOp(current, step.inverse);
+  }
+
+  const memory = memoryWrites(afterTurn);
+  let saved = null;
+  const result = await undoTurn({ records: turn.undo, writeOps: memory.writeOps, client: 'x', turn: turn.id, saveRedo: async (_id, record) => { saved = record; } });
+  assert.equal(result.kept, 0);
+  assert.equal(memory.doc, SOURCE, 'the page is back to where the turn started');
+  assert.deepEqual(saved, { steps: [{ path: turn.target, steps: expected }], restores: [] });
+
+  // And fed back in, it is the turn again (two rows inserted at once come
+  // back one at a time, each on its own line).
+  const redone = await undoTurn({ records: saved.steps, writeOps: memory.writeOps, client: 'x' });
+  assert.equal(redone.kept, 0);
+  const tight = (html) => html.replace(/>\s+</g, '><');
+  assert.equal(tight(memory.doc), tight(afterTurn));
+});
+
+test('an undo reads the page once for each step it takes back, not again for its redo', async () => {
+  const { watchParses } = await import('../server/agent/source.js');
+  const rows = Array.from({ length: 20 }, (_, i) => `<li data-marble-id="r${i}">Row ${i}</li>`).join('');
+  const start = SOURCE.replace('</ul>', `${rows}</ul>`);
+  const records = [];
+  let doc = start;
+  for (let i = 0; i < 20; i += 1) {
+    const op = { type: 'setText', id: `r${i}`, text: `Renamed ${i}` };
+    records.push({ path: 'p', steps: inverseSteps(doc, [op]) });
+    doc = engine.applyOp(doc, op);
+  }
+  const memory = memoryWrites(doc);
+  let parses = 0;
+  let saved = null;
+  watchParses(() => {
+    parses += 1;
+  });
+  try {
+    await undoTurn({ records, writeOps: memory.writeOps, client: 'x', turn: 't', saveRedo: async (_id, record) => { saved = record; } });
+  } finally {
+    watchParses(null);
+  }
+  assert.equal(memory.doc, start);
+  assert.equal(saved.steps[0].steps.length, 20);
+  assert.ok(parses <= 21, `${parses} parses for 20 steps`);
+});
+
+test('an undo that only restored a document saves no redo, and drops one left from before', async () => {
+  const calls = [];
+  const result = await undoTurn({
+    records: [],
+    restores: [{ path: 'p', sha: 'abc' }],
+    writeOps: async () => ({ applied: 0 }),
+    restore: async () => {},
+    client: 'x',
+    turn: 't',
+    saveRedo: async (id, record) => calls.push(['save', id, record]),
+    dropRedo: async (id) => calls.push(['drop', id]),
+  });
+  assert.equal(result.reverted, 1);
+  assert.deepEqual(calls, [['drop', 't']]);
+});
+
+test('a redo that could not be saved does not fail the undo', async () => {
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  await tools.call('apply_ops', { path: turn.target, note: 'x', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] }, turn);
+  const errors = [];
+  const result = await undoTurn({
+    records: turn.undo,
+    writeOps: drive.writeOps,
+    client: `agent-undo:${turn.conversationId}`,
+    turn: turn.id,
+    saveRedo: async () => {
+      throw new Error('disk full');
+    },
+    log: { error: (line) => errors.push(line) },
+  });
+  assert.deepEqual(result, { reverted: 1, kept: 0, errors: [] });
+  assert.match(await drive.store.read(turn.target), />Research Garden</);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /disk full/);
 });
 
 test('a refusal only counts as a read for elements it showed in full', async () => {
@@ -376,6 +555,150 @@ test('a refused apply_ops does not tape off the page', async () => {
   assert.equal(seen.length, 0);
 });
 
+test('apply_ops tells the page which parts, the step, a running count, and what is coming', async () => {
+  const looks = [];
+  const presences = [];
+  const recordingWriteOps = async (docPath, ops, options) => {
+    const result = await drive.writeOps(docPath, ops, options);
+    presences.push(options.presence);
+    return result;
+  };
+  const v5Tools = createTools({
+    store: drive.store,
+    writeOps: recordingWriteOps,
+    createDocument: drive.createDocument,
+    buildStarter: build,
+    guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+    examine: () => [],
+    onLook: (docPath, ids, client, extra) => looks.push({ docPath, ids, client, extra }),
+  });
+  const turn = await freshTurn();
+  await v5Tools.call('read_document', { path: turn.target }, turn);
+
+  await v5Tools.call('apply_ops', {
+    path: turn.target, note: 'Stage 1 of 2: rename the title', total: 2,
+    ops: [{ type: 'setText', id: 'h', text: 'Backlog' }],
+  }, turn);
+  const before1 = looks.find((l) => l.extra?.stage === 'before');
+  assert.equal(before1.extra.turn, turn.id);
+  assert.deepEqual(before1.extra.parts, ['h']);
+  assert.equal(before1.extra.kind, 'words');
+  assert.equal(before1.extra.count, 1);
+  assert.deepEqual(before1.extra.step, { n: 1, of: 2, text: 'rename the title' });
+  assert.equal(before1.extra.total, 2);
+  assert.equal(before1.extra.reach, null);
+  assert.equal(presences[0].stage, 'after');
+  assert.deepEqual(presences[0].parts, ['h']);
+
+  looks.length = 0;
+  await v5Tools.call('apply_ops', {
+    path: turn.target, note: 'Stage 2 of 2: tidy the list',
+    ops: [{ type: 'setAttr', id: 'q', name: 'class', value: 'x' }],
+  }, turn);
+  const before2 = looks.find((l) => l.extra?.stage === 'before');
+  assert.equal(before2.extra.count, 2, 'count accumulates distinct parts across batches of the turn');
+  assert.equal(before2.extra.total, 2, 'total given once is repeated on later batches, even when this call omits it');
+});
+
+test('apply_ops reach drops ids that are not in the document', async () => {
+  const looks = [];
+  const v5Tools = createTools({
+    store: drive.store,
+    writeOps: drive.writeOps,
+    createDocument: drive.createDocument,
+    buildStarter: build,
+    guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+    examine: () => [],
+    onLook: (docPath, ids, client, extra) => looks.push({ docPath, ids, client, extra }),
+  });
+  const turn = await freshTurn();
+  await v5Tools.call('read_document', { path: turn.target }, turn);
+  await v5Tools.call('apply_ops', {
+    path: turn.target, note: 'x', reach: ['h', 'q1', 'nope-not-here'],
+    ops: [{ type: 'setText', id: 'h', text: 'Backlog' }],
+  }, turn);
+  const before = looks.find((l) => l.extra?.stage === 'before');
+  assert.deepEqual(before.extra.reach, ['h', 'q1']);
+});
+
+test('a batch is read against one parse of the document, its reach included', async () => {
+  const { watchParses } = await import('../server/agent/source.js');
+  const lists = Array.from({ length: 5 }, (_, k) =>
+    `<ul data-marble-id="u${k}">${[0, 1, 2].map((i) => `<li data-marble-id="u${k}i${i}">Item ${i}</li>`).join('')}</ul>`).join('\n');
+  const looks = [];
+  const v5Tools = createTools({
+    store: drive.store,
+    writeOps: drive.writeOps,
+    createDocument: drive.createDocument,
+    buildStarter: build,
+    guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+    examine: () => [],
+    onLook: (docPath, ids, client, extra) => looks.push({ docPath, ids, client, extra }),
+  });
+  const turn = await freshTurn();
+  await drive.writeOps(turn.target, [{ type: 'insert', parentId: 'b', beforeId: null, html: lists }], { client: 'tab' });
+  await v5Tools.call('read_document', { path: turn.target }, turn);
+  const source = await drive.store.read(turn.target);
+
+  let parses = 0;
+  watchParses((text) => {
+    if (text === source) parses += 1;
+  });
+  let result;
+  try {
+    result = await v5Tools.call('apply_ops', {
+      path: turn.target,
+      note: 'Rewrite every list',
+      reach: ['u0', 'u1', 'u2', 'u3', 'u4', 'nope'],
+      ops: Array.from({ length: 5 }, (_, k) => ({
+        type: 'setInner',
+        id: `u${k}`,
+        html: [0, 1].map((i) => `<li data-marble-id="u${k}n${i}">New ${i}</li>`).join(''),
+      })),
+    }, turn);
+  } finally {
+    watchParses(null);
+  }
+  assert.ok(result.applied > 0, JSON.stringify(result).slice(0, 400));
+  const before = looks.find((l) => l.extra?.stage === 'before');
+  assert.equal(before.extra.parts.length, 25, 'each list\'s three old rows and two new ones');
+  assert.equal(before.extra.removes.length, 15);
+  assert.deepEqual(before.extra.reach, ['u0', 'u1', 'u2', 'u3', 'u4']);
+  assert.equal(parses, 1, 'one parse of the document for the whole batch');
+});
+
+test('a total that is not a whole number of parts, one or more, is not taken', async () => {
+  const looks = [];
+  const v5Tools = createTools({
+    store: drive.store,
+    writeOps: drive.writeOps,
+    createDocument: drive.createDocument,
+    buildStarter: build,
+    guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+    examine: () => [],
+    onLook: (docPath, ids, client, extra) => looks.push({ docPath, ids, client, extra }),
+  });
+  const turn = await freshTurn();
+  await v5Tools.call('read_document', { path: turn.target }, turn);
+  const totals = [];
+  for (const [k, total] of [0, -3, 2.5, '4', Number.NaN, 3, 7].entries()) {
+    looks.length = 0;
+    const result = await v5Tools.call('apply_ops', {
+      path: turn.target, note: 'x', total,
+      ops: [{ type: 'setText', id: 'h', text: `Title ${k}` }],
+    }, turn);
+    assert.equal(result.applied, 1);
+    totals.push(looks.find((l) => l.extra?.stage === 'before').extra.total);
+  }
+  assert.deepEqual(totals, [null, null, null, null, null, 3, 3], 'none of the wrong ones is frozen, the first right one is');
+});
+
+test('apply_ops schema names reach and total', () => {
+  const applyOps = TOOL_SCHEMAS.find((t) => t.name === 'apply_ops');
+  assert.equal(applyOps.inputSchema.properties.reach.maxItems, 200);
+  assert.equal(applyOps.inputSchema.properties.total.minimum, 1);
+});
+
 test('check_document is offered to agents', () => {
   const checking = createTools({
     store: {}, writeOps: async () => ({}), createDocument: async () => {},
@@ -384,4 +707,120 @@ test('check_document is offered to agents', () => {
   assert.ok(checking.schemas.some((s) => s.name === 'check_document'));
 });
 
+test('affordance_script composes what the markers need, the way a starter does', async () => {
+  const composing = createTools({
+    store: {}, writeOps: async () => ({}), createDocument: async () => {},
+    buildStarter: async () => '', composeAffordances: composeScript, guidePath: '/dev/null', examine: () => [],
+  });
+  const { script } = await composing.call('affordance_script', { affords: ['editable', 'toggle'] });
+  // History always; the five small interactions are one part; each marker named in full.
+  assert.match(script, /^\/\/ Affordances: history, editable, state /);
+  for (const name of ['data-marble-editable', 'data-marble-toggle']) assert.ok(script.includes(name), name);
+  assert.doesNotMatch(script, /data-marble-sortable/);
+  // The doctor agrees that a document carrying it is wired.
+  const doc = `<!doctype html><html data-marble="1"><body>
+    <h1 data-marble-id="h" data-marble-editable>Title</h1>
+    <button data-marble-id="b" data-marble-toggle="data-done:yes|no">Done</button>
+    <script>${script}</script></body></html>`;
+  assert.deepEqual(examine('x.mrbl', doc).filter((f) => /no script in this document reads/.test(f.message)), []);
+
+  assert.match((await composing.call('affordance_script', { affords: ['wobble'] })).error, /no affordance "wobble"/);
+});
+
 test.after(() => drive.close());
+
+// ------------------------------------------------------------ v6: marks
+
+const marksTools = (looks) => createTools({
+  store: drive.store,
+  writeOps: drive.writeOps,
+  createDocument: drive.createDocument,
+  buildStarter: build,
+  guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+  examine: () => [],
+  onLook: (docPath, ids, client, extra) => looks.push({ docPath, ids, client, extra }),
+});
+
+test('apply_ops marks ride the batch\'s frames and every later batch of the turn, anchored to the document', async () => {
+  const looks = [];
+  const v6Tools = marksTools(looks);
+  const turn = await freshTurn();
+  await v6Tools.call('read_document', { path: turn.target }, turn);
+  const result = await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Answer the first question.', total: 2,
+    marks: { verb: 'answering', unit: ['question', 'questions'], draw: [{ at: 'q1', shape: 'ring', key: 'cursor' }, { at: 'nope', shape: 'dot' }] },
+    ops: [{ type: 'setText', id: 'q1', text: 'Why? Because.' }],
+  }, turn);
+  assert.equal(result.applied, 1);
+  const before1 = looks.find((l) => l.extra?.stage === 'before');
+  assert.deepEqual(before1.extra.marks, {
+    verb: 'Answering', unit: ['question', 'questions'], draw: [{ at: 'q1', on: 'over', as: 'now', key: 'cursor', shape: 'ring' }],
+  });
+
+  looks.length = 0;
+  await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Answer the second question.',
+    marks: { draw: [{ at: 'q2', shape: 'ring', key: 'cursor' }] },
+    ops: [{ type: 'setText', id: 'q2', text: 'How? Slowly.' }],
+  }, turn);
+  const before2 = looks.find((l) => l.extra?.stage === 'before');
+  assert.equal(before2.extra.marks.verb, 'Answering', 'words given once are kept for the turn');
+  assert.deepEqual(before2.extra.marks.draw.map((m) => m.at), ['q2'], 'a draw given replaces the last one');
+
+  looks.length = 0;
+  await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Retitle.', ops: [{ type: 'setText', id: 'h', text: 'Garden notes' }],
+  }, turn);
+  const before3 = looks.find((l) => l.extra?.stage === 'before');
+  assert.deepEqual(before3.extra.marks.draw.map((m) => m.at), ['q2'], 'no draw leaves the marks as they are');
+});
+
+test('apply_ops with no ops draws the reach and the marks ahead, and writes nothing', async () => {
+  const looks = [];
+  const v6Tools = marksTools(looks);
+  const turn = await freshTurn();
+  const sourceBefore = await drive.store.read(turn.target);
+  const result = await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Stage 1 of 2: find each question', total: 2, reach: ['q1', 'q2', 'nope'], ops: [],
+    marks: { verb: 'Answering', unit: ['question'], draw: [{ at: 'q1', as: 'ahead', shape: 'ring' }, { at: 'q2', as: 'ahead', shape: 'ring' }] },
+  }, turn);
+  assert.deepEqual(result, { applied: 0, marked: { reach: 2, draw: 2 } });
+  assert.equal(await drive.store.read(turn.target), sourceBefore, 'nothing is written');
+  assert.equal(turn.undo.length, 0, 'nothing is recorded for undo');
+  assert.equal(looks.length, 1);
+  const [mark] = looks;
+  assert.equal(mark.extra.stage, 'mark');
+  assert.equal(mark.extra.turn, turn.id);
+  assert.deepEqual(mark.extra.reach, ['q1', 'q2']);
+  assert.equal(mark.extra.total, 2);
+  assert.equal(mark.extra.count, 0);
+  assert.deepEqual(mark.extra.step, { n: 1, of: 2, text: 'find each question' });
+  assert.deepEqual(mark.ids.sort(), ['q1', 'q2']);
+  assert.equal(mark.extra.marks.draw.length, 2);
+
+  // The first edit after it carries the same marks and the same reach.
+  await v6Tools.call('read_document', { path: turn.target }, turn);
+  looks.length = 0;
+  await v6Tools.call('apply_ops', { path: turn.target, note: 'Stage 2 of 2: answer them', ops: [{ type: 'setText', id: 'q1', text: 'Why? Because.' }] }, turn);
+  const before = looks.find((l) => l.extra?.stage === 'before');
+  assert.deepEqual(before.extra.reach, ['q1', 'q2']);
+  assert.equal(before.extra.marks.verb, 'Answering');
+});
+
+test('apply_ops with no ops and nothing to draw is a batch that changes nothing', async () => {
+  const looks = [];
+  const v6Tools = marksTools(looks);
+  const turn = await freshTurn();
+  const result = await v6Tools.call('apply_ops', { path: turn.target, note: 'Nothing.', ops: [] }, turn);
+  assert.equal(result.marked, undefined);
+  assert.equal(looks.filter((l) => l.extra?.stage === 'mark').length, 0);
+});
+
+test('apply_ops and fan_out schemas name marks', () => {
+  for (const name of ['apply_ops', 'fan_out']) {
+    const schema = TOOL_SCHEMAS.find((t) => t.name === name).inputSchema.properties.marks;
+    assert.equal(schema.type, 'object', name);
+    assert.deepEqual(Object.keys(schema.properties), ['verb', 'unit', 'measure', 'draw']);
+    assert.equal(schema.properties.draw.maxItems, 24);
+  }
+});

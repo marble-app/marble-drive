@@ -10,28 +10,63 @@
 // prompts routed back to Marble over stream-json stdin so the person can
 // answer them from the drawer.
 //
-// The two providers differ only in billing: the subscription gets no API key
-// in its environment, so the CLI uses the login; the API provider hands it one.
+// The providers differ only in billing: the subscription gets no API key in
+// its environment, so the CLI uses the login (or the long-lived token of a
+// plan connected from the browser, CLAUDE_CODE_OAUTH_TOKEN); the API provider
+// hands it one; and starter credit (claude-credit) hands it the drive's own
+// credit token with ANTHROPIC_BASE_URL pointed at the credit proxy
+// (worker/src/credit.js), which adds the owner's key on the way to Anthropic.
 
 import path from 'node:path';
 
 import { CLAUDE_MODES } from '../catalog.js';
 import { pickEnv } from '../env.js';
 import { instructionsFor } from '../instructions.js';
+import { PLUGIN_DIR } from '../skills.js';
 import { runCommand } from './exec.js';
 import { writePrivateFile } from './private-file.js';
 
 export const CLAUDE_MODELS = [
   { id: 'haiku', label: 'Haiku 4.5' },
   { id: 'sonnet', label: 'Sonnet 5' },
-  { id: 'opus', label: 'Opus 5' },
+  { id: 'opus', label: 'Opus 5.5' },
   { id: 'fable', label: 'Fable 5.1' },
 ];
+// The picker keeps the family id (`opus`) so a saved conversation still
+// selects it. Claude Code 2.1.280 is the first build that accepts the Opus
+// 5.5 API id. 2.1.278 rejects `claude-opus-5-5[1m]` outright ("version
+// 2.1.280 or newer is required") and runs the bare alias `opus`. `[1m]` is
+// the CLI's hint that an unrecognized model has a 1M window; it is stripped
+// before the request. Opus 5.5's window is 1M (platform.claude.com, 2026-09-22).
+export function claudeCodeAcceptsOpus55(version) {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ''));
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  if (major !== 2 || minor !== 1) return major > 2 || (major === 2 && minor > 1);
+  return patch >= 280;
+}
+
+export function claudeModelArg(model, version) {
+  if (model === 'opus' && claudeCodeAcceptsOpus55(version)) return 'claude-opus-5-5[1m]';
+  return model;
+}
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+// A chat that switched agents can still carry the last one's model or effort.
+// Claude would refuse those outright, so they are left out and Claude runs on
+// the person's own settings instead.
+const OTHER_AGENTS_MODEL = /^(gpt|o\d|codex|grok|composer|auto$)/i;
+const claudeModel = (model) => (model && !OTHER_AGENTS_MODEL.test(String(model)) ? model : null);
+const claudeEffort = (effort) => (CLAUDE_EFFORTS.includes(effort) ? effort : null);
 // The request id Marble gives the stream-json initialize handshake. Its reply
 // carries the CLI's own skills list.
 export const INIT_REQUEST_ID = 'marble-init';
+// The longest one Bash command of a full agent may ask for: half an hour, the
+// stall rule's default, against the CLI's own ten minutes.
+export const BASH_MAX_TIMEOUT_MS = 30 * 60_000;
 const SUMMARY = 200;
+const TAIL = 600;
 
 const toolName = (name) => String(name ?? '').replace(/^mcp__[a-zA-Z0-9_-]+__/, '');
 const textOf = (content) =>
@@ -47,6 +82,17 @@ const skill = (name, description = '') => ({ id: String(name), name: String(name
 const DENIAL = /\b(denied by the Claude Code auto mode classifier|permission (?:for this action |to use [^\n]*?)?(?:was |is )?denied|requested permissions[^\n]*?(?:denied|rejected)|operation not permitted by (?:a )?hook|blocked by (?:a )?hook)\b/i;
 
 export const isDenial = (text) => DENIAL.test(String(text ?? ''));
+
+// What the credit proxy answers at a drive's cap: a 402 billing_error saying
+// "Starter credit used up". The CLI prints the status and the body.
+const CREDIT_USED_UP = /starter credit used up|\b402\b[^\n]*billing_error|billing_error[^\n]*\b402\b/i;
+export const creditUsedUp = (text) => CREDIT_USED_UP.test(String(text ?? ''));
+/** The two settings that put a drive on starter credit, or null. */
+export function creditSettings(env = {}) {
+  const url = String(env.MARBLE_CREDIT_URL ?? '').trim().replace(/\/+$/, '');
+  const token = String(env.MARBLE_CREDIT_TOKEN ?? '').trim();
+  return /^https?:\/\/\S+$/.test(url) && token ? { url, token } : null;
+}
 
 /** One line of `claude -p --output-format stream-json` as the runner's events.
  *  `state` is the runner's per-turn scratch: what a line means can depend on
@@ -65,6 +111,13 @@ export function parseClaudeLine(line, state = {}) {
         if (e.subtype === 'task_started') tasks.add(e.task_id);
         else tasks.delete(e.task_id);
         return [{ type: 'background', pending: tasks.size }];
+      }
+      // The CLI's own list of what is still out, whenever it changes: the
+      // count follows it, so a notification that never came cannot hold a
+      // turn open.
+      if (e.subtype === 'background_tasks_changed' && Array.isArray(e.tasks)) {
+        state.tasks = new Set(e.tasks.map((t) => t?.task_id).filter(Boolean));
+        return [{ type: 'background', pending: state.tasks.size }];
       }
       if (e.subtype !== 'init') return [];
       const events = [];
@@ -132,6 +185,9 @@ export function parseClaudeLine(line, state = {}) {
           ok: !block.is_error,
           denied: Boolean(block.is_error) && isDenial(text),
           summary: text.slice(0, SUMMARY),
+          // Not stored: the runner hands it to the progress drawer and drops
+          // it. A test run prints its counts at the end, past the summary.
+          ...(text.length > SUMMARY ? { tail: text.slice(-TAIL) } : {}),
         });
       }
       return events;
@@ -163,13 +219,18 @@ export function parseClaudeLine(line, state = {}) {
   }
 }
 
-export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env, secrets } = {}) {
+export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env, secrets, version = null } = {}) {
   const api = auth === 'api';
+  const credit = auth === 'credit';
   const live = () => ({ ...env, ...(typeof secrets === 'function' ? secrets() : secrets ?? {}) });
+  let cliVersion = version;
+  // One name for both: which one pays is a switch in Agents settings, not a
+  // second agent to pick (server/agent/routes.js, claudeAuth).
+  const label = 'Claude';
 
   return {
-    id: api ? 'claude-api' : 'claude-subscription',
-    label: api ? 'KIXLAB API' : 'Claude',
+    id: api ? 'claude-api' : credit ? 'claude-credit' : 'claude-subscription',
+    label,
     capability: 'full',
 
     async detect() {
@@ -180,8 +241,21 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       const current = live();
       const probeEnv = pickEnv(current);
       if (api && current.ANTHROPIC_API_KEY) probeEnv.ANTHROPIC_API_KEY = current.ANTHROPIC_API_KEY;
+      // The person's own plan, connected from the browser (claude-signin.js):
+      // the CLI reads the token from its environment and answers as signed in.
+      if (!api && current.CLAUDE_CODE_OAUTH_TOKEN) probeEnv.CLAUDE_CODE_OAUTH_TOKEN = current.CLAUDE_CODE_OAUTH_TOKEN;
       const probe = await exec('claude', ['auth', 'status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'claude is not installed' };
+      if (cliVersion == null) {
+        const versionProbe = await exec('claude', ['--version'], { env: probeEnv });
+        cliVersion = /(\d+\.\d+\.\d+)/.exec(`${versionProbe.stdout}\n${versionProbe.stderr}`)?.[1] ?? '';
+      }
+
+      if (credit) {
+        return creditSettings(current)
+          ? { installed: true, signedIn: true, detail: 'on starter credit' }
+          : { installed: true, signedIn: false, detail: 'this drive has no starter credit' };
+      }
 
       if (api) {
         return current.ANTHROPIC_API_KEY
@@ -229,6 +303,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
             '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
             // Marble's server is added to whatever the person configured, not swapped for it.
             '--mcp-config', path.join(workspace, 'mcp.json'),
+            // The app's own skills (visuals in the chat, growing an open page,
+            // GenUI), wherever the drive is — never found by walking up from it.
+            '--plugin-dir', PLUGIN_DIR,
             '--append-system-prompt', instructionsFor('full', kind),
           ]
         : [
@@ -243,14 +320,16 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
         if (mode === 'bypassPermissions') args.push('--allow-dangerously-skip-permissions');
       }
       // No model or effort means the person's own settings.json — the terminal default.
-      if (model) args.push('--model', model);
-      if (effort) args.push('--effort', effort);
+      if (claudeModel(model)) args.push('--model', claudeModelArg(model, cliVersion));
+      if (claudeEffort(effort)) args.push('--effort', effort);
       if (resume) args.push('--resume', resume);
       // Without a key the CLI would fall back to the login, and bill the
       // subscription for a conversation someone chose to put on the API.
       if (api && !current.ANTHROPIC_API_KEY) {
-        throw new Error('ANTHROPIC_API_KEY is not set, so KIXLAB API cannot run — set it or choose Claude');
+        throw new Error('No Claude API key is set — add one in Agents settings, or switch Claude to your login');
       }
+      const onCredit = credit ? creditSettings(current) : null;
+      if (credit && !onCredit) throw new Error('This drive has no starter credit. Connect your Claude in Agents settings.');
       // A full turn speaks stream-json: the initialize handshake first (it is
       // what makes AskUserQuestion available and answers with the skills
       // list), then the prompt as a user message. stdin stays open for the
@@ -261,7 +340,16 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       return {
         command: 'claude',
         args,
-        env: api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {},
+        env: {
+          // A full agent runs the project's tests itself, and a whole suite
+          // outlasts the CLI's ten-minute ceiling on one command. Its default
+          // per command is unchanged.
+          ...(full ? { BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS) } : {}),
+          ...(api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {}),
+          // The drive's own token, never the owner's key: the proxy holds that.
+          ...(onCredit ? { ANTHROPIC_BASE_URL: onCredit.url, ANTHROPIC_API_KEY: onCredit.token } : {}),
+          ...(!api && !onCredit && current.CLAUDE_CODE_OAUTH_TOKEN ? { CLAUDE_CODE_OAUTH_TOKEN: current.CLAUDE_CODE_OAUTH_TOKEN } : {}),
+        },
         stdin,
         ...(full ? { stdinOpen: true } : {}),
         // A full agent works in its project. A documents agent keeps its empty
@@ -272,6 +360,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
     },
 
     parse: (line, state) => parseClaudeLine(line, state),
+
+    // The proxy said this drive's starter credit is spent.
+    ...(credit ? { creditUsedUp } : {}),
 
     // `--resume` with a session the CLI has deleted.
     lostSession: (error) => /no conversation found/i.test(String(error ?? '')),

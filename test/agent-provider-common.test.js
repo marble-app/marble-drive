@@ -7,7 +7,7 @@ import { runCommand } from '../server/agent/providers/exec.js';
 
 test('the instructions name every tool and the rules the tools enforce', () => {
   for (const { name } of TOOL_SCHEMAS) {
-    const text = name === 'check_document' ? instructionsFor('full') : INSTRUCTIONS;
+    const text = ['check_document', 'affordance_script'].includes(name) ? instructionsFor('full') : INSTRUCTIONS;
     assert.ok(text.includes(name), name);
   }
   assert.match(INSTRUCTIONS, /read before you edit/i);
@@ -16,16 +16,30 @@ test('the instructions name every tool and the rules the tools enforce', () => {
   assert.ok(INSTRUCTIONS.includes('"type":"setText"'));
 });
 
-test('a documents agent is told to insert a stub that matches the surrounding UI, then fill it', () => {
+test('a documents agent is told to insert a stub that matches the surrounding UI, then refine it in stages', () => {
   assert.match(INSTRUCTIONS, /insert a stub/i);
   assert.match(INSTRUCTIONS, /surrounding/i);
-  assert.match(INSTRUCTIONS, /fill it/i);
+  assert.match(INSTRUCTIONS, /in stages/i);
+  assert.match(INSTRUCTIONS, /three to six stages/i);
+  assert.match(INSTRUCTIONS, /whole, plainer version/i);
+});
+
+test('a stage keeps its ids, names itself in the note, and retires its filler', () => {
+  for (const text of [INSTRUCTIONS, instructionsFor('full')]) {
+    assert.match(text, /keeps the id from the stage that introduced it/i);
+    assert.match(text, /never remove an element to reinsert its finished form/i);
+    assert.match(text, /Stage 2 of 4/);
+    assert.match(text, /page itself never narrates/i);
+    assert.match(text, /filler/i);
+    assert.match(text, /read_guide "Growing the open page"/);
+  }
 });
 
 test('a full agent grows a document the person is viewing instead of Writing the finished subtree', () => {
   const full = instructionsFor('full');
   assert.match(full, /person is viewing/i);
   assert.match(full, /do not Write the finished/i);
+  assert.match(full, /in stages/i);
 });
 
 test('a probe reports what the command printed and how it exited', async () => {
@@ -80,4 +94,19 @@ test('a probe gets exactly the environment it is given', async () => {
     env: { PATH: process.env.PATH, MARBLE_PROBE: 'seen' },
   });
   assert.equal(result.stdout.trim(), 'seen');
+});
+
+test('an agent is told the file is the state and the markers need the document\'s own script', () => {
+  const full = instructionsFor('full');
+  assert.match(full, /The file is the app's state/);
+  assert.match(full, /window\.marble\.op/);
+  assert.match(full, /localStorage or a shadow root/);
+  assert.match(full, /host ships no affordances/);
+  assert.match(full, /affordance_script/);
+  assert.match(full, /create_document from a starter/);
+  // A documents agent cannot insert a whole affordance script under the op size
+  // limit, so it is pointed at what it can do: markers already wired, starters.
+  assert.match(INSTRUCTIONS, /host ships none/);
+  assert.match(INSTRUCTIONS, /start a new document from a starter/);
+  assert.match(INSTRUCTIONS, /window\.marble\.op/);
 });

@@ -48,6 +48,22 @@ async function visit(path = 'garden', options = {}) {
 
 const opened = (panel) => panel.locator('xpath=self::*[@data-open="true"]').waitFor();
 
+test('a document opened with #chat= arrives with that conversation open', async () => {
+  await host.reset();
+  const started = await fetch(`${host.base}/agent/conversations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: 'fake' }),
+  });
+  const { id } = await started.json();
+
+  const { page, panel, view } = await visit(`garden#chat=${id}`);
+  await opened(panel);
+  assert.equal(await view.getAttribute('conversation'), id);
+  // And it is remembered as this document's chat.
+  assert.equal(await page.evaluate(() => window.marble.agent.current()), id);
+});
+
 test('the drawer is on the page and not in the document', async () => {
   await host.reset();
   const { page, drawer, panel, errors } = await visit();
@@ -62,23 +78,43 @@ test('the drawer is on the page and not in the document', async () => {
   assert.deepEqual(errors, []);
 });
 
-test('⌘J and Ctrl+J toggle it, Escape closes it, and opening focuses the composer', async () => {
+test('⌘\\ and Ctrl+\\ open the shell with the chat in it, focused; Escape hands the keys back', async () => {
   const { page, panel, view } = await visit();
-  await page.keyboard.press('Meta+j');
+  await page.keyboard.press('Meta+\\');
   await opened(panel);
   await page.waitForFunction(() => {
     const view = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation');
     return view.shadowRoot.activeElement?.classList.contains('editor');
   });
+  // Inside the shell the chat is a panel, not a sheet: Escape leaves the box
+  // and the chat stays where it is.
   await view.locator('.editor').press('Escape');
+  await page.waitForFunction(() => document.activeElement === document.body);
+  assert.equal(await panel.getAttribute('data-open'), 'true');
+  await page.keyboard.press('Control+\\');
   await panel.locator('xpath=self::*[@data-open="false"]').waitFor();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await opened(panel);
-  await page.keyboard.press('Control+j');
-  await panel.locator('xpath=self::*[@data-open="false"]').waitFor();
 });
 
-test('a conversation from the drawer edits the page, and follows you to the next page', async () => {
+test('⌘J only asks: with nothing to ask about it opens the page\'s line, never the chat, and never moves the drive around the page', async () => {
+  const { page } = await visit();
+  const shellOpen = () => page.evaluate(() => document.querySelector('marble-shell')?.state?.open ?? null);
+  const before = await shellOpen();
+  await page.keyboard.press('Control+j');
+  // Nothing under the pointer or the caret: the line at the foot of the
+  // window, about the page (change-line.js). The chat is ⌘⇧J.
+  await page.locator('.marble-line[data-scope="page"]').waitFor();
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), false);
+  assert.equal(await shellOpen(), before, 'the shell stays as it was');
+  // Again: the line goes, and the chat stays shut.
+  await page.keyboard.press('Control+j');
+  await page.waitForFunction(() => !document.querySelector('.marble-line'));
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), false);
+  assert.equal(await shellOpen(), before);
+});
+
+test('a conversation from the drawer edits the page, and stays with that page', async () => {
   await host.reset();
   const { page, drawer, panel, view } = await visit();
   await drawer.locator('.launcher').click();
@@ -88,15 +124,29 @@ test('a conversation from the drawer edits the page, and follows you to the next
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await page.locator('h1', { hasText: 'Backlog' }).waitFor();
   await drawer.locator('.title-text', { hasText: 'script:rename' }).waitFor();
+  const gardenChat = await view.getAttribute('conversation');
 
+  // Another page: the panel is shut, and opening it starts a new chat there
+  // rather than carrying the garden's over.
   await page.goto(`${host.base}/a/reading`);
   const again = page.locator('marble-agent-drawer');
-  await again.locator('aside.panel[data-open="true"]').waitFor();
-  await again.locator('marble-conversation .turn-footer[data-status="completed"]').waitFor();
-  assert.equal(await again.locator('marble-conversation .msg.me').count(), 1);
+  await again.locator('.launcher').waitFor();
+  assert.equal(await again.locator('aside.panel').getAttribute('data-open'), 'false');
+  await again.locator('.launcher').click();
+  await opened(again.locator('aside.panel'));
+  assert.equal(await again.locator('marble-conversation').getAttribute('conversation'), null);
+  assert.equal(await again.locator('marble-conversation .msg.me').count(), 0);
+  assert.equal(await page.evaluate(() => window.marble.agent.current()), null);
+
+  // Back on the garden, its own chat is where it was left.
+  await page.goto(`${host.base}/a/garden`);
+  const home = page.locator('marble-agent-drawer');
+  await home.locator('aside.panel[data-open="true"]').waitFor();
+  assert.equal(await home.locator('marble-conversation').getAttribute('conversation'), gardenChat);
+  await home.locator('marble-conversation .turn-footer[data-status="completed"]').waitFor();
 });
 
-test('the header names the file being edited when you are looking at another page', async () => {
+test('the header names the file being edited when you bring a chat to another page', async () => {
   await host.reset();
   const { page, drawer, panel, view } = await visit();
   await drawer.locator('.launcher').click();
@@ -105,9 +155,13 @@ test('the header names the file being edited when you are looking at another pag
   await view.locator('.editor').fill('script:hold');
   await view.locator('.editor').press('Enter');
   await view.locator('button.stop').waitFor({ state: 'visible' });
+  const gardenChat = await view.getAttribute('conversation');
 
+  // Only by asking for it — the recent menu, or a link that hands it over.
   await page.goto(`${host.base}/a/reading`);
   const again = page.locator('marble-agent-drawer');
+  await again.locator('.launcher').waitFor();
+  await page.evaluate((id) => window.marble.agent.open(id), gardenChat);
   await again.locator('.where').waitFor({ state: 'visible' });
   assert.match(await again.locator('.where').textContent(), /Viewing reading · editing garden/);
   await again.locator('marble-conversation button.stop').click();
@@ -122,6 +176,8 @@ test('overlay leaves the page’s layout alone; pinning docks it, and it stays t
   await drawer.locator('.launcher').click();
   await opened(panel);
   assert.equal(await page.evaluate(() => document.documentElement.clientWidth), widthBefore, 'overlay does not reflow');
+  // It says what it covers, so the page's own menus can open clear of it.
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--marble-chat-cover').trim()), '420px');
 
   await drawer.locator('button.pin').click();
   await panel.locator('xpath=self::*[@data-pinned="true"]').waitFor();
@@ -367,6 +423,20 @@ test('the drawer panel wears the document’s paper', async () => {
   assert.ok(r != null, `panel background should be a color, got ${bg}`);
   assert.ok(r < 50 && g > 40 && g < 80 && b < 60, `panel should be forest green, got ${bg}`);
   assert.ok(!(r > 200 && g > 200 && b > 200), 'panel must not stay Drive cream');
+});
+
+test('… but not the document’s face', async () => {
+  const { drawer, panel, view } = await visit('forest');
+  await drawer.locator('.launcher').click();
+  await opened(panel);
+  // Forest is set in Georgia. The chrome is not the document: it keeps the
+  // design system's UI stack so a log, a composer and a row of buttons read
+  // the same on every page they are opened over.
+  for (const el of [panel, view.locator('.editor'), view.locator('.log')]) {
+    const family = await el.evaluate((node) => getComputedStyle(node).fontFamily);
+    assert.ok(!/georgia/i.test(family), `chrome should not wear the page face, got ${family}`);
+    assert.match(family, /Google Sans/);
+  }
 });
 
 test('a document that draws its own agent interface gets no drawer', async () => {

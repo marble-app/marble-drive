@@ -11,20 +11,24 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
+// The name a key is saved under, and the variable its CLI reads. Codex's is
+// CODEX_API_KEY: `codex exec` ignores OPENAI_API_KEY. `claude` is not an API
+// key but the long-lived token `claude setup-token` gives for the person's
+// own Claude plan (server/agent/claude-signin.js); the Claude login provider
+// runs on it when it is set.
 const FIELDS = {
   anthropic: 'ANTHROPIC_API_KEY',
+  claude: 'CLAUDE_CODE_OAUTH_TOKEN',
   cursor: 'CURSOR_API_KEY',
+  openai: 'CODEX_API_KEY',
 };
 
-const empty = () => ({ anthropic: undefined, cursor: undefined });
+const empty = () => Object.fromEntries(Object.keys(FIELDS).map((name) => [name, undefined]));
 
 const readFile = (file) => {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return {
-      anthropic: typeof parsed.anthropic === 'string' ? parsed.anthropic : undefined,
-      cursor: typeof parsed.cursor === 'string' ? parsed.cursor : undefined,
-    };
+    return Object.fromEntries(Object.keys(FIELDS).map((name) => [name, typeof parsed[name] === 'string' ? parsed[name] : undefined]));
   } catch (err) {
     if (err.code === 'ENOENT') return empty();
     throw err;
@@ -50,7 +54,7 @@ export function createKeyStore({ file }) {
     cache = next;
     await fsp.mkdir(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-    const body = `${JSON.stringify({ anthropic: next.anthropic, cursor: next.cursor }, null, 2)}\n`;
+    const body = `${JSON.stringify(Object.fromEntries(Object.keys(FIELDS).map((name) => [name, next[name]])), null, 2)}\n`;
     await fsp.writeFile(tmp, body, { mode: 0o600 });
     await fsp.rename(tmp, file);
     await fsp.chmod(file, 0o600);
@@ -58,7 +62,7 @@ export function createKeyStore({ file }) {
 
   const flags = async () => {
     const data = current();
-    return { anthropic: Boolean(data.anthropic), cursor: Boolean(data.cursor) };
+    return Object.fromEntries(Object.keys(FIELDS).map((name) => [name, Boolean(data[name])]));
   };
 
   const asEnv = () => {
@@ -70,5 +74,9 @@ export function createKeyStore({ file }) {
     return env;
   };
 
-  return { write, flags, asEnv, file };
+  /** One key's value, for the host's own calls (server/agent/voice): never
+   *  sent to a page, never logged, never put in argv. */
+  const value = (name) => (Object.hasOwn(FIELDS, name) ? current()[name] ?? null : null);
+
+  return { write, flags, asEnv, value, file };
 }

@@ -29,7 +29,9 @@
         body: body ? JSON.stringify(body) : undefined,
       });
       const answer = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(answer.error ?? `${route} answered ${response.status}`);
+      // The status rides on the error: a caller can tell "not possible" (409)
+      // from "the host failed".
+      if (!response.ok) throw Object.assign(new Error(answer.error ?? `${route} answered ${response.status}`), { status: response.status });
       return answer;
     };
 
@@ -131,6 +133,15 @@
       notify();
     });
 
+    // One brief for the next send, and only that one: a card hands it over
+    // just before it sends, and a send that never comes lets it lapse.
+    let pendingBrief = null;
+    const takeBrief = () => {
+      const held = pendingBrief;
+      pendingBrief = null;
+      return held && Date.now() - held.at < 15_000 ? held.text : null;
+    };
+
     const context = () => ({
       viewing: marble.app,
       target: aimed ?? marble.app,
@@ -147,7 +158,10 @@
     let suspended = false;
 
     const openStream = (key, entry) => {
-      const url = key === '*' ? '/agent/events?all=1' : `/agent/events?conversation=${enc(key)}`;
+      // `after` is where a reader that already holds the history wants the
+      // stream to begin; a reconnect goes on from Last-Event-ID either way.
+      const url = key === '*' ? '/agent/events?all=1'
+        : `/agent/events?conversation=${enc(key)}${entry.after ? `&after=${entry.after}` : ''}`;
       const source = new EventSource(url);
       const current = entry;
       const deliver = (message) => {
@@ -158,9 +172,19 @@
           return;
         }
         if (current.history) current.history.push(data);
+        // A page back from the background opens a new EventSource, which has
+        // no Last-Event-ID: it goes on from here rather than from the top.
+        if (key !== '*' && data?.seq > current.after) current.after = data.seq;
         for (const handler of [...current.handlers]) handler(data);
       };
       if (key === '*') {
+        // Open again after it was away (a resting tab, a host restart, a page
+        // back from the background): whatever was said meanwhile reached
+        // nobody here, so the page is told to look again.
+        source.addEventListener('open', () => {
+          if (current.opened) dispatchEvent(new CustomEvent('marble:agent-reopened'));
+          current.opened = true;
+        });
         source.addEventListener('summary', deliver);
         source.addEventListener('folders', deliver);
         // An ask opening or closing anywhere, for a list that would
@@ -180,10 +204,13 @@
       entry.source = source;
     };
 
-    function on(key, fn) {
+    /** `after`: the last seq this reader already has. A stream it opens
+     *  starts there instead of replaying the whole conversation; one already
+     *  open hands over what it holds, and the reader skips what it has. */
+    function on(key, fn, { after = 0 } = {}) {
       let entry = streams.get(key);
       if (!entry) {
-        entry = { source: null, handlers: new Set(), history: key === '*' ? null : [] };
+        entry = { source: null, handlers: new Set(), history: key === '*' ? null : [], after: Number(after) || 0 };
         if (!suspended) openStream(key, entry);
         streams.set(key, entry);
       }
@@ -236,18 +263,50 @@
       },
     };
 
+    const ATTENDING = 'marble-attending';
+    const attendingIds = () => {
+      try { return new Set(JSON.parse(sessionStorage.getItem(ATTENDING) || '[]')); } catch { return new Set(); }
+    };
+
     const agent = {
       providers: () => ask('/agent/providers'),
       settings: () => ask('/agent/settings'),
       saveSettings: (patch) => ask('/agent/settings', { method: 'PUT', body: patch }),
+      // Can this drive run an agent: Claude or Codex, signed in or on a key.
+      // And a key itself, checked with Anthropic or OpenAI before it is kept.
+      setup: () => ask('/agent/setup'),
+      // Not now on the first-visit popup, kept for the drive.
+      setupLater: () => ask('/agent/setup/later', { method: 'POST' }),
+      connectClaude: (key) => ask('/agent/setup', { method: 'POST', body: { key } }),
+      connectAgent: (provider, key) => ask('/agent/setup', { method: 'POST', body: { provider, key } }),
+      // Connect your Claude: the host runs `claude setup-token` and answers
+      // its sign-in address; the code Claude's page shows goes back to it.
+      claudeSignIn: () => ask('/agent/claude/sign-in', { method: 'POST' }),
+      claudeSignInCode: (code) => ask('/agent/claude/sign-in/code', { method: 'POST', body: { code } }),
+      claudeSignInCancel: () => ask('/agent/claude/sign-in', { method: 'DELETE' }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
+      // Starter credit: whose, how much is used. `fresh` asks the proxy now.
+      credit: ({ fresh = false } = {}) => ask(fresh ? '/agent/credit?fresh=1' : '/agent/credit'),
+      // Whether this drive can hear and speak, and how it was set to.
+      voice: () => ask('/agent/voice'),
+      // An OpenAI key for voice, checked with OpenAI before it is kept.
+      voiceKey: (key) => ask('/agent/voice/key', { method: 'POST', body: { key } }),
       asks: () => ask('/agent/asks'),
       usageHistory: (weeks) => ask(weeks ? `/agent/usage/history?weeks=${enc(weeks)}` : '/agent/usage/history'),
       workspace: () => ask('/agent/workspace'),
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),
-      conversation: (id) => ask(`/agent/conversations/${enc(id)}`),
+      /** Every chat's turns since a time (ms), archived ones' too: `{ turns, now }`. */
+      turnsSince: (since, { paths = false } = {}) => ask(`/agent/turns?since=${enc(since)}${paths ? '&paths=1' : ''}`),
+      // `turns`: only the last few turns (or the few `before` a turn id), for
+      // a reader that draws the end of a long chat first. Without it, all.
+      // `after`: only events past that seq, for a reader holding the rest.
+      conversation: (id, { turns = null, before = null, after = null } = {}) => ask(`/agent/conversations/${enc(id)}${
+        turns !== null ? `?turns=${enc(turns)}${before ? `&before=${enc(before)}` : ''}`
+          : after !== null ? `?after=${enc(after)}` : ''}`),
       update: (id, patch) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: patch }),
+      failover: (id) => ask(`/agent/conversations/${enc(id)}/failover`, { method: 'POST' }),
+      leaveUsage: (id, turn) => ask(`/agent/conversations/${enc(id)}/usage-left`, { method: 'POST', body: { turn } }),
       // A chat with nothing in it, taken off the disk instead of filed.
       // The host refuses it for anything that has been used, so a caller
       // that guesses wrong gets an error rather than a hole.
@@ -263,18 +322,19 @@
       addProject: (body) => ask('/agent/projects', { method: 'POST', body }),
       removeProject: (id) => ask(`/agent/projects/${enc(id)}`, { method: 'DELETE' }),
 
-      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = null } = {}) {
+      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = null, failover = null } = {}) {
         const body = { provider };
         if (model) body.model = model;
         if (effort) body.effort = effort;
         if (mode) body.mode = mode;
         if (handoffFrom) body.handoffFrom = handoffFrom;
         if (project) body.project = project;
+        if (failover === 'auto' || failover === 'pause') body.failover = failover;
         return (await ask('/agent/conversations', { method: 'POST', body })).id;
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
 
-      send(id, { prompt, target, viewing, selection, also, dispatch } = {}) {
+      send(id, { prompt, target, viewing, selection, also, dispatch, surface, brief, spoken } = {}) {
         const here = context();
         const body = {
           prompt,
@@ -285,8 +345,36 @@
             also: also ?? here.also,
           },
         };
+        // A brief the page adds without showing it: handed over for the next
+        // send (agent.brief), or passed here. The agent reads it; the chat
+        // shows only the prompt.
+        const hidden = brief ?? takeBrief();
+        if (hidden) body.context.brief = hidden;
         if (dispatch) body.dispatch = dispatch;
+        // Where it was typed, when that is an app for talking rather than a
+        // document being worked on. Only `chat` is understood.
+        if (surface) body.context.surface = surface;
+        // Said aloud (runtime/voice.js): the agent is asked for a reply that
+        // sounds right spoken, and the chat marks the prompt "Said aloud".
+        if (spoken === true) body.context.spoken = true;
+        // Sending is attending: whatever this tab just asked of an agent is
+        // what this tab is following, and may draw its work on the page.
+        agent.attend(id);
+        dispatchEvent(new CustomEvent('marble:agent-sent', { detail: { id } }));
         return ask(`/agent/conversations/${enc(id)}/turns`, { method: 'POST', body });
+      },
+
+      // The chats this tab is following: sent to here, or opened to follow.
+      // The page draws a working agent's zone only for these; the rest show
+      // as a glint (agent-glints.js). A tab's business, so session storage.
+      attending: (id) => attendingIds().has(id),
+      attend(id) {
+        if (!id) return;
+        const ids = attendingIds();
+        if (ids.has(id)) return;
+        ids.add(id);
+        try { sessionStorage.setItem(ATTENDING, JSON.stringify([...ids].slice(-50))); } catch { /* private mode */ }
+        dispatchEvent(new CustomEvent('marble:attending', { detail: { id } }));
       },
 
       patchTurn: (turnId, patch) => ask(`/agent/turns/${enc(turnId)}`, { method: 'PATCH', body: patch }),
@@ -294,6 +382,11 @@
       cancel: (turnId) => ask(`/agent/turns/${enc(turnId)}/cancel`, { method: 'POST' }),
       answer: (turnId, requestId, response) => ask(`/agent/turns/${enc(turnId)}/answer`, { method: 'POST', body: { requestId, response } }),
       undo: (turnId) => ask(`/agent/turns/${enc(turnId)}/undo`, { method: 'POST' }),
+      redo: (turnId) => ask(`/agent/turns/${enc(turnId)}/redo`, { method: 'POST' }),
+      keep: (turnId) => ask(`/agent/turns/${enc(turnId)}/keep`, { method: 'POST' }),
+      // What a document's agent turns still have to show: each one's parts
+      // still worth a Keep, Undo or Redo, newest first.
+      review: (docPath) => ask(`/agent/review?path=${enc(docPath)}`),
       dequeue: (turnId) => ask(`/agent/turns/${enc(turnId)}`, { method: 'DELETE' }),
       archive: (id, archived = true) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: { archived } }),
       markReviewed: (id) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: { reviewed: true } }),
@@ -310,6 +403,11 @@
       resume,
       streamsOpen,
       context,
+      /** Add `text` to the next send's prompt without showing it in the chat. */
+      brief(text) {
+        const said = String(text ?? '').trim();
+        pendingBrief = said ? { text: said, at: Date.now() } : null;
+      },
       select(ids) {
         chosen = Array.isArray(ids) && ids.length ? [...ids] : null;
         notify();
@@ -320,8 +418,15 @@
         notify();
       },
 
-      current: () => storage.get(KEY),
-      remember: (id) => storage.set(KEY, id ?? null),
+      // The conversation is this document's, not the tab's. A chat opened
+      // beside one page is about that page; carried to the next one it would
+      // quietly start talking about somewhere else. So each document keeps its
+      // own, a page that has none opens a new one, and moving a chat to
+      // another page is something the person does from the menu, never the
+      // drawer on its own.
+      current: () => storage.get(agent.here(KEY)),
+      remember: (id) => storage.set(agent.here(KEY), id ?? null),
+      here: (key) => `${key}:${marble.app ?? location.pathname}`,
       storage,
 
       open: (id = null) => dispatchEvent(new CustomEvent('marble:agent-open', { detail: { id } })),

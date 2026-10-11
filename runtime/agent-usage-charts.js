@@ -258,6 +258,12 @@
     .uh-skel i { width: 12px; height: 12px; border-radius: 3px; background: var(--paper-3); animation: uh-pulse 1.4s ease-in-out infinite; }
     @keyframes uh-pulse { 50% { opacity: .5; } }
     .uh-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    /* Under a finger every control is a 44pt box. The bars and the day cells
+       are marks, not controls: a tap on one shows its tip (render, below). */
+    @media (hover: none) {
+      .uh button.uh-toggle, .uh-metric button, .uh-view button, .uh-chip { min-height: 2.75rem; padding-inline: .85rem; font-size: 13px; }
+      .uh-chips { gap: 6px; }
+    }
     @media (max-width: 560px) {
       .uh-bar-total { display: none; }
       .uh-x:nth-child(even) { visibility: hidden; }
@@ -360,17 +366,41 @@
       tip.style.left = `${Math.round(left)}px`;
       tip.style.top = `${Math.round(top)}px`;
     };
+    // A finger has no hover: it lands, lifts, and the pointer leaves with it,
+    // so a tip that follows the pointer flashed for a frame and was gone, and
+    // on an iPhone (where a tapped button takes no focus) a day's numbers
+    // could not be read at all. A tap shows a day's tip and leaves it up; a
+    // tap on it again, or anywhere else in the charts, puts it away.
+    let tapped = null;
     root.addEventListener('pointerover', (event) => {
+      if (event.pointerType === 'touch') return;
       const el = event.target.closest?.('[data-tip]');
       if (el) showTip(el);
       else tip.hidden = true;
     });
-    root.addEventListener('pointerleave', () => { tip.hidden = true; });
+    root.addEventListener('pointerleave', (event) => {
+      if (event.pointerType === 'touch') return;
+      tip.hidden = true;
+    });
+    root.addEventListener('pointerup', (event) => {
+      if (event.pointerType !== 'touch') return;
+      const el = event.target.closest?.('[data-tip]');
+      if (el && el !== tapped) {
+        tapped = el;
+        showTip(el);
+      } else {
+        tapped = null;
+        tip.hidden = true;
+      }
+    });
     root.addEventListener('focusin', (event) => {
       const el = event.target.closest?.('[data-tip]');
       if (el) showTip(el);
     });
-    root.addEventListener('focusout', () => { tip.hidden = true; });
+    root.addEventListener('focusout', () => {
+      if (tapped) return;
+      tip.hidden = true;
+    });
 
     // ---- activity heatmap
     const heatSection = mk('section');

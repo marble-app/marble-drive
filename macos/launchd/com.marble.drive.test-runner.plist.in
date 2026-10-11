@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Rendered into ~/Library/LaunchAgents by macos/launchd/test-runner.sh; the
+     placeholders are absolute paths this machine's copy needs. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>@LABEL@</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@NODE@</string>
+    <string>@REPO@/tools/test-runner.mjs</string>
+    <string>@SPRITE@</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@REPO@</string>
+
+  <!-- Always running, and started again if it stops: it watches the sprite's
+       state through the Sprites API, which wakes nothing, and looks inside
+       only while the sprite is awake. -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>@HOME@/Library/Logs/marble-drive/test-runner.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/Library/Logs/marble-drive/test-runner.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <!-- npm and the tests' own node: this machine's, under nvm. -->
+    <key>PATH</key>
+    <string>@NODEDIR@:@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

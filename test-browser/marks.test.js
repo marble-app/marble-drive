@@ -1,38 +1,25 @@
+// Describe mode: the toolbar of tools for saying what you want about a
+// document, the frame that wraps what you meant, and the card on it. What it
+// has to get right is that everything still ends where a text selection ends —
+// one selection, one callout, one conversation.
 import assert from 'node:assert/strict';
-import fsp from 'node:fs/promises';
-import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 import { GARDEN, startDrive } from './harness.js';
 
-const AGENTS_TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'agents.mrbl');
-const AGENTS = (await fsp.readFile(AGENTS_TEMPLATE, 'utf8'))
-  .replaceAll('__TITLE__', 'Agents')
-  .replaceAll('__ID__', () => Math.random().toString(36).slice(2, 10))
-  .replace('__ICON__', '');
-
-// A page taller than the window, with a row below the fold and a banner that
-// does not move when the page does. The garden fixture is five elements in
-// one screen and can say nothing about either.
-const TALL = `<!doctype html>
-<html><head><meta charset="utf-8"><title>Tall</title>
-<style>
-  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; }
-  .banner { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #eee; }
-  .gap { height: 1000px; }
-  .row { height: 120px; background: #f6f6f6; }
-  .tail { height: 1500px; }
-</style></head>
+// A page that carries its own conversation chrome mounts no drawer, so there
+// is no tray — and Describe mode is only reachable from one.
+const CUSTOM = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Custom</title>
+<meta name="marble-agent" content="custom">
+<style>body { font: 16px/1.5 Georgia, serif; margin: 40px; }</style>
+</head>
 <body data-marble-id="b">
-  <div class="banner" data-marble-id="banner">Pinned to the window</div>
-  <div class="gap" data-marble-id="gap"></div>
-  <div class="row" data-marble-id="r1">Below the fold until you scroll</div>
-  <div class="tail" data-marble-id="tail"></div>
+  <p data-marble-id="p">A paragraph an agent is on.</p>
 </body></html>
 `;
 
-const host = await startDrive({ documents: { garden: GARDEN, Agents: AGENTS, tall: TALL } });
+const host = await startDrive({ documents: { garden: GARDEN, custom: CUSTOM } });
 test.after(() => host.close());
 
 const pages = [];
@@ -41,403 +28,423 @@ const closePages = async () => {
 };
 test.after(closePages);
 
-const open = async (doc = 'garden', { width = 1200, height = 800, reducedMotion = null } = {}) => {
+// A reset drive keeps its conversations, and the callout rebuilds a card for
+// every unreviewed chat about the document — so one test's brief would hang
+// over the next test's page. Stop and file them between tests.
+const clearConversations = async () => {
+  const list = await (await fetch(`${host.base}/agent/conversations`)).json();
+  for (const summary of list) {
+    if (summary.status === 'running' || summary.queued) {
+      const detail = await (await fetch(`${host.base}/agent/conversations/${summary.id}`)).json();
+      for (const turn of detail.turns ?? []) {
+        if (turn.status === 'running') await fetch(`${host.base}/agent/turns/${turn.id}/cancel`, { method: 'POST' });
+        if (turn.status === 'queued') await fetch(`${host.base}/agent/turns/${turn.id}`, { method: 'DELETE' });
+      }
+    }
+    await fetch(`${host.base}/agent/conversations/${summary.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ archived: true }),
+    });
+  }
+};
+
+const open = async (doc = 'garden', { width = 1200, height = 800 } = {}) => {
   await closePages();
+  await clearConversations();
   await host.reset();
   const { page } = await host.newPage();
   pages.push(page);
   await page.setViewportSize({ width, height });
-  if (reducedMotion) await page.emulateMedia({ reducedMotion });
   await page.goto(`${host.base}/a/${doc}`);
   await page.waitForFunction(() => Boolean(window.marble?.agent));
   return page;
 };
 
+const launcher = (page) => page.locator('marble-agent-drawer .launcher');
+const trayTool = (page, id) => page.locator(`marble-agent-drawer .tool[data-tool="${id}"]`);
+const layer = (page) => page.locator('.marble-marks-layer');
 const bar = (page) => page.locator('.marble-marks-bar');
-const main = (page) => page.locator('.marble-marks-main');
-const barBox = (page) => page.evaluate(() => {
-  const r = document.querySelector('.marble-marks-bar').getBoundingClientRect();
-  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
-});
-const launcherBox = (page) => page.evaluate(() => {
-  const r = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher').getBoundingClientRect();
-  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
-});
-// The toolbar takes its horizontal inset from the launcher it stacks on, not
-// from its own PAD: the launcher's inset carries `env(safe-area-inset-right)`
-// and the toolbar's would not, so two round buttons 6px out of true on a
-// desktop are a whole notch apart on a phone in landscape. Above it, centred
-// on it, one column.
-const stackedOnLauncher = (box, launcher) => {
-  const drift = Math.abs((box.left + box.width / 2) - (launcher.left + launcher.width / 2));
-  assert.ok(drift <= 1, `toolbar centre is ${drift}px off the launcher's`);
-  assert.ok(Math.abs(box.bottom - (launcher.top - 12)) <= 1, `bottom edge at ${box.bottom}, launcher top at ${launcher.top}`);
+const tool = (page, id) => page.locator(`.marble-marks-tool[data-tool="${id}"]`);
+const frame = (page) => page.locator('.marble-marks-frame');
+// The composer on the marks is the ⌘J line, lent: the same component as every
+// other ask on the page, never a second one of the mode's own. What the marks
+// say is its placeholder.
+const field = (page) => page.locator('.marble-line:not([data-state="sent"]):not([data-leaving])');
+const words = (page) => page.locator('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input');
+const briefOf = (page) => page.evaluate(() => document.querySelector('.marble-line-input')?.dataset.placeholder ?? '');
+const selection = (page) => page.evaluate(() => window.marble.agent.context().selection);
+const boxOf = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox();
+
+const describe = async (page) => {
+  await launcher(page).hover();
+  await trayTool(page, 'marks-describe').click();
+  await bar(page).waitFor();
 };
+const use = async (page, name) => {
+  await tool(page, name).click();
+  await page.locator(`.marble-marks-layer[data-mode="${name}"]`).waitFor();
+};
+const stroke = async (page, points) => {
+  await page.mouse.move(points[0].x, points[0].y);
+  await page.mouse.down();
+  for (const point of points.slice(1)) await page.mouse.move(point.x, point.y, { steps: 4 });
+  await page.mouse.up();
+};
+// A brief handed over by the field waits for the card to find out which agents
+// exist before it can send, so the turn lands a beat after the click.
+const knownChats = (page) => page.evaluate(async () => (await window.marble.agent.conversations()).map((c) => c.id));
+// The host keeps its conversations across a reset, so a turn is only this
+// test's if the chat holding it was not there before the click.
+const newTurn = async (page, known = []) => {
+  for (let i = 0; i < 60; i += 1) {
+    const turn = await page.evaluate(async (before) => {
+      const fresh = (await window.marble.agent.conversations()).filter((c) => !before.includes(c.id));
+      for (const summary of fresh) {
+        const detail = await window.marble.agent.conversation(summary.id);
+        if (detail?.turns?.length) return detail.turns[0];
+      }
+      return null;
+    }, known);
+    if (turn) return turn;
+    await page.waitForTimeout(250);
+  }
+  throw new Error('no turn ever arrived');
+};
+const boxAround = (box, pad = 8) => [
+  { x: box.x - pad, y: box.y - pad },
+  { x: box.x + box.width + pad, y: box.y - pad },
+  { x: box.x + box.width + pad, y: box.y + box.height + pad },
+  { x: box.x - pad, y: box.y + box.height + pad },
+  { x: box.x - pad, y: box.y - pad + 2 },
+];
 
-test('every document gets the toolbar in the bottom-right corner above the drawer\'s launcher; the Agents page does not', async () => {
+test('the tray holds one entry, and a page with no tray has no layer at all', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  stackedOnLauncher(await barBox(page), await launcherBox(page));
-  assert.equal(await page.evaluate(() => document.querySelector('.marble-marks-layer').hasAttribute('data-marble-transient')), true);
-  assert.equal(await main(page).getAttribute('aria-expanded'), 'false');
+  await layer(page).waitFor({ state: 'attached' });
+  await launcher(page).hover();
+  await trayTool(page, 'marks-describe').waitFor({ state: 'visible' });
+  assert.equal(await trayTool(page, 'marks-describe').getAttribute('aria-label'), 'Describe a change');
+  assert.equal(await trayTool(page, 'marks-select').count(), 0, 'the modal tools are not in two homes');
+  assert.equal(await bar(page).isVisible(), false, 'no toolbar until you ask for one');
 
-  const agents = await open('Agents');
-  await agents.waitForTimeout(300);
-  assert.equal(await agents.locator('.marble-marks-layer').count(), 0, 'no toolbar on the page made of agents');
+  const custom = await open('custom');
+  await custom.waitForTimeout(300);
+  assert.equal(await layer(custom).count(), 0, 'no tray, so the layer stands down rather than draw its own affordance');
 });
 
-test('the toolbar leaves the drawer’s launcher reachable in the same corner', async () => {
+test('Describe opens the toolbar on the picker; Escape drops the tool, then the mode', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  const [barRect, launcherRect] = await page.evaluate(() => {
-    const l = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher');
-    const r = (el) => { const b = el.getBoundingClientRect(); return { left: b.left, top: b.top, right: b.right, bottom: b.bottom }; };
-    return [r(document.querySelector('.marble-marks-bar')), r(l)];
-  });
-  const overlaps = barRect.left < launcherRect.right && barRect.right > launcherRect.left
-    && barRect.top < launcherRect.bottom && barRect.bottom > launcherRect.top;
-  assert.equal(overlaps, false, `toolbar ${JSON.stringify(barRect)} covers launcher ${JSON.stringify(launcherRect)}`);
-  // And the launcher is what a click in its middle actually reaches.
-  const hit = await page.evaluate(() => {
-    const l = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher');
-    const b = l.getBoundingClientRect();
-    const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-    return top?.tagName?.toLowerCase() ?? null;
-  });
-  assert.equal(hit, 'marble-agent-drawer');
+  await describe(page);
+  await page.locator('.marble-marks-layer[data-mode="select"]').waitFor();
+  assert.equal(await tool(page, 'select').getAttribute('aria-pressed'), 'true');
+  for (const id of ['sketch', 'text', 'explore', 'done']) {
+    assert.equal(await tool(page, id).isVisible(), true, id);
+  }
+  assert.equal(await tool(page, 'explore').isDisabled(), true, 'nothing selected to explore yet');
+
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+  assert.equal(await bar(page).isVisible(), true, 'the toolbar is still there; only the tool went');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-layer').hasAttribute('data-describing'));
+
+  // And Done is the same door.
+  await describe(page);
+  await tool(page, 'done').click();
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-layer').hasAttribute('data-describing'));
 });
 
-test('the toolbar steps aside while the drawer is open, and comes back when it closes', async () => {
+test('leaving the mode takes the marks off the page and brings them back, keeping every one', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  const drawer = page.locator('marble-agent-drawer');
-  await drawer.locator('.launcher').click();
-  await page.locator('marble-agent-drawer aside.panel[data-open="true"]').waitFor();
-  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').hidden);
-  await drawer.locator('button.close').click();
-  await page.waitForFunction(() => !document.querySelector('.marble-marks-bar').hidden);
-});
+  await describe(page);
+  await use(page, 'sketch');
+  const q = await boxOf(page, 'q');
+  await stroke(page, boxAround(q));
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-stroke').length === 1);
+  await use(page, 'text');
+  const p = await boxOf(page, 'p');
+  await page.mouse.click(p.x + 40, p.y + 4);
+  await page.locator('.marble-marks-note-body').waitFor();
+  await page.keyboard.type('shorter');
+  await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder.includes('a note on p'));
 
-test('a resize while the drawer is open does not strand the toolbar when it reappears', async () => {
-  const page = await open();
-  await bar(page).waitFor();
-  const drawer = page.locator('marble-agent-drawer');
-  await drawer.locator('.launcher').click();
-  await page.locator('marble-agent-drawer aside.panel[data-open="true"]').waitFor();
-  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').hidden);
-  // The bar is display:none here, so its offsetWidth/offsetHeight are 0.
-  // restingPoint() must not use them, or this resize computes a degenerate
-  // rest point nothing ever corrects afterwards.
-  await page.setViewportSize({ width: 1000, height: 700 });
-  await drawer.locator('button.close').click();
-  await page.waitForFunction(() => !document.querySelector('.marble-marks-bar').hidden);
-  stackedOnLauncher(await barBox(page), await launcherBox(page));
-});
-
-test('pinning the drawer moves the toolbar in with the page edge', async () => {
-  const page = await open();
-  await bar(page).waitFor();
-  const drawer = page.locator('marble-agent-drawer');
-  await drawer.locator('.launcher').click();
-  await page.locator('marble-agent-drawer aside.panel[data-open="true"]').waitFor();
-  await drawer.locator('button.pin').click();
-  await page.locator('marble-agent-drawer aside.panel[data-pinned="true"]').waitFor();
-  await page.waitForFunction(() => document.documentElement.getBoundingClientRect().right < innerWidth - 300);
-  await page.waitForFunction(() => {
-    const edge = document.documentElement.getBoundingClientRect().right;
-    const r = document.querySelector('.marble-marks-bar').getBoundingClientRect();
-    return Math.abs(r.right - (edge - 16)) <= 1;
-  });
-});
-
-const strip = (page) => page.locator('.marble-marks-strip');
-const tool = (page, name) => page.locator(`.marble-marks-tool[data-tool="${name}"]`);
-
-test('the button opens a strip holding Select, out of its own corner, and closes it again', async () => {
-  const page = await open();
-  await bar(page).waitFor();
-  assert.equal(await strip(page).isHidden(), true);
-  await main(page).click();
-  await strip(page).waitFor();
-  assert.equal(await main(page).getAttribute('aria-expanded'), 'true');
-  await tool(page, 'select').waitFor();
-  assert.equal(await tool(page, 'select').getAttribute('aria-pressed'), 'false');
-  assert.equal(await tool(page, 'select').getAttribute('data-label'), 'Select');
-  // The strip hangs above the button and shares its right edge.
-  const [b, s] = await page.evaluate(() => {
-    const r = (sel) => document.querySelector(sel).getBoundingClientRect();
-    return [r('.marble-marks-main'), r('.marble-marks-strip')];
-  });
-  assert.ok(s.bottom < b.top, 'strip sits above the button');
-  assert.ok(Math.abs(s.right - b.right) <= 1, 'strip shares the button\'s right edge');
-  assert.equal(await strip(page).evaluate((el) => {
-    const [x, y] = getComputedStyle(el).transformOrigin.split(' ').map(parseFloat);
-    return Math.round(x) === el.offsetWidth && Math.round(y) === el.offsetHeight;
-  }), true, 'grows from the bottom right');
-  await main(page).click();
-  await page.waitForFunction(() => document.querySelector('.marble-marks-strip').hidden);
-  assert.equal(await main(page).getAttribute('aria-expanded'), 'false');
-});
-
-test('under reduced motion the strip cross-fades in rather than blinking', async () => {
-  const page = await open('garden', { reducedMotion: 'reduce' });
-  await bar(page).waitFor();
-  await main(page).click();
-  // §5.7: every spring and slide becomes a cross-fade. Nothing about the
-  // strip may move — but it still arrives, and `transition: none` would take
-  // the fade away with the scale and leave a blink. Read while it is still
-  // running, before the 300ms is up.
-  const props = await strip(page).evaluate((el) => el.getAnimations()
+  // Out: a fade, not a blink, and nothing thrown away.
+  await tool(page, 'done').click();
+  const fading = await layer(page).evaluate((el) => el.getAnimations()
     .flatMap((a) => a.effect.getKeyframes())
     .flatMap((frame) => Object.keys(frame).filter((key) => !['offset', 'computedOffset', 'easing', 'composite'].includes(key))));
-  assert.ok(props.includes('opacity'), `the fade is running, got ${props.join(', ') || 'nothing at all'}`);
-  assert.ok(!props.includes('transform') && !props.includes('filter'), `nothing moves, got ${props.join(', ')}`);
-  await strip(page).waitFor();
-  const settled = await strip(page).evaluate((el) => {
-    const style = getComputedStyle(el);
-    return { transform: style.transform, filter: style.filter, transition: style.transitionProperty };
+  assert.ok(fading.includes('opacity'), `the layer fades out, got ${fading.join(', ') || 'nothing'}`);
+
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.marble-marks-layer')).visibility === 'hidden');
+  assert.equal(await page.locator('.marble-marks-stroke').count(), 1, 'the ink is still there, only out of sight');
+  assert.equal(await page.locator('.marble-marks-note').count(), 1);
+  // And out of reach while it is out of sight: no caret, no tab stop.
+  assert.equal(await page.locator('.marble-marks-note-body').isVisible(), false);
+  assert.equal(await field(page).isVisible(), false);
+  assert.equal(await bar(page).isVisible(), false);
+  // Including the one piece of it that lives in another layer: the callout's
+  // handle, which would otherwise hang at a selection nobody can see.
+  assert.deepEqual(await selection(page), []);
+  assert.equal(await page.locator('.marble-callout-handle:not([hidden])').count(), 0);
+
+  // The way back says the work is still in hand.
+  await launcher(page).hover();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot
+    .querySelector('.tool[data-tool="marks-describe"]')?.getAttribute('aria-label') === 'Describe · 2 kept');
+
+  // In: the same marks, the same brief.
+  await trayTool(page, 'marks-describe').click();
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.marble-marks-layer')).visibility === 'visible');
+  await page.waitForFunction(() => {
+    const said = document.querySelector('.marble-line-input')?.dataset.placeholder ?? '';
+    return said.includes('a box around q') && said.includes('a note on p: "shorter"');
   });
-  assert.equal(settled.transform, 'none');
-  assert.equal(settled.filter, 'none');
-  assert.ok(!/transform|filter/.test(settled.transition), `only opacity and display transition, got ${settled.transition}`);
+  assert.equal(await page.locator('.marble-marks-stroke').count(), 1);
+  assert.equal(await page.locator('.marble-marks-note-body').textContent(), 'shorter');
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q","p"]');
 });
 
-const drag = async (page, from, to, { shift = false } = {}) => {
-  if (shift) await page.keyboard.down('Shift');
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(to.x, to.y, { steps: 8 });
-  await page.mouse.up();
-  if (shift) await page.keyboard.up('Shift');
-};
-const boxOf = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox();
-const selection = (page) => page.evaluate(() => window.marble.agent.context().selection);
-const enterSelect = async (page) => {
-  // The strip's own `hidden` IDL property, not Playwright's rendered
-  // isHidden(): a collapse from the previous drag is still visibly fading
-  // out under the allow-discrete transition, so asking what is on screen
-  // races that 300ms and can read "still open" moments before it finishes
-  // closing for good.
-  if (await strip(page).evaluate((el) => el.hidden)) await main(page).click();
-  await tool(page, 'select').click();
-  await page.locator('.marble-marks-layer[data-mode="select"]').waitFor();
-};
-
-test('Select outlines elements as the marquee crosses them, and a rect over a list hands the list to the callout', async () => {
+test('a marquee wraps what it means in one frame and hangs the card on it', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  await enterSelect(page);
-  assert.equal(await tool(page, 'select').getAttribute('aria-pressed'), 'true');
+  await describe(page);
   const q = await boxOf(page, 'q');
   await page.mouse.move(q.x - 6, q.y - 6);
   await page.mouse.down();
   await page.mouse.move(q.x + q.width + 6, q.y + q.height / 2, { steps: 6 });
-  await page.locator('.marble-marks-marquee:not([hidden])').waitFor();
-  // Half way down the list only the first item is covered.
   await page.waitForFunction(() => document.querySelectorAll('.marble-marks-hit:not([hidden])').length === 1);
   await page.mouse.move(q.x + q.width + 6, q.y + q.height + 6, { steps: 6 });
-  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-hit:not([hidden])').length === 1);
   await page.mouse.up();
   await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q"]');
-  // The mode ends with the release, and the callout's handle takes over.
-  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
-  await page.locator('.marble-callout-handle:not([hidden])').waitFor();
-  assert.equal(await page.locator('.marble-marks-marquee:not([hidden])').count(), 0);
+
+  await frame(page).waitFor();
+  await field(page).waitFor();
+  assert.equal(await briefOf(page), '1 element');
+  // The frame is around the list, not around the window.
+  const [f, list] = await Promise.all([frame(page).boundingBox(), boxOf(page, 'q')]);
+  assert.ok(f.x <= list.x && f.y <= list.y, `frame ${JSON.stringify(f)} does not contain ${JSON.stringify(list)}`);
+  assert.ok(f.x + f.width >= list.x + list.width - 1 && f.width < list.width + 40);
+  // And the field hangs under it.
+  const input = await field(page).boundingBox();
+  assert.ok(input.y > f.y + f.height - 2, 'the field is below the frame');
 });
 
-test('a marquee that grazes an element selects nothing, and a fresh text selection replaces a marquee', async () => {
+test('a region too tall to sit under keeps its card at the marks, never on the toolbar', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  await enterSelect(page);
-  const p = await boxOf(page, 'p');
-  await drag(page, { x: p.x - 6, y: p.y + p.height - 3 }, { x: p.x + p.width + 6, y: p.y + p.height + 3 });
-  await page.waitForTimeout(100);
-  assert.deepEqual(await selection(page), []);
-
-  await enterSelect(page);
-  await drag(page, { x: p.x - 6, y: p.y - 6 }, { x: p.x + p.width + 6, y: p.y + p.height + 6 });
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+  // A box around most of a page has no room under it, which is how the field
+  // used to end up parked at the bottom of the window — on the toolbar, and
+  // nowhere near the thing it was about.
   await page.evaluate(() => {
-    const el = document.querySelector('[data-marble-id="h"]');
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    getSelection().removeAllRanges();
-    getSelection().addRange(range);
+    document.querySelector('[data-marble-id="q"]').style.minHeight = '620px';
   });
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h"]');
+  await describe(page);
+  await use(page, 'sketch');
+  const q = await boxOf(page, 'q');
+  await stroke(page, boxAround(q, 6));
+  await field(page).waitFor();
+
+  const [box, toolbar, frameBox] = await Promise.all([
+    field(page).boundingBox(),
+    bar(page).boundingBox(),
+    frame(page).boundingBox(),
+  ]);
+  const overlaps = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  assert.equal(overlaps(box, toolbar), false, `field ${JSON.stringify(box)} is on the toolbar ${JSON.stringify(toolbar)}`);
+
+  // And it is against the marks — over, under, beside, or inside them — rather
+  // than in a corner of the window.
+  const dx = Math.max(frameBox.x - (box.x + box.width), box.x - (frameBox.x + frameBox.width), 0);
+  const dy = Math.max(frameBox.y - (box.y + box.height), box.y - (frameBox.y + frameBox.height), 0);
+  assert.ok(Math.hypot(dx, dy) <= 16, `field is ${Math.round(Math.hypot(dx, dy))}px from the marks`);
 });
 
-test('a page that scrolls under a drag commits what is on screen when the hand lets go', async () => {
-  const page = await open('tall');
-  await bar(page).waitFor();
-  await enterSelect(page);
-  // The boxes are measured at the press and translated by the scroll after
-  // it, which is what keeps a momentum scroll off the frame budget. Two
-  // things that translation cannot know: a row that was below the fold and
-  // was never measured, and the banner, which is `position: fixed` and did
-  // not move with the page at all. `finish` measures again before it commits
-  // for exactly that reason.
-  await page.mouse.move(1190, 380);
-  await page.mouse.down();
-  await page.mouse.move(1100, 420, { steps: 4 });
-  await page.mouse.wheel(0, 600);
-  await page.waitForFunction(() => scrollY >= 590);
-  await page.mouse.move(5, 540, { steps: 6 });
-  await page.mouse.up();
-  await page.waitForFunction(() => window.marble.agent.context().selection.length > 0);
-  assert.deepEqual(await selection(page), ['r1'], 'the row that scrolled into view, and not the banner that never moved');
-});
-
-test('Shift adds a second marquee; Escape leaves the mode and then clears the selection', async () => {
+test('a sketch says what it read in the brief line, and Select picks the ink back up', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  await enterSelect(page);
+  await describe(page);
+  await use(page, 'sketch');
+  const q = await boxOf(page, 'q');
+  await stroke(page, boxAround(q));
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q"]');
+  await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder.includes('a box around q'));
+  assert.equal(await page.locator('.marble-marks-stroke').count(), 1, 'the hand\'s own stroke, never redrawn as a shape');
+
+  // A marquee over the ink picks the mark itself — the things you drew are as
+  // pointable as the things the document holds — and ⌫ takes it off.
+  await use(page, 'select');
+  await stroke(page, [{ x: q.x - 30, y: q.y - 30 }, { x: q.x + q.width + 30, y: q.y + q.height + 30 }]);
+  await page.locator('.marble-marks-halo:not([hidden])').waitFor();
+  await page.keyboard.press('Backspace');
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-stroke').length === 0);
+});
+
+test('Note puts a text box on the page, and what is typed in it is part of the brief', async () => {
+  const page = await open();
+  await describe(page);
+  await use(page, 'text');
+  const p = await boxOf(page, 'p');
+  await page.mouse.click(p.x + 40, p.y + 4);
+  const body = page.locator('.marble-marks-note-body');
+  await body.waitFor();
+  await page.keyboard.type('make this the headline');
+  await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder.includes('a note on p: "make this the headline"'));
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+
+  // A note dragged by its grip keeps its place on the element it was put on.
+  const before = await page.locator('.marble-marks-note').boundingBox();
+  const grip = await page.locator('.marble-marks-note-grip').boundingBox();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 + 60, grip.y + grip.height / 2 + 30, { steps: 6 });
+  await page.mouse.up();
+  const after = await page.locator('.marble-marks-note').boundingBox();
+  assert.ok(Math.abs(after.x - before.x - 60) < 6 && Math.abs(after.y - before.y - 30) < 6, `${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+
+  // An empty note is a slip of the hand, not a mark.
+  await page.mouse.click(p.x + 200, p.y + 4);
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-note').length === 2);
+  await words(page).click();
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-note').length === 1);
+});
+
+test('the line sends the marks beside the sentence, and the mode steps back', async () => {
+  const page = await open();
+  await describe(page);
+  await use(page, 'sketch');
   const q1 = await boxOf(page, 'q1');
-  await drag(page, { x: q1.x - 6, y: q1.y - 4 }, { x: q1.x + q1.width + 6, y: q1.y + q1.height + 4 });
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q1"]');
-  await enterSelect(page);
-  const h = await boxOf(page, 'h');
-  await drag(page, { x: h.x - 6, y: h.y - 6 }, { x: h.x + h.width + 6, y: h.y + h.height + 6 }, { shift: true });
-  await page.waitForFunction(() => JSON.stringify([...window.marble.agent.context().selection].sort()) === '["h","q1"]');
+  await stroke(page, boxAround(q1));
+  await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder.includes('a box around q1'));
 
-  await enterSelect(page);
+  await words(page).click();
+  await page.keyboard.type('make these one line');
+  const before = await knownChats(page);
+  await page.locator('.marble-line-send').click();
+
+  // Sent, not just drafted: the words are the prompt, and what was marked
+  // rides with them, unseen.
+  const turn = await newTurn(page, before);
+  assert.equal(turn.prompt, 'make these one line');
+  assert.ok(String(turn.context.brief ?? '').includes('I marked up the page: a box around q1.'), turn.context.brief);
+  assert.deepEqual(turn.context.selection, ['q1'], 'the turn carries what was marked');
+  // Sent is the end of describing: the mode steps back and the page is yours
+  // to read again — but what was marked stays up while the agent works from
+  // it, in the sheet the mode's fade does not reach.
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-layer').hasAttribute('data-describing'));
+  await page.waitForFunction(() => document.querySelector('.marble-marks-held .marble-marks-stroke')?.dataset.state === 'working');
+  assert.equal(await page.locator('.marble-marks-held .marble-marks-stroke').isVisible(), true, 'the marks show while the work goes on');
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.marble-marks-bar')).visibility === 'hidden');
+  // No second composer was ever drawn.
+  assert.equal(await page.locator('.marble-callout').count(), 0);
+
+  // The work ends having changed nothing, so the line comes back with what it
+  // said, and the marks stay up while it speaks for them. Putting it away
+  // puts the brief away: the marks go back to being kept marks, out of
+  // sight outside the mode.
+  await page.locator('.marble-line[data-state="cant"]').waitFor({ timeout: 20000 });
+  assert.equal(await page.locator('.marble-marks-held .marble-marks-stroke').count(), 1);
+  await page.evaluate(() => window.marbleLine.close({ keep: false }));
+  await page.waitForFunction(() => document.querySelector('.marble-marks-layer .marble-marks-stroke')?.dataset.state === 'sent');
+  assert.equal(await page.locator('.marble-marks-stroke').isVisible(), false);
+});
+
+test('one composer: Describe mode hangs the ⌘J line on the marks, never a card or a field of its own', async () => {
+  const page = await open();
+  await describe(page);
+  const q = await boxOf(page, 'q');
+  await stroke(page, [{ x: q.x - 6, y: q.y - 6 }, { x: q.x + q.width + 6, y: q.y + q.height + 6 }]);
+  await field(page).waitFor();
   await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
-  assert.deepEqual((await selection(page)).sort(), ['h', 'q1'], 'leaving the mode keeps the selection');
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('.marble-line').count(), 1, 'one line');
+  assert.equal(await page.locator('.marble-callout').count(), 0, 'no callout card');
+  assert.equal(await page.locator('.marble-callout-handle:not([hidden])').count(), 0, 'no handle for a second one');
+  assert.equal(await page.locator('.marble-marks-field').count(), 0, 'no composer of the mode\'s own');
+  // ⌘J means this line, too.
+  await page.keyboard.press('ControlOrMeta+j');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('marble-line-input'));
+  assert.equal(await page.locator('.marble-line').count(), 1);
+
+  // Out of the mode it goes with the marks, and comes back with them.
+  await tool(page, 'done').click();
+  await page.waitForFunction(() => document.querySelector('.marble-line')?.hidden === true);
+  await launcher(page).hover();
+  await trayTool(page, 'marks-describe').click();
+  await page.waitForFunction(() => document.querySelector('.marble-line')?.hidden === false);
 });
 
-test('double-clicking Select pins the mode for several rectangles', async () => {
+test('the line Describe borrows offers the actions for what is marked, without Sketch it or suggestions', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  await main(page).click();
-  await tool(page, 'select').dblclick();
-  await page.locator('.marble-marks-layer[data-mode="select"][data-pinned]').waitFor();
-  const h = await boxOf(page, 'h');
-  await drag(page, { x: h.x - 6, y: h.y - 6 }, { x: h.x + h.width + 6, y: h.y + h.height + 6 });
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h"]');
-  assert.equal(await page.evaluate(() => document.querySelector('.marble-marks-layer').dataset.mode), 'select', 'pinned: still in the mode');
-  const p = await boxOf(page, 'p');
-  await drag(page, { x: p.x - 6, y: p.y - 6 }, { x: p.x + p.width + 6, y: p.y + p.height + 6 });
-  // Without Shift the second rectangle replaces the first.
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+  await describe(page);
+  await use(page, 'sketch');
+  const q1 = await boxOf(page, 'q1');
+  await stroke(page, boxAround(q1));
+  await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder.includes('a box around q1'));
+  const acts = field(page).locator('.marble-line-chip');
+  await acts.first().waitFor();
+  assert.deepEqual(await acts.evaluateAll((els) => els.map((el) => el.dataset.act ?? 'suggestion')), ['variations', 'automate', 'alive', 'interactive', 'visual']);
+  await words(page).click();
+  await acts.filter({ hasText: 'Make it visual' }).click();
+  assert.equal(await words(page).textContent(), 'Make what is marked visual: a chart or diagram of what it shows');
+  await page.keyboard.type('as a timeline');
+  const before = await knownChats(page);
+  await page.locator('.marble-line-send').click();
+  const turn = await newTurn(page, before);
+  assert.equal(turn.prompt, 'Make what is marked visual: as a timeline');
+  const brief = String(turn.context.brief ?? '');
+  assert.match(brief, /seen rather than read/);
+  assert.ok(brief.includes('I marked up the page: a box around q1.'), brief);
 });
 
-test('Escape mid-drag ends the drag it was in, not just the mode', async () => {
+test('with a tool on, the pinned chat panel and the card are still the app\'s to click', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  await enterSelect(page);
-  const h = await boxOf(page, 'h');
-  await page.mouse.move(h.x - 6, h.y - 6);
-  await page.mouse.down();
-  await page.mouse.move(h.x + h.width + 6, h.y + h.height + 6, { steps: 6 });
-  await page.locator('.marble-marks-marquee:not([hidden])').waitFor();
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
-  assert.equal(await page.locator('.marble-marks-marquee:not([hidden])').count(), 0);
-  assert.equal(await page.locator('.marble-marks-hit:not([hidden])').count(), 0);
-  await page.mouse.up();
+  await launcher(page).click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
+  await page.locator('marble-agent-drawer .pin').click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel')?.dataset.pinned === 'true');
+  await describe(page);
+  await page.locator('.marble-marks-layer[data-mode="select"]').waitFor();
+
+  // Into the panel's own composer, with Select still on.
+  const editor = page.locator('marble-agent-drawer marble-conversation .editor').first();
+  await editor.click();
+  await page.keyboard.type('still reachable');
+  assert.equal((await editor.textContent()).includes('still reachable'), true);
+  assert.equal(await page.locator('.marble-marks-layer').getAttribute('data-mode'), 'select', 'the tool is still on');
+
+  // And into the line hung on the marks.
+  const q = await boxOf(page, 'q');
+  await stroke(page, [{ x: q.x - 6, y: q.y - 6 }, { x: q.x + q.width + 6, y: q.y + q.height + 6 }]);
+  const card = words(page);
+  await card.waitFor();
+  await card.click();
+  await page.keyboard.type('ok');
+  assert.equal((await card.textContent()).includes('ok'), true);
+  // ⌫ in the line is the line's, not a mark being taken off the page.
+  await page.keyboard.press('Backspace');
+  assert.equal(await page.evaluate(() => JSON.stringify(window.marble.agent.context().selection)), '["q"]');
 });
 
-test('a tool mode owns Escape while it is on, and the callout\'s picks survive it', async () => {
+test('Explore asks for variations in the document\'s own words, and says what it wants and why', async () => {
   const page = await open();
-  await bar(page).waitFor();
-  const p = await boxOf(page, 'p');
-  await page.keyboard.down('Alt');
-  await page.mouse.click(p.x + 10, p.y + p.height / 2);
-  await page.keyboard.up('Alt');
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+  await describe(page);
+  const q = await boxOf(page, 'q');
+  await stroke(page, [{ x: q.x - 6, y: q.y - 6 }, { x: q.x + q.width + 6, y: q.y + q.height + 6 }]);
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q"]');
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-tool[data-tool="explore"]').disabled);
 
-  await enterSelect(page);
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
-  assert.deepEqual(await selection(page), ['p'], 'the pick is still there once the mode ends');
-});
+  await tool(page, 'explore').click();
+  await page.locator('.marble-marks-explore:not([hidden])').waitFor();
+  const asks = page.locator('.marble-marks-ask');
+  await asks.first().click();
+  await page.keyboard.type('shorter lines');
+  await asks.nth(1).click();
+  await page.keyboard.type('the list is the first thing read');
+  await page.locator('.marble-marks-count[aria-pressed="false"]').first().click();
+  const before = await knownChats(page);
+  await page.locator('.marble-marks-go').click();
 
-test('the toolbar can be thrown to another corner, and the corner is remembered', async () => {
-  const page = await open();
-  await bar(page).waitFor();
-  const b = await barBox(page);
-  const cx = b.left + b.width / 2;
-  const cy = b.top + b.height / 2;
-  await page.mouse.move(cx, cy);
-  await page.mouse.down();
-  await page.mouse.move(cx - 300, cy, { steps: 12 });
-  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').hasAttribute('data-dragging'));
-  await page.mouse.move(cx - 700, cy, { steps: 4 });
-  await page.mouse.up();
-  await page.waitForFunction(() => localStorage.getItem('marble-marks:corner:garden') === 'bl');
-  await page.waitForFunction(() => Math.abs(document.querySelector('.marble-marks-bar').getBoundingClientRect().left - 16) <= 1);
-  assert.equal(await page.evaluate(() => document.querySelector('.marble-marks-bar').dataset.corner), 'bl');
-  await page.reload();
-  await page.waitForFunction(() => Boolean(window.marble?.agent));
-  await bar(page).waitFor();
-  await page.waitForFunction(() => Math.abs(document.querySelector('.marble-marks-bar').getBoundingClientRect().left - 16) <= 1);
-});
-
-test('a short press is a click, not a throw', async () => {
-  const page = await open();
-  await bar(page).waitFor();
-  const b = await barBox(page);
-  await page.mouse.move(b.left + 20, b.top + 20);
-  await page.mouse.down();
-  await page.mouse.move(b.left + 24, b.top + 22);
-  await page.mouse.up();
-  await strip(page).waitFor();
-  assert.equal(await page.evaluate(() => localStorage.getItem('marble-marks:corner:garden')), null);
-});
-
-test('with the strip open, dragging closes it first, and the strip reopens on the new side', async () => {
-  const page = await open();
-  await bar(page).waitFor();
-  await main(page).click();
-  await strip(page).waitFor();
-  const b = await barBox(page);
-  await page.mouse.move(b.left + 20, b.top + 20);
-  await page.mouse.down();
-  await page.mouse.move(b.left - 900, b.top - 600, { steps: 12 });
-  await page.waitForFunction(() => document.querySelector('.marble-marks-strip').hidden);
-  await page.mouse.up();
-  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').dataset.corner === 'tl');
-  await main(page).click();
-  await strip(page).waitFor();
-  const [button, s] = await page.evaluate(() => {
-    const r = (sel) => document.querySelector(sel).getBoundingClientRect();
-    return [r('.marble-marks-main'), r('.marble-marks-strip')];
-  });
-  assert.ok(s.top > button.bottom, 'in a top corner the strip hangs below');
-  assert.ok(Math.abs(s.left - button.left) <= 1, 'and shares the left edge');
-});
-
-test('under reduced motion a throw jumps and fades instead of springing', async () => {
-  const page = await open('garden', { reducedMotion: 'reduce' });
-  await bar(page).waitFor();
-  const b = await barBox(page);
-  const cx = b.left + b.width / 2;
-  const cy = b.top + b.height / 2;
-  await page.mouse.move(cx, cy);
-  await page.mouse.down();
-  await page.mouse.move(cx - 300, cy, { steps: 12 });
-  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').hasAttribute('data-dragging'));
-  await page.mouse.move(cx - 700, cy, { steps: 4 });
-  await page.mouse.up();
-  await page.waitForFunction(() => localStorage.getItem('marble-marks:corner:garden') === 'bl');
-  // A spring takes frames to converge; the jump is done in the same tick as
-  // the release, so — with no wait at all — the bar should already sit at
-  // its new corner rather than partway toward it.
-  const left = (await barBox(page)).left;
-  assert.ok(Math.abs(left - 16) <= 1, `jumped straight to the corner (left at ${left})`);
-  // The only Animation running is the opacity fade: a spring never creates
-  // a Web Animation at all (it drives `transform` by hand, frame by frame),
-  // so anything here that touches a property other than opacity would mean
-  // the spring path ran instead.
-  const kinds = await page.evaluate(() => document.querySelector('.marble-marks-bar')
-    .getAnimations()
-    .flatMap((a) => a.effect.getKeyframes())
-    .flatMap((frame) => Object.keys(frame).filter((key) => !['offset', 'computedOffset', 'easing', 'composite'].includes(key))));
-  assert.ok(kinds.length > 0, 'the opacity fade is running');
-  assert.ok(kinds.every((prop) => prop === 'opacity'), `only opacity animates, got ${kinds.join(', ')}`);
+  const { prompt } = await newTurn(page, before);
+  assert.ok(prompt.startsWith('Explore 5 variations of q'), prompt.slice(0, 80));
+  assert.ok(prompt.includes('What to try: shorter lines'), prompt);
+  assert.ok(prompt.includes('Why: the list is the first thing read'), prompt);
+  assert.ok(prompt.includes('<marble-alt>'), 'the ask is in the format the document has for this');
 });

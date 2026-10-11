@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
   CLAUDE_MODES,
+  CODEX_MODES,
   CURSOR_MODES,
   composeCursorModel,
   driveWhere,
@@ -26,6 +27,10 @@ test('Cursor model ids split into a family and an effort or speed', () => {
   assert.equal(resolveCursorModel('cursor-grok-4.6', 'xhigh', 'composer-2.5'), 'cursor-grok-4.6-xhigh');
   assert.equal(resolveCursorModel('cursor-grok-4.6-high', 'xhigh-fast', 'composer-2.5'), 'cursor-grok-4.6-xhigh-fast');
   assert.equal(resolveCursorModel(null, null, 'composer-2.5'), 'composer-2.5');
+  assert.equal(resolveCursorModel('opus', 'high', 'composer-2.5'), 'composer-2.5');
+  assert.equal(resolveCursorModel('fable', 'high', 'grok-4.7'), 'grok-4.7');
+  assert.equal(resolveCursorModel('claude-opus-5-5[1m]', 'high', 'composer-2.5'), 'composer-2.5');
+  assert.equal(resolveCursorModel('claude-opus-5-5', 'high', 'composer-2.5'), 'claude-opus-5-5-high');
 });
 
 test('Cursor catalogs collapse effort variants into one family with effort radios', () => {
@@ -50,7 +55,7 @@ test('Cursor catalogs collapse effort variants into one family with effort radio
 });
 
 test('the Cursor picker only offers Auto and the best Grok family', () => {
-  const picked = pickCursorPickerModels([
+  const older = pickCursorPickerModels([
     { id: 'auto', label: 'Auto (default)' },
     { id: 'composer-2.5', label: 'Composer 2.5' },
     { id: 'gpt-5.2', label: 'GPT-5.2' },
@@ -58,18 +63,32 @@ test('the Cursor picker only offers Auto and the best Grok family', () => {
     { id: 'cursor-grok-4.6-high', label: 'Grok 4.6' },
     { id: 'cursor-grok-4.6-xhigh', label: 'Grok 4.6 Extra High' },
   ]);
-  assert.deepEqual(picked.map((item) => item.id), ['auto', 'cursor-grok-4.6']);
-  assert.equal(picked.find((item) => item.id === 'cursor-grok-4.6').label, 'Grok 4.6');
+  assert.deepEqual(older.map((item) => item.id), ['auto', 'cursor-grok-4.6']);
+  const picked = pickCursorPickerModels([
+    { id: 'auto', label: 'Auto (default)' },
+    { id: 'cursor-grok-4.6-high', label: 'Grok 4.6' },
+    { id: 'grok-4.7-high', label: 'Grok 4.7  High' },
+    { id: 'grok-4.7-high-fast', label: 'Grok 4.7  High Fast' },
+    { id: 'grok-4.7-xhigh', label: 'Grok 4.7  Extra High' },
+  ]);
+  assert.deepEqual(picked.map((item) => item.id), ['auto', 'grok-4.7']);
+  assert.equal(picked.find((item) => item.id === 'grok-4.7').label, 'Grok 4.7');
+  assert.deepEqual(
+    picked.find((item) => item.id === 'grok-4.7').efforts.map((item) => item.id),
+    ['high', 'high-fast', 'xhigh'],
+  );
+  assert.equal(resolveCursorModel('grok-4.7', 'high', 'composer-2.5'), 'grok-4.7-high');
 });
 
-test('picker providers are Claude, Cursor, then KIXLAB API', () => {
+test('picker providers sort Claude, Codex, Cursor, then the API-key Claude', () => {
   const sorted = sortProviders([
-    { id: 'claude-api', label: 'KIXLAB API' },
+    { id: 'claude-api', label: 'Claude API' },
     { id: 'fake', label: 'Fake' },
     { id: 'cursor', label: 'Cursor' },
+    { id: 'codex', label: 'Codex' },
     { id: 'claude-subscription', label: 'Claude' },
   ]);
-  assert.deepEqual(sorted.map((item) => item.id), ['claude-subscription', 'cursor', 'claude-api', 'fake']);
+  assert.deepEqual(sorted.map((item) => item.id), ['claude-subscription', 'codex', 'cursor', 'claude-api', 'fake']);
 });
 
 test('Shift+Tab walks each CLI’s modes and wraps', () => {
@@ -79,6 +98,11 @@ test('Shift+Tab walks each CLI’s modes and wraps', () => {
   assert.equal(nextMode(CURSOR_MODES, 'agent'), 'plan');
   assert.equal(nextMode(CURSOR_MODES, 'review'), 'agent');
   assert.equal(CURSOR_MODES[0].label, 'Run Everything');
+  assert.equal(nextMode(CODEX_MODES, 'read'), 'full');
+  assert.equal(nextMode(CODEX_MODES, 'auto'), 'full', 'a Claude mode left on the chat steps onto Codex\'s wheel');
+  assert.equal(CODEX_MODES[0].label, 'Full access');
+  // Marble's tools still edit documents in it, so its name may not say "read only".
+  assert.equal(CODEX_MODES.find((m) => m.id === 'read').label, 'Documents only');
 });
 
 test('files-edited copy is countable English', () => {

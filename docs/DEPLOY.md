@@ -35,10 +35,28 @@ With a secret set:
 The comparison is constant-time, over hashes of both sides so a length mismatch
 leaks nothing either.
 
-**This is thrown away at G2.** It is one shared secret for one owner. Accounts,
-capability URLs and per-document policy are the next generation's work, and the
-vision is explicit that building identity now would be building it before
-knowing what sharing needs of it.
+**The door, beside it** ([ACCOUNTS.md](ACCOUNTS.md)). People sign in at
+`marbledrive.app`, and the edge hands their browser a pass for the drive,
+signed with Ed25519, which the drive checks with public keys only
+(`server/door.js`). Three settings turn it on for a drive:
+`MARBLE_DOOR_KEYS`, `MARBLE_DOOR_NAME` and `MARBLE_DOOR_OWNER`. With them:
+
+- the pass opens the drive as the passphrase's cookie does;
+- a browser without either, through a tunnel or the edge, is sent to
+  `https://marbledrive.app/enter`; at `127.0.0.1` it still gets the form;
+- the form offers **Sign in with Marble Drive** above the passphrase.
+
+`MARBLE_DRIVE_GATE=tools` then takes the passphrase out of the browser: the
+form, `POST /gate` and the passphrase's cookie are refused to any request
+that came through `cloudflared` (`Cf-Ray`), the edge (`X-Forwarded-Host`) or
+another proxy (`X-Forwarded-For`, `Forwarded`). It still works at
+`127.0.0.1`, as `Authorization: Bearer` for scripts, and as the agent's
+browser pass. Without the door settings `tools` changes nothing, so it can
+never lock a drive's only person out.
+
+The passphrase was always meant to go at G2; the spec keeps it as the key for
+scripts and the desk instead, and moves each drive's browsers off it one at a
+time.
 
 ## From your own devices: Tailscale Serve
 
@@ -134,6 +152,64 @@ take the host down.
 
 A backup is a copy of the drive root. Stop the host, put it back, start the
 host. There is no import step, because there was no export step.
+
+## On a Fly Sprite
+
+The full guide to the sprites (who runs where, shipping, provisioning,
+recovery, troubleshooting) is [`HOSTING.md`](HOSTING.md), and the reasoning is
+[`HOSTING-DECISIONS.md`](HOSTING-DECISIONS.md). In short:
+
+One sprite per person, each running this host as it runs on a laptop
+(docs/superpowers/specs/2026-09-23-marble-drive-on-a-sprite-design.md). From
+this checkout:
+
+```
+tools/sprite-deploy.sh <sprite> --org <org>            # a pushed commit, from GitHub + npm
+tools/sprite-deploy.sh <sprite> --org <org> --local    # this Mac's working copies
+tools/sprite-deploy.sh <sprite> --org <org> --rollback # the release before
+```
+
+- **Sources.** By default the sprite fetches `marble-drive` at `--ref`
+  (default `origin/main`, which must be pushed) from GitHub and installs
+  `@bdhmin/marble@<version>` from npm, so it holds no credentials. `--local`
+  packs this Mac's working copies instead, for trying unreleased changes.
+- **Claude Code is pinned per release** (`--claude`, default the version on
+  this Mac): the host passes flags a given CLI must know. The release runs
+  Claude Code's own installer, because npm on a sprite blocks install scripts.
+- **Releases** live side by side in `~/app/releases/`, `~/app/current` points
+  at the live one, and the last three are kept. A release that does not answer
+  `/health` on a throwaway drive never goes live; one whose service does not
+  come up is switched back.
+- **The service** is `marble-drive` (`sprite-env services`), port 4400, drive
+  at `/drive`, recreated on every switch so its settings are always the
+  script's. Logs: `/.sprite/logs/services/marble-drive.log`.
+- **Staying awake.** A sprite pauses about 30 seconds after its last
+  connection. While an agent turn or a stem split runs, the host holds a Sprites
+  task (`server/keep-awake.js`), so a turn outlives its tab.
+- **Checkpoints.** Every deploy checkpoints first and prints how to restore.
+- **A sprite per tester.** `tools/sprite-provision.sh <person> [--agent
+  api|subscription] [--key-file <file>]` makes `t-<person>`: a passphrase and
+  its own settings in `~/.config/marble-drive/sprite.env` on the sprite (kept
+  across deploys, like saved API keys in `~/.config/marble-drive/agent-keys`),
+  a deploy, a public URL behind the passphrase, and a note to send. The roster
+  is `~/.config/marble-drive/testers.json` on the Mac. `--remove <person>`
+  destroys it after a typed confirmation. `tools/sprite-deploy.sh --all`
+  updates every user's sprite: those labelled `marble-tester` (every user so
+  far, the owner's own drive included) or `marble-user` (the label they will
+  all move to); `--all --list` shows which. The owner's test bed, labelled
+  `marble-owner`, is deployed by name only. A tester's Drive and Agents pages are theirs once made:
+  a deploy updates the host, the shared page code and starters, never those.
+- **Signing in.** Every sprite has a Marble passphrase (`MARBLE_DRIVE_SECRET`
+  in its `sprite.env`): a drive with none answers agent routes only when asked
+  for as `localhost`, which a sprite's URL never is. The owner's own sprite keeps
+  its URL private to the org as well ("sprite" auth), so it has both.
+  Agents need a `claude login` in `sprite console` or an API key in Agents
+  settings; a sprite made for someone else never carries anyone's login.
+- **The workshop.** `tools/sprite-workshop.sh <sprite>` makes the owner's
+  sprite the workshop: checkouts of `marble-drive` and `marble` in
+  `/home/sprite/src`, the agent projects "Marble Drive" and "Marble", and
+  commits as the owner. GitHub, npm and Sprites are signed in there with
+  `gh auth login`, `npm login` and `sprite login`.
 
 ## Everything else
 

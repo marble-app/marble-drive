@@ -102,9 +102,9 @@ test('/ lands on the Drive, which is an ordinary document in the drive', async (
   assert.equal(response.headers.get('location'), '/a/drive');
 
   const page = await (await get('/a/drive')).text();
-  assert.match(page, /<script src="\/runtime\/marble\.js" data-marble-app="drive"/);
-  assert.match(page, /<script src="\/runtime\/drive\.js"/);
-  assert.match(page, /<script src="\/runtime\/collab\.js"/);
+  assert.match(page, /<script src="\/runtime\/marble\.js\?v=[0-9a-f]{12}" data-marble-app="drive"/);
+  assert.match(page, /<script src="\/runtime\/drive\.js\?v=[0-9a-f]{12}"/);
+  assert.match(page, /<script src="\/runtime\/collab\.js\?v=[0-9a-f]{12}"/);
   assert.doesNotMatch(page, /agent-callout\.js/, 'no agents here, so nothing to summon');
   assert.doesNotMatch(page, /agent-marks/, 'no agents here, so nothing to mark up for');
   // The host injects the carrier and nothing else — no affordance, no chrome.
@@ -116,10 +116,14 @@ test('/today bookmarks whatever the day skill mirrored there most recently, fall
   assert.equal(before.status, 302);
   assert.equal(before.headers.get('location'), '/a/drive');
 
-  await drive.store.write("Bryan's Days/today", '<html><body>today</body></html>', { label: 'seeded' });
+  // The drive names its own bookmark (server/drive-settings.js).
+  await fsp.writeFile(path.join(drive.store.marbleDir, 'drive.json'), JSON.stringify({ latest: 'Days/today' }));
+  await drive.store.write('Days/today', '<html><body>today</body></html>', { label: 'seeded' });
+  await drive.store.write('a newer page', '<html><body>newer</body></html>', { label: 'seeded' });
   const after = await get('/today');
   assert.equal(after.status, 302);
-  assert.equal(after.headers.get('location'), `/a/${encodeURIComponent("Bryan's Days/today")}`);
+  assert.equal(after.headers.get('location'), `/a/${encodeURIComponent('Days/today')}`);
+  await fsp.rm(path.join(drive.store.marbleDir, 'drive.json'));
 });
 
 test('the carrier and its Drive extension are both served', async () => {
@@ -182,6 +186,47 @@ test('a file is served under a type the browser will not execute', async () => {
   const svg = await get('/drive/file?path=work%2Fq3%2Flogo.svg');
   assert.equal(svg.headers.get('content-type'), 'application/octet-stream');
   assert.match(svg.headers.get('content-disposition'), /^attachment/);
+});
+
+// A song is played by seeking into it, and a browser that is not offered a
+// byte range will play one from the top and refuse to move the playhead.
+test('a file is served in ranges, so a song can be seeked', async () => {
+  await fsp.writeFile(path.join(ROOT, 'work/q3/tone.mp3'), Buffer.from('0123456789'));
+  const whole = await get('/drive/file?path=work%2Fq3%2Ftone.mp3');
+  assert.equal(whole.headers.get('accept-ranges'), 'bytes');
+  assert.equal(whole.headers.get('content-type'), 'audio/mpeg');
+
+  const mid = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=2-5' } });
+  assert.equal(mid.status, 206);
+  assert.equal(mid.headers.get('content-range'), 'bytes 2-5/10');
+  assert.equal(await mid.text(), '2345');
+
+  const tail = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=-3' } });
+  assert.equal(await tail.text(), '789');
+  const open = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=7-' } });
+  assert.equal(await open.text(), '789');
+
+  const past = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=40-' } });
+  assert.equal(past.status, 416);
+  assert.equal(past.headers.get('content-range'), 'bytes */10');
+});
+
+// The browser's PDF viewer will not draw under a sandbox, so a PDF is the one
+// file served without it — and still never sniffed into something else.
+test('a PDF opens in the browser rather than as a blank sandboxed tab', async () => {
+  await fsp.writeFile(path.join(ROOT, 'work/q3/paper.pdf'), '%PDF-1.4\n%%EOF');
+  const pdf = await get('/drive/file?path=work%2Fq3%2Fpaper.pdf');
+  assert.equal(pdf.headers.get('content-type'), 'application/pdf');
+  assert.match(pdf.headers.get('content-disposition'), /^inline/);
+  assert.equal(pdf.headers.get('content-security-policy'), null);
+  assert.equal(pdf.headers.get('x-content-type-options'), 'nosniff');
+});
+
+test('a thumbnail is asked for, and a file with none is a 404 the page can draw around', async () => {
+  const none = await get('/drive/thumb?path=work%2Fq3%2Frefs.bib&w=320');
+  assert.equal(none.status, 404);
+  assert.equal((await get('/drive/thumb?path=work%2Fq3%2Fnope.pdf')).status, 404);
+  assert.equal((await get('/drive/thumb?path=..%2Fetc%2Fpasswd')).status, 400);
 });
 
 test('the file route refuses a document, a folder and a way out of the drive', async () => {
@@ -333,16 +378,52 @@ test('the Drive hears about the folder changing, not just about one file', async
   assert.ok((await listening.frames).some((frame) => frame.event === 'created'));
 });
 
+test('a starter can be looked at without one being made', async () => {
+  const before = await asJson(await get('/drive/tree'));
+
+  const response = await get('/drive/starters/board/preview');
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/html/);
+  const html = await response.text();
+  assert.match(html, /^<!doctype html>/);
+  assert.ok(!/<script/i.test(html), 'a preview carries nothing that could run');
+
+  // The gallery asks for this on every draw. Asking must not leave anything
+  // behind — a preview is a picture of a document, not a document.
+  assert.deepEqual(await asJson(await get('/drive/tree')), before);
+
+  assert.equal((await get('/drive/starters/telekinesis/preview')).status, 404);
+});
+
 test('moving, trashing and restoring, over HTTP', async () => {
   await asJson(await post('/drive/new', { path: 'scratch', from: 'board' }));
   await asJson(await post('/drive/move', { from: 'scratch', to: 'archive/scratch' }));
-  assert.equal((await get('/a/scratch')).status, 404);
+  // The old address is not a dead end: it forwards to where it went.
+  const old = await get('/a/scratch');
+  assert.equal(old.status, 302);
+  assert.equal(old.headers.get('location'), '/a/archive%2Fscratch');
   assert.equal((await get('/a/archive%2Fscratch')).status, 200);
 
   const gone = await asJson(await post('/drive/trash', { path: 'archive/scratch' }));
   assert.equal((await get('/a/archive%2Fscratch')).status, 404);
   await asJson(await post('/drive/untrash', { id: gone.id }));
   assert.equal((await get('/a/archive%2Fscratch')).status, 200);
+});
+
+test('a rename retitles the document, and a move alone leaves its title be', async () => {
+  await asJson(await post('/drive/new', { path: 'first name', from: 'doc' }));
+  const titled = (await drive.store.read('first name')).replace(/<title>[^<]*<\/title>/, '<title data-marble-id="t1">Kept &amp; mine</title>');
+  await drive.store.write('first name', titled, { label: 'test' });
+
+  // Into a folder under the same name: the person named nothing.
+  await asJson(await post('/drive/move', { from: 'first name', to: 'shelf/first name' }));
+  assert.match(await drive.store.read('shelf/first name'), /<title data-marble-id="t1">Kept &amp; mine<\/title>/);
+
+  // A new name is the name the tab says, and the title keeps its id.
+  await asJson(await post('/drive/move', { from: 'shelf/first name', to: 'shelf/second name' }));
+  const renamed = await drive.store.read('shelf/second name');
+  assert.match(renamed, /<title data-marble-id="t1">second name<\/title>/);
+  assert.equal(renamed.replace(/<title[^>]*>[^<]*/, ''), titled.replace(/<title[^>]*>[^<]*/, ''));
 });
 
 test('a name that is taken gets a number rather than a refusal', async () => {
@@ -369,11 +450,60 @@ test('a copy is a copy of the bytes, because a document is one file', async () =
 // arriving from outside.
 const brought = (title, id = 'aa11bb22') =>
   `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
-  `<body data-marble-id="body${id}">\n<h1 data-marble-id="${id}" data-marble-editable>${title}</h1>\n</body>\n</html>\n`;
+  `<body data-marble-id="body${id}">\n<h1 data-marble-id="${id}">${title}</h1>\n</body>\n</html>\n`;
 
 const collabDoc = (title) =>
   `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
   `<body data-marble-id="bodyc1">\n<main data-marble-id="rootc1">\n<h1 data-marble-id="hc1" data-marble-editable>${title}</h1>\n</main>\n</body>\n</html>\n`;
+
+test('a page and its runtime come compressed to a browser that asks, and plain to one that does not', async () => {
+  // Over a sprite's URL every byte of a page crosses the internet, and a page
+  // is its document plus about 800 KB of runtime.
+  for (const encoding of ['br', 'gzip']) {
+    const page = await get('/a/drive', { headers: { 'Accept-Encoding': encoding } });
+    assert.equal(page.headers.get('content-encoding'), encoding);
+    assert.match(page.headers.get('vary'), /Accept-Encoding/);
+    assert.match(await page.text(), /<script src="\/runtime\/marble\.js/, 'and it still reads as the page');
+  }
+  const js = await get('/runtime/marble.js', { headers: { 'Accept-Encoding': 'gzip, br' } });
+  assert.equal(js.headers.get('content-encoding'), 'br', 'brotli when both are on offer');
+  assert.match(await js.text(), /window\.marble = \{/);
+
+  const http = await import('node:http');
+  const plain = await new Promise((resolve, reject) => {
+    http.get(`${base}/a/drive`, (res) => {
+      let body = '';
+      res.setEncoding('utf8').on('data', (chunk) => { body += chunk; }).on('end', () => resolve({ res, body }));
+    }).on('error', reject);
+  });
+  assert.equal(plain.res.headers['content-encoding'], undefined);
+  assert.match(plain.body, /<script src="\/runtime\/marble\.js/);
+});
+
+test('the runtime a page names is kept by the browser until it changes, and any other address is revalidated', async () => {
+  const page = await (await get('/a/drive')).text();
+  const named = page.match(/src="(\/runtime\/marble\.js\?v=([0-9a-f]{12}))"/);
+  assert.ok(named, 'the page names a version of marble.js');
+
+  const pinned = await get(named[1]);
+  assert.equal(pinned.status, 200);
+  assert.match(pinned.headers.get('cache-control'), /max-age=31536000/);
+  assert.match(pinned.headers.get('cache-control'), /immutable/);
+  assert.equal(pinned.headers.get('etag'), `"${named[2]}"`, 'the version is the hash of what is served');
+
+  // An import() inside the runtime names no version; neither does a page from
+  // before the file changed. Both are asked about, and a match costs nothing.
+  for (const route of ['/runtime/marble.js', '/runtime/marble.js?v=000000000000']) {
+    const response = await get(route);
+    assert.equal(response.headers.get('cache-control'), 'no-cache', route);
+    const again = await get(route, { headers: { 'If-None-Match': response.headers.get('etag') } });
+    assert.equal(again.status, 304, route);
+    assert.equal(await again.text(), '');
+  }
+
+  // Documents are never kept: the page is the document, and it moves.
+  assert.equal((await get('/a/drive')).headers.get('cache-control'), 'no-store');
+});
 
 test('a document dropped into the drive lands in the folder it was dropped on', async () => {
   const made = await asJson(await put('archive', 'Brought In.mrbl', brought('Brought In')));
@@ -383,7 +513,7 @@ test('a document dropped into the drive lands in the folder it was dropped on', 
 
   // Served as the app it is, not previewed — the whole point of the drive.
   const page = await (await get('/a/archive%2FBrought%20In')).text();
-  assert.match(page, /<script src="\/runtime\/marble\.js" data-marble-app="archive\/Brought In"/);
+  assert.match(page, /<script src="\/runtime\/marble\.js\?v=[0-9a-f]{12}" data-marble-app="archive\/Brought In"/);
   assert.match(page, /<h1 data-marble-id="aa11bb22"/);
 
   // And it is in the tree, in that folder, rather than at the root.
@@ -442,6 +572,62 @@ test('an upload is announced to the drive, and never to whoever filed it', async
   const heard = await others.frames;
   assert.ok(heard.some((frame) => frame.event === 'created' && JSON.parse(frame.data).path === 'Announced'));
   assert.deepEqual(await uploader.frames, []);
+});
+
+/** The file route: the body is the bytes, and nothing about them is text. */
+const putFile = (folder, name, bytes, client = 'up') =>
+  fetch(
+    `${base}/drive/upload-file?folder=${encodeURIComponent(folder)}` +
+      `&name=${encodeURIComponent(name)}&client=${client}`,
+    { method: 'POST', headers: { 'Content-Type': 'audio/mpeg' }, body: bytes },
+  );
+
+test('a song dropped into a folder lands there byte for byte, and plays from the drive', async () => {
+  await asJson(await post('/drive/mkdir', { path: 'Fun/Song Mashups' }));
+  // Every byte value, so a text decode anywhere on the way would show.
+  const bytes = Buffer.from(Array.from({ length: 70000 }, (_, i) => (i * 37) % 256));
+  const others = collect('/events?drive=1&client=listener', { want: 1, ms: 1500 });
+  await others.ready;
+
+  const first = await asJson(await putFile('Fun/Song Mashups', 'thank u, next (Instrumental).mp3', bytes));
+  assert.equal(first.path, 'Fun/Song Mashups/thank u next Instrumental.mp3');
+  assert.equal(first.bytes, bytes.length);
+  assert.deepEqual(await fsp.readFile(path.join(ROOT, first.path)), bytes);
+
+  const heard = await others.frames;
+  assert.ok(heard.some((f) => f.event === 'created' && JSON.parse(f.data).path === first.path));
+
+  const served = await get(first.href);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'audio/mpeg');
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), bytes);
+
+  // The same name twice is a second file, numbered before the extension so it
+  // is still an mp3 — never the first one overwritten.
+  const second = await asJson(await putFile('Fun/Song Mashups', 'thank u, next (Instrumental).mp3', Buffer.from('b')));
+  assert.equal(second.path, 'Fun/Song Mashups/thank u next Instrumental 1.mp3');
+  assert.deepEqual(await fsp.readFile(path.join(ROOT, first.path)), bytes);
+
+  const tree = await asJson(await get('/drive/tree?folder=Fun%2FSong%20Mashups'));
+  const names = tree.children.map((c) => c.kind + ':' + c.name).sort();
+  assert.deepEqual(names, [
+    'file:thank u next Instrumental 1.mp3',
+    'file:thank u next Instrumental.mp3',
+  ]);
+  // Nothing half-written is left behind under its hidden name.
+  const onDisk = await fsp.readdir(path.join(ROOT, 'Fun/Song Mashups'));
+  assert.equal(onDisk.filter((n) => n.startsWith('.')).length, 0);
+});
+
+test('a document is never stored as a file, and a file cannot climb out', async () => {
+  const doc = await putFile('', 'Sneaky.mrbl', Buffer.from('<!doctype html><title>x</title>'));
+  assert.equal(doc.status, 400);
+  assert.equal((await putFile('', 'page.html', Buffer.from('<p>'))).status, 400);
+
+  const climbed = await asJson(await putFile('../..', '../escape.mp3', Buffer.from('x')));
+  assert.ok(path.resolve(ROOT, climbed.path).startsWith(path.resolve(ROOT) + path.sep));
+  assert.match(climbed.path, /escape\.mp3$/);
+  assert.ok(!(await fsp.stat(path.join(ROOT, '..', 'escape.mp3')).catch(() => null)));
 });
 
 test('a bad path is a 400 with a sentence, not a stack trace', async () => {

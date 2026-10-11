@@ -334,3 +334,97 @@ test('a torn last inbox line is skipped, not fatal', async () => {
   await fsp.appendFile(path.join(dir, b.id, 'inbox.jsonl'), '{"id":"tor');
   assert.deepEqual((await store.inbox(b.id)).map((m) => m.text), ['whole']);
 });
+
+test('events read again after more are appended: only the new lines are parsed, and a line mid-write waits', async () => {
+  const { dir, store } = await fresh();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await store.appendEvent(id, { type: 'user', text: 'one' });
+  await store.appendEvent(id, { type: 'text', text: 'two' });
+  const first = await store.events(id);
+  assert.deepEqual(first.map((e) => e.seq), [1, 2]);
+  await store.appendEvent(id, { type: 'text', text: 'three' });
+  assert.deepEqual((await store.events(id)).map((e) => e.text), ['one', 'two', 'three']);
+  // What a caller was handed is its own: a later read does not grow it.
+  assert.equal(first.length, 2);
+  // Half a line on disk, as a read racing an append would find it.
+  const file = path.join(dir, id, 'events.jsonl');
+  await fsp.appendFile(file, '{"seq":4,"t":1,"type":"text","te');
+  assert.deepEqual((await store.events(id)).map((e) => e.seq), [1, 2, 3]);
+  await fsp.appendFile(file, 'xt":"four"}\n');
+  assert.deepEqual((await store.events(id)).map((e) => e.text), ['one', 'two', 'three', 'four']);
+  assert.deepEqual((await store.events(id, { after: 3 })).map((e) => e.seq), [4]);
+});
+
+test('a discarded conversation leaves nothing behind in what the store remembers', async () => {
+  const { store } = await fresh();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await store.appendEvent(id, { type: 'turn.queued' });
+  assert.equal((await store.events(id)).length, 1);
+  await store.discardConversation(id);
+  assert.deepEqual(await store.events(id), []);
+});
+
+test('a summary carries the last step and when the running turn began, and the last step outlives the host when written on', async () => {
+  const { dir, store } = await fresh();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  assert.equal((await store.summary(id)).lastStep, null);
+
+  const turn = await store.createTurn(id, { prompt: 'go', context: { target: 'Plan' } });
+  await store.updateTurn(turn.id, { status: 'running', startedAt: 1_000 });
+  await store.updateConversation(id, { running: true });
+  await store.appendEvent(id, { type: 'turn.started', turn: turn.id });
+  let summary = await store.summary(id);
+  assert.equal(summary.turnStartedAt, 1_000);
+  assert.equal(summary.lastStep, null, 'a turn starting is not a step');
+
+  await store.appendEvent(id, { type: 'tool.call', turn: turn.id, name: 'Bash', input: { command: 'npm test' } });
+  await store.appendEvent(id, { type: 'tool.result', turn: turn.id, ok: true });
+  await store.appendEvent(id, { type: 'text', turn: turn.id, text: 'Tests pass.' });
+  summary = await store.summary(id);
+  assert.equal(summary.lastStep.kind, 'run');
+  assert.equal(summary.lastStep.words, 'Testing that it works', 'in the card\'s words');
+  assert.equal(summary.lastStep.turn, turn.id);
+  assert.deepEqual(store.lastStep(id), summary.lastStep);
+
+  // The turn ends; the runner writes the step on, and a new host reads it.
+  await store.updateTurn(turn.id, { status: 'completed', finishedAt: 2_000 });
+  await store.updateConversation(id, { running: false, lastStep: store.lastStep(id) });
+  const again = createAgentStore({ dir, defaultProvider: 'claude-subscription' });
+  await again.ready();
+  summary = await again.summary(id);
+  assert.equal(summary.turnStartedAt, null);
+  assert.equal(summary.lastStep.words, 'Testing that it works', 'in the card\'s words');
+});
+
+test('turns since a time: every chat\'s, archived too, cut to times, outcome and page', async () => {
+  const { store } = await fresh();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const old = await store.createTurn(a.id, { prompt: 'old', context: { target: 'Old page' } });
+  await store.updateTurn(old.id, { status: 'completed', startedAt: 100, finishedAt: 200 });
+  const done = await store.createTurn(a.id, { prompt: 'new', context: { target: 'Plan' } });
+  await store.updateTurn(done.id, { status: 'completed', startedAt: 5_000, finishedAt: 6_000, applied: 2 });
+  await store.appendEvent(a.id, { type: 'ops.applied', turn: done.id, path: 'Plan', count: 2 });
+  await store.appendEvent(a.id, { type: 'document.changed', turn: done.id, path: 'Notes/Other' });
+  const live = await store.createTurn(b.id, { prompt: 'live', context: { target: 'Plan' } });
+  await store.updateTurn(live.id, { status: 'running', startedAt: 50 });
+  await store.updateConversation(b.id, { running: true, archived: true });
+
+  const turns = await store.turnsSince(1_000);
+  assert.deepEqual(turns.map((t) => t.id), [live.id, done.id]);
+  assert.deepEqual(turns[1], {
+    id: done.id, conversationId: a.id, n: 2, status: 'completed',
+    createdAt: done.createdAt, startedAt: 5_000, finishedAt: 6_000, applied: 2, target: 'Plan',
+  });
+  assert.equal(turns[0].archived, true);
+  assert.equal(turns[0].prompt, undefined);
+
+  const withPaths = await store.turnsSince(1_000, { paths: true });
+  assert.deepEqual(withPaths.find((t) => t.id === done.id).changed, ['Plan', 'Notes/Other']);
+  assert.deepEqual(withPaths.find((t) => t.id === live.id).changed, []);
+
+  // Nothing written since then and nothing running: left out without reading.
+  await store.updateConversation(b.id, { running: false });
+  await store.updateTurn(live.id, { status: 'completed', finishedAt: 7_000 });
+  assert.deepEqual(await store.turnsSince(Date.now() + 60_000), []);
+});

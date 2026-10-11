@@ -13,6 +13,8 @@
 // Nothing below reaches the filesystem. Every read and every write goes through
 // the store, which is the seam the next four generations hang off.
 
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -24,18 +26,41 @@ import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, merge
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten } from './flatten.js';
 import { createTouched } from './touched.js';
-import { createGate } from './gate.js';
+import { createDoor } from './door.js';
+import { createGate, isLocal, overHttps, returnPath } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
+import { createMoves } from './moves.js';
+import { shareRefusal } from './share-policy.js';
+import { RANK, createShares } from './shares.js';
 import { createPendingWrites } from './pending-writes.js';
-import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
-import { build as buildStarter, list as listStarters } from './gallery.js';
-import { createChannels } from './sse.js';
+import { PathError, isInside, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
+import { build as buildStarter, list as listStarters, preview as starterPreview } from './gallery.js';
+import { createChannels, forVisitor, lookFrame } from './sse.js';
 import { createStore } from './store/index.js';
+import { readDriveSettings } from './drive-settings.js';
+import { startHereFor } from './start-here.js';
+import { createAwakeClock, createProgress } from './awake.js';
+import { createHold } from './hold.js';
+import { createKeepAwake } from './keep-awake.js';
+import { createLedger } from './ledger.js';
+import { createMemoryGuard } from './memory-guard.js';
+import { createStreams } from './streams.js';
+import { consoleAllowed, createConsole } from './console/index.js';
+import { createGit, gitAllowed } from './git.js';
+import { sameOrigin } from './sessions.js';
+import { createStems } from './stems/index.js';
+import { cleanFileName, createUploads } from './uploads.js';
+import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
 import { createGenuiHandler } from './genui/routes.js';
 import { watchDrive } from './watch.js';
+import { createDaily } from './daily.js';
+import { createAlive } from './alive.js';
+import { createGrants } from './connector/grants.js';
+import { createMcp } from './connector/mcp.js';
+import { createConnectorRoutes } from './connector/routes.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -53,13 +78,23 @@ const INLINE_TYPES = {
   webp: 'image/webp',
   avif: 'image/avif',
   bmp: 'image/bmp',
+  ico: 'image/x-icon',
   pdf: 'application/pdf',
   mp4: 'video/mp4',
+  m4v: 'video/mp4',
   webm: 'video/webm',
   mov: 'video/quicktime',
+  ogv: 'video/ogg',
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
   m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  opus: 'audio/ogg',
+  aif: 'audio/aiff',
+  aiff: 'audio/aiff',
   txt: 'text/plain; charset=utf-8',
   md: 'text/plain; charset=utf-8',
   json: 'text/plain; charset=utf-8',
@@ -87,24 +122,124 @@ const RUNTIME = {
   // Marble's carrier, served from the package. Not copied into this repo: two
   // copies of the contract is how two hosts stop rendering a file the same way.
   'marble.js': () => enginePath('runtime/marble.js'),
+  // The vocabulary reader: what an element affords, and the op each gesture
+  // would file. A reader, not an affordance — it wires nothing.
+  'affords.js': () => enginePath('runtime/affords.js'),
   // The Drive's extension to it. Everything a Drive needs that a single
   // document does not — see docs/CARRIER-DRIVE.md.
   'drive.js': () => path.join(REPO, 'runtime', 'drive.js'),
+  // Runs first on every page: lets a tab nobody is using close its streams,
+  // so its sprite can sleep (server/streams.js).
+  'tab-rest.js': () => path.join(REPO, 'runtime', 'tab-rest.js'),
+  // Second on every page: the viewport, the keyboard and touch, so no app
+  // has to solve the phone on its own (runtime/phone.js).
+  'phone.js': () => path.join(REPO, 'runtime', 'phone.js'),
+  'console.js': () => path.join(REPO, 'runtime', 'console.js'),
+  'console.css': () => path.join(REPO, 'runtime', 'console.css'),
+  'console-charts.js': () => path.join(REPO, 'runtime', 'console-charts.js'),
+  'console-features.js': () => path.join(REPO, 'runtime', 'console-features.js'),
+  // The Projects page (templates/projects.mrbl): the views drawn around the
+  // projects its file holds.
+  'projects.js': () => path.join(REPO, 'runtime', 'projects.js'),
+  'projects.css': () => path.join(REPO, 'runtime', 'projects.css'),
   // Agents, when they are on: the client for /agent/* and the drawer that
   // uses it. Served to every document; injected only when agents run here.
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
   'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
+  // Listening and playing for talking to a chat: the microphone on a press,
+  // the reply's audio when a spoken turn ends (docs/AGENTS.md, "Voice").
+  'voice.js': () => path.join(REPO, 'runtime', 'voice.js'),
+  // How the chats are doing, in words and numbers: a chat's state with Quiet,
+  // a step in plain words, lanes, collisions, pace. One module, so every view
+  // that says it says it the same way (the host imports it too).
+  'agent-status.js': () => path.join(REPO, 'runtime', 'agent-status.js'),
   'agent-folders.js': () => path.join(REPO, 'runtime', 'agent-folders.js'),
   'agent-phone.js': () => path.join(REPO, 'runtime', 'agent-phone.js'),
+  // What a chat's progress card says, read by the card and by the host.
+  'agent-words.js': () => path.join(REPO, 'runtime', 'agent-words.js'),
   'choice-question.js': () => path.join(REPO, 'runtime', 'choice-question.js'),
+  // The card a ```marble-visual block becomes in the transcript: a sandboxed
+  // frame wearing the page's own palette. Imported by agent-ui.js on the first
+  // visual, never injected — most conversations never hold one.
+  'chat-visual.js': () => path.join(REPO, 'runtime', 'chat-visual.js'),
   'agent-usage-charts.js': () => path.join(REPO, 'runtime', 'agent-usage-charts.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
+  // What a page opened by a share link wears instead of the shell.
+  'share.js': () => path.join(REPO, 'runtime', 'share.js'),
+  // Which text takes typing outside build mode (and on a share link).
+  'writing.js': () => path.join(REPO, 'runtime', 'writing.js'),
   // The callout: a conversation drawn at the region of a document it is about.
+  // The scope finder and the offer: which element a resting pointer means,
+  // and what a fresh callout card offers before anything is sent.
+  'agent-scope.js': () => path.join(REPO, 'runtime', 'agent-scope.js'),
+  'agent-offer.js': () => path.join(REPO, 'runtime', 'agent-offer.js'),
   'agent-callout.js': () => path.join(REPO, 'runtime', 'agent-callout.js'),
-  // The marks toolbar: mark a document up, then hand the marks to an agent.
-  // Geometry first; the layer reads it off globalThis.
+  // Glints: a dot on each element an agent is on, for the chats nobody here
+  // is following — the callout's quiet counterpart.
+  'agent-glints.js': () => path.join(REPO, 'runtime', 'agent-glints.js'),
+  // Notes: ⇧⏎ in a card keeps the ask as a pin, and Send all is one brief.
+  'agent-notes.js': () => path.join(REPO, 'runtime', 'agent-notes.js'),
+  // Offers after edits: one quiet chip when a hand edit leaves a next step.
+  'agent-nudge.js': () => path.join(REPO, 'runtime', 'agent-nudge.js'),
+  // The agent in the text: a caret, thinking and typing, for work on words.
+  'agent-text.js': () => path.join(REPO, 'runtime', 'agent-text.js'),
+  // The engine (v5): a change moves from what was to what is, in loose
+  // batches. Nothing that writes to a page animates it; this does.
+  'change-morph.js': () => path.join(REPO, 'runtime', 'change-morph.js'),
+  // The marks (v5): each part a change touches is tinted as it lands, one tag
+  // counts, and a rail stands for parts out of view. The zone box steps aside.
+  'change-marks.js': () => path.join(REPO, 'runtime', 'change-marks.js'),
+  // The line (v5): what ⌘J opens, one line flush under the thing, where
+  // words go in and come back. The callout decides what it is about.
+  'change-line.js': () => path.join(REPO, 'runtime', 'change-line.js'),
+  // The change on request (v5): nothing stays after a change; rest on it to
+  // see it drawn over what it made, then Keep, Undo or Change more.
+  'change-review.js': () => path.join(REPO, 'runtime', 'change-review.js'),
+  // Find, mark, commit (v5): Reshape a part by hand and every part like it
+  // follows; a few words that are one rule become one. One undo either way.
+  'change-rules.js': () => path.join(REPO, 'runtime', 'change-rules.js'),
+  // The work, on the page: dots on what an agent changed, a rail, the island
+  // while the chat is closed, and the walk through a turn's changes.
+  'agent-work.js': () => path.join(REPO, 'runtime', 'agent-work.js'),
+  // Automations: a [data-marble-run] button starts an agent with its brief.
+  'agent-run.js': () => path.join(REPO, 'runtime', 'agent-run.js'),
+  // Marks: Select and Sketch, the tray's two tools for briefing an agent
+  // about a region. Geometry first; the layer reads it off globalThis.
   'agent-marks-geometry.js': () => path.join(REPO, 'runtime', 'agent-marks-geometry.js'),
   'agent-marks.js': () => path.join(REPO, 'runtime', 'agent-marks.js'),
+  'build-mode.js': () => path.join(REPO, 'runtime', 'build-mode.js'),
+  'build-margin.js': () => path.join(REPO, 'runtime', 'build-margin.js'),
+  'build-history.js': () => path.join(REPO, 'runtime', 'build-history.js'),
+  // Variations: the version pill and the compare surface for a <marble-alt>.
+  'agent-variations.js': () => path.join(REPO, 'runtime', 'agent-variations.js'),
+  // The shell: ⌘J's tree, bar and chat around whatever document is open.
+  'shell.js': () => path.join(REPO, 'runtime', 'shell.js'),
+};
+
+// A runtime file's version is a hash of its bytes. A page asks for each one at
+// `?v=<version>`, which the browser keeps until the file changes, so moving
+// between documents downloads only the document. Remembered against the
+// file's size and mtime, because the runtime is re-read on every request and a
+// page names all of it.
+const hashOf = (bytes) => crypto.createHash('sha1').update(bytes).digest('hex').slice(0, 12);
+const runtimeVersions = new Map();
+const runtimeVersion = (file) => {
+  try {
+    const where = RUNTIME[file]();
+    const stat = fs.statSync(where);
+    const stamp = `${stat.size}:${stat.mtimeMs}`;
+    const known = runtimeVersions.get(file);
+    if (known?.stamp === stamp) return known.version;
+    const version = hashOf(fs.readFileSync(where));
+    runtimeVersions.set(file, { stamp, version });
+    return version;
+  } catch {
+    return null;
+  }
+};
+const runtimeUrl = (file) => {
+  const version = runtimeVersion(file);
+  return version ? `/runtime/${file}?v=${version}` : `/runtime/${file}`;
 };
 
 /** The ids a document's html, head and body carry. */
@@ -123,19 +258,110 @@ export const rootRemoved = (priorSource, ops) => {
   return roots.size > 0 && (ops ?? []).some((op) => op?.type === 'remove' && roots.has(op.id));
 };
 
-export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, genui: genuiOpts = null, agentSandbox = null } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, genui: genuiOpts = null, agentSandbox = null, drawSummary = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
   const channels = createChannels();
   const oplog = createOpLog({ dir: store.marbleDir });
+  const moves = createMoves({ dir: store.marbleDir });
+  const thumbs = createThumbs({ dir: path.join(store.marbleDir, 'thumbs'), ...(config.quicklook === false ? { platform: 'none' } : {}) });
   const gate = createGate({
     secret: config.secret,
     cookieName: config.cookieName,
     days: config.sessionDays,
     secure: config.secureCookie,
   });
+  // The door (server/door.js): a pass from marbledrive.app opens the drive
+  // beside the passphrase. Not configured without its three settings, and then
+  // nothing below changes. `strict` is `tools` mode with a door to send people
+  // to: the passphrase is then for scripts and the desk, not a browser outside.
+  const door = createDoor({ keys: config.doorKeys, name: config.doorName, owner: config.doorOwner });
+  const strict = config.gateMode === 'tools' && door.configured && !gate.open;
+  if (config.gateMode === 'tools' && !strict) {
+    log.info?.('[drive] MARBLE_DRIVE_GATE=tools does nothing without the door settings (MARBLE_DOOR_KEYS, _NAME, _OWNER) and a passphrase');
+  }
+  /** The owner: the door's pass, or the passphrase where it still counts. */
+  const isOwner = (req) => door.allows(req) || gate.allows(req, { cookie: !strict || isLocal(req) });
+  /** Where a browser that is not the owner is sent to sign in. */
+  const signInAt = (req) =>
+    door.configured && (strict || !isLocal(req)) ? door.enterUrl(req) : `/gate?to=${encodeURIComponent(req.url)}`;
+  // Links to one page each, for people who do not have the passphrase
+  // (server/shares.js). The gate still decides who the owner is.
+  const shares = createShares({
+    dir: store.marbleDir,
+    days: config.sessionDays,
+    secureFor: (req) => Boolean(config.secureCookie) || overHttps(req),
+  });
   const intents = createIntents({ store, log });
+  const stems = createStems({ store, channels, log });
+  const uploads = createUploads({
+    store,
+    maxBytes: config.maxFileBytes,
+    chunkBytes: config.uploadChunkBytes,
+    marginBytes: config.uploadMarginBytes,
+    freePath: (wanted) => freeFilePath(wanted),
+  });
+  // A session nobody came back for is dropped after a day: at boot, then hourly.
+  uploads.sweep().catch(() => {});
+  const uploadSweep = setInterval(() => uploads.sweep().catch(() => {}), 60 * 60 * 1000);
+  uploadSweep.unref?.();
+  // On a sprite: stay awake while a turn or a split is getting somewhere, even
+  // with no tab open (server/keep-awake.js), within the limits in server/hold.js.
+  // Time is awake time, so a night frozen adds nothing. Inert off a sprite.
+  const awake = createAwakeClock();
+  const progress = createProgress();
+  const hold = createHold({
+    clock: awake,
+    progress,
+    limits: {
+      pausedMs: config.askHoldMinutes * 60_000,
+      noProgressMs: config.noProgressMinutes * 60_000,
+      maxMs: config.awakeMaxHours * 60 * 60_000,
+    },
+  });
+  const work = () => [
+    ...(agents?.runner?.running?.() ?? []).map((turn) => ({
+      key: `turn:${turn.id}`,
+      lastProgress: turn.lastProgress,
+      pausedSince: turn.pausedSince,
+    })),
+    ...stems.work(),
+  ];
+  // A forgotten tab's streams would keep the sprite awake too: they close once
+  // the tab goes unused (server/streams.js, runtime/tab-rest.js).
+  const unusedMs = config.streamUnusedMinutes * 60_000;
+  const streams = createStreams({ unusedMs, checkMs: Math.max(50, Math.min(60_000, Math.floor(unusedMs / 4))) });
+  const keepAwake = createKeepAwake({
+    socket: config.spriteSocket,
+    busy: () => hold.holds(work()),
+    log,
+  });
+  keepAwake.start();
+  // One line a minute while awake: what the machine used and why it was up,
+  // for the Console to draw state and cost over time (server/ledger.js).
+  const seenTurns = new Set();
+  const ledger = createLedger({
+    dir: path.join(store.marbleDir, 'usage'),
+    log,
+    why: () => {
+      const items = work();
+      for (const item of items) {
+        if (item.key.startsWith('turn:') && !seenTurns.has(item.key)) {
+          seenTurns.add(item.key);
+          ledger.count('turns');
+        }
+      }
+      const live = new Set(items.map((i) => i.key));
+      for (const key of seenTurns) if (!live.has(key)) seenTurns.delete(key);
+      const asks = items.filter((i) => i.pausedSince !== null && i.pausedSince !== undefined).length;
+      return { tabs: streams.count, looking: streams.looking(60_000), work: items.length - asks, asks };
+    },
+    processes: () => memoryGuard?.snapshot() ?? null,
+  });
+  // Before the machine runs out of memory and stalls, stop the heaviest thing
+  // an agent is running (server/memory-guard.js). Inert where there is no /proc.
+  const memoryGuard = config.memoryGuard ? createMemoryGuard({ log, onRelief: () => ledger.count('relieved') }) : null;
   const typesafe = createTypesafeHandler({
     apiKey: config.typesafeApiKey,
     maxBodyBytes: config.maxBodyBytes,
@@ -184,30 +410,122 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   // ------------------------------------------------------------------ serving
 
-  const injectCarrier = (source, docPath) => {
+  // runtime/phone.js goes in the <head>, ahead of anything the page runs
+  // itself, so an app's own inline script finds window.marblePhone waiting.
+  const withPhone = (source) => {
+    const tag = `<script src="${runtimeUrl('phone.js')}" data-marble-transient></script>`;
+    if (/<head\b[^>]*>/i.test(source)) return source.replace(/<head\b[^>]*>/i, (open) => `${open}\n${tag}`);
+    return `${tag}\n${source}`;
+  };
+
+  const injectCarrier = (raw, docPath, visit = null) => {
+    const source = withPhone(raw);
+    // tab-rest.js first: it stands in for EventSource before any stream opens.
     let tags =
-      `<script src="/runtime/marble.js" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
-      `<script src="/runtime/drive.js" data-marble-transient></script>`;
+      `<script src="${runtimeUrl('tab-rest.js')}" data-hidden-ms="${config.tabHiddenSeconds * 1000}" data-idle-ms="${config.tabIdleMinutes * 60_000}" data-marble-transient></script>\n` +
+      `<script src="${runtimeUrl('marble.js')}" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
+      `<script src="${runtimeUrl('drive.js')}" data-marble-transient></script>\n` +
+      `<script src="${runtimeUrl('affords.js')}" data-marble-transient></script>`;
+    // Someone who came by a share link gets the page and nothing of the
+    // drive around it: no shell, no agents, no console. share.js says what
+    // their link lets them do, and keeps a read-only page read-only.
+    if (visit) {
+      tags += `\n<script src="${runtimeUrl('collab.js')}" data-marble-transient></script>`;
+      // With the door on, the page ends with a quiet "Make your own" that
+      // goes to Ask for access; with it off there is nowhere to send them.
+      const ask = door.askUrl ? ` data-door="${escapeHtml(door.askUrl)}"` : '';
+      tags += `\n<script src="${runtimeUrl('share.js')}" data-role="${escapeHtml(visit.role)}"${ask} data-marble-transient></script>`;
+      // Their link never has build mode, so only the page's writing areas take
+      // typing. A modify link changes the page itself, and keeps all of it.
+      if (visit.role !== 'modify') tags += `\n<script src="${runtimeUrl('writing.js')}" data-mode="share" data-marble-transient></script>`;
+      return source.includes('</body>')
+        ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
+        : source + tags;
+    }
     if (agents) {
-      tags += `\n<script src="/runtime/agent.js" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent.js')}" data-marble-transient></script>`;
+      // The card's words, before the card that says them.
+      tags += `\n<script src="${runtimeUrl('agent-words.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-status.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('voice.js')}" data-marble-transient></script>`;
       // Custom meta skips the drawer mount in runtime/agent-ui.js, not this script —
       // Agents.mrbl still needs <marble-conversation> without a second launcher.
-      tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-folders.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-phone.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-usage-charts.js" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-ui.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-folders.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-phone.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-usage-charts.js')}" data-marble-transient></script>`;
     }
-    tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;
+    tags += `\n<script src="${runtimeUrl('collab.js')}" data-marble-transient></script>`;
+    // The Console's own look and behaviour, only on the Console, only where
+    // the console is on (server/console).
+    if (consoleApp && /<meta\s+name="marble-console"/i.test(source)) {
+      tags += `\n<link rel="stylesheet" href="${runtimeUrl('console.css')}" data-marble-transient>`;
+      tags += `\n<script src="${runtimeUrl('console-charts.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('console-features.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('console.js')}" data-marble-transient></script>`;
+    }
     // After collab.js: the callout hangs its card with the zone's own geometry.
-    if (agents) tags += `\n<script src="/runtime/agent-callout.js" data-marble-transient></script>`;
-    // After the callout: Select hands its ids to the callout's handle. After
-    // agent-ui.js too, and less visibly — the toolbar captures the drawer's
-    // shadow root once at boot, so a drawer mounted later would leave it
-    // watching nothing. test/agent-http.test.js holds both orders.
+    // The callout reads the scope finder and mounts the offer, so both first.
     if (agents) {
-      tags += `\n<script src="/runtime/agent-marks-geometry.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-marks.js" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-scope.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-offer.js')}" data-marble-transient></script>`;
     }
+    if (agents) tags += `\n<script src="${runtimeUrl('agent-callout.js')}" data-marble-transient></script>`;
+    // After the callout, which it asks what it already shows.
+    if (agents) tags += `\n<script src="${runtimeUrl('agent-glints.js')}" data-marble-transient></script>`;
+    // After the callout, which hands them its asks, and after collab.js,
+    // whose zones step back for work drawn in the text.
+    if (agents) {
+      tags += `\n<script src="${runtimeUrl('agent-notes.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-nudge.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-text.js')}" data-marble-transient></script>`;
+      // The engine, before the marks that hand it each batch to play.
+      tags += `\n<script src="${runtimeUrl('change-morph.js')}" data-marble-transient></script>`;
+      // After the caret in the text, whose claims it defers to, and after
+      // collab.js, whose zones step aside for what it marks.
+      tags += `\n<script src="${runtimeUrl('change-marks.js')}" data-marble-transient></script>`;
+      // After the marks, whose tints its own tint gives way to, and after the
+      // callout, which opens it.
+      tags += `\n<script src="${runtimeUrl('change-line.js')}" data-marble-transient></script>`;
+      // After the line, which its Change more opens, and the marks, whose
+      // end it waits on to ask what is left to review.
+      tags += `\n<script src="${runtimeUrl('change-review.js')}" data-marble-transient></script>`;
+      // After the marks, whose tints and tag it draws with, and the line,
+      // whose words it tries as one rule before they go to an agent.
+      tags += `\n<script src="${runtimeUrl('change-rules.js')}" data-marble-transient></script>`;
+    }
+    if (agents) tags += `\n<script src="${runtimeUrl('agent-work.js')}" data-marble-transient></script>`;
+    if (agents) tags += `\n<script src="${runtimeUrl('agent-run.js')}" data-marble-transient></script>`;
+    // The Projects page's look and behaviour, only on that page: its file
+    // holds the owner's projects, and the views drawn around them ship with
+    // every release instead of being merged into it (runtime/projects.js).
+    // After agent-run.js, which wires the page's morning run.
+    if (/<meta\s+name="marble-projects"/i.test(source)) {
+      tags += `\n<link rel="stylesheet" href="${runtimeUrl('projects.css')}" data-marble-transient>`;
+      tags += `\n<script src="${runtimeUrl('projects.js')}" data-marble-transient></script>`;
+    }
+    // After the callout, whose handle both tools hand their ids to, and after
+    // agent-ui.js, whose tray is the only place these tools are reachable from
+    // — a register nobody answers takes the layer back down.
+    if (agents) {
+      tags += `\n<script src="${runtimeUrl('agent-marks-geometry.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-marks.js')}" data-marble-transient></script>`;
+      // After Describe, whose marks and toolbar it builds from (Build mode).
+      tags += `\n<script src="${runtimeUrl('build-mode.js')}" data-marble-transient></script>`;
+      // Its margin: every mark beside the app, and how each is going.
+      tags += `\n<script src="${runtimeUrl('build-margin.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('build-history.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-variations.js')}" data-marble-transient></script>`;
+      // After Describe, whose build mode it follows: out of it, only the page's
+      // writing areas take typing.
+      tags += `\n<script src="${runtimeUrl('writing.js')}" data-mode="build" data-marble-transient></script>`;
+    }
+    // Last: the shell seats the drawer, so it comes after everything that
+    // mounts one, and reads the drawer's tokens off window.marbleAgentUI.
+    // It is told which document is the Drive, so on the Drive itself the bar
+    // says Drive rather than naming its file.
+    // And whether a folder can be published from its menu (server/git.js).
+    tags += `\n<script src="${runtimeUrl('shell.js')}" data-home="${escapeHtml(config.home)}"${git ? ' data-git="1"' : ''} data-marble-transient></script>`;
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
       : source + tags;
@@ -218,6 +536,77 @@ export async function createDrive(config, { log = console, agentProviders = null
    *  written for a flat host still works; one written for this one gets
    *  folders. */
   const listDocs = async () => (await store.list({ recursive: true })).filter((e) => e.kind === 'doc');
+
+  // ------------------------------------------------------------------ moving
+
+  /** The name is the address, so a move is a change of identity, and what
+   *  pointed at the old one has to follow: the old address forwards
+   *  (server/moves.js), the conversations aimed at it aim at the new one, and
+   *  the Drive's pins — the Drive's own references, in its own file — are
+   *  rewritten there as ops, so they are undoable like any other edit. Other
+   *  documents' links are theirs; the forward is what keeps them working. */
+  const unescapeAttr = (v) => v.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+  /** A document, file or folder to a new name, and everything that follows
+   *  the name: what this host remembers of it, its title, the conversations,
+   *  share links and builds aimed at it. The Drive's move, and a build naming
+   *  the app it made (server/build). */
+  async function moveDocument(from, to) {
+    const moved = await store.move(from, to);
+    // The name is the address, so a move is a change of identity. The
+    // bookkeeping this host holds in memory has to follow it or the next
+    // write is measured against the wrong baseline.
+    if (lastKnown.has(moved.from)) {
+      lastKnown.set(moved.to, lastKnown.get(moved.from));
+      lastKnown.delete(moved.from);
+    }
+    pendingWrites.move(moved.from, moved.to);
+    // A rename is the person naming the document, so the tab says the
+    // new name too. A move that kept the name leaves the title alone.
+    if (moved.kind === 'doc' && splitPath(moved.from).name !== splitPath(moved.to).name) {
+      const source = await store.read(moved.to);
+      const next = source === null ? null : retitled(source, splitPath(moved.to).name);
+      if (next !== null && next !== source) await putDocument(moved.to, next, { label: 'renamed', event: 'changed' });
+    }
+    channels.toDrive('moved', moved);
+    await followMove(moved.from, moved.to);
+    return moved;
+  }
+
+  async function followMove(from, to) {
+    const folder = (await store.has(to)) ? 'doc' : 'folder';
+    const at = (p) => (p === from ? to : folder === 'folder' && p?.startsWith(`${from}/`) ? to + p.slice(from.length) : null);
+    try {
+      await moves.note(from, to, folder);
+    } catch (err) {
+      log.error(`[move] could not remember ${from} → ${to}: ${err.message}`);
+    }
+    try {
+      await agents?.followMove?.(at);
+    } catch (err) {
+      log.error(`[move] conversations did not follow ${from} → ${to}: ${err.message}`);
+    }
+    try {
+      await shares.moved(at);
+    } catch (err) {
+      log.error(`[move] share links did not follow ${from} → ${to}: ${err.message}`);
+    }
+    try {
+      const home = config.home;
+      const source = home && home !== from ? await store.read(home) : null;
+      if (!source) return;
+      const ops = [];
+      for (const [tag] of source.matchAll(/<li\b[^>]*\bclass="pin"[^>]*>/g)) {
+        const id = /\bdata-marble-id="([^"]+)"/.exec(tag)?.[1];
+        const pinned = /\bdata-path="([^"]*)"/.exec(tag)?.[1];
+        const next = pinned ? at(unescapeAttr(pinned)) : null;
+        if (id && next) ops.push({ type: 'setAttr', id, name: 'data-path', value: next });
+      }
+      if (ops.length) await applyOps(home, ops, { client: 'drive:move' });
+    } catch (err) {
+      log.error(`[move] pins did not follow ${from} → ${to}: ${err.message}`);
+    }
+  }
 
   // ------------------------------------------------------------------ writing
 
@@ -234,12 +623,17 @@ export async function createDrive(config, { log = console, agentProviders = null
       const source = await store.read(docPath);
       if (source === null) throw Object.assign(new Error(`no document "${docPath}"`), { status: 404 });
 
+      // A writer that ran the guard itself, to know the batch would land
+      // before saying so, hands on what it got rather than have it worked
+      // out twice (on a large page that is most of a second).
+      let guarded = null;
       if (prepare) {
         const planned = await prepare(source);
         if (planned.refused) {
           return { applied: 0, refused: planned.refused, bytes: bytesOf(source), sha: shaOf(source) };
         }
         ops = planned.ops;
+        if (typeof planned.html === 'string') guarded = planned.html;
       }
 
       // `after` is bookkeeping for a writer that has already won; it must not
@@ -273,7 +667,7 @@ export async function createDrive(config, { log = console, agentProviders = null
           });
           if (merged.forks.length) return { html: merged.source, ops: merged.ops, forks: merged.forks };
         }
-        return { html: guardOps(source, ops), ops, forks: [] };
+        return { html: guarded ?? guardOps(source, ops), ops, forks: [] };
       })();
 
       if (next.html === source) {
@@ -310,6 +704,10 @@ export async function createDrive(config, { log = console, agentProviders = null
         if (String(client).startsWith('agent')) {
           payload.phase = 'writing';
           if (options.note) payload.note = options.note;
+          // The v5 presence fields (parts, kind, count, step, total, reach,
+          // turn, stage…) an agent's `prepare` already computed for the
+          // matching pre-write look — same batch, so they apply unchanged.
+          if (options.presence) Object.assign(payload, options.presence);
         }
         channels.toPresence(docPath, payload, { except });
       }
@@ -364,18 +762,121 @@ export async function createDrive(config, { log = console, agentProviders = null
   // Set once the server exists, because the agents need to know where to tell
   // their MCP bridge to call back. Null when agents are not allowed here.
   let agents = null;
+  /** Claude and ChatGPT's door (server/connector), once agents have booted or not. */
+  let connector = null;
+  // The run the host starts once a day (server/daily.js), once agents are up.
+  let daily = null;
+  // Automations that run on a schedule (server/alive.js, Make it alive).
+  let alive = null;
+  // The console (server/console): on only where MARBLE_DRIVE_CONSOLE says so.
+  let consoleApp = null;
+  // Publish (server/git.js): on only where MARBLE_DRIVE_GIT says so.
+  let git = null;
   // Why `agents` is null, when it is — for the boot line.
   let agentsWhy = withAgents ? agentsAllowed(config).why : 'not started for this command';
+
+  /** A file that is not a document, answered the one way the drive answers
+   *  one: inert unless the allowlist says otherwise, and seekable. */
+  function sendFile(req, res, file) {
+    const type = INLINE_TYPES[file.ext] ?? null;
+    const headers = {
+      'Cache-Control': 'no-store',
+      'Content-Type': type ?? 'application/octet-stream',
+      // Two headers doing one job, because getting this wrong is a script
+      // running on the drive's own origin with the drive's own cookie.
+      // `nosniff` stops the browser deciding for itself that a .txt is
+      // HTML, and the sandbox policy makes it inert even if it decides
+      // anyway.
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      // Anything not on the allowlist is downloaded rather than rendered.
+      // The list is short on purpose: `.svg` is missing from it because an
+      // SVG can carry script, and it looks like a picture right up until
+      // it is one.
+      'Content-Disposition':
+        `${type ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`,
+      // A song is played by seeking into it. Without this a browser will
+      // play one from the top and refuse to move the playhead anywhere.
+      'Accept-Ranges': 'bytes',
+    };
+    // A PDF is the one exception to the sandbox. The browser's viewer is a
+    // plugin, and it refuses to draw inside a sandboxed page (or under a
+    // policy that forbids objects) — so a PDF under the header above opens
+    // as a blank tab. The viewer runs its own document, not script on
+    // this origin, so the file has nothing to reach even without it.
+    if (file.ext === 'pdf') delete headers['Content-Security-Policy'];
+
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+    if (range && file.bytes > 0 && (range[1] || range[2])) {
+      // `bytes=500-` is from 500 on, `bytes=-500` is the last 500.
+      let start = range[1] ? Number(range[1]) : Math.max(0, file.bytes - Number(range[2]));
+      let end = range[1] && range[2] ? Math.min(Number(range[2]), file.bytes - 1) : file.bytes - 1;
+      if (start > end || start >= file.bytes) {
+        res.writeHead(416, { ...headers, 'Content-Range': `bytes */${file.bytes}` });
+        return res.end();
+      }
+      res.writeHead(206, {
+        ...headers,
+        'Content-Range': `bytes ${start}-${end}/${file.bytes}`,
+        'Content-Length': end - start + 1,
+      });
+      return file.open({ start, end }).pipe(res);
+    }
+    res.writeHead(200, { ...headers, 'Content-Length': file.bytes });
+    return file.open().pipe(res);
+  }
+
+  /**
+   * A file a document names from the root, the way a website names its own:
+   * `/thumbnails/a.png`. A document that is also a site is published from its
+   * folder, so that folder is its root — and the folder's `public/` too, which
+   * is where a site keeps what it serves at its root. In the Drive there is no
+   * such root, so the path is read beside the document that asked, which the
+   * browser names in `Referer`. Only after every route of the host's own has
+   * passed on it, so a document can never shadow one.
+   *
+   * Null for anything else: no document asking, another site asking, a path
+   * the grammar refuses, or a document rather than a file.
+   */
+  async function besideReferrer(req, route) {
+    let from;
+    let asked;
+    try {
+      from = new URL(req.headers.referer ?? '');
+      asked = decodeURIComponent(route);
+    } catch {
+      return null;
+    }
+    if (from.host !== (req.headers['x-forwarded-host'] || req.headers.host)) return null;
+    if (!from.pathname.startsWith('/a/')) return null;
+    let docPath;
+    try {
+      docPath = parsePath(decodeURIComponent(from.pathname.slice(3)), { allowRoot: false });
+    } catch {
+      return null;
+    }
+    const { parent } = splitPath(docPath);
+    for (const candidate of [joinPath(parent, asked), joinPath(parent, 'public', asked)]) {
+      const file = await store.readRaw(candidate).catch(() => null);
+      if (file) return file;
+    }
+    return null;
+  }
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
     const route = url.pathname;
+    // Any request may be the one that woke a paused sprite, and the only
+    // chance to start a day that came due while it slept: the sprite pauses
+    // again before a minute timer would fire.
+    daily?.nudge();
+    alive?.nudge();
 
     try {
       // The gate, and the two things that have to be reachable through it: the
       // form itself, and a health check a load balancer runs before anybody has
       // a cookie.
-      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts });
+      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts, streams: streams.count, working: work().length, memory: memoryGuard?.reading() ?? null });
       // The mark, for the two pages that cannot carry it in their own head: a
       // document written before this host had one, and the gate. Everything
       // made here has it inline and never asks — which is why this is a
@@ -390,25 +891,61 @@ export async function createDrive(config, { log = console, agentProviders = null
       }
       if (route === '/favicon.ico') return send(res, 302, '', { Location: '/favicon.svg' });
       if (route === '/gate') return gateRoute(req, res, url);
+      // A share link: in front of the gate, because the person holding one
+      // has no passphrase. It trades the token for a cookie and goes on to
+      // the page (server/shares.js).
+      const link = /^\/s\/([A-Za-z0-9_-]+)$/.exec(route);
+      if (link && req.method === 'GET') return shareDoor(req, res, link[1]);
       // In front of the gate: the MCP bridge carries a turn's token, not the
       // drive's secret, and the tool routes check that token themselves.
       if (route === '/agent/tools' || route.startsWith('/agent/tools/')) {
         // Awaited, so a refusal thrown inside reaches the catch below as a status.
         return agents ? await agents.handleTools(req, res, url) : text(res, 404, 'not found');
       }
-      if (!gate.allows(req)) {
-        if ((req.headers.accept ?? '').includes('text/html')) {
-          return send(res, 302, '', { Location: `/gate?to=${encodeURIComponent(req.url)}` });
+      // In front of the gate: Claude's and ChatGPT's servers hold a token the
+      // owner let them have, not a cookie (server/connector/routes.js).
+      if (connector && (await connector.handlePublic(req, res, url))) return;
+      // Not the owner, but maybe someone holding a share link. `visit` is the
+      // link's grant for the one document this request is about; everything
+      // a link does not open is turned away here, before any route runs.
+      let visit = null;
+      if (!isOwner(req)) {
+        const grants = await shares.visitor(req);
+        const asked = grants ? await visitorMay(req, url, route, grants) : null;
+        if (asked?.redirect) return send(res, 302, '', { Location: asked.redirect });
+        if (!asked?.ok) {
+          // Someone whose every link has been turned off is told that, not
+          // shown a passphrase form they were never given.
+          const lapsed = !grants && shares.carries(req);
+          if ((req.headers.accept ?? '').includes('text/html')) {
+            if (lapsed) return linkIsOff(res);
+            return send(res, 302, '', { Location: signInAt(req) });
+          }
+          if (lapsed) return json(res, 403, { error: 'This link was turned off' });
+          if (grants) return json(res, 403, { error: asked?.error ?? 'a shared link opens one page, not the drive' });
+          if (door.configured && (strict || !isLocal(req))) {
+            return json(res, 401, { error: 'this drive is closed', hint: `sign in at ${door.enterUrl(req)}, or send the secret as a bearer token` });
+          }
+          return json(res, 401, { error: 'this drive is closed', hint: 'POST /gate with the secret' });
         }
-        return json(res, 401, { error: 'this drive is closed', hint: 'POST /gate with the secret' });
+        visit = asked.grant;
       }
+      // The owner's: the Allow page and Connected apps. Never a share link's.
+      if (connector && !visit && (await connector.handleOwner(req, res, url))) return;
       if (route.startsWith('/agent/')) {
         return agents ? await agents.handle(req, res, url) : text(res, 404, 'not found');
+      }
+      if (route.startsWith('/console/')) {
+        return consoleApp ? await consoleApp.handle(req, res, url, route) : text(res, 404, 'not found');
       }
       if (await typesafe.handle(req, res, url)) return;
       if (await genui.handle(req, res, url)) return;
 
       if (route === '/') {
+        // A new drive's first visits open Start here, until it is deleted or
+        // all three of its rows are ticked (server/start-here.js).
+        const first = await startHereFor(store, req);
+        if (first) return send(res, 302, '', { Location: `/a/${encodeURIComponent(first)}` });
         // Land on the Drive if it is there. It is an ordinary document with no
         // standing, so deleting it falls back to whatever exists.
         const landing = (await store.has(config.home))
@@ -421,9 +958,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route === '/today') {
         // One address, bookmarked once, that always opens whatever a
         // recurring skill built most recently — the skill's job is to keep
-        // `config.latestDoc` mirrored, not to hand out a fresh URL each day.
-        const landing = (await store.has(config.latestDoc))
-          ? config.latestDoc
+        // `latest` mirrored, not to hand out a fresh URL each day. The
+        // environment wins, then the drive's own settings, then the newest.
+        const latest = config.latestDoc ?? (await readDriveSettings(store.marbleDir)).latest;
+        const landing = latest && (await store.has(latest))
+          ? latest
           : (await listDocs())[0]?.path;
         if (landing) return send(res, 302, '', { Location: `/a/${encodeURIComponent(landing)}` });
         return text(res, 404, `no documents in ${config.root}\n\nmake one:  marble-drive new <name>\n`);
@@ -435,13 +974,31 @@ export async function createDrive(config, { log = console, agentProviders = null
         if (!resolve) return text(res, 404, `no runtime module "${file}"`);
         const js = await fsp.readFile(resolve(), 'utf8').catch(() => null);
         if (js === null) return text(res, 404, `no runtime module "${file}"`);
-        return send(res, 200, js, { 'Content-Type': 'text/javascript; charset=utf-8' });
+        const type = file.endsWith('.css') ? 'text/css' : 'text/javascript';
+        // Kept for good at the address a page names (runtimeUrl), because a new
+        // version is a new address. Any other address — an import() inside
+        // the runtime, a stale version — is asked about each time, and a
+        // browser that already has these bytes is told so.
+        const version = hashOf(js);
+        const headers = {
+          'Content-Type': `${type}; charset=utf-8`,
+          ETag: `"${version}"`,
+          'Cache-Control': url.searchParams.get('v') === version ? 'private, max-age=31536000, immutable' : 'no-cache',
+        };
+        if (req.headers['if-none-match'] === headers.ETag) return send(res, 304, '', headers);
+        return send(res, 200, js, headers);
       }
 
       if (route.startsWith('/a/')) {
         const docPath = parsePath(decodeURIComponent(route.slice(3)), { allowRoot: false });
         const source = await store.read(docPath);
-        if (source === null) return text(res, 404, `no document "${docPath}"`);
+        if (source === null) {
+          // An address a document left: send the visit on to where it went.
+          // The fragment rides the redirect, so a chat or a place in it survives.
+          const went = await moves.resolve(docPath);
+          if (went && (await store.has(went))) return send(res, 302, '', { Location: `/a/${encodeURIComponent(went)}` });
+          return text(res, 404, `no document "${docPath}"`);
+        }
         // Serving is the first thing that happens to a document this session, so
         // it is where the baseline comes from: an edit from outside now has a
         // state to be measured against, and a restore point that predates it.
@@ -449,14 +1006,20 @@ export async function createDrive(config, { log = console, agentProviders = null
           lastKnown.set(docPath, { source, client: null });
           await store.mark(docPath, source, 'opened');
         }
-        return html(res, 200, injectCarrier(source, docPath));
+        // A visit, not a preview: the Drive draws live pages in iframes.
+        const dest = req.headers['sec-fetch-dest'];
+        if (!dest || dest === 'document') ledger.count('opens');
+        return html(res, 200, injectCarrier(source, docPath, visit));
       }
 
       // ------------------------------------------------- the carrier's surface
 
       if (route === '/docs' && req.method === 'GET') {
         if (url.searchParams.get('tree')) {
-          return json(res, 200, await store.tree({ folder: url.searchParams.get('folder') ?? '' }));
+          return json(res, 200, await store.tree({
+          folder: url.searchParams.get('folder') ?? '',
+          files: url.searchParams.get('files') !== '0',
+        }));
         }
         // `name` is what Marble's carrier calls a document, and here that name
         // is its whole path — so `marble.href(doc.name)` still opens it.
@@ -464,7 +1027,28 @@ export async function createDrive(config, { log = console, agentProviders = null
         return json(res, 200, docs.map((doc) => ({ ...doc, name: doc.path })));
       }
 
+      // A tab says someone is using it: its streams stay open, and a day of
+      // unattended work starts again (server/streams.js, server/hold.js).
+      // This drive's ledger since a moment (unix seconds): what it used, minute
+      // by minute, while awake (server/ledger.js).
+      if (route === '/usage' && req.method === 'GET') {
+        return json(res, 200, { lines: await ledger.read(Number(url.searchParams.get('since')) || 0) });
+      }
+
+      if (route === '/tab/alive' && req.method === 'POST') {
+        const body = await readJson(req, 1024).catch(() => ({}));
+        streams.alive(body?.tab);
+        hold.used();
+        res.writeHead(204, { 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+
       if (route === '/events') {
+        if (!streams.admit(req, url)) {
+          res.writeHead(204, { 'Cache-Control': 'no-store' });
+          return res.end();
+        }
+        streams.track(req, res, url);
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-store',
@@ -472,11 +1056,14 @@ export async function createDrive(config, { log = console, agentProviders = null
           'X-Accel-Buffering': 'no',
         });
         res.write(': connected\n\n');
-        const client = { id: url.searchParams.get('client'), res };
+        // A share link's listener is told where work is, never its words
+        // (`forVisitor`, server/sse.js).
+        const client = { id: url.searchParams.get('client'), res, visitor: Boolean(visit) };
 
         const off = url.searchParams.get('drive')
           ? channels.subscribeDrive(client)
           : channels.subscribeDoc(parsePath(url.searchParams.get('app'), { allowRoot: false }), client);
+        if (visit) shares.track(visit.id, res);
         req.on('close', () => {
           off();
           if (!url.searchParams.get('drive') && client.id) {
@@ -497,7 +1084,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       // catch one by listening. It asks instead.
       if (route === '/presence' && req.method === 'GET') {
         const docPath = parsePath(url.searchParams.get('app'), { allowRoot: false });
-        return json(res, 200, { frames: [...(looking.get(docPath)?.values() ?? [])] });
+        const frames = [...(looking.get(docPath)?.values() ?? [])];
+        return json(res, 200, { frames: visit ? frames.map(forVisitor) : frames });
       }
 
       if (route === '/presence' && req.method === 'POST') {
@@ -517,9 +1105,19 @@ export async function createDrive(config, { log = console, agentProviders = null
         const ops = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
         if (!Array.isArray(ops)) return json(res, 400, { error: 'expected an array of ops' });
 
+        // A share link's batch is judged against the document as it is inside
+        // the queue, by what its level may change (server/share-policy.js),
+        // and refused whole. A refusal is a 403 so the page puts itself back.
+        const prepare = visit
+          ? (source) => {
+            const why = shareRefusal(source, ops, visit.role);
+            return why ? { refused: why } : { ops };
+          }
+          : null;
         // The echo is for the other tabs, the other devices, the other people,
         // and the agent — never for whoever filed it.
-        const result = await writeOps(docPath, ops, { client });
+        const result = await writeOps(docPath, ops, { client, prepare });
+        if (result.refused) return json(res, 403, { error: result.refused });
         return json(res, 200, { ok: true, ...result });
       }
 
@@ -582,8 +1180,74 @@ export async function createDrive(config, { log = console, agentProviders = null
         return json(res, 200, listStarters());
       }
 
+      // A picture of a starter, so the gallery can show the document instead of
+      // describing it. Deliberately not under /a/: there is no document here and
+      // none is made by asking. What comes back has had every script taken out of
+      // it, and the page mounts it in an empty sandbox on top of that — a preview
+      // is a picture, not a second live copy.
+      const previewing = /^\/drive\/starters\/([\w-]+)\/preview$/.exec(route);
+      if (previewing && req.method === 'GET') {
+        try {
+          const source = await starterPreview(previewing[1]);
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'private, max-age=300',
+          });
+          return res.end(source);
+        } catch (err) {
+          return json(res, err.status ?? 500, { error: err.message });
+        }
+      }
+
+      // The drive's own choices (server/drive-settings.js): which folders wear
+      // a realm, which document /today opens. Empty for a drive with none.
+      // Share links for one document (server/shares.js). Only the owner gets
+      // here: a link never opens a /drive route.
+      if (route === '/drive/shares' && req.method === 'GET') {
+        const docPath = parsePath(url.searchParams.get('path'), { allowRoot: false });
+        return json(res, 200, { open: gate.open, base: config.publicUrl, links: await shares.forPath(docPath) });
+      }
+      if (route === '/drive/shares' && req.method === 'POST') {
+        const body = await readJson(req, 4096);
+        const docPath = parsePath(body.path, { allowRoot: false });
+        if (!(await store.has(docPath))) return json(res, 404, { error: `no document "${docPath}"` });
+        return json(res, 200, { open: gate.open, base: config.publicUrl, link: await shares.make(docPath, body.role) });
+      }
+      if (route === '/drive/shares/off' && req.method === 'POST') {
+        const body = await readJson(req, 4096);
+        return json(res, 200, { ok: await shares.off(String(body.id ?? '')) });
+      }
+
+      // Publish (server/git.js): a folder that is its own git repository,
+      // committed and pushed. Owner-only like every /drive route, and a
+      // change that leaves the machine, so it also has to come from the
+      // Drive's own page — an Origin is required, not just tolerated.
+      if (route === '/drive/git' && req.method === 'GET') {
+        if (!git) return text(res, 404, 'not found');
+        return json(res, 200, await git.status(url.searchParams.get('path') ?? '', { fetch: url.searchParams.get('fetch') === '1' }));
+      }
+      if (route === '/drive/git/publish' && req.method === 'POST') {
+        if (!git) return text(res, 404, 'not found');
+        if (!req.headers.origin || !sameOrigin(req)) {
+          return json(res, 403, { error: "publishing acts only for the Drive's own page" });
+        }
+        const body = await readJson(req, 4096);
+        const folder = parsePath(body.path, { allowRoot: false });
+        // Every write already queued for a document in the folder lands
+        // before anything is committed, so a publish never takes half a save.
+        await Promise.all([...queues].filter(([docPath]) => isInside(docPath, folder)).map(([, queued]) => queued));
+        return json(res, 200, await git.publish(folder, { message: body.message }));
+      }
+
+      if (route === '/drive/settings' && req.method === 'GET') {
+        return json(res, 200, await readDriveSettings(store.marbleDir));
+      }
+
       if (route === '/drive/tree' && req.method === 'GET') {
-        return json(res, 200, await store.tree({ folder: url.searchParams.get('folder') ?? '' }));
+        return json(res, 200, await store.tree({
+          folder: url.searchParams.get('folder') ?? '',
+          files: url.searchParams.get('files') !== '0',
+        }));
       }
 
       if (route === '/drive/new' && req.method === 'POST') {
@@ -626,6 +1290,35 @@ export async function createDrive(config, { log = console, agentProviders = null
         });
       }
 
+      // A file that is not a document, arriving the same way — the mp3 dropped
+      // into the folder beside the mashup that plays it. The body is the bytes
+      // and is streamed to disk as it comes, so it has its own ceiling rather
+      // than the one sized for documents held in memory. A document never comes
+      // in through here: the page sends those to `/drive/upload`, and a .mrbl or
+      // .html that arrives anyway is refused rather than stored as a file that
+      // would open as its own source.
+      if (route === '/drive/upload-file' && req.method === 'POST') {
+        const folder = parsePath(safePath(url.searchParams.get('folder') ?? ''));
+        const name = cleanFileName(url.searchParams.get('name') ?? '');
+        // A size the client declares is checked before a byte is read: above
+        // the cap, or more than the disk has room for, is refused now.
+        const declared = Number(req.headers['content-length']);
+        if (Number.isSafeInteger(declared)) await uploads.room(declared);
+        const filePath = await freeFilePath(joinPath(folder, name));
+        // Silence, not length, ends an upload (the server has no whole-request
+        // deadline, see below). Cutting the socket fails the pipe, and putFile
+        // takes its half-written part away.
+        req.setTimeout(config.uploadIdleSeconds * 1000, () => req.destroy(new Error('the upload stopped sending')));
+        const put = await store.putFile(filePath, req, { limit: config.maxFileBytes });
+        channels.toDrive('created', { path: put.path, kind: 'file' }, { except: url.searchParams.get('client') });
+        return json(res, 200, {
+          ok: true,
+          path: put.path,
+          href: `/drive/file?path=${encodeURIComponent(put.path)}`,
+          bytes: put.bytes,
+        });
+      }
+
       if (route === '/drive/mkdir' && req.method === 'POST') {
         const body = await readJson(req, config.maxBodyBytes);
         const made = await store.mkdir(body.path);
@@ -635,16 +1328,7 @@ export async function createDrive(config, { log = console, agentProviders = null
 
       if (route === '/drive/move' && req.method === 'POST') {
         const body = await readJson(req, config.maxBodyBytes);
-        const moved = await store.move(body.from, body.to);
-        // The name is the address, so a move is a change of identity. The
-        // bookkeeping this host holds in memory has to follow it or the next
-        // write is measured against the wrong baseline.
-        if (lastKnown.has(moved.from)) {
-          lastKnown.set(moved.to, lastKnown.get(moved.from));
-          lastKnown.delete(moved.from);
-        }
-        pendingWrites.move(moved.from, moved.to);
-        channels.toDrive('moved', moved);
+        const moved = await moveDocument(body.from, body.to);
         return json(res, 200, { ok: true, ...moved });
       }
 
@@ -674,26 +1358,95 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route === '/drive/file' && req.method === 'GET') {
         const file = await store.readRaw(url.searchParams.get('path') ?? '');
         if (!file) return text(res, 404, `no file "${url.searchParams.get('path')}"`);
-        const type = INLINE_TYPES[file.ext] ?? null;
-        res.writeHead(200, {
-          'Cache-Control': 'no-store',
-          'Content-Type': type ?? 'application/octet-stream',
-          'Content-Length': file.bytes,
-          // Two headers doing one job, because getting this wrong is a script
-          // running on the drive's own origin with the drive's own cookie.
-          // `nosniff` stops the browser deciding for itself that a .txt is
-          // HTML, and the sandbox policy makes it inert even if it decides
-          // anyway.
+        return sendFile(req, res, file);
+      }
+
+      // A picture of a file, for the tile it sits in: a PDF's first page, a
+      // slide, a photo the browser cannot decode. Made by the system's own
+      // thumbnailer and kept; a 404 means "draw it yourself", which is always
+      // allowed. Cacheable, because the address names the file's version.
+      if (route === '/drive/thumb' && req.method === 'GET') {
+        const file = await store.readRaw(url.searchParams.get('path') ?? '');
+        if (!file) return text(res, 404, `no file "${url.searchParams.get('path')}"`);
+        const made = await thumbs.get(file, url.searchParams.get('w'));
+        if (!made) return text(res, 404, `no picture of "${file.name}"`);
+        const bytes = await fsp.readFile(made);
+        return send(res, 200, bytes, {
+          'Content-Type': made.endsWith('.webp') ? 'image/webp' : 'image/png',
+          'Cache-Control': 'private, max-age=86400',
           'X-Content-Type-Options': 'nosniff',
-          'Content-Security-Policy': "default-src 'none'; sandbox",
-          // Anything not on the allowlist is downloaded rather than rendered.
-          // The list is short on purpose: `.svg` is missing from it because an
-          // SVG can carry script, and it looks like a picture right up until
-          // it is one.
-          'Content-Disposition':
-            `${type ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`,
         });
-        return file.open().pipe(res);
+      }
+
+      // ------------------------------------------------------- upload sessions
+      //
+      // A big file, in chunks (server/uploads.js). Start, send each chunk at
+      // the offset the host has, finish; a chunk that lands in the wrong
+      // place is a 409 that says where the host is, so a retry never
+      // duplicates a byte and a reload can carry on.
+      if (route === '/drive/uploads' && req.method === 'POST') {
+        const body = await readJson(req, 64 * 1024);
+        return json(res, 200, await uploads.start(body));
+      }
+      const session = /^\/drive\/uploads\/([^/]+)(\/finish)?$/.exec(route);
+      if (session) {
+        const [, id, finishing] = session;
+        if (finishing && req.method === 'POST') {
+          const put = await uploads.finish(id);
+          channels.toDrive('created', { path: put.path, kind: 'file' }, { except: url.searchParams.get('client') });
+          return json(res, 200, {
+            ok: true,
+            path: put.path,
+            href: `/drive/file?path=${encodeURIComponent(put.path)}`,
+            bytes: put.bytes,
+          });
+        }
+        if (!finishing && req.method === 'PUT') {
+          req.setTimeout(config.uploadIdleSeconds * 1000, () => req.destroy(new Error('the upload stopped sending')));
+          try {
+            return json(res, 200, await uploads.append(id, url.searchParams.get('offset'), req));
+          } catch (err) {
+            if (err.status === 409) return json(res, 409, { error: err.message, received: err.received });
+            throw err;
+          }
+        }
+        if (!finishing && req.method === 'GET') return json(res, 200, await uploads.status(id));
+        if (!finishing && req.method === 'DELETE') return json(res, 200, await uploads.cancel(id));
+      }
+
+      // A picture the page drew, because this host could not: the first page
+      // of a PDF, a frame of a video. Kept beside QuickLook's, for this version
+      // of the file, and served before QuickLook is asked. Small PNG or WebP
+      // only (server/thumbs.js).
+      if (route === '/drive/thumb' && req.method === 'PUT') {
+        const file = await store.readRaw(url.searchParams.get('path') ?? '');
+        if (!file) return text(res, 404, `no file "${url.searchParams.get('path')}"`);
+        await thumbs.put(file, await readBody(req, DRAWN_MAX_BYTES));
+        return json(res, 200, { ok: true });
+      }
+
+      // ---------------------------------------------------------------- stems
+
+      // A song, split on this machine into its voice and its band, the pair
+      // written beside it (server/stems). Asking answers at once with a job;
+      // the page watches it by asking again.
+      if (route === '/stems' && req.method === 'GET') {
+        const folder = url.searchParams.has('folder') ? parsePath(url.searchParams.get('folder') ?? '') : null;
+        return json(res, 200, stems.list({ folder }));
+      }
+
+      if (route === '/stems/split' && req.method === 'POST') {
+        const body = await readJson(req, config.maxBodyBytes);
+        const job = await stems.split(body.path ?? '');
+        keepAwake.nudge();
+        return json(res, 200, { ok: true, job });
+      }
+
+      if (route === '/stems/cancel' && req.method === 'POST') {
+        const body = await readJson(req, config.maxBodyBytes);
+        const job = stems.cancel(body.id ?? '');
+        if (!job) return json(res, 404, { error: 'no such job' });
+        return json(res, 200, { ok: true, job });
       }
 
       // ---------------------------------------------------------------- blobs
@@ -702,10 +1455,14 @@ export async function createDrive(config, { log = console, agentProviders = null
         const blob = await store.blobs.get(route.slice('/blob/'.length));
         if (!blob) return text(res, 404, 'no such blob');
         // Content-addressed, so the bytes behind a hash never change and this is
-        // the one thing in the whole host that is safe to cache forever.
+        // the one thing in the whole host that is safe to cache forever; private,
+        // as it sits behind the gate and no shared cache may keep it.
         return send(res, 200, blob.data, {
           'Content-Type': blob.type,
-          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Cache-Control': 'private, max-age=31536000, immutable',
+          // A blob is whatever type its uploader said. Never let a browser
+          // decide it is a page instead.
+          'X-Content-Type-Options': 'nosniff',
         });
       }
 
@@ -756,6 +1513,11 @@ export async function createDrive(config, { log = console, agentProviders = null
         return json(res, 200, weigh(docPath, source));
       }
 
+      if (req.method === 'GET') {
+        const beside = await besideReferrer(req, route);
+        if (beside) return sendFile(req, res, beside);
+      }
+
       return text(res, 404, 'not found');
     } catch (err) {
       if (!(err instanceof PathError)) log.error(`[drive] ${req.method} ${route} — ${err.message}`);
@@ -769,13 +1531,33 @@ export async function createDrive(config, { log = console, agentProviders = null
     }
   });
 
+  // Node's default gives a whole request five minutes, which capped a dropped
+  // file at what the link could carry in five minutes — ~600 MB at 2 MB/s,
+  // whatever MARBLE_DRIVE_MAX_FILE said. The deadline cannot be lifted for one
+  // route, so it is lifted here and the upload route times silence instead.
+  // Headers still have to arrive within `headersTimeout`.
+  server.requestTimeout = 0;
+
   if (!agentsWhy) {
     agents = await createAgents({
       config,
       store,
+      // Build mode's History reads who wrote what (server/build/history.js).
+      oplog,
+      awake,
+      progress,
+      streams,
+      onActivity: () => keepAwake.nudge(),
       writeOps,
       createDocument,
       restore: restoreDocument,
+      // What a build needs beyond a turn (server/build): to put a checkpoint
+      // back, and to name and file the app it made.
+      putDocument: (docPath, source, options) => putDocument(docPath, source, options),
+      moveDocument: (from, to) => moveDocument(from, to),
+      freePath: (wanted) => freePath(wanted),
+      // Who draws an ended build's summary, when not the host's own drawer (a test).
+      drawSummary,
       // An agent's turn ending is the end of its claim on what it touched. Kept
       // for the life of the process, a turn's touches forked every later edit
       // near them — the person against an agent that finished an hour ago.
@@ -787,6 +1569,10 @@ export async function createDrive(config, { log = console, agentProviders = null
         const loopback = address.family === 'IPv6' ? '[::1]' : '127.0.0.1';
         return `http://${loopback}:${address.port}`;
       },
+      // An agent's browser is a fresh Chromium, and this host's own gate would
+      // turn it away from the drive it is working on. A pass is the gate's own
+      // cookie, good for a day, planted for this host only (server/agent/browser.js).
+      browserPass: gate.open ? null : () => `${gate.cookieName}=${gate.issue(24 * 60 * 60 * 1000)}`,
       providers: agentProviders ?? null,
       log,
       usage,
@@ -794,13 +1580,10 @@ export async function createDrive(config, { log = console, agentProviders = null
       sandbox: agentSandbox ?? null,
       onLook: (docPath, ids, client, extra = {}) => {
         if (!client) return;
-        const frame = {
-          client,
-          ids: Array.isArray(ids) ? ids : [],
-          label: extra.label ?? client,
-          ...(extra.phase ? { phase: extra.phase } : {}),
-          ...(extra.note ? { note: extra.note } : {}),
-        };
+        // Every field a caller hands in rides along — the v5 presence fields
+        // (parts, kind, count, step, total, reach, turn, stage, prompt,
+        // done…) included — except `client` and `ids`, this look's own.
+        const frame = lookFrame(client, ids, extra);
         rememberLook(docPath, frame);
         channels.toPresence(docPath, frame);
       },
@@ -811,10 +1594,158 @@ export async function createDrive(config, { log = console, agentProviders = null
     });
   }
 
+  if (config.connector) {
+    const why = config.multiTenant
+      ? 'this host is shared by many'
+      : gate.open && !door.configured
+        ? 'this drive has no passphrase or sign-in, so anyone could let an app in'
+        : null;
+    if (why) log.info?.(`[connector] off: ${why}`);
+    else {
+      connector = createConnectorRoutes({
+        grants: createGrants({ dir: store.marbleDir }),
+        mcp: createMcp({ agents, read: agents ? agents.read : () => ({ error: 'reading needs agents on this host' }), hasDocument: (docPath) => store.has(docPath), log }),
+        publicUrl: config.publicUrl,
+        isOwner,
+        signInAt,
+        log,
+      });
+      log.info?.(`[connector] on at /mcp${agents ? '' : ' (agents off: no chats, and no reading)'}`);
+    }
+  }
+
+  if (agents) {
+    daily = createDaily({
+      at: config.dayAt,
+      zone: config.dayZone,
+      prompt: config.dayPrompt,
+      target: config.dayTarget,
+      start: agents.startRun,
+      conversations: async () => [
+        ...(await agents.store.conversations()),
+        ...(await agents.store.conversations({ archived: true })),
+      ],
+      log,
+    });
+    if (config.alive !== false) {
+      alive = createAlive({
+        store,
+        zone: config.dayZone,
+        start: agents.startRun,
+        conversations: async () => [
+          ...(await agents.store.conversations()),
+          ...(await agents.store.conversations({ archived: true })),
+        ],
+        log,
+      });
+    }
+  }
+
+  const consoleWhy = consoleAllowed(config);
+  if (consoleWhy.ok) {
+    consoleApp = await createConsole({ config, store, streams, ledger, log, json, readJson, text });
+  } else if (config.console) {
+    log.error?.(`[console] not started: ${consoleWhy.why}`);
+  }
+  const gitWhy = gitAllowed(config);
+  if (gitWhy.ok) git = createGit({ root: config.root });
+  else if (config.git) log.error?.(`[git] publishing is off: ${gitWhy.why}`);
+
   // ------------------------------------------------------------------ helpers
+
+  /** What a share link may ask for: its document's page, stream, presence and
+   *  (by level) ops; the runtime that page loads; the blobs that page names.
+   *  Everything else belongs to the drive and is refused before any route
+   *  runs, so a route added later is the owner's until it is listed here.
+   *  `{ ok, grant }` with the grant for the document the request is about. */
+  async function visitorMay(req, url, route, grants) {
+    const { method } = req;
+    const grantFor = (docPath) => (grants.has(docPath) ? { ...grants.get(docPath), path: docPath } : null);
+    const named = (raw) => {
+      try {
+        return parsePath(raw, { allowRoot: false });
+      } catch {
+        return null;
+      }
+    };
+    // The carrier's tab id, and nothing that could pass for an agent's.
+    const client = url.searchParams.get('client');
+    if (client !== null && !/^[a-z0-9]{1,16}$/i.test(client)) return { error: 'that is not a tab' };
+
+    if (route.startsWith('/runtime/') && method === 'GET') return { ok: true, grant: null };
+    if (route === '/tab/alive' && method === 'POST') return { ok: true, grant: null };
+
+    if (route.startsWith('/a/') && method === 'GET') {
+      const docPath = named(decodeURIComponent(route.slice(3)));
+      const grant = docPath && grantFor(docPath);
+      if (grant) return { ok: true, grant };
+      // A page that moved after the link was opened: the link moved with it.
+      const went = docPath && (await moves.resolve(docPath));
+      if (went && grants.has(went)) return { redirect: `/a/${encodeURIComponent(went)}` };
+      return null;
+    }
+
+    const docPath = named(url.searchParams.get('app'));
+    const grant = docPath && grantFor(docPath);
+    if (route === '/events' && grant && !url.searchParams.get('drive')) return { ok: true, grant };
+    if (route === '/presence' && grant && (method === 'GET' || method === 'POST')) return { ok: true, grant };
+    if (route === '/ops' && grant && method === 'POST') {
+      if (RANK[grant.role] < RANK.edit) return { error: 'This link can only read the page' };
+      return { ok: true, grant };
+    }
+
+    if (route.startsWith('/blob/') && method === 'GET') {
+      const hash = route.slice('/blob/'.length);
+      if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+      for (const [path] of grants) {
+        if (((await store.read(path)) ?? '').includes(hash)) return { ok: true, grant: grantFor(path) };
+      }
+      return null;
+    }
+    return null;
+  }
+
+  /** `/s/<token>`: the owner goes straight to the page; anyone else is handed
+   *  a cookie for this link and then goes there. A link that is off says so,
+   *  and says nothing about what it was for. */
+  async function shareDoor(req, res, token) {
+    const share = await shares.resolve(token);
+    const quiet = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' };
+    if (!share || !(await store.has(share.path))) return linkIsOff(res);
+    const to = `/a/${encodeURIComponent(share.path)}`;
+    if (isOwner(req)) return send(res, 302, '', { ...quiet, Location: to });
+    // When it was last used is the owner's to read; failing to note it is no
+    // reason to turn the visitor away.
+    await shares.opened(share.id).catch((err) => log.error(`[share] could not note an open: ${err.message}`));
+    return send(res, 302, '', { ...quiet, Location: to, 'Set-Cookie': await shares.cookieWith(req, token) });
+  }
+
+  /** The page for a link that opens nothing: it says so, and nothing about
+   *  what the link was for or whose drive this is. */
+  function linkIsOff(res) {
+    return html(res, 404, `<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
+<link rel="icon" href="${iconUri('drive')}">
+<style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;padding:0 24px;background:#fafaf7;color:#111111}p{color:#5a5a5a;margin:0}
+@media (prefers-color-scheme: dark){body{background:#161616;color:#ededed}p{color:#a3a3a3}}</style>
+<p>This link doesn’t open anything. Whoever shared it may have turned it off.</p>`, { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  }
 
   function gateRoute(req, res, url) {
     if (gate.open) return send(res, 302, '', { Location: '/' });
+    // `tools` mode: the passphrase has left the browser. The form is still
+    // here at the desk (127.0.0.1, not through a tunnel); from anywhere else
+    // it is refused, and the page says where to sign in instead.
+    if (strict && !isLocal(req)) {
+      if (req.method === 'POST') return json(res, 403, { error: 'this drive opens with Marble Drive sign-in', hint: door.enterUrl({ url: '/' }) });
+      const enter = escapeHtml(door.enterUrl({ url: returnPath(url.searchParams.get('to')) }));
+      return html(res, 403, `<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
+<link rel="icon" href="${iconUri('drive')}">
+<style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;padding:0 24px;background:#fafaf7;color:#111111}p{color:#5a5a5a}a{color:#4f6070}
+@media (prefers-color-scheme: dark){body{background:#161616;color:#ededed}p{color:#a3a3a3}a{color:#9dc0dc}}</style>
+<div><p>This drive opens with your Marble Drive sign-in.</p><p><a href="${enter}">Sign in with Marble Drive</a></p></div>`, { 'Cache-Control': 'no-store' });
+    }
 
     if (req.method === 'POST') {
       return readJson(req, 4096)
@@ -828,16 +1759,22 @@ export async function createDrive(config, { log = console, agentProviders = null
     // The only HTML this host ships, and it is one form. Anything more would be
     // the host having an interface, which is the thing the Drive exists not to
     // need — but a door has to be openable before there is a document to open.
-    const to = escapeHtml(url.searchParams.get('to') ?? '/');
+    // `to` is untrusted: kept only as a path on this host, and handed to the
+    // page's fixed script as data, never written into script. With the door
+    // configured, signing in there comes first and the passphrase second.
+    const to = escapeHtml(returnPath(url.searchParams.get('to')));
+    const enter = door.configured ? escapeHtml(door.enterUrl({ url: returnPath(url.searchParams.get('to')) })) : null;
     return html(res, 200, `<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
 <link rel="icon" href="${iconUri('drive')}">
 <style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#fafaf7;color:#111111}
 form{display:flex;gap:.5rem}input,button{font:inherit;padding:.6rem .8rem;border:1px solid #ddd9cf;border-radius:8px}
-button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{color:#5a5a5a}</style>
-<div><p>This drive is closed.</p>
-<form onsubmit="event.preventDefault();fetch('/gate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:this.secret.value})}).then(r=>r.ok?location.replace('${to}'):this.secret.select())">
-<input name="secret" type="password" placeholder="Secret" autofocus><button>Open</button></form></div>`);
+button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{color:#5a5a5a}
+.door{display:inline-block;padding:.6rem .9rem;border:1px solid #ddd9cf;border-radius:8px;color:#111111;text-decoration:none;font-weight:500}</style>
+<div>${enter ? `<p><a class="door" href="${enter}">Sign in with Marble Drive</a></p><p>Or use the drive’s passphrase.</p>` : '<p>This drive is closed.</p>'}
+<form data-to="${to}">
+<input name="secret" type="password" placeholder="Secret" autofocus><button>Open</button></form></div>
+<script>const f=document.querySelector('form');f.addEventListener('submit',(e)=>{e.preventDefault();fetch('/gate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:f.secret.value})}).then((r)=>r.ok?location.replace(f.dataset.to):f.secret.select())})</script>`);
   }
 
   /** A name that is not taken. Drive appends "(1)" and so does this, because
@@ -850,6 +1787,27 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       if (!(await store.has(candidate)) && !(await store.hasFolder(candidate))) return candidate;
     }
     throw new PathError(`too many documents called "${name}"`);
+  }
+
+  /** The same, for a file: the number goes before the extension, the way a
+   *  desktop does it, so `song.mp3` is followed by `song 1.mp3` and still
+   *  plays. Checked against every kind, because a file called `Notes` with no
+   *  extension and a document called `Notes` would be one name twice. */
+  async function freeFilePath(wanted) {
+    const taken = async (candidate) =>
+      (await store.hasFile(candidate)) ||
+      (await store.hasFolder(candidate)) ||
+      (await store.has(candidate));
+    if (!(await taken(wanted))) return wanted;
+    const { parent, name } = splitPath(wanted);
+    const dot = name.lastIndexOf('.');
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    for (let n = 1; n < 500; n += 1) {
+      const candidate = [parent, `${stem} ${n}${ext}`].filter(Boolean).join('/');
+      if (!(await taken(candidate))) return candidate;
+    }
+    throw new PathError(`too many files called "${name}"`);
   }
 
   /** What the drive thinks of a document somebody just handed it: `{error}`,
@@ -895,8 +1853,13 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
   async function copyOf(from, to) {
     const source = await store.read(parsePath(from, { allowRoot: false }));
     if (source === null) throw Object.assign(new Error(`no document "${from}"`), { status: 404 });
-    return source.replace(/<title>([^<]*)<\/title>/i, () => `<title>${escapeHtml(splitPath(to).name)}</title>`);
+    return retitled(source, splitPath(to).name);
   }
+
+  /** The document's <title> says `name`, keeping whatever the tag carries
+   *  (its data-marble-id most of all). */
+  const retitled = (source, name) =>
+    source.replace(/<title(\s[^>]*)?>[^<]*<\/title>/i, (_, attrs = '') => `<title${attrs}>${escapeHtml(name)}</title>`);
 
   /** What a document weighs, in the terms that decide whether blobs are a
    *  nicety or a blocker: total bytes, how many of them are base64, and how
@@ -1057,14 +2020,20 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
   return {
     server,
     store,
+    uploads,
+    keepAwake,
+    ledger,
     channels,
     gate,
+    door,
     oplog,
     writeOps,
     genui,
     agents,
     agentsWhy,
+    console: consoleApp,
     createDocument,
+    putDocument,
     config,
     seed,
     weigh,
@@ -1084,7 +2053,17 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     },
     async close() {
       await agents?.close();
+      stems.close();
+      clearInterval(uploadSweep);
+      await keepAwake.stop();
+      await ledger.stop();
+      memoryGuard?.stop();
+      awake.stop();
+      streams.close();
+      consoleApp?.close();
       stopBackups();
+      daily?.stop();
+      alive?.stop();
       watcher.close();
       channels.close();
       // Event streams are open by design and keep-alive sockets are open by

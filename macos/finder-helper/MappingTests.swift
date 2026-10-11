@@ -93,6 +93,17 @@ enum MappingTests {
             "got \(rootSlash)"
         )
 
+        let unset = openTarget(
+            filePath: "/Users/someone/Desktop/notes.mrbl",
+            driveRoot: "",
+            host: host
+        )
+        check(
+            "with no drive configured, nothing is inside a drive",
+            unset == .localHtml,
+            "got \(unset)"
+        )
+
         if failed > 0 {
             fputs("\(failed) failed\n", stderr)
             exit(1)

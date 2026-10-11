@@ -2,6 +2,7 @@
 // The command.
 //
 //   marble-drive serve            serve the drive (the default)
+//   marble-drive standby          the host on a machine that is not this drive's home: writes nothing
 //   marble-drive new <path>       a document from a starter, without a browser
 //   marble-drive icon [path]      give a document already in the drive its mark
 //   marble-drive weigh [path]     what the documents weigh, and how much is base64
@@ -12,12 +13,14 @@
 //   marble-drive starters         what you can make
 //   marble-drive genui space <doc>       is this document an app space? every issue, or ok
 //   marble-drive genui decide <doc>      let Jev position it — --dry to look without writing, --verbose for the distributions
+//   marble-drive provisioner      the door sprite: make the drives people asked for at marbledrive.app
 //
 // Every one of these goes through the same store the host does, which is the
 // point: a command and a request are two callers of one seam, not two
 // implementations of one idea.
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { createDrive } from '../server/app.js';
@@ -29,8 +32,15 @@ import { stamp, stamped } from '../server/favicon.js';
 import { build as buildStarter, list as listStarters } from '../server/gallery.js';
 import { check as checkRemote, serveOff, serveOn, serveStatus, tailnetUrl } from '../server/remote.js';
 import { splitPath, parsePath } from '../server/paths.js';
-import { seedAgents, seedDrive } from '../server/seed.js';
+import { updateApps } from '../server/app-updates.js';
+import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignDonts, seedDesignSystem, seedDrive, seedProjects, seedStartHere } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
+import { createStandby, whereIsHome } from '../server/standby.js';
+import { createLeaseClient } from '../server/hub/lease-client.js';
+import { holdPath, loadHubSettings } from '../server/hub/settings.js';
+import { scheduleUploads, touchOnWrites } from '../server/hub/schedule.js';
+import { createKeepAwake } from '../server/keep-awake.js';
+import { createProvisioner, scriptRunner, sparesWanted } from '../server/provisioner.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
 
@@ -54,6 +64,9 @@ const kb = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)}
 switch (command) {
   case 'serve':
     await serve();
+    break;
+  case 'standby':
+    await standby();
     break;
   case 'new':
     await make();
@@ -79,16 +92,117 @@ switch (command) {
   case 'genui':
     await genuiCommand();
     break;
+  case 'apps':
+    await appsCommand();
+    break;
+  case 'provisioner':
+    await provisioner();
+    break;
   default:
-    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui, apps, provisioner`);
+}
+
+// ---------------------------------------------------------------- provisioner
+
+/** The door sprite (server/provisioner.js). Its settings: DOOR_URL (the door,
+ *  https://marbledrive.app by default), DOOR_ADMIN_TOKEN, MARBLE_DOOR_KEYS (the
+ *  public keys every new drive is given), MARBLE_SPARE_DRIVES (keep a drive
+ *  made ahead; off unless set), and PORT. */
+async function provisioner() {
+  const adminToken = process.env.DOOR_ADMIN_TOKEN;
+  const keys = process.env.MARBLE_DOOR_KEYS;
+  if (!adminToken) fail('provisioner: set DOOR_ADMIN_TOKEN');
+  if (!keys) fail('provisioner: set MARBLE_DOOR_KEYS');
+  const { parseDoorKeys } = await import('../server/door.js');
+  try {
+    parseDoorKeys(keys);
+  } catch (err) {
+    fail(`provisioner: ${err.message}`);
+  }
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'marble-door-'));
+  const keysFile = path.join(dir, 'door-keys');
+  fs.writeFileSync(keysFile, `${keys}\n`, { mode: 0o600 });
+  // sprite-provision.sh deploys through sprite-deploy.sh, which wants a git
+  // checkout with ../marble beside it, so on the door sprite this names the
+  // script in that checkout (docs/ACCOUNTS.md, "The door sprite").
+  const script = process.env.MARBLE_PROVISION_SCRIPT || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'tools', 'sprite-provision.sh');
+  const runner = scriptRunner({ script, keysFile, org: process.env.MARBLE_PROVISION_ORG || 'marble-drive' });
+  // A sprite pauses about a second after its last connection; a drive takes
+  // minutes to make, so the work holds it up until it is done.
+  let p = null;
+  const awake = createKeepAwake({ socket: config.spriteSocket, busy: () => Boolean(p?.busy()), name: 'marble-door' });
+  awake.start();
+  const spares = sparesWanted(process.env.MARBLE_SPARE_DRIVES);
+  p = createProvisioner({
+    directoryUrl: process.env.DOOR_URL || 'https://marbledrive.app',
+    adminToken,
+    spares,
+    run: (job, onLine) => {
+      awake.nudge();
+      return runner(job, onLine);
+    },
+  });
+  const port = Number(process.env.PORT || 8080);
+  await p.serve(port, process.env.HOST || '0.0.0.0');
+  console.log(`[door] provisioner listening on ${port}; poke it at POST /poke${spares ? `; keeping ${spares} spare drive${spares === 1 ? '' : 's'} ready` : ''}`);
+  p.work().catch((err) => console.error(`[door] ${err.message}`));
 }
 
 // ---------------------------------------------------------------------- serve
 
+async function standby() {
+  // A standby must answer /health whatever state the hub settings are in: a
+  // host that died here would crash-loop, and fail every deploy's health check.
+  // The lease is asked afresh, briefly, and the remembered one is the
+  // fallback: after a move the remembered one names the wrong machine.
+  let where = { home: null, since: null, held: false };
+  try {
+    const settings = loadHubSettings(config.hubEnv);
+    if (settings) where = await whereIsHome({ settings, client: createLeaseClient({ settings, timeoutMs: 3_000 }) });
+  } catch (err) {
+    console.error(`[drive] standby: ${err.message}; standing by without a remembered lease`);
+  }
+  const server = createStandby(where);
+  server.listen(Number(flags.port ?? config.port), config.host, () => {
+    const said = where.held ? 'held; served from the other machine' : `this drive's home is ${where.home ?? 'elsewhere'}`;
+    console.log(`[drive] standby on ${config.host}:${flags.port ?? config.port}: ${said}`);
+  });
+}
+
 async function serve() {
+  // Two homes (the owner's Mac and Fly): with MARBLE_HUB_ENV set, this host may
+  // write only with the hub's settings in hand and no hold on it. Checked
+  // before the drive is opened; exit 75 so the keeper (tools/sprite/serve.sh)
+  // asks home-mode.mjs again, which says standby for the same reason.
+  let hubSettings = null;
+  if (config.hubEnv) {
+    try {
+      hubSettings = loadHubSettings(config.hubEnv);
+    } catch (err) {
+      console.error(`[drive] hub: ${err.message}; not serving`);
+      process.exit(75);
+    }
+    if (!hubSettings) {
+      console.error(`[drive] hub: no settings in ${config.hubEnv}; not serving`);
+      process.exit(75);
+    }
+    if (fs.existsSync(holdPath(hubSettings))) {
+      console.error(`[drive] hub: held by drive-home (${holdPath(hubSettings)}); not serving`);
+      process.exit(75);
+    }
+  }
   const drive = await createDrive(config);
+  // First, while a new drive is still empty: that is how it knows it is new.
+  await seedStartHere(drive.store);
   await seedDrive(drive.store, { name: config.home });
   await seedAgents(drive.store);
+  await seedProjects(drive.store);
+  await seedChat(drive.store);
+  await seedBoard(drive.store);
+  await seedDesignSystem(drive.store);
+  await seedDesignDonts(drive.store);
+  if (drive.console) await seedConsole(drive.store);
   // Not awaited: the host should answer requests while it reads the drive, and
   // a document served before its baseline lands sets its own on the way out.
   drive.seed().catch(() => {});
@@ -105,17 +219,59 @@ async function serve() {
   });
 
   drive.server.listen(port, config.host, () => {
+    // After the host answers, not before: merging is seconds of work on a big
+    // drive, and nobody should wait at a blank page for it.
+    if (config.appUpdates) {
+      updateApps({
+        store: drive.store,
+        config,
+        write: (where, text, { label }) => drive.putDocument(where, text, { label, event: 'changed' }),
+      }).catch((err) => console.error('[apps] could not bring app pages forward:', err.message));
+    }
+    // Two homes (the owner's Mac and Fly): keep the hub current, and step down
+    // the moment the lease names the other machine. Exit 75 so the keeper
+    // (tools/sprite/serve.sh) starts again, asks home-mode.mjs, and comes back
+    // as standby.
+    if (hubSettings) {
+      const uploads = scheduleUploads({
+        root: config.root,
+        settings: hubSettings,
+        client: createLeaseClient({ settings: hubSettings }),
+        onLost: () => setTimeout(() => process.exit(75), 100),
+      });
+      // A sprite pauses about a second after its last connection: keep it up
+      // until what changed is in the hub, giving up after 30 min of failed
+      // tries. A write request marks the drive dirty when it arrives, before
+      // the connection that made it closes, and again when its response
+      // closes (touchOnWrites); a change an agent makes on its own is seen
+      // by the uploader's 15 s rescan. Without the sprite's socket (the Mac)
+      // the keep-awake does nothing.
+      const hubAwake = createKeepAwake({ socket: config.spriteSocket, busy: () => uploads.wantsAwake(), name: 'marble-drive-hub' });
+      hubAwake.start();
+      touchOnWrites(drive.server, () => {
+        uploads.touch();
+        hubAwake.nudge();
+      });
+      console.log(`[drive] hub: uploading ${hubSettings.HUB_DRIVE} from ${hubSettings.HUB_MACHINE} while it is home`);
+    }
     const url = `http://localhost:${port}/`;
     console.log('[drive] serving at');
     console.log(`\n  ${url}\n`);
     console.log(`[drive] documents in ${config.root}`);
     console.log(`[drive] history and op log in ${path.join(config.root, '.marble')}`);
+    const snapshotDir = process.execArgv.find((arg) => arg.startsWith('--diagnostic-dir='))?.slice('--diagnostic-dir='.length);
+    if (snapshotDir) {
+      console.log(`[drive] if the process runs out of memory, a heap snapshot is written to ${snapshotDir}`);
+    }
 
     if (drive.gate.open) {
       console.log('[drive] no gate — anybody who can reach this port can edit everything.');
       console.log('[drive] set MARBLE_DRIVE_SECRET before putting a domain in front of it.');
     } else {
       console.log('[drive] gated — the secret is exchanged for a cookie at /gate');
+    }
+    if (drive.door?.configured) {
+      console.log(`[drive] door: a pass from marbledrive.app opens it as ${config.doorName}; the passphrase is ${config.gateMode === 'tools' ? 'for scripts and 127.0.0.1 only' : 'still offered too'}`);
     }
 
     if (!config.backupDir && !config.backupCommand) {
@@ -215,6 +371,23 @@ async function icon() {
       ? `\n  --dry, so nothing was written. Run it again without the flag.`
       : `\n  ${marked} document(s) marked. Every one of them can still be edited back.`,
   );
+}
+
+// ----------------------------------------------------------------------- apps
+
+/** `marble-drive apps [--write]`: what bringing this drive's app pages forward
+ *  would do (the host does it on start), or do it now with --write. */
+async function appsCommand() {
+  const store = createStore({ root: config.root });
+  await store.ready();
+  const report = await updateApps({ store, config, dryRun: !flags.write, log: { log() {} } });
+  if (!report.length) console.log('  every app page is current');
+  for (const line of report) {
+    const why = line.status === 'held' ? ` (${line.reason}${line.conflicts ? `, ${line.conflicts} overlapping` : ''})` : '';
+    const what = line.status === 'update' ? ` ${line.from} → ${line.to}, ${line.hunks} changes` : '';
+    console.log(`  ${line.status.padEnd(8)} ${line.app.padEnd(10)} ${line.path}${what}${why}`);
+  }
+  if (!flags.write && report.some((l) => l.status === 'update')) console.log('\n  nothing written — run with --write to apply');
 }
 
 // ---------------------------------------------------------------------- weigh

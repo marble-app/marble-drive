@@ -7,10 +7,11 @@
 
 import readline from 'node:readline';
 
-import { BROWSER_SCHEMAS, createBrowserSession, toMcpResult } from '../server/agent/browser.js';
+import { BROWSER_SCHEMAS, createBrowserSession, passFromEnv, toMcpResult } from '../server/agent/browser.js';
 
 const session = createBrowserSession({
   userDataDir: process.env.MARBLE_BROWSER_PROFILE || undefined,
+  pass: passFromEnv(process.env),
 });
 
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);

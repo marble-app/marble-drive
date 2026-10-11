@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Console">
+<!-- The console is the host's page for the whole fleet: its look and its
+     behaviour are runtime/console.css and runtime/console.js, which the host
+     injects here, so they ship with every deploy instead of drifting in this
+     file. Nothing it shows is writing of the owner's; this file only says
+     where the console lives. -->
+<meta name="marble-agent" content="custom">
+<meta name="marble-console" content="1">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* Only what the page must be before the console's own sheet arrives: the
+     paper, in both schemes, so the first frame is not a white flash. */
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; background: light-dark(#fafaf7, #16181a); }
+</style>
+</head>
+<body data-marble-id="__ID__">
+<main data-marble-id="__ID__" data-console></main>
+</body>
+</html>

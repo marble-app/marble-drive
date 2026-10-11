@@ -13,14 +13,20 @@
 //   ready()                          make whatever the store needs to exist
 //   read(path)          → string|null
 //   readRaw(path)       → {path,name,ext,bytes,open()}|null   a file that is not a document
+//   putFile(path, stream, {limit}) → {path, bytes}   refuses to overwrite
+//   placeFile(path, from) → {path, bytes}  link a file already on this volume into place, refusing to overwrite
 //   has(path)           → boolean          a document is there
 //   hasFolder(path)     → boolean          a folder is there
 //   hasFile(path)       → boolean          something that is neither is there
-//   stat(path)          → entry|null       {kind,path,name,folder,title,day,nodes,bytes,modified,created}
+//   stat(path)          → entry|null       {kind,path,name,folder,title,day,nodes,bytes,modified,created,icon?}
+//                                          icon: the document's own favicon, a data URI, when not the marble
 //   list({folder,recursive,files}) → entry[]  flat, newest first, folders included;
 //                                            `files` adds kind:'file' for what is
 //                                            in the folder but is not a document
-//   tree({folder})      → folder node with `children`, files included
+//   tree({folder,files}) → folder node with `children`; files included unless
+//                          `files` is false
+//                          a folder that is its own git repository carries
+//                          `repo: true`
 //   write(path, source, {label, ops}) → {path, bytes, sha}
 //   mark(path, source, label)              a restore point for a state nobody replaced
 //   create(path, source)                   refuses to overwrite

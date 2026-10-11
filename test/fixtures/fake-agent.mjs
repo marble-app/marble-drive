@@ -76,10 +76,20 @@ out({ kind: 'text', text: `prompt:${prompt.split('\n')[0]}` });
 
 for (const step of script) {
   if (step.ignoreTerm) process.on('SIGTERM', () => {});
+  // Text arriving in pieces, the way a CLI streams a long answer: one delta
+  // per chunk, and usually a `say` after it for the finished message.
+  if (step.stream) {
+    for (const chunk of step.stream) {
+      out({ kind: 'delta', text: chunk });
+      await sleep(step.every ?? 40);
+    }
+  }
   if (step.say) {
-    out({ kind: 'delta', text: step.say.slice(0, 3) });
+    if (!step.stream) out({ kind: 'delta', text: step.say.slice(0, 3) });
     out({ kind: 'text', text: step.say });
   }
+  // What the runner put in this process's environment, said back as text.
+  if (step.sayEnv) out({ kind: 'text', text: `${step.sayEnv}=${process.env[step.sayEnv] ?? ''}` });
   if (step.sleep) await sleep(step.sleep);
   // What a CLI does when it needs the person: print the prompt, wait for the
   // answer on stdin, say what it got.
@@ -123,6 +133,10 @@ for (const step of script) {
     out({ kind: 'call', name: step.tool, input: step.input ?? {}, callId });
     out({ kind: 'result', callId, ok: step.ok !== false, denied: step.denied === true, summary: step.summary ?? '' });
   }
+  // The same tool, its call and its result apart: a foreground command that
+  // runs silent in between.
+  if (step.toolStart) out({ kind: 'call', name: step.toolStart, input: {}, callId: step.id });
+  if (step.toolEnd) out({ kind: 'result', callId: step.toolEnd, ok: true, denied: false, summary: '' });
   // What a full agent does that a documents agent cannot: write the file
   // itself, with no op and no bridge. The host hears it from the watcher.
   if (step.write) {

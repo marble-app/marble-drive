@@ -18,12 +18,11 @@ node_modules/
 # The default drive root. A drive belongs to whoever is running the host, not
 # to this repository — and `.marble/` under it is their history.
 drive/
+# A mirror pulled from a sprite set its predecessors aside beside it
+# (tools/drive-pull.sh): drive.pulling/, drive.previous/, drive.kept-<utc>/.
+/drive.*/
 # Hand-made copies of documents, kept beside the drive rather than in it.
 backups/
-# The daily-document skill's memory of its one reader: what it has shown, the
-# to-dos he typed, where he lives. The skill is code and stays; its memory is
-# his, and it changes on every morning's run.
-.claude/skills/my-day/state/
 
 # ---- this machine ----------------------------------------------------------
 .DS_Store
@@ -37,6 +36,8 @@ __pycache__/
 .claude/worktrees/
 # Hook config that names absolute paths on one laptop.
 .codex/
+# A deploy target: which org and machine this checkout's `sprite` talks to.
+.sprite
 # Local design-hook detector config (per machine)
 .impeccable/
 
@@ -44,5 +45,8 @@ __pycache__/
 # Screenshots, one-off patches, generated pages. A script worth keeping moves
 # to `tools/`; the rest is never read back after the run that made it.
 scratchpad/
+# Screenshots the visual tools write on every run.
+test-results/
+*.heapsnapshot
 # Brainstorm servers, their ports, tokens and pids.
 .superpowers/

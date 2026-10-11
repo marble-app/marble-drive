@@ -1,6 +1,6 @@
-// The arithmetic under the marks toolbar, kept apart from the DOM so it can
-// be tested in node: what a rectangle means on a page of addressed boxes,
-// where a thrown toolbar lands, and the spring that carries it there.
+// The arithmetic under the marks tools, kept apart from the DOM so it can be
+// tested in node: what a rectangle means on a page of addressed boxes, what a
+// drawn stroke means, and how a stroke is held to the element it was drawn on.
 //
 // Loaded in the browser before agent-marks.js, and imported in node by the
 // tests; it touches neither window nor document.
@@ -74,46 +74,94 @@
     return [...chosen].sort((a, b) => order.get(a) - order.get(b));
   };
 
-  /** Where a flick comes to rest, from Designing Fluid Interfaces: an
-   *  exponential decay, not the textbook v²/2a. 0.998 is scroll feel. */
-  const project = (velocity, decelerationRate = 0.998) =>
-    ((velocity / 1000) * decelerationRate) / (1 - decelerationRate);
+  // ------------------------------------------------------------------ strokes
 
-  /** The corner of a `width × height` field a point is nearest. Points past
-   *  the field still resolve, so a projected landing can be off-screen. */
-  const nearestCorner = ({ x, y }, { width, height }) =>
-    `${y < height / 2 ? 't' : 'b'}${x < width / 2 ? 'l' : 'r'}`;
+  const distance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
 
-  // The semi-implicit Euler update's numerical damping depends on step size,
-  // so a spring driven straight off requestAnimationFrame would bounce
-  // differently on a 60Hz external monitor than on a 120Hz ProMotion Mac —
-  // and in a node test given yet another dt. Substepping at a fixed, small
-  // step makes the motion the same regardless of what dt the caller passes.
-  const STEP = 0.001;
-
-  /** Advance a damped spring by `dt` seconds, in Apple's two parameters:
-   *  `damping` is the damping ratio (1 = no overshoot), `response` the
-   *  period in seconds. Integrates in fixed `STEP`-sized substeps internally
-   *  (semi-implicit Euler per substep), so it is stable and frame-rate
-   *  independent for any dt the caller passes. */
-  const spring = (state, target, dt, { damping = 1, response = 0.4 } = {}) => {
-    if (!Number.isFinite(dt) || dt <= 0) return state;
-    const omega = (2 * Math.PI) / response;
-    const stiffness = omega * omega;
-    const drag = 2 * damping * omega;
-    let { x, v } = state;
-    let remaining = dt;
-    while (remaining > 0) {
-      const h = Math.min(STEP, remaining);
-      const acceleration = -stiffness * (x - target) - drag * v;
-      v = v + acceleration * h;
-      x = x + v * h;
-      remaining -= h;
+  /** The box a stroke was drawn inside. Zero-sized for a single point, which
+   *  every caller below is written to survive. */
+  const boundsOf = (points) => {
+    let left = Infinity; let top = Infinity; let right = -Infinity; let bottom = -Infinity;
+    for (const p of points) {
+      if (p.x < left) left = p.x;
+      if (p.x > right) right = p.x;
+      if (p.y < top) top = p.y;
+      if (p.y > bottom) bottom = p.y;
     }
-    return { x, v };
+    if (!points.length) return { left: 0, top: 0, width: 0, height: 0 };
+    return { left, top, width: right - left, height: bottom - top };
   };
 
-  const settled = (state, target) => Math.abs(state.x - target) < 0.5 && Math.abs(state.v) < 10;
+  /** How far the hand travelled, which is not how far it got. */
+  const lengthOf = (points) => {
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) total += distance(points[i - 1], points[i]);
+    return total;
+  };
 
-  globalThis.marbleMarksGeometry = { coverage, idsInRect, project, nearestCorner, spring, settled };
+  const centroidOf = (points) => {
+    if (!points.length) return { x: 0, y: 0 };
+    let x = 0; let y = 0;
+    for (const p of points) { x += p.x; y += p.y; }
+    return { x: x / points.length, y: y / points.length };
+  };
+
+  /** What a stroke is, by cheap heuristics and never by redrawing it.
+   *
+   *  A **box** closes on itself and traces its own bounding box rather than
+   *  filling it: a circle comes in at 0.79 of the box's perimeter, a hand-drawn
+   *  rectangle at about 1, and a scribble that happens to end where it started
+   *  is well past 2 and stays ink. An **arrow** got nearly as far as it
+   *  travelled. Everything else is ink, which is a reading too — "over these
+   *  elements" — not a failure to be one of the other two. */
+  const readStroke = (points, { minimum = 18 } = {}) => {
+    if (!Array.isArray(points) || points.length < 3) return 'ink';
+    const span = boundsOf(points);
+    const reach = Math.hypot(span.width, span.height);
+    const travelled = lengthOf(points);
+    if (travelled < minimum || reach < minimum) return 'ink';
+    const gap = distance(points[0], points[points.length - 1]);
+    const perimeter = 2 * (span.width + span.height);
+    if (gap <= 0.25 * reach && perimeter > 0 && travelled <= 2 * perimeter
+      && Math.min(span.width, span.height) >= 12) return 'box';
+    if (gap / travelled >= 0.8) return 'arrow';
+    return 'ink';
+  };
+
+  /** Whether a stroke is the head someone just put on the arrow before it,
+   *  rather than a mark of its own: short, soon after, and drawn at one of
+   *  that arrow's two ends. Returns which end it points at, or null. */
+  const arrowHeadFor = (arrow, points, { within = 500, elapsed = 0 } = {}) => {
+    if (!arrow || arrow.kind !== 'arrow' || elapsed > within) return null;
+    const shaft = arrow.points;
+    if (!shaft?.length || !points?.length) return null;
+    const travelled = lengthOf(points);
+    const shaftLength = lengthOf(shaft);
+    if (!shaftLength || travelled > 0.5 * shaftLength) return null;
+    const here = centroidOf(points);
+    const ends = [shaft[0], shaft[shaft.length - 1]];
+    const near = ends.map((end) => distance(here, end));
+    const which = near[0] <= near[1] ? 0 : 1;
+    if (near[which] > Math.max(24, 0.25 * shaftLength)) return null;
+    return which === 0 ? 'start' : 'end';
+  };
+
+  /** A stroke is kept as fractions of the box it was drawn on, never as
+   *  pixels: documents reflow, the pinned drawer takes a margin off `<html>`,
+   *  and an agent rewrites elements while you look. Fractions outside 0..1 are
+   *  allowed — a stroke can run past its anchor's edge. */
+  const toFractions = (box, points) => points.map((p) => [
+    box.width ? (p.x - box.left) / box.width : 0,
+    box.height ? (p.y - box.top) / box.height : 0,
+  ]);
+
+  const fromFractions = (box, pairs) => pairs.map(([u, v]) => ({
+    x: box.left + u * box.width,
+    y: box.top + v * box.height,
+  }));
+
+  globalThis.marbleMarksGeometry = {
+    coverage, idsInRect,
+    boundsOf, lengthOf, centroidOf, readStroke, arrowHeadFor, toFractions, fromFractions,
+  };
 })();

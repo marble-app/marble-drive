@@ -8,6 +8,19 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import { parseDoorKeys } from './door.js';
+
+/** An http(s) origin, or null: a path or a query on it would only mislead. */
+function originOf(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 export function loadConfig(env = process.env) {
   // Read off the env that was handed in, not off `process.env` — a test that
   // builds a second configuration to check the gate has to be able to say so
@@ -55,6 +68,11 @@ export function loadConfig(env = process.env) {
   env.MARBLE_APPS = root;
   process.env.MARBLE_APPS = root;
 
+  // A tab rests, closing its streams, once hidden this long or shown with no
+  // input this long (runtime/tab-rest.js, which reads them off its tag).
+  const tabHiddenSeconds = num('MARBLE_DRIVE_TAB_HIDDEN_SECONDS', 60);
+  const tabIdleMinutes = num('MARBLE_DRIVE_TAB_IDLE_MINUTES', 10);
+
   return {
     root,
     port: num('PORT', 4400),
@@ -69,9 +87,10 @@ export function loadConfig(env = process.env) {
     home: str('MARBLE_DRIVE_HOME', 'drive'),
 
     // `/today`'s bookmark: a stable address for whichever document a
-    // recurring skill keeps mirroring the latest run into. Same fallback as
-    // `/` — missing, it lands on whatever's newest instead of 404ing.
-    latestDoc: str('MARBLE_DRIVE_LATEST_DOC', "Bryan's Days/today"),
+    // recurring skill keeps mirroring the latest run into. Unset here, the
+    // drive's own `drive.json` names it (server/drive-settings.js); named
+    // nowhere, `/today` lands on whatever's newest, like `/`.
+    latestDoc: str('MARBLE_DRIVE_LATEST_DOC', null),
 
     // G0's gate. Unset means an open host, which is right for a laptop and
     // wrong for anything with a domain in front of it — so it says so, loudly,
@@ -81,8 +100,25 @@ export function loadConfig(env = process.env) {
     secret: str('MARBLE_DRIVE_SECRET', null),
     cookieName: str('MARBLE_DRIVE_COOKIE', 'marble_drive'),
     sessionCookie: str('MARBLE_DRIVE_SESSION_COOKIE', 'marble_session'),
+    // The door (server/door.js): people sign in at marbledrive.app, and the
+    // edge hands their browser a pass this drive checks with public keys.
+    // All three set, or the door is not there and the gate decides alone.
+    // A malformed key list stops the boot, naming the setting, not its value.
+    doorKeys: parseDoorKeys(str('MARBLE_DOOR_KEYS', null)),
+    doorName: str('MARBLE_DOOR_NAME', null),
+    doorOwner: str('MARBLE_DOOR_OWNER', null),
+    // `on`: the passphrase form and the door, as before. `tools`: browsers come
+    // in by the door; the passphrase is still a bearer for scripts and still
+    // opens the drive at 127.0.0.1, but not through a tunnel or the edge.
+    // Anything else is `on`, so a typo never locks anyone out.
+    gateMode: /^tools$/i.test(str('MARBLE_DRIVE_GATE', 'on')) ? 'tools' : 'on',
     sessionDays: num('MARBLE_DRIVE_SESSION_DAYS', 30),
     secureCookie: bool('MARBLE_DRIVE_SECURE_COOKIE', str('NODE_ENV', '') === 'production'),
+    // The address other people reach this drive at, when it is not the one
+    // its owner has open: a drive at home on the Mac is opened at 127.0.0.1,
+    // and a share link made there would open only on that Mac. Share links
+    // are written against this origin (`https://bryan.marbledrive.app`).
+    publicUrl: originOf(str('MARBLE_DRIVE_PUBLIC_URL', null)),
 
     // Multi-tenant, or not, and where its data lives. `accountsDir` is
     // deliberately not under any drive root — a file the Drive can see is a
@@ -105,19 +141,94 @@ export function loadConfig(env = process.env) {
     backupEveryMinutes: num('MARBLE_DRIVE_BACKUP_MINUTES', 60),
     backupKeep: num('MARBLE_DRIVE_BACKUP_KEEP', 24),
 
+    // A run the host starts on its own once a day: at `dayAt` (HH:MM) in
+    // `dayZone`, `dayPrompt` aimed at `dayTarget`. Off unless both a time and
+    // a target are set. A sprite asleep at that hour runs it on waking.
+    dayAt: str('MARBLE_DRIVE_DAY_AT', null),
+    dayZone: str('MARBLE_DRIVE_DAY_TZ', 'America/Los_Angeles'),
+    dayPrompt: str('MARBLE_DRIVE_DAY_PROMPT', '/my-day'),
+    dayTarget: str('MARBLE_DRIVE_DAY_TARGET', null),
+    // Automations whose data-marble-on is a schedule run on it, in dayZone
+    // (server/alive.js). On unless turned off.
+    alive: bool('MARBLE_DRIVE_ALIVE', true),
+
     // A document that carries megabytes of base64 is the case blobs exist for,
     // and `marble-drive weigh` is how you find out before deciding.
     maxBodyBytes: num('MARBLE_DRIVE_MAX_BODY', 16 * 1024 * 1024),
     maxBlobBytes: num('MARBLE_DRIVE_MAX_BLOB', 64 * 1024 * 1024),
+    // A file that is not a document is streamed to disk rather than held, so
+    // this is a ceiling on a mistake, not on memory. A long 4K video fits; the
+    // disk is checked separately (server/uploads.js).
+    maxFileBytes: num('MARBLE_DRIVE_MAX_FILE', 20 * 1024 * 1024 * 1024),
+    // A big file goes up in chunks of this size through a session, so a
+    // dropped connection costs one chunk and a proxy never sees the whole file.
+    uploadChunkBytes: num('MARBLE_DRIVE_UPLOAD_CHUNK', 32 * 1024 * 1024),
+    // Room kept back on the drive's disk: an upload that would leave less than
+    // this is refused before a byte is sent.
+    uploadMarginBytes: num('MARBLE_DRIVE_UPLOAD_MARGIN', 1024 * 1024 * 1024),
+    // An upload is timed by silence, not by length: a 2 GB file over a slow
+    // link takes as long as it takes, and one that stops sending is cut.
+    uploadIdleSeconds: num('MARBLE_DRIVE_UPLOAD_IDLE_SECONDS', 60),
+    // macOS's own thumbnailer, for the kinds a page cannot draw itself. On by
+    // default where it exists; off makes a Mac behave like any other host.
+    quicklook: bool('MARBLE_DRIVE_QUICKLOOK', true),
+    // A Fly Sprite's own API. Present only on a sprite; there, the host holds
+    // a task on it while work runs so the sprite cannot pause mid-turn.
+    spriteSocket: str('MARBLE_DRIVE_SPRITE_SOCKET', '/.sprite/api.sock'),
+    // The console: every drive, from one page (server/console). admin-p2 only.
+    console: bool('MARBLE_DRIVE_CONSOLE', false),
+    // Publish: commit and push a folder that is its own git repository
+    // (server/git.js). Off by default, and off anyway without a passphrase.
+    git: bool('MARBLE_DRIVE_GIT', false),
+    // Stop the heaviest thing an agent runs before the machine runs out of
+    // memory (server/memory-guard.js); off only to see a machine without it.
+    memoryGuard: bool('MARBLE_DRIVE_MEMORY_GUARD', true),
+    // Bring this drive's own app pages (Drive, Agents, Chat, Board, notes made
+    // from the Note starter) forward to the templates this release ships, by a
+    // three-way merge that keeps what their owner changed (server/app-updates.js).
+    // Off for a drive whose pages are where the templates come from.
+    appUpdates: bool('MARBLE_DRIVE_APP_UPDATES', true),
+    consoleOrg: str('MARBLE_DRIVE_CONSOLE_ORG', 'marble-drive'),
+    consoleSrc: str('MARBLE_DRIVE_CONSOLE_SRC', '/home/sprite/src'),
+    consoleSprite: str('MARBLE_DRIVE_CONSOLE_SPRITE', 'sprite'),
+    consoleSelf: str('MARBLE_DRIVE_CONSOLE_SELF', ''),
+    // What keeps a sprite awake with no tab open (server/hold.js). A question
+    // nobody answers holds it this long; work that has stopped getting anywhere
+    // this long; anything at all this long after anyone last used the drive.
+    // Letting go freezes the work, it does not end it.
+    tabHiddenSeconds,
+    tabIdleMinutes,
+    // A live stream whose tab has gone this long unused is closed (server/streams.js).
+    // Unless set, it outlasts the tab's own limits: a tab says it is used only
+    // on input while shown, so it can sit idle and then hidden, silent the
+    // whole time, and a shorter cut would put to sleep a drive its limits were
+    // raised to keep up.
+    streamUnusedMinutes: num('MARBLE_DRIVE_STREAM_UNUSED_MINUTES', Math.max(15, tabIdleMinutes + tabHiddenSeconds / 60 + 1)),
+    askHoldMinutes: num('MARBLE_DRIVE_ASK_HOLD_MINUTES', 10),
+    noProgressMinutes: num('MARBLE_DRIVE_NO_PROGRESS_MINUTES', 30),
+    awakeMaxHours: num('MARBLE_DRIVE_AWAKE_MAX_HOURS', 24),
 
     open: bool('MARBLE_DRIVE_OPEN', false),
+    // The hub (server/hub/): a file of settings when this drive has two homes
+    // (the owner's Mac and Fly), unset for every other drive. Never defaulted,
+    // so a test host or the dev checkout can never upload anything.
+    hubEnv: str('MARBLE_HUB_ENV', null),
 
     // Agents: Claude, Cursor or Codex running on this machine and editing the
     // drive through Marble's tools. Off unless asked for, because it is a
     // process on this machine acting for whoever got through the gate. See
     // docs/AGENTS.md.
     agents: bool('MARBLE_DRIVE_AGENTS', false),
+    // The drive as an MCP server for Claude and ChatGPT (server/connector):
+    // /mcp, with an OAuth sign-in the owner says yes to. Off unless asked for,
+    // and never on a host without a gate or on one shared by many.
+    connector: bool('MARBLE_DRIVE_CONNECTOR', false),
     agentProvider: str('MARBLE_DRIVE_AGENT_PROVIDER', 'claude-subscription'),
+    // Starter credit (docs/ACCOUNTS.md): the credit proxy's address and this
+    // drive's own token for it, written by the door when it makes the drive.
+    // With both, Claude can run as claude-credit before anyone brings a key.
+    creditUrl: str('MARBLE_CREDIT_URL', null),
+    creditToken: str('MARBLE_CREDIT_TOKEN', null),
     // One switch that holds every provider down to the 2026-09-16 boundary,
     // whatever each adapter declares. The rollback, if a full turn goes wrong.
     agentPower: str('MARBLE_DRIVE_AGENT_POWER', ''),
@@ -130,6 +241,14 @@ export function loadConfig(env = process.env) {
     agentNaming: bool('MARBLE_DRIVE_AGENT_NAMING', true),
     // Which model writes those names. Small and fast on purpose.
     agentNamingModel: str('MARBLE_DRIVE_AGENT_NAMING_MODEL', 'haiku'),
+    // Whether a small model draws each turn's progress widget while it runs
+    // (server/agent/drawer.js). Off wherever naming is off unless set: both
+    // spawn a CLI of their own, and a test host wants neither.
+    agentDrawing: bool('MARBLE_DRIVE_AGENT_DRAWING', bool('MARBLE_DRIVE_AGENT_NAMING', true)),
+    agentDrawingModel: str('MARBLE_DRIVE_AGENT_DRAWING_MODEL', 'haiku'),
+    // Which model draws a build's summary when it ends (server/build/summary.js):
+    // once per build, read in full, so a larger one than the running drawings.
+    agentSummaryModel: str('MARBLE_DRIVE_AGENT_SUMMARY_MODEL', 'sonnet'),
     agentStallMinutes: num('MARBLE_DRIVE_AGENT_STALL_MINUTES', 30),
     // 0 is no cap: every conversation the person has started runs at once.
     agentMaxRunning: num('MARBLE_DRIVE_AGENT_MAX_RUNNING', 0),
@@ -138,6 +257,14 @@ export function loadConfig(env = process.env) {
     // API keys the settings panel writes. Gitignored, and not under the drive
     // root, so a backup of `.marble/` does not take them.
     agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', path.join(process.cwd(), '.agent-keys.local'))),
+    // Where a pasted API key is checked before it is kept (server/agent/key-check.js).
+    anthropicBase: str('MARBLE_DRIVE_ANTHROPIC_BASE', 'https://api.anthropic.com'),
+    openaiBase: str('MARBLE_DRIVE_OPENAI_BASE', 'https://api.openai.com'),
+    // The longest clip voice sends to be written down (server/agent/voice).
+    voiceMaxSeconds: num('MARBLE_DRIVE_VOICE_MAX_SECONDS', 120),
+    // How long Connect your Claude waits for the code from Claude's page
+    // before it ends the sign-in it started (server/agent/claude-signin.js).
+    claudeSignInSeconds: num('MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS', 600),
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),

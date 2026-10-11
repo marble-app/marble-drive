@@ -45,6 +45,15 @@ const SCRIPTS = {
     { tool: 'Edit', input: { file_path: '/Users/x/marble-drive/runtime/agent-ui.js' } },
     { say: 'Six calls later.' },
   ],
+  // Operating the app instead of rewriting it. The act is one line about the
+  // person's document, so it keeps its line while the reads fold around it.
+  operating: [
+    { tool: 'Read', input: { file_path: '/Users/x/marble-drive/runtime/collab.js' } },
+    { tool: 'read_affordances', input: { path: 'table', ids: ['sort'] } },
+    { tool: 'act', input: { path: 'table', id: 'sort', gesture: 'press' }, summary: 'Pressed Sort · 12 changes' },
+    { tool: 'Grep', input: { pattern: 'sort', path: '/Users/x/marble-drive/runtime' } },
+    { say: 'Sorted.' },
+  ],
   // One command somebody refused and one that merely fell over. They arrive
   // the same way; the drawer has to tell them apart.
   refusals: [
@@ -156,7 +165,7 @@ const installNamedSetups = async (view, { model = 'sonnet', effort = 'high', wid
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -169,7 +178,7 @@ const installNamedSetups = async (view, { model = 'sonnet', effort = 'high', wid
         signedIn: true,
         models: [
           { id: 'auto', label: 'Auto' },
-          { id: 'cursor-grok-4.6', label: 'Grok 4.6', efforts: [{ id: 'high', label: 'High' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
+          { id: 'grok-4.7', label: 'Grok 4.7', efforts: [{ id: 'high', label: 'High' }, { id: 'high-fast', label: 'High Fast' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
         ],
         efforts: [],
         modes: [{ id: 'agent', label: 'Run Everything' }],
@@ -198,7 +207,7 @@ test('saved setups hug their labels instead of stretching across the composer', 
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -223,7 +232,7 @@ test('saved setups hug their labels instead of stretching across the composer', 
       names: [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim()),
     };
   });
-  assert.deepEqual(names.names, ['Fable 5.1 High', 'Opus High', 'Sonnet High']);
+  assert.deepEqual(names.names, ['Sonnet High', 'Opus 5.5 High', 'Fable 5.1 High']);
   assert.ok(names.presets <= names.pills + 12, `presets ${names.presets} should hug pills ${names.pills}, not setup ${names.setup}`);
   // The setup shares its row with the mode and send buttons now, so the
   // margin is what Custom takes, not the old empty half of the composer.
@@ -246,7 +255,7 @@ const presetGeometry = (el) => {
       top: Math.round(box.top * 10) / 10,
     };
   }).filter((item) => item.width > 0 && item.height > 0 && item.display !== 'none');
-  const names = boxes.filter((item) => item.text.includes('Grok Extra High'));
+  const names = boxes.filter((item) => item.text.includes('Grok 4.7 High'));
   const overlap = (a, b) => a.left < b.right - 2 && b.left < a.right - 2 && Math.abs(a.top - b.top) < 12;
   const clashes = [];
   for (let i = 0; i < names.length; i += 1) {
@@ -269,7 +278,7 @@ const presetGeometry = (el) => {
 test('saved setups collapse to the one you are on, at every width', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
-  await installNamedSetups(view, { model: 'cursor-grok-4.6', effort: 'xhigh' });
+  await installNamedSetups(view, { model: 'grok-4.7', effort: 'high' });
   // A row of capsules for a choice made rarely outweighed the prompt above it,
   // and had to be packed and re-packed at every width to fit. One word cannot
   // overflow, so the fitting problem is gone rather than solved.
@@ -291,7 +300,7 @@ test('saved setups collapse to the one you are on, at every width', async () => 
     assert.equal(shape.onTrack, 0, `width ${width}: nothing should sit on the track`);
     assert.ok(shape.inMenu >= 4, `width ${width}: every setup lives in the menu, got ${shape.inMenu}`);
     assert.ok(shape.height < 32, `width ${width}: one row, got ${shape.height}`);
-    assert.match(shape.trigger, /Grok Extra High/, `width ${width}: the trigger names the setup you are on`);
+    assert.match(shape.trigger, /Grok 4\.7 High/, `width ${width}: the trigger names the setup you are on`);
     assert.match(shape.fill, /rgba\(0, 0, 0, 0\)/, `width ${width}: the trigger is a word, not a capsule`);
   }
 });
@@ -309,7 +318,7 @@ test('Custom keeps the Claude model sliders visible after picking a preset', asy
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -322,7 +331,7 @@ test('Custom keeps the Claude model sliders visible after picking a preset', asy
         signedIn: true,
         models: [
           { id: 'auto', label: 'Auto' },
-          { id: 'cursor-grok-4.6', label: 'Grok 4.6', efforts: [{ id: 'high', label: 'High' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
+          { id: 'grok-4.7', label: 'Grok 4.7', efforts: [{ id: 'high', label: 'High' }, { id: 'high-fast', label: 'High Fast' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
         ],
         efforts: [],
         modes: [{ id: 'agent', label: 'Run Everything' }],
@@ -362,7 +371,7 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -375,7 +384,7 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
         signedIn: true,
         models: [
           { id: 'auto', label: 'Auto' },
-          { id: 'cursor-grok-4.6', label: 'Grok 4.6', efforts: [{ id: 'high', label: 'High' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
+          { id: 'grok-4.7', label: 'Grok 4.7', efforts: [{ id: 'high', label: 'High' }, { id: 'high-fast', label: 'High Fast' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
         ],
         efforts: [],
         modes: [{ id: 'agent', label: 'Run Everything' }],
@@ -391,15 +400,15 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
     await el.syncCatalog({ model: 'sonnet', effort: 'high' });
     el.paintPresets({ initial: true });
     await el.applyPreset({
-      id: 'grok-xhigh',
+      id: 'grok-high',
       provider: 'cursor',
-      model: 'cursor-grok-4.6',
-      effort: 'xhigh',
-      name: 'Grok Extra High',
+      model: 'grok-4.7',
+      effort: 'high',
+      name: 'Grok 4.7 High',
       brand: 'cursor',
     });
     return {
-      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-xhigh"]')?.disabled ?? true,
+      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-high"]')?.disabled ?? true,
       agent: el.shadowRoot.querySelector('input[name="agent"]:checked')?.value,
       model: el.shadowRoot.querySelector('input[name="model"]:checked')?.value,
       effort: el.shadowRoot.querySelector('input[name="effort"]:checked')?.value,
@@ -407,8 +416,8 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
   });
   assert.equal(flags.grokDisabled, false);
   assert.equal(flags.agent, 'cursor');
-  assert.equal(flags.model, 'cursor-grok-4.6');
-  assert.equal(flags.effort, 'xhigh');
+  assert.equal(flags.model, 'grok-4.7');
+  assert.equal(flags.effort, 'high', 'Grok 4.7 rests on High, not High Fast');
 });
 
 test('spent Claude usage prefers Cursor for a new conversation', async () => {
@@ -426,7 +435,10 @@ test('spent Claude usage prefers Cursor for a new conversation', async () => {
   assert.equal(pick, 'cursor');
 });
 
-test('unavailable Claude usage prefers Cursor and disables Claude presets', async () => {
+// An unreadable meter (`available: false`, no `used`) is not spent usage.
+// Not knowing is not being out: stay on Claude and leave its presets on.
+// Spent usage (`used >= 100`) is the test above.
+test('an unreadable Claude meter stays on Claude with its presets enabled', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
   const flags = await view.evaluate(async (el) => {
@@ -461,13 +473,13 @@ test('unavailable Claude usage prefers Cursor and disables Claude presets', asyn
       agent: el.shadowRoot.querySelector('input[name="agent"]:checked')?.value,
       claudeDisabled: el.shadowRoot.querySelector('input[name="agent"][value="claude-subscription"]')?.disabled ?? false,
       sonnetDisabled: el.shadowRoot.querySelector('input[name="preset"][value="sonnet-high"]')?.disabled ?? false,
-      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-xhigh"]')?.disabled ?? true,
+      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-high"]')?.disabled ?? true,
     };
   });
-  assert.equal(flags.preferred, 'cursor');
-  assert.equal(flags.agent, 'cursor');
-  assert.equal(flags.claudeDisabled, true);
-  assert.equal(flags.sonnetDisabled, true);
+  assert.equal(flags.preferred, 'claude-subscription');
+  assert.equal(flags.agent, 'claude-subscription');
+  assert.equal(flags.claudeDisabled, false);
+  assert.equal(flags.sonnetDisabled, false);
   assert.equal(flags.grokDisabled, false);
 });
 
@@ -486,7 +498,7 @@ test('a signed-in Claude with no usage meter keeps its models pickable', async (
         installed: true,
         signedIn: true,
         default: true,
-        models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5' }, { id: 'fable', label: 'Fable 5.1' }],
+        models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5.5' }, { id: 'fable', label: 'Fable 5.1' }],
         efforts: ['high', 'xhigh'],
         modes: [{ id: 'default', label: 'Default' }],
       },
@@ -549,7 +561,7 @@ const withSetups = (view, { efforts = ['high', 'xhigh'], model = 'fable', effort
       installed: true,
       signedIn: true,
       default: true,
-      models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5' }, { id: 'fable', label: 'Fable 5.1' }],
+      models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5.5' }, { id: 'fable', label: 'Fable 5.1' }],
       efforts: list,
       modes: [{ id: 'default', label: 'Default' }],
     }];
@@ -827,7 +839,7 @@ test('holding the two modifiers raises the setups as a stepped scrubber', async 
   assert.equal(up.open, true);
   // Weakest at the left: a slider is pushed right to turn something up.
   assert.deepEqual(up.stops, ['sonnet-high', 'opus-high', 'fable-high'], 'one stop per setup you can pick, weakest first');
-  assert.deepEqual(up.labels, ['Sonnet', 'Opus', 'Fable 5.1'], 'the model alone — effort has its own axis now');
+  assert.deepEqual(up.labels, ['Sonnet', 'Opus 5.5', 'Fable 5.1'], 'the model alone — effort has its own axis now');
   assert.equal(up.marked, up.at, 'the stop it starts on is the one marked');
   assert.equal(up.model, 'Fable 5.1');
   assert.equal(up.effort, 'High');
@@ -856,7 +868,7 @@ test('the arrows walk the scrubber while the modifiers are held, and stop at the
   const moved = await scrub(left);
   assert.equal(moved.at, start.at - 1);
   assert.equal(moved.marked, moved.at, 'the mark follows');
-  assert.equal(moved.model, 'Opus');
+  assert.equal(moved.model, 'Opus 5.5');
 
   // A timeline has ends; holding an arrow down comes to rest, it does not cycle.
   for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowLeft');
@@ -959,7 +971,7 @@ test('a setup no chip matches still opens on its own model', async () => {
 
   await hold(page);
   const up = await scrub(left);
-  assert.equal(up.model, 'Opus', 'the stop is the model, even with no chip to match');
+  assert.equal(up.model, 'Opus 5.5', 'the stop is the model, even with no chip to match');
   assert.equal(up.effort, 'Max', 'and the gauge carries the effort that had no chip');
   assert.equal(up.gauge, 5);
   await release(page);
@@ -981,7 +993,7 @@ test('each model keeps its own effort, and wears it under its name', async () =>
   // Walk off it: the next model is still where it was left, not at Max.
   await page.keyboard.press('ArrowLeft');
   const opus = await scrub(left);
-  assert.equal(opus.model, 'Opus');
+  assert.equal(opus.model, 'Opus 5.5');
   assert.equal(opus.effort, 'High', 'a raised effort does not follow you to the next model');
   assert.equal(opus.gauge, 3);
 
@@ -994,7 +1006,7 @@ test('each model keeps its own effort, and wears it under its name', async () =>
   assert.equal(back.effort, 'Max', 'the model you tuned kept it');
   // Each stop says what it is remembering, under its own name.
   assert.deepEqual(back.stopEfforts, ['High', 'Medium', 'Max']);
-  assert.deepEqual(back.labels, ['Sonnet', 'Opus', 'Fable 5.1'], 'the names stay the names');
+  assert.deepEqual(back.labels, ['Sonnet', 'Opus 5.5', 'Fable 5.1'], 'the names stay the names');
   await release(page);
 });
 
@@ -1087,11 +1099,11 @@ test('letting the modifiers go commits the setup the scrubber landed on', async 
   // Down one from the strongest, which is where the default sits.
   await page.keyboard.press('ArrowLeft');
   await release(page);
-  await left.locator('.presets-more', { hasText: 'Opus High' }).waitFor();
+  await left.locator('.presets-more', { hasText: 'Opus 5.5 High' }).waitFor();
   const after = await scrub(left);
   assert.equal(after.open, false, 'the scrubber goes down with the keys');
   assert.notEqual(after.setup, before);
-  assert.equal(after.setup, 'Opus High');
+  assert.equal(after.setup, 'Opus 5.5 High');
   assert.equal(
     await left.evaluate((el) => el.shadowRoot.querySelector('input[name="model"]:checked')?.value),
     'opus',
@@ -1120,8 +1132,10 @@ test('resting on the setup button names the shortcut, after a beat', async () =>
   await left.locator('input[name="agent"][value="fake"]').waitFor();
   await withSetups(left);
   await left.locator('.presets-more').waitFor();
+  // Its own tip: every armed control keeps one beside it, so ".keytip" alone
+  // now means more than one thing.
   const hint = () => left.evaluate((el) => {
-    const tip = el.shadowRoot.querySelector('.keytip');
+    const tip = el.shadowRoot.querySelector('.presets-more + .keytip');
     return { open: Boolean(tip?.classList.contains('is-open')), text: tip?.textContent ?? '' };
   });
 
@@ -1130,17 +1144,17 @@ test('resting on the setup button names the shortcut, after a beat', async () =>
   // the way to somewhere else; this one waits to be rested on.
   assert.equal((await hint()).open, false, 'not on the way past');
 
-  await left.locator('.keytip').waitFor({ state: 'visible' });
+  await left.locator('.presets-more + .keytip').waitFor({ state: 'visible' });
   const up = await hint();
   assert.equal(up.open, true);
   assert.match(up.text, /⌃⌥/);
   assert.match(up.text, /model/);
   assert.match(up.text, /effort/);
   // It has the pane next door to clear, like every other floating thing here.
-  assert.equal(await left.evaluate((el) => el.shadowRoot.querySelector('.keytip').matches(':popover-open')), true);
+  assert.equal(await left.evaluate((el) => el.shadowRoot.querySelector('.presets-more + .keytip').matches(':popover-open')), true);
 
   await page.mouse.move(4, 4);
-  await left.locator('.keytip').waitFor({ state: 'hidden' });
+  await left.locator('.presets-more + .keytip').waitFor({ state: 'hidden' });
   assert.equal((await hint()).open, false, 'moving on takes it away');
 });
 
@@ -1222,7 +1236,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -1236,7 +1250,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
         models: [
           { id: 'auto', label: 'Auto' },
           { id: 'composer-2.5', label: 'Composer 2.5' },
-          { id: 'cursor-grok-4.6', label: 'Grok 4.6', efforts: [{ id: 'high', label: 'High' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
+          { id: 'grok-4.7', label: 'Grok 4.7', efforts: [{ id: 'high', label: 'High' }, { id: 'high-fast', label: 'High Fast' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
         ],
         efforts: [],
         modes: [{ id: 'agent', label: 'Run Everything' }],
@@ -1250,7 +1264,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
     el.paintPresets({ initial: true });
     return [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim());
   });
-  assert.deepEqual(names, ['Fable 5.1 High', 'Opus High', 'Sonnet High', 'Grok Extra High']);
+  assert.deepEqual(names, ['Sonnet High', 'Grok 4.7 High', 'Opus 5.5 High', 'Fable 5.1 High']);
   assert.equal(await view.locator('.presets').isVisible(), true);
   assert.equal(await view.locator('.picker').isVisible(), false);
   assert.equal(await view.locator('input[name="preset"][value="sonnet-high"]').isChecked(), true);
@@ -1260,30 +1274,30 @@ test('Claude and Cursor presets become the main toggles', async () => {
   assert.deepEqual(claudeModels, ['haiku', 'sonnet', 'opus', 'fable']);
   await view.evaluate(async (el) => {
     await el.applyPreset({
-      id: 'grok-xhigh',
+      id: 'grok-high',
       provider: 'cursor',
-      model: 'cursor-grok-4.6',
-      effort: 'xhigh',
-      name: 'Grok Extra High',
+      model: 'grok-4.7',
+      effort: 'high',
+      name: 'Grok 4.7 High',
       brand: 'cursor',
     });
   });
   assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="agent"]:checked')?.value), 'cursor');
-  assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="model"]:checked')?.value), 'cursor-grok-4.6');
-  assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="effort"]:checked')?.value), 'xhigh');
+  assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="model"]:checked')?.value), 'grok-4.7');
+  assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="effort"]:checked')?.value), 'high');
   assert.equal(await view.locator('.picker').isVisible(), true, 'Custom stays open so the sliders do not vanish');
   const cursorModels = await view.evaluate((el) => [...el.shadowRoot.querySelectorAll('input[name="model"]')].map((input) => input.value));
-  assert.deepEqual(cursorModels, ['', 'auto', 'cursor-grok-4.6']);
+  assert.deepEqual(cursorModels, ['', 'auto', 'grok-4.7']);
   const clis = await view.evaluate((el) => [...el.shadowRoot.querySelectorAll('input[name="agent"] + span')].map((node) => node.textContent.trim()));
   assert.deepEqual(clis, ['Claude', 'Cursor']);
 });
 
-test('CLI radios are Claude, Cursor, then KIXLAB API', async () => {
+test('CLI radios sort Claude, Cursor, then the API-key Claude', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
   const order = await view.evaluate((el) => {
     const sorted = window.marbleAgentUI.sortProviders([
-      { id: 'claude-api', label: 'KIXLAB API' },
+      { id: 'claude-api', label: 'Claude API' },
       { id: 'fake', label: 'Fake' },
       { id: 'cursor', label: 'Cursor' },
       { id: 'claude-subscription', label: 'Claude' },
@@ -1505,6 +1519,25 @@ test('finished tool rows fold into one line that counts by kind and names source
 // Calling both "Blocked: Bash" read as a drive with no access, when most of
 // them were the agent tripping over its own shell. Only a refusal is a
 // decision, and only a decision gets the word.
+test('an act says what the app did, and stays out of the fold', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:operating');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+
+  // Called as an address and a gesture; reported as the sentence the host
+  // wrote once the control had run.
+  const act = view.locator('.tool[data-kind="act"]');
+  assert.equal(await act.count(), 1);
+  assert.equal((await act.textContent()).trim(), 'Pressed Sort · 12 changes');
+  assert.equal(await act.isVisible(), true, 'an act is never folded away');
+  assert.equal(await view.locator('.tool-group .tool[data-kind="act"]').count(), 0);
+  assert.match(await view.locator('.tool-group-count').first().textContent(), /^2 steps$/);
+  assert.match(
+    await view.locator('.tool-group-kinds').first().textContent(),
+    /Read_affordances/,
+  );
+});
+
 test('a refused command says Blocked, a broken one says Failed, and both keep their label', async () => {
   const { view } = await mount();
   await sendFrom(view, 'script:refusals');
@@ -2060,9 +2093,11 @@ test('the row names the other document, and pressing it opens that document at t
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   assert.equal(await page.evaluate(() => location.hash), '', 'the hash is spent on arrival');
   // The tab arrived after the frame was broadcast, and is caught up on joining:
-  // landing on the page the agent is in and seeing no box would read as broken.
-  await page.locator('.marble-zone').waitFor();
-  assert.match(await page.locator('.marble-zone-label').innerText(), /Agent · rename the heading/);
+  // landing on the page the agent is in and seeing nothing marked would read
+  // as broken. The heading it renamed is tinted, and the change's tag counts it.
+  await page.locator('.marble-change-tag').waitFor();
+  assert.equal(await page.locator('.marble-change-tag .marble-change-said').innerText(), 'Rewriting 1 heading');
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'the marks, not a box');
 });
 
 /** The same view in callout chrome: what the card at a selection holds. */
@@ -2122,4 +2157,76 @@ test('the ticker says what the log said last, and nothing outside callout chrome
   await sendFrom(plain, 'script:rename');
   await plain.locator('.turn-footer[data-status="completed"]').waitFor();
   assert.equal(await plain.locator('.ticker').isVisible(), false, 'the drawer keeps its log');
+});
+
+test('the usage toggle sits with the model, and Pause asks above the box', async () => {
+  const { page, view } = await mount();
+  await view.locator('.failover').waitFor();
+  assert.equal(await view.locator('.failover').getAttribute('data-failover'), 'auto');
+  assert.equal(
+    await view.evaluate((el) => el.shadowRoot.querySelector('.failover').querySelector('svg') != null),
+    true,
+    'a glyph, not the word Auto, which the permission modes already own',
+  );
+  assert.equal(
+    await view.evaluate((el) => {
+      const style = getComputedStyle(el.shadowRoot.querySelector('.failover'));
+      return `${style.borderTopWidth} ${style.backgroundColor}`;
+    }),
+    '0px rgba(0, 0, 0, 0)',
+    'no pill: it is as quiet as the options beside it',
+  );
+  assert.equal(
+    await view.evaluate((el) => el.shadowRoot.querySelector('.failover').closest('.setup-row') != null),
+    true,
+    'the toggle lives in the setup row, which a phone moves into the sheet',
+  );
+
+  await sendFrom(view, 'script:rename');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  const id = await view.getAttribute('conversation');
+  await view.locator('.failover').click();
+  await page.waitForFunction(async (conversation) => {
+    const meta = await window.marble.agent.conversation(conversation);
+    return meta.meta.failover === 'pause';
+  }, id);
+  assert.equal(await view.locator('.failover').getAttribute('data-failover'), 'pause');
+  assert.match(
+    await view.locator('.failover').getAttribute('aria-label'),
+    /^Pause when Claude usage stops/,
+    'the mode it is in, said out loud',
+  );
+
+  // A rest on it names the mode; moving on takes the tip away.
+  await view.locator('.failover').hover();
+  const tip = view.locator('.failover + .keytip');
+  await tip.waitFor({ state: 'visible' });
+  assert.match(await tip.innerText(), /^Pause when Claude usage runs out/);
+  await view.locator('.editor').hover();
+  await tip.waitFor({ state: 'hidden' });
+
+  await view.evaluate((el, conversation) => {
+    el.receive({
+      type: 'turn.failed',
+      usageStopped: true,
+      canSwitch: true,
+      turn: `${conversation}-t9`,
+    });
+  }, id);
+  await view.locator('.usage-note').waitFor();
+  const place = await view.evaluate((el) => {
+    const root = el.shadowRoot;
+    const note = root.querySelector('.usage-note').getBoundingClientRect();
+    const editor = root.querySelector('.editor').getBoundingClientRect();
+    return { note: note.bottom, editor: editor.top, text: root.querySelector('.usage-note-text').textContent };
+  });
+  assert.ok(place.note <= place.editor, 'the note sits above the box');
+  assert.equal(place.text, 'Claude usage stopped. Switch to Cursor?');
+
+  await view.locator('.usage-leave').click();
+  await view.locator('.usage-note').waitFor({ state: 'hidden' });
+  await page.waitForFunction(async (conversation) => {
+    const body = await window.marble.agent.conversation(conversation);
+    return body.events.some((event) => event.type === 'usage.left');
+  }, id);
 });

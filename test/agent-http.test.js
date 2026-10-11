@@ -52,6 +52,12 @@ const SCRIPTS = {
     { say: 'Renamed late.' },
   ],
   wait: [{ sleep: 2500 }, { say: 'waited' }],
+  // A turn of its own page, for the status widgets' reads.
+  status: [
+    { call: 'read_document', args: { path: 'status' } },
+    { call: 'apply_ops', args: { path: 'status', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { say: 'Renamed the heading.' },
+  ],
   // Writes, then stays: long enough to ask what zones are standing while one is.
   park: [
     { sleep: 700 },
@@ -62,6 +68,31 @@ const SCRIPTS = {
   ],
   hold: [{ silent: 20_000 }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
+  // Two documents of its own, so the review tests (keep; undo/redo) never
+  // race the undo test above, which expects `garden` untouched by anyone else.
+  review: [
+    { call: 'read_document', args: { path: 'meadow' } },
+    { call: 'apply_ops', args: { path: 'meadow', note: 'add a row and rename the heading', ops: [
+      { type: 'insert', parentId: 'q', beforeId: null, html: '<li data-marble-id="q2">Where?</li>' },
+      { type: 'setText', id: 'h', text: 'Backlog' },
+    ] } },
+    { say: 'Added a row and renamed the heading.' },
+  ],
+  // One heading renamed, in a page of its own, for each test of what an
+  // undo leaves to redo.
+  ...Object.fromEntries(['meadow3', 'meadow4'].map((doc) => [doc, [
+    { call: 'read_document', args: { path: doc } },
+    { call: 'apply_ops', args: { path: doc, note: 'rename the heading', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { say: 'Renamed the heading.' },
+  ]])),
+  reviewAgain: [
+    { call: 'read_document', args: { path: 'meadow2' } },
+    { call: 'apply_ops', args: { path: 'meadow2', note: 'add a row and rename the heading', ops: [
+      { type: 'insert', parentId: 'q', beforeId: null, html: '<li data-marble-id="r2">Where?</li>' },
+      { type: 'setText', id: 'h', text: 'Backlog' },
+    ] } },
+    { say: 'Added a row and renamed the heading.' },
+  ],
 };
 
 const config = loadConfig({
@@ -344,10 +375,16 @@ test('the conversation stream replays what happened and follows what happens nex
   await finished(conversationId, turnId);
 });
 
+// What a tab joining now is told is standing on a document: an undo that has
+// finished is not one of those things.
+const undoFrames = async (docPath) => (await api('GET', `/presence?app=${docPath}`)).body.frames
+  .filter((frame) => String(frame.client).startsWith('agent-undo:'));
+
 test('undo over HTTP puts the heading back, once', async () => {
   const first = await api('POST', `/agent/turns/${edited.turnId}/undo`);
   assert.deepEqual(first.body, { reverted: 1, kept: 0, errors: [] });
   assert.match(await drive.store.read('garden'), />Research Garden</);
+  assert.deepEqual(await undoFrames('garden'), [], 'a finished undo leaves no presence standing');
   const again = await api('POST', `/agent/turns/${edited.turnId}/undo`);
   assert.equal(again.status, 409);
   const { body } = await api('GET', `/agent/conversations/${edited.conversationId}`);
@@ -380,7 +417,7 @@ test('tools answer only a running turn’s token, and the token dies with the tu
   const held = await start('script:hold');
   const token = await until(() => drive.agents.runner.running()[0]?.token);
   const listed = await api('GET', '/agent/tools', null, { Authorization: `Bearer ${token}` });
-  assert.equal(listed.body.tools.length, 9);
+  assert.equal(listed.body.tools.length, 12);
   assert.ok(listed.body.tools.some((tool) => tool.name === 'check_document'));
 
   const cancelled = await api('POST', `/agent/turns/${held.turnId}/cancel`);
@@ -424,7 +461,7 @@ test('settings are read and saved', async () => {
   assert.equal(saved.body.models.fake, 'm1');
   assert.equal(saved.body.efforts.fake, 'high');
   assert.equal((await api('GET', '/agent/settings')).body.defaultProvider, 'fake');
-  assert.deepEqual((await api('GET', '/agent/settings')).body.keys, { anthropic: false, cursor: false });
+  assert.deepEqual((await api('GET', '/agent/settings')).body.keys, { anthropic: false, claude: false, cursor: false, openai: false });
 });
 
 test('a new conversation can name its effort, and a later patch changes model and effort', async () => {
@@ -712,10 +749,14 @@ test('a turn can be sent as steer and a queued turn can be patched', async () =>
 test("a document is served with the agent scripts after the Drive's, when agents are on", async () => {
   const page = await (await fetch(`${base}/a/garden`)).text();
   const drive = page.indexOf('/runtime/drive.js');
-  const api = page.indexOf('<script src="/runtime/agent.js" data-marble-transient></script>');
-  const ui = page.indexOf('<script src="/runtime/agent-ui.js" data-marble-transient></script>');
+  const api = page.search(/<script src="\/runtime\/agent\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
+  const words = page.search(/<script src="\/runtime\/agent-words\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
+  const ui = page.search(/<script src="\/runtime\/agent-ui\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
   assert.ok(drive > 0 && api > drive && ui > api, 'drive.js, then agent.js, then agent-ui.js');
-  for (const file of ['agent.js', 'agent-ui.js']) {
+  assert.ok(words > api && words < ui, 'the card reads its words from agent-words.js, so it comes first');
+  const voice = page.search(/<script src="\/runtime\/voice\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
+  assert.ok(voice > api && voice < ui, 'the composer listens through voice.js, so it comes first');
+  for (const file of ['agent.js', 'agent-words.js', 'voice.js', 'agent-ui.js']) {
     const response = await fetch(`${base}/runtime/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get('content-type'), /javascript/);
@@ -723,25 +764,24 @@ test("a document is served with the agent scripts after the Drive's, when agents
   assert.equal((await fetch(`${base}/runtime/choice-question.js`)).status, 200);
   assert.match(
     page,
-    /<script src="\/runtime\/collab\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-callout\.js" data-marble-transient><\/script>/,
+    /<script src="\/runtime\/collab\.js\?v=[0-9a-f]{12}"[^>]*><\/script>\n<script src="\/runtime\/agent-scope\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-offer\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-callout\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/,
     'the callout script follows collab.js when agents are on',
   );
   assert.match(
     page,
-    /<script src="\/runtime\/agent-callout\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js" data-marble-transient><\/script>/,
-    'the marks layer follows the callout it hands its ids to, and its geometry is read on the way in',
+    /<script src="\/runtime\/agent-scope\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-offer\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-callout\.js\?v=[0-9a-f]{12}"[^>]*><\/script>\n<script src="\/runtime\/agent-glints\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-notes\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-nudge\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-text\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/change-morph\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/change-marks\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/change-line\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/change-review\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/change-rules\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-work\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-run\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/build-mode\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/build-margin\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/build-history\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-variations\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/,
+    'the scope finder and the offer come before the callout that uses them, the glints follow the callout they ask, the notes, the offers after edits and the caret in the text follow the callout and collab.js, the engine comes before the change marks that hand it their batches, the change marks follow the caret they defer to, the line follows the marks its tint gives way to, the review follows the line its Change more opens, the rules follow the review and the line whose words they try first, the marks layer follows the callout it hands its ids to, its geometry is read on the way in, and the variations surface comes after both',
   );
-  // The toolbar captures the drawer's shadow root once, at boot, and hangs
-  // its `data-pinned` observer on it. There is nothing to capture until
-  // agent-ui.js has mounted the drawer, and nothing says so at the point of
-  // failure: put agent-marks.js first and the toolbar quietly stops stepping
-  // aside for an open drawer, with all seventeen marks tests still passing.
-  // This line is what stands between that order and a silent regression.
+  // The marks layer asks the drawer's tray for its slots at boot and takes
+  // itself down if nothing answers, and it hangs its observers on the drawer's
+  // shadow root. There is nothing to ask and nothing to observe until
+  // agent-ui.js has mounted the drawer: put agent-marks.js first and Select
+  // and Sketch quietly stop existing, with every marks test still passing.
   assert.ok(
-    ui < page.indexOf('<script src="/runtime/agent-marks.js" data-marble-transient></script>'),
-    'agent-ui.js mounts the drawer before agent-marks.js reads its shadow root',
+    ui < page.search(/<script src="\/runtime\/agent-marks\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/),
+    'agent-ui.js mounts the drawer before agent-marks.js asks it for a slot',
   );
-  for (const file of ['agent-callout.js', 'agent-marks-geometry.js', 'agent-marks.js']) {
+  for (const file of ['agent-scope.js', 'agent-offer.js', 'agent-callout.js', 'agent-glints.js', 'agent-notes.js', 'agent-nudge.js', 'agent-text.js', 'change-morph.js', 'change-marks.js', 'change-line.js', 'change-review.js', 'change-rules.js', 'agent-work.js', 'agent-run.js', 'agent-marks-geometry.js', 'agent-marks.js', 'build-mode.js', 'build-margin.js', 'build-history.js', 'agent-variations.js']) {
     const response = await fetch(`${base}/runtime/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get('content-type'), /javascript/);
@@ -872,4 +912,258 @@ test('a zone is asked for by the document and told to the conversation', async (
 
   await finished(conversation.body.id, turn.body.turnId);
   assert.deepEqual((await api('GET', '/presence?app=watched')).body.frames, [], 'a turn that is over holds no zone');
+});
+
+test('a new conversation starts on auto, and pause is the only other failover', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake' });
+  assert.equal(created.body.failover, 'auto');
+  const paused = await api('PATCH', `/agent/conversations/${created.body.id}`, { failover: 'pause' });
+  assert.equal(paused.status, 200);
+  assert.equal(paused.body.failover, 'pause');
+  const reloaded = await api('GET', `/agent/conversations/${created.body.id}`);
+  assert.equal(reloaded.body.meta.failover, 'pause');
+  const bad = await api('PATCH', `/agent/conversations/${created.body.id}`, { failover: 'later' });
+  assert.equal(bad.status, 400);
+});
+
+test('Leave it is still on the conversation after a reload', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake' });
+  const left = await api('POST', `/agent/conversations/${created.body.id}/usage-left`, { turn: `${created.body.id}-t1` });
+  assert.equal(left.status, 200);
+  assert.equal(left.body.type, 'usage.left');
+  const reloaded = await api('GET', `/agent/conversations/${created.body.id}`);
+  assert.equal(reloaded.body.events.some((event) => event.type === 'usage.left' && event.turn === `${created.body.id}-t1`), true);
+});
+
+test('Switch starts a Continue turn and a second call returns it', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-failover-http-'));
+  const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-failover-work-'));
+  const local = loadConfig({
+    ...process.env,
+    MARBLE_DRIVE_ROOT: root,
+    MARBLE_APPS: root,
+    MARBLE_DRIVE_AGENTS: '1',
+    MARBLE_DRIVE_AGENT_NAMING: '0',
+    MARBLE_DRIVE_AGENT_PROVIDER: 'claude-subscription',
+    MARBLE_DRIVE_AGENT_WORKDIR: work,
+    MARBLE_DRIVE_AGENT_KEYS: path.join(work, 'keys'),
+  });
+  const claude = createFakeProvider({
+    id: 'claude-subscription',
+    scripts: { spent: [{ fail: 'You have hit your limit' }] },
+  });
+  const cursor = createFakeProvider({ id: 'cursor', scripts: { hello: [{ say: 'picked up' }] } });
+  const cursorSpawn = cursor.spawn.bind(cursor);
+  cursor.spawn = (opts) => cursorSpawn({ ...opts, prompt: `script:hello\n${opts.prompt}` });
+  cursor.detect = async () => ({ installed: true, signedIn: true });
+  cursor.listModels = async () => [
+    { id: 'auto', label: 'Auto' },
+    { id: 'grok-4.7-high', label: 'Grok 4.7 High' },
+    { id: 'grok-4.7-xhigh', label: 'Grok 4.7 Extra High' },
+  ];
+  const localDrive = await createDrive(local, {
+    log: quiet,
+    agentProviders: new Map([['claude-subscription', claude], ['cursor', cursor]]),
+  });
+  await localDrive.createDocument('garden', SOURCE);
+  const localPort = await new Promise((resolve) => localDrive.server.listen(0, '127.0.0.1', () => resolve(localDrive.server.address().port)));
+  const call = async (method, route, body) => {
+    const response = await fetch(`http://127.0.0.1:${localPort}${route}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  };
+  try {
+    const created = await call('POST', '/agent/conversations', { provider: 'claude-subscription', model: 'opus', effort: 'max', failover: 'pause' });
+    assert.equal(created.body.failover, 'pause');
+    const sent = await call('POST', `/agent/conversations/${created.body.id}/turns`, {
+      prompt: 'script:spent',
+      context: { target: 'garden', viewing: 'garden', selection: [] },
+    });
+    const done = await until(async () => {
+      const { body } = await call('GET', `/agent/conversations/${created.body.id}`);
+      const turn = body.turns.find((item) => item.id === sent.body.turnId);
+      return turn && turn.status === 'failed' ? body : null;
+    });
+    assert.equal(done.turns[0].usageStopped, true);
+    assert.equal(done.meta.provider, 'claude-subscription');
+    const switched = await call('POST', `/agent/conversations/${created.body.id}/failover`);
+    assert.equal(switched.status, 200);
+    const again = await call('POST', `/agent/conversations/${created.body.id}/failover`);
+    assert.equal(again.status, 200);
+    assert.equal(again.body.turnId, switched.body.turnId);
+    const after = await until(async () => {
+      const { body } = await call('GET', `/agent/conversations/${created.body.id}`);
+      return body.meta.provider === 'cursor' ? body : null;
+    });
+    assert.equal(after.meta.model, 'grok-4.7');
+    assert.equal(after.meta.effort, 'xhigh');
+    assert.equal(after.turns.some((turn) => turn.prompt === 'Continue'), true);
+  } finally {
+    await localDrive.close();
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(work, { recursive: true, force: true });
+  }
+});
+
+test('a run the host starts itself is named, aimed, and under way', async () => {
+  const { id, turn } = await drive.agents.startRun({ prompt: 'script:edit', target: 'garden', title: 'Today’s day' });
+  const { body } = await finished(id, turn.turnId);
+  assert.equal(body.meta.title, 'Today’s day');
+  assert.equal(body.meta.provider, 'fake');
+  assert.equal(body.events.find((e) => e.type === 'user').context.target, 'garden');
+});
+
+test('review lists what a turn changed, and Keep clears it and the launcher dot', async () => {
+  await drive.store.write('meadow', SOURCE.replace('Garden', 'Meadow'), { label: 'test' });
+  const run = await start('script:review\nAdd a row and rename the heading', 'meadow');
+  const { turn } = await finished(run.conversationId, run.turnId);
+  assert.equal(turn.status, 'completed');
+
+  const listed = await api('GET', '/agent/review?path=meadow');
+  assert.equal(listed.body.turns.length, 1);
+  const reviewed = listed.body.turns[0];
+  assert.equal(reviewed.id, run.turnId);
+  assert.equal(reviewed.conversationId, run.conversationId);
+  assert.deepEqual(reviewed.parts.map((p) => p.kind).sort(), ['added', 'words']);
+
+  const kept = await api('POST', `/agent/turns/${run.turnId}/keep`);
+  assert.deepEqual(kept.body, { ok: true });
+
+  assert.deepEqual((await api('GET', '/agent/review?path=meadow')).body.turns, []);
+  const conv = await api('GET', `/agent/conversations/${run.conversationId}`);
+  assert.equal(conv.body.meta.needsReview, false);
+});
+
+test('undo drops a turn from the review list, and redo brings it — and the row — back', async () => {
+  await drive.store.write('meadow2', SOURCE.replace('Garden', 'Meadow'), { label: 'test' });
+  const run = await start('script:reviewAgain\nAdd a row and rename the heading', 'meadow2');
+  const { turn } = await finished(run.conversationId, run.turnId);
+  assert.equal(turn.status, 'completed');
+  assert.equal((await api('GET', '/agent/review?path=meadow2')).body.turns.length, 1);
+
+  const undone = await api('POST', `/agent/turns/${run.turnId}/undo`);
+  assert.equal(undone.status, 200);
+  assert.deepEqual((await api('GET', '/agent/review?path=meadow2')).body.turns, []);
+  assert.doesNotMatch(await drive.store.read('meadow2'), /r2/);
+
+  assert.deepEqual(await undoFrames('meadow2'), [], 'a finished undo leaves no presence standing');
+
+  const redone = await api('POST', `/agent/turns/${run.turnId}/redo`);
+  assert.equal(redone.status, 200);
+  assert.deepEqual(redone.body, { reverted: 2, kept: 0 });
+  assert.deepEqual(await undoFrames('meadow2'), [], 'nor does a finished redo');
+  assert.match(await drive.store.read('meadow2'), /r2/, 'the row an agent added is back in the file');
+
+  const afterRedo = await api('GET', '/agent/review?path=meadow2');
+  assert.equal(afterRedo.body.turns.length, 1, 'the turn is listed again');
+  assert.deepEqual(afterRedo.body.turns[0].parts.map((p) => p.kind).sort(), ['added', 'words']);
+
+  const redoneAgain = await api('POST', `/agent/turns/${run.turnId}/redo`);
+  assert.equal(redoneAgain.status, 409);
+
+  // A person's own later edit to the heading takes just that part off the
+  // list — it is theirs now — and leaves the row the agent added alone.
+  await fetch(`${base}/ops?app=meadow2&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify([{ type: 'setText', id: 'h', text: 'Mine' }]),
+  });
+
+  const afterPersonEdit = await api('GET', '/agent/review?path=meadow2');
+  assert.equal(afterPersonEdit.body.turns.length, 1);
+  assert.deepEqual(afterPersonEdit.body.turns[0].parts.map((p) => p.kind), ['added']);
+});
+
+test('an undo that only put the page back leaves nothing to redo, even where a redo was left before', async () => {
+  const original = SOURCE.replace('Garden', 'Meadow');
+  await drive.store.write('meadow3', original, { label: 'test' });
+  const run = await start('script:meadow3\nRename the heading', 'meadow3');
+  assert.equal((await finished(run.conversationId, run.turnId)).turn.status, 'completed');
+  assert.match(await drive.store.read('meadow3'), /Backlog/);
+
+  // As a turn that rewrote the page with its own tools is undone: by the
+  // point it started from, and nothing else.
+  let sha = null;
+  for (const checkpoint of await drive.store.history('meadow3')) {
+    if ((await drive.store.snapshot('meadow3', checkpoint.sha)) === original) sha = checkpoint.sha;
+  }
+  assert.ok(sha, 'the page as it was is a checkpoint');
+  await drive.agents.store.saveUndo(run.turnId, { steps: [], restores: [{ path: 'meadow3', sha }] });
+  await drive.agents.store.saveRedo(run.turnId, {
+    steps: [{ path: 'meadow3', steps: [{ inverse: { type: 'setText', id: 'h', text: 'Stale' }, id: 'h', expect: null, absent: null }] }],
+    restores: [],
+  });
+
+  const undone = await api('POST', `/agent/turns/${run.turnId}/undo`);
+  assert.equal(undone.status, 200);
+  assert.equal(await drive.store.read('meadow3'), original);
+  assert.equal(await drive.agents.store.redoRecords(run.turnId), null, 'no redo is kept, and the old one is gone');
+
+  const redone = await api('POST', `/agent/turns/${run.turnId}/redo`);
+  assert.equal(redone.status, 409);
+  assert.equal(await drive.store.read('meadow3'), original);
+
+  // A record with no steps in it, however it got there, is nothing to redo.
+  await drive.agents.store.saveRedo(run.turnId, { steps: [], restores: [] });
+  assert.equal((await api('POST', `/agent/turns/${run.turnId}/redo`)).status, 409);
+});
+
+test('an undo whose redo could not be kept is still an undo', async () => {
+  const original = SOURCE.replace('Garden', 'Meadow');
+  await drive.store.write('meadow4', original, { label: 'test' });
+  const run = await start('script:meadow4\nRename the heading', 'meadow4');
+  assert.equal((await finished(run.conversationId, run.turnId)).turn.status, 'completed');
+
+  const saveRedo = drive.agents.store.saveRedo;
+  drive.agents.store.saveRedo = async () => {
+    throw new Error('disk full');
+  };
+  let undone;
+  try {
+    undone = await api('POST', `/agent/turns/${run.turnId}/undo`);
+  } finally {
+    drive.agents.store.saveRedo = saveRedo;
+  }
+  assert.equal(undone.status, 200);
+  assert.deepEqual(undone.body, { reverted: 1, kept: 0, errors: [] });
+  assert.equal(await drive.store.read('meadow4'), original);
+  assert.ok((await drive.agents.store.turn(run.turnId)).undoneAt, 'the turn is marked undone');
+  assert.equal((await api('POST', `/agent/turns/${run.turnId}/undo`)).status, 409, 'and is not undone twice');
+});
+
+test('a summary carries the last step in plain words, and every chat\'s turns since a time come in one request', async () => {
+  await drive.createDocument('status', SOURCE);
+  const before = Date.now();
+  const made = await start('script:status\nRename the heading', 'status');
+  const { turn } = await finished(made.conversationId, made.turnId);
+  assert.equal(turn.status, 'completed');
+
+  const { body: listed } = await api('GET', '/agent/conversations');
+  const summary = listed.find((s) => s.id === made.conversationId);
+  assert.equal(summary.lastStep.kind, 'change');
+  assert.equal(summary.lastStep.words, 'Updating status', 'the card\'s words');
+  assert.equal(summary.lastStep.turn, made.turnId);
+  assert.ok(summary.lastStep.t >= before);
+  assert.equal(summary.turnStartedAt, null, 'a finished chat has no running turn');
+  assert.equal(summary.lastStep.input, undefined, 'none of the step\'s input');
+
+  const { status, body } = await api('GET', `/agent/turns?since=${before}&paths=1`);
+  assert.equal(status, 200);
+  assert.ok(Number.isFinite(body.now));
+  const mine = body.turns.find((t) => t.id === made.turnId);
+  assert.ok(mine, 'the new turn is in range');
+  assert.equal(mine.conversationId, made.conversationId);
+  assert.equal(mine.status, 'completed');
+  assert.equal(mine.applied, 1);
+  assert.equal(mine.target, 'status');
+  assert.deepEqual(mine.changed, ['status']);
+  assert.equal(mine.prompt, undefined, 'a turn is cut to its times, outcome and page');
+  assert.ok(body.turns.every((t) => (t.finishedAt ?? t.startedAt ?? Infinity) >= before || ['running', 'queued'].includes(t.status)));
+
+  const { body: later } = await api('GET', `/agent/turns?since=${Date.now() + 60_000}`);
+  assert.equal(later.turns.find((t) => t.id === made.turnId), undefined, 'a turn that ended before the time is left out');
+  assert.equal((await api('GET', '/agent/turns')).status, 400);
 });
