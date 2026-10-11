@@ -123,6 +123,11 @@ test('Make it with nothing to make from puts the caret in the answer instead', a
   await page.waitForFunction(() => window.marbleRun.running().has('sh-keep') || document.querySelector('[data-marble-id="sh-make"]').getAttribute('aria-busy') === 'true');
   await (async () => { for (let i = 0; i < 50 && (await chats()) === count; i++) await new Promise((r) => setTimeout(r, 100)); })();
   assert.equal(await chats(), count + 1);
+  // The page's own goings-on (a chip, typing, the press, the agent starting)
+  // are not Claude changing it.
+  await page.waitForTimeout(500);
+  assert.equal(await done(page, 'ask'), null);
+  assert.equal(await done(page, 'write'), null);
 });
 
 test('the page holds up at phone and desk widths, in both schemes', async () => {
