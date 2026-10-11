@@ -83,10 +83,14 @@ test('an invite, Google, a name, and the drive is queued; the door sprite is pok
 
   const home = await b.go('/');
   assert.equal(home.headers.get('location'), '/name');
-  assert.match(await text(await b.go('/name')), /Name your drive/);
+  const named = await text(await b.go('/name'));
+  assert.match(named, /Name your drive/);
+  assert.match(named, /value="ana"/, 'filled from her Google name');
+  assert.match(named, /Free\. You can’t change it later\./);
+  assert.match(named, />Open my drive</);
 
   const check = await (await b.go('/name/check?n=ana')).json();
-  assert.deepEqual(check, { ok: true, said: 'ana is free.' });
+  assert.deepEqual(check, { ok: true, said: 'Free. You can’t change it later.' });
   assert.equal((await (await b.go('/name/check?n=pc-ana')).json()).ok, false);
 
   const crossSite = await b.form('/name', { name: 'ana' }, 'https://bob.marbledrive.app');

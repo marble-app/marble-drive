@@ -40,7 +40,7 @@ import { createLeaseClient } from '../server/hub/lease-client.js';
 import { holdPath, loadHubSettings } from '../server/hub/settings.js';
 import { scheduleUploads, touchOnWrites } from '../server/hub/schedule.js';
 import { createKeepAwake } from '../server/keep-awake.js';
-import { createProvisioner, scriptRunner } from '../server/provisioner.js';
+import { createProvisioner, scriptRunner, sparesWanted } from '../server/provisioner.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
 
@@ -106,7 +106,8 @@ switch (command) {
 
 /** The door sprite (server/provisioner.js). Its settings: DOOR_URL (the door,
  *  https://marbledrive.app by default), DOOR_ADMIN_TOKEN, MARBLE_DOOR_KEYS (the
- *  public keys every new drive is given), and PORT. */
+ *  public keys every new drive is given), MARBLE_SPARE_DRIVES (keep a drive
+ *  made ahead; off unless set), and PORT. */
 async function provisioner() {
   const adminToken = process.env.DOOR_ADMIN_TOKEN;
   const keys = process.env.MARBLE_DOOR_KEYS;
@@ -132,9 +133,11 @@ async function provisioner() {
   let p = null;
   const awake = createKeepAwake({ socket: config.spriteSocket, busy: () => Boolean(p?.busy()), name: 'marble-door' });
   awake.start();
+  const spares = sparesWanted(process.env.MARBLE_SPARE_DRIVES);
   p = createProvisioner({
     directoryUrl: process.env.DOOR_URL || 'https://marbledrive.app',
     adminToken,
+    spares,
     run: (job, onLine) => {
       awake.nudge();
       return runner(job, onLine);
@@ -142,8 +145,8 @@ async function provisioner() {
   });
   const port = Number(process.env.PORT || 8080);
   await p.serve(port, process.env.HOST || '0.0.0.0');
-  console.log(`[door] provisioner listening on ${port}; poke it at POST /poke`);
-  p.drain().catch((err) => console.error(`[door] ${err.message}`));
+  console.log(`[door] provisioner listening on ${port}; poke it at POST /poke${spares ? `; keeping ${spares} spare drive${spares === 1 ? '' : 's'} ready` : ''}`);
+  p.work().catch((err) => console.error(`[door] ${err.message}`));
 }
 
 // ---------------------------------------------------------------------- serve

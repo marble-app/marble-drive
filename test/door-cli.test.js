@@ -146,3 +146,26 @@ test('invite --credit gives the drive it makes its own amount', async () => {
   const listed = await route(new Request('https://marbledrive.app/_door/invites', { headers: { authorization: `Bearer ${r.env.DOOR_ADMIN_TOKEN}` } }), r.env);
   assert.equal((await listed.json()).invites[0].credit, 10);
 });
+
+test('spares lists the drives kept ready, says why none is made, and forget-spare stops one being given out', async () => {
+  const r = await rig();
+  const dir = (p, b) => r.env.DIRECTORY.get('directory').fetch(new Request(`https://directory${p}`, { method: 'POST', body: JSON.stringify(b) }));
+  assert.match((await r.run('spares')).out, /No spare drives\. With MARBLE_SPARE_DRIVES set on the door sprite/);
+  await dir('/spares', { sprite: 'd-spare-0000aaaa', state: 'making' });
+  await dir('/spares', { sprite: 'd-spare-0000aaaa', state: 'ready', url: 'https://d-spare-0000aaaa-x.sprites.app' });
+  await dir('/spares', { sprite: 'd-spare-0000bbbb', state: 'making' });
+  await dir('/spares', { sprite: 'd-spare-0000bbbb', state: 'failed' });
+  const listed = await r.run('spares');
+  assert.equal(listed.code, 0, listed.err);
+  assert.match(listed.out, /d-spare-0000aaaa\s+ready\s+\d{4}-\d{2}-\d{2}\s+https:\/\/d-spare-0000aaaa-x\.sprites\.app/);
+  assert.match(listed.out, /d-spare-0000bbbb\s+failed/);
+  assert.match(listed.out, /No new spare is made while one has failed/);
+  assert.match(listed.out, /--remove <sprite> --spare <sprite>/);
+  const forgot = await r.run('forget-spare', 'd-spare-0000bbbb');
+  assert.equal(forgot.code, 0, forgot.err);
+  assert.match(forgot.out, /Forgot d-spare-0000bbbb/);
+  assert.match(forgot.out, /tools\/sprite-provision\.sh --remove d-spare-0000bbbb --spare d-spare-0000bbbb/);
+  assert.doesNotMatch((await r.run('spares')).out, /0000bbbb/);
+  assert.match((await r.run('forget-spare', 'd-ana')).err, /forget which spare/);
+  assert.match((await r.run('forget-spare', 'd-spare-0000cccc')).err, /No such spare/);
+});

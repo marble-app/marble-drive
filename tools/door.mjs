@@ -20,6 +20,8 @@
 //   node tools/door.mjs credit reset <name>         what it spent back to nothing
 //   node tools/door.mjs credit off <name>           its token stops working
 //   (invite takes --credit <usd> too: the credit the drive it makes gets)
+//   node tools/door.mjs spares                      the drives kept ready for the next sign-ups
+//   node tools/door.mjs forget-spare <sprite>       stop handing that spare out (its sprite stays)
 //
 // Reads DOOR_URL and DOOR_ADMIN_TOKEN from ~/.config/marble-drive/door.env,
 // which must be mode 600. An invite link is printed once, when it is made:
@@ -77,7 +79,7 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
   const { flags, args } = parseArgs(argv);
   const [command, ...rest] = args;
   if (!command || flags.help) {
-    out('node tools/door.mjs invite | invites | requests | approve <id> | drives | hold <name> [--off] | log [--account <id>] | credit [mint|cap|reset|off <name>]');
+    out('node tools/door.mjs invite | invites | requests | approve <id> | drives | hold <name> [--off] | log [--account <id>] | credit [mint|cap|reset|off <name>] | spares | forget-spare <sprite>');
     return command ? 0 : 2;
   }
   let settings;
@@ -212,8 +214,28 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
         }
         throw new Error(`no "credit ${what}": mint, cap, reset, off`);
       }
+      case 'spares': {
+        const { spares, room } = await call('GET', '/spares');
+        if (!spares.length) out('No spare drives. With MARBLE_SPARE_DRIVES set on the door sprite, it makes one after its next poke.');
+        else for (const line of pad([['sprite', 'state', 'since', 'url'], ...spares.map((x) => [x.sprite, x.state === 'failed' && x.failedFor ? `failed for ${x.failedFor}` : x.state, day(x.ready ?? x.made), x.url ?? ''])])) out(line);
+        if (spares.some((x) => x.state === 'failed')) {
+          out('');
+          out('No new spare is made while one has failed. Forget it with node tools/door.mjs forget-spare <sprite>,');
+          out('then remove its sprite on the door sprite: tools/sprite-provision.sh --remove <sprite> --spare <sprite>');
+        }
+        if (room <= 0) out('Sign-up has made as many drives as MAX_DRIVES allows, so no spare is made.');
+        return 0;
+      }
+      case 'forget-spare': {
+        const sprite = rest[0];
+        if (!sprite || !/^d-spare-[0-9a-f]{6,16}$/.test(sprite)) throw new Error('forget which spare? node tools/door.mjs spares lists them (d-spare-<hex>)');
+        await call('DELETE', `/spares/${sprite}`);
+        out(`Forgot ${sprite}: no sign-up is given it. Its sprite is still there; remove it on the door sprite with`);
+        out(`  tools/sprite-provision.sh --remove ${sprite} --spare ${sprite}`);
+        return 0;
+      }
       default:
-        throw new Error(`no command "${command}": invite, invites, requests, approve, drives, hold, log, credit`);
+        throw new Error(`no command "${command}": invite, invites, requests, approve, drives, hold, log, credit, spares, forget-spare`);
     }
   } catch (e) {
     err(`door: ${e.message}`);
