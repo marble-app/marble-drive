@@ -393,9 +393,9 @@
 
     /* ---------------------------------------------------------- Build mode
 
-       Describe is where every app starts, so it says so with nothing but the
-       toolbar rising from the foot: no ring round the window, no line at its
-       top, and the app at full size. The bar is a rounded rectangle at the
+       Describe is the app's own mode for building, so it says so with
+       nothing but the toolbar rising from the foot: no ring round the
+       window, no line at its top, and the app at full size. The bar is a rounded rectangle at the
        sheet radius, its tools at 10px inside. */
     .marble-marks-layer[data-build] .marble-marks-ring,
     .marble-marks-layer[data-build] .marble-marks-notice { display: none; }
@@ -560,10 +560,12 @@
     style.textContent = STYLE;
     document.head.append(style);
 
-    // Build mode (build-mode.js): every app starts in Describe, its marks are
-    // kept for it by the host, and Build takes them. The Drive's own page is
-    // the frame apps sit in, not an app to build, and keeps Describe as it was.
-    // It can be turned off for this browser (the shell's Settings, "Build
+    // Build mode (build-mode.js): an app's marks are kept for it by the host,
+    // and Build takes them. Apps open in normal use, where only the page's
+    // writing areas take typing (writing.js); one opens in build mode when it
+    // was left in it here, or when it is new from New and about to be built.
+    // The Drive's own page is the frame apps sit in, not an app to build, and
+    // keeps Describe as it was. It can be turned off for this browser (the shell's Settings, "Build
     // mode"), or by a page for itself (<meta name="marble-build" content="off">),
     // and then Describe is the mode you turn on that sends from the ⌘J line.
     const buildOff = () => {
@@ -2353,8 +2355,9 @@
       // it comes back when the mode ends.
       dispatchEvent(new CustomEvent('marble-marks:mode', { detail: { mode: next, describing } }));
     }
-    // Turning Describe off is remembered for this app, in this browser: the
-    // next visit opens the way it was left. Every app starts in it otherwise.
+    // Turning build mode on or off is remembered for this app, in this
+    // browser: the next visit opens the way it was left. An app nobody has
+    // built here yet opens in normal use.
     const PREF = `marble-build:describe:${app}`;
     const remembered = () => { try { return localStorage.getItem(PREF); } catch { return null; } };
     function setDescribing(on, { remember = true } = {}) {
@@ -2975,8 +2978,10 @@
     setMode(null);
     syncBrief();
     if (building) {
-      // Every app starts in Describe, unless it was turned off here last time.
-      if (remembered() !== 'off') setDescribing(true, { remember: false });
+      // In build mode only when it was left in it here, or when it is a new
+      // app from New, whose prompt build-mode.js is about to build from.
+      const fresh = /(?:^#|&)build=/.test(location.hash);
+      if (remembered() === 'on' || fresh) setDescribing(true, { remember: false });
       dispatchEvent(new CustomEvent('marble-marks:ready'));
     }
     return true;

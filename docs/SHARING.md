@@ -14,6 +14,14 @@ every change a link files in `server/share-policy.js`.
 | **Read & write** (`edit`) | change what the page offers to change: anything under an element with an affordance marker (`data-marble-editable`, `-rich`, `-add`, `-sortable`, `-removable`, `-toggle`, `-choose` …; the list is `MARKERS`, and a test fails when Marble's affordances or a starter wire one it lacks), and the element a control points at with `data-marble-of` | change anything else, or add a `<style>` |
 | **Read, write & modify** (`modify`) | change any part of the page: rewrite, add or remove sections, restructure, restyle | touch the page's code |
 
+In the page, an edit link types only where the page is written into, as the
+owner does out of build mode (`runtime/writing.js`): text marked
+`data-marble-editable="write"`, anything under `data-marble-write`, an editable
+with a placeholder, and rich text. A bare `data-marble-editable` (a heading, a
+label) is locked for them. The host's check above is still the wider one: it
+does not yet refuse an edit link's change to a bare editable that arrives by
+some other way than typing.
+
 No level can, ever:
 
 - add a `<script>`, an event handler (`on…=`), an `<iframe>`/`<object>`/`<embed>`,

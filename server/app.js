@@ -166,6 +166,8 @@ const RUNTIME = {
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
   // What a page opened by a share link wears instead of the shell.
   'share.js': () => path.join(REPO, 'runtime', 'share.js'),
+  // Which text takes typing outside build mode (and on a share link).
+  'writing.js': () => path.join(REPO, 'runtime', 'writing.js'),
   // The callout: a conversation drawn at the region of a document it is about.
   // The scope finder and the offer: which element a resting pointer means,
   // and what a fresh callout card offers before anything is sent.
@@ -433,6 +435,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       // goes to Ask for access; with it off there is nowhere to send them.
       const ask = door.askUrl ? ` data-door="${escapeHtml(door.askUrl)}"` : '';
       tags += `\n<script src="${runtimeUrl('share.js')}" data-role="${escapeHtml(visit.role)}"${ask} data-marble-transient></script>`;
+      // Their link never has build mode, so only the page's writing areas take
+      // typing. A modify link changes the page itself, and keeps all of it.
+      if (visit.role !== 'modify') tags += `\n<script src="${runtimeUrl('writing.js')}" data-mode="share" data-marble-transient></script>`;
       return source.includes('</body>')
         ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
         : source + tags;
@@ -511,6 +516,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="${runtimeUrl('build-margin.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('build-history.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-variations.js')}" data-marble-transient></script>`;
+      // After Describe, whose build mode it follows: out of it, only the page's
+      // writing areas take typing.
+      tags += `\n<script src="${runtimeUrl('writing.js')}" data-mode="build" data-marble-transient></script>`;
     }
     // Last: the shell seats the drawer, so it comes after everything that
     // mounts one, and reads the drawer's tokens off window.marbleAgentUI.

@@ -237,7 +237,7 @@ __ICON__
   </header>
 
   <div class="scroll" data-marble-id="__ID__" id="scroll">
-    <div class="grid" data-marble-id="__ID__" id="grid" style="--cols:4">
+    <div class="grid" data-marble-id="__ID__" id="grid" style="--cols:4" data-marble-write>
       <div class="row head" data-marble-id="__ID__" id="head">
         <div class="cell" data-marble-id="__ID__" data-marble-editable>Item</div>
         <div class="cell" data-marble-id="__ID__" data-marble-editable>Owner</div>

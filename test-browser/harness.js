@@ -148,13 +148,19 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     // (collab.js); any other agent is a glint.
     async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1, attending = [], detail = 'technical', shell = true, build = false } = {}) {
       const context = await browser.newContext({ viewport, reducedMotion, colorScheme, hasTouch, isMobile, deviceScaleFactor });
-      // Build mode (runtime/build-mode.js) opens every app in Describe. The
-      // suites written before it test Describe as a mode you turn on, so a
-      // page has Build mode off unless a test asks for it.
+      // Build mode (runtime/build-mode.js). The suites written before it test
+      // Describe as a mode you turn on, so a page has Build mode off unless a
+      // test asks for it. `build: true` opens each app in build mode, as if it
+      // was left in it here, which the suites written for it expect; `build:
+      // 'closed'` has it on the page but opens the app in normal use, as an
+      // app nobody has built in this browser opens.
       await context.addInitScript((on) => {
         try {
-          if (on) localStorage.removeItem('marble-build');
-          else localStorage.setItem('marble-build', 'off');
+          if (!on) { localStorage.setItem('marble-build', 'off'); return; }
+          localStorage.removeItem('marble-build');
+          const app = decodeURIComponent(location.pathname.replace(/^\/a\//, ''));
+          const key = `marble-build:describe:${app}`;
+          if (on === true && location.pathname.startsWith('/a/') && localStorage.getItem(key) === null) localStorage.setItem(key, 'on');
         } catch { /* opaque origin */ }
       }, build);
       // A page with the shell turned off, as a document turns it off for
