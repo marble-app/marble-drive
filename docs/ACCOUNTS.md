@@ -28,6 +28,7 @@ cleanup for after phase 1.
 | The drive's own check of the pass, with public keys only | `server/door.js`, `server/app.js` |
 | The door sprite, which makes the drives people asked for | `server/provisioner.js`, `marble-drive provisioner`, `tools/sprite-provision.sh --door` |
 | Invites, requests and drives from the terminal | `tools/door.mjs` |
+| A drive kept ready, so sign-up takes seconds (off until set) | `server/provisioner.js`, `tools/sprite-provision.sh --spare` and `--from-spare`, the Directory's spares; below, "The spare drive" |
 
 **Nothing changes until it is configured.** With no `DOOR_SIGNING_KEY` on the
 Worker, `marbledrive.app` is the placeholder and every drive name is routed as
@@ -129,6 +130,10 @@ MARBLE_DOOR_KEYS=<the line in door-keys>
 MARBLE_PROVISION_SCRIPT=/home/sprite/src/marble-drive/tools/sprite-provision.sh
 ```
 
+To keep a drive made ahead so a sign-up takes seconds, add
+`MARBLE_SPARE_DRIVES=1` to that file too ("The spare drive", below). It can
+wait until the door has made its first drive the slow way.
+
 Then `tools/sprite-deploy.sh door`. Keep its URL private to the org (the
 default); the Worker pokes it with `SPRITES_TOKEN`, which it already has. Set
 `DOOR_SPRITE_URL` in `worker/wrangler.toml` to its URL and deploy the Worker
@@ -174,6 +179,61 @@ In the spec's order: `t-bryan` first, then `bryan`, then the testers.
    cookie), and still works at `127.0.0.1` and as `Authorization: Bearer` for
    scripts. Taking the lines out puts the drive back as it was.
 
+## The spare drive
+
+With `MARBLE_SPARE_DRIVES=1` in the door sprite's `sprite.env`, the door sprite
+keeps one drive made ahead: created, deployed, checked, and then left to sleep
+with nobody's name on it. The next person to name a drive is given it. The door
+sprite writes its settings (her name, her account, the door's keys, and the
+starter credit's settings when there are any), restarts it, and she is in about
+ten seconds later, where without it she would wait three to five minutes. Once
+it has handed the spare over, it starts making the next one, beside anything
+else it is doing, so a sign-up never waits behind a spare being made.
+
+Fly can't rename a sprite (the `sprite` CLI has create, list, info, config,
+exec, checkpoint, restore, destroy and url; `config update` changes only URL
+access and labels). So the spare keeps its own name, `d-spare-<hex>`, and the
+Directory maps her drive's name to it: `node tools/door.mjs drives` shows
+`ana` on sprite `d-spare-3fa9c1d2`. The router already finds a drive by its
+name in the Directory and sends it to the sprite URL recorded there, so nothing
+else changes. No drive can be called `spare-…`, so no drive's own sprite can
+have a spare's name.
+
+**What it costs while it waits.** A sprite that is asleep bills only its
+storage, at the cold rate (about $0.02 a GB a month, "Cost, sleep and limits"
+in the spec). A spare with its release, Claude Code, Codex and Chromium is a
+few GB, so a few cents a month. It is awake for the few minutes it takes to
+make, and for a few seconds when it is handed over.
+
+**What it does not do.** It is off until the setting is there: without it the
+door sprite makes nothing ahead, the Directory has no spares, and every drive
+is made from nothing as before. It makes no spare once `MAX_DRIVES` is reached,
+since that one could never be given out. A spare is labelled `marble-user`, so
+`tools/sprite-deploy.sh --all` keeps it on the current release like any drive.
+
+**When something goes wrong.** If handing the spare over fails, the drive goes
+back to the queue and is made from nothing; her page turns into the three-step
+one that says it takes a few minutes. The spare that failed is kept in the list
+as failed, and while one is there no new spare is made, so a fault can't make
+sprite after sprite. A spare that failed while it was being made is kept the
+same way.
+
+| To | Run |
+|---|---|
+| See the spare, and whether one failed | `node tools/door.mjs spares` |
+| Stop a spare being given out | `node tools/door.mjs forget-spare <sprite>` |
+| Then remove its sprite | on the door sprite, `tools/sprite-provision.sh --remove <sprite> --spare <sprite>` |
+| Turn it off | take `MARBLE_SPARE_DRIVES` out of the door sprite's `sprite.env`, `tools/sprite-deploy.sh door`, then forget and remove the spare |
+
+`SPARE_DRIVES` in `server/provisioner.js` is how many are kept when the setting
+is `on` (1); a number in the setting keeps that many, at most three.
+
+**For the starter credit.** The door sprite writes `MARBLE_CREDIT_URL` and
+`MARBLE_CREDIT_TOKEN` into a drive's settings, whether it is made from nothing
+or handed a spare, when the drive's Directory record carries
+`credit: { url, token }`: the queue passes that through, and the provisioning
+script takes it with `--settings <file>` (only `MARBLE_CREDIT_*` lines).
+
 ## Day to day
 
 | To | Run |
@@ -201,11 +261,11 @@ In the spec's order: `t-bryan` first, then `bryan`, then the testers.
 | drive `sprite.env` | `MARBLE_DOOR_NAME`, `MARBLE_DOOR_OWNER` | the name a pass must be for, and the account it must name |
 | drive `sprite.env` | `MARBLE_DRIVE_GATE` | `on` (the default) or `tools` |
 | door sprite `sprite.env` | `MARBLE_SERVE_COMMAND=provisioner`, `DOOR_URL`, `DOOR_ADMIN_TOKEN`, `MARBLE_DOOR_KEYS`, `MARBLE_PROVISION_SCRIPT` | above |
+| door sprite `sprite.env` | `MARBLE_SPARE_DRIVES` | `1` keeps one drive made ahead ("The spare drive"); unset, none |
 
 ## Not in phase 1
 
 Two-step sign-in (passkeys, an authenticator app, recovery codes) and the rule
 that the owner must have it; Console's People view; per-drive monthly budgets;
-deleting an account from the account page; a drive kept ready so sign-up takes
-seconds; `marbledrive.app` on the Public Suffix List; sprite URLs made private
-behind the edge; email links. The spec's "Phases" table has them in order.
+deleting an account from the account page; `marbledrive.app` on the Public
+Suffix List; sprite URLs made private behind the edge; email links. The spec's "Phases" table has them in order.
