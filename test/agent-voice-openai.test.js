@@ -64,7 +64,7 @@ test('the key store answers a key by name on the host, and its flags and env are
   assert.equal(keys.value('openai'), KEY);
   assert.equal(keys.value('anthropic'), null);
   assert.equal(keys.value('nonsense'), null);
-  assert.deepEqual(await keys.flags(), { anthropic: false, cursor: false, openai: true });
+  assert.deepEqual(await keys.flags(), { anthropic: false, claude: false, cursor: false, openai: true });
   assert.deepEqual(keys.asEnv(), { CODEX_API_KEY: KEY });
 });
 
