@@ -43,12 +43,13 @@ test('Chat is seeded once, with custom chrome, unique ids and its affordances', 
   assert.equal((await seedChat(store)).seeded, false);
 });
 
-test('the Design System is seeded once, and a drive that already has one keeps it', async () => {
+test('the Design System is seeded once, into the System folder, and a drive that already has one keeps it', async () => {
   const { store } = await fresh();
   const first = await seedDesignSystem(store);
   assert.equal(first.seeded, true);
-  assert.equal(first.path, 'Design System');
-  const source = await store.read('Design System');
+  assert.equal(first.path, 'System/Design System');
+  assert.equal(await store.has('Design System'), false, 'not at the top');
+  const source = await store.read('System/Design System');
   assert.match(source, /<title>Design system<\/title>/);
   assert.doesNotMatch(source, /__(ID|TITLE|ICON|SCRIPT)__/);
   // Its scripts find elements by id, so count the markup's ids, not theirs.
@@ -62,14 +63,17 @@ test('the Design System is seeded once, and a drive that already has one keeps i
   const kept = await seedDesignSystem(theirs);
   assert.equal(kept.seeded, false);
   assert.match(await theirs.read('Design System'), /<title>Mine<\/title>/);
+  // A drive from before the System folder keeps its page at the top, and no second copy.
+  assert.equal(kept.path, 'Design System');
+  assert.equal(await theirs.has('System/Design System'), false);
 });
 
 test("the Design Don'ts are seeded once, beside the Design System, and a drive that already has them keeps them", async () => {
   const { store } = await fresh();
   const first = await seedDesignDonts(store);
   assert.equal(first.seeded, true);
-  assert.equal(first.path, "Design Don'ts");
-  const source = await store.read("Design Don'ts");
+  assert.equal(first.path, "System/Design Don'ts");
+  const source = await store.read("System/Design Don'ts");
   assert.match(source, /<title>Design don'ts<\/title>/);
   assert.doesNotMatch(source, /__(ID|TITLE|ICON|SCRIPT)__/);
   // The one it is there to catch comes first, and the scan an agent runs is in it.
@@ -85,4 +89,6 @@ test("the Design Don'ts are seeded once, beside the Design System, and a drive t
   const kept = await seedDesignDonts(theirs);
   assert.equal(kept.seeded, false);
   assert.match(await theirs.read("Design Don'ts"), /<title>Mine<\/title>/);
+  assert.equal(kept.path, "Design Don'ts");
+  assert.equal(await theirs.has("System/Design Don'ts"), false);
 });

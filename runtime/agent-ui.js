@@ -9470,7 +9470,9 @@
   // offers a key field right away: for Claude, for Codex, or a choice of the
   // two when the drive has both. The host checks the key with Anthropic or
   // OpenAI before keeping it; the page never holds it past the request.
-  // "Not now" lasts the tab, so moving between documents does not ask again.
+  // "Not now" is kept for the drive (POST /agent/setup/later), so a new tab or
+  // another device does not ask again; the tab also remembers it, so moving
+  // between documents does not wait on the host to know.
   const SETUP_DISMISSED = 'marble-agent-setup-dismissed';
   const SETUP_CSS = `
     dialog {
@@ -9625,12 +9627,12 @@
       } catch {
         return;
       }
-      if (!state?.needed || !this.isConnected) return;
+      if (!state?.needed || state.later || !this.isConnected) return;
       this.present(state);
     }
 
     /** Opened on request (the line's Set up, change-line.js), whatever Not
-     *  now said for this tab: someone asked for it. Answers whether the host
+     *  now said for this tab or the drive: someone asked for it. Answers whether the host
      *  had anything to connect. */
     async offer() {
       let state = null;
@@ -9681,9 +9683,12 @@
       try {
         sessionStorage.setItem(SETUP_DISMISSED, '1');
       } catch {
-        // Nothing to remember it in; it is closed for this page either way.
+        // Nothing to remember it in; the drive still keeps it.
       }
       this.dialog.close();
+      // For the drive, so the next tab does not ask. A host that cannot keep
+      // it leaves this tab's answer standing.
+      this.api?.setupLater?.().catch(() => {});
     }
 
     async connect() {

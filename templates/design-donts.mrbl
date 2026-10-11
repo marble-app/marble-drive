@@ -883,11 +883,18 @@ printf '%s\n' "$v" | grep -o '—' | wc -l</pre>
 
   // ---- links to neighbours. The href in the file is the neighbour file, which
   // is right with no host; under one, the carrier says where a name lives.
+  // The neighbour is looked for beside this page first (a new drive keeps
+  // both in its System folder), then at the top, then anywhere.
   for (const a of $$('a[data-doc]')) {
-    a.addEventListener('click', (e) => {
+    a.addEventListener('click', async (e) => {
       if (!window.marble?.href) return;
       e.preventDefault();
-      location.href = window.marble.href(a.getAttribute('data-doc'));
+      const name = a.getAttribute('data-doc');
+      const folder = String(window.marble.app ?? '').split('/').slice(0, -1).join('/');
+      const paths = ((await window.marble.docs?.().catch(() => null)) ?? []).map((d) => d.path ?? d.name);
+      const where = [folder ? `${folder}/${name}` : name, name, ...paths.filter((p) => p.split('/').pop() === name)]
+        .find((p) => paths.includes(p)) ?? name;
+      location.href = window.marble.href(where);
     });
   }
 

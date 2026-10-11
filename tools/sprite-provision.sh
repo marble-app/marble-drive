@@ -13,7 +13,7 @@
 # Makes sprite t-<person>, gives it a passphrase and its own settings, deploys
 # the pushed main to it, opens its URL behind the passphrase, and prints a note
 # to send them. Agents: `api` (default) uses an Anthropic Console key — preload
-# one with --key-file, or the tester adds theirs in Agents settings;
+# one with --key-file, or the drive asks for one the first time it is opened;
 # `subscription` uses the Claude login you give it in its console. Nothing of
 # yours is copied to the sprite except, with --key-file, that one key.
 #
@@ -247,12 +247,13 @@ echo
 echo "  $URL"
 echo "  passphrase: $PASSPHRASE"
 echo
-if [[ "$AGENT" == subscription ]]; then
-  echo "Agents are ready to use."
-elif [[ -n "$KEY_FILE" ]]; then
-  echo "Agents are set up with an API key for you."
+# The drive opens on Start here (templates/start-here.mrbl), which shows the
+# rest; the note only has to get them through the door.
+echo "It opens on a page called Start here, with three things to try."
+if [[ "$AGENT" == subscription || -n "$KEY_FILE" ]]; then
+  echo "Claude is ready: press Cmd J (Ctrl J on Windows) on any page to ask it for a change."
 else
-  echo "To use agents: open Agents, then Settings; Claude is set to \"API key\" — paste your Anthropic API key there."
+  echo "The first time, it asks to connect Claude. Paste an Anthropic API key if you have one, or press Not now and I'll set it up for you."
 fi
 echo "It is yours: nothing you make there is shared with anyone."
 echo "---------------------------------------------------------------------------"
