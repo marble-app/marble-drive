@@ -57,10 +57,14 @@ export const usageHistoryStub = (weeks = 26) => {
   return { source: 'claude-code-local', tz: 'America/Los_Angeles', generatedAt: '2026-09-18T20:00:00.000Z', from: days[0].date, to: days.at(-1).date, days };
 };
 
-export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [], signedOut = [], env = {} } = {}) {
+// `launchOptions` reach Chromium as they are: a voice test launches it with a
+// fake microphone. `keys` are written to the drive's key file before it
+// starts, as Settings would have kept them.
+export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [], signedOut = [], env = {}, launchOptions = {}, keys = null } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-work-'));
   const keysFile = path.join(workdir, 'agent-keys.local');
+  if (keys) await fsp.writeFile(keysFile, JSON.stringify(keys), { mode: 0o600 });
   const config = loadConfig({
     ...process.env,
     MARBLE_DRIVE_ROOT: root,
@@ -127,11 +131,12 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
   for (const [docPath, source] of Object.entries(documents)) await drive.createDocument(docPath, source, { label: 'test' });
   const port = await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', () => resolve(drive.server.address().port)));
   const base = `http://127.0.0.1:${port}`;
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
 
   return {
     drive,
     base,
+    root,
     async reset() {
       for (const [docPath, source] of Object.entries(documents)) await drive.createDocument(docPath, source, { label: 'reset' });
       // The composer remembers the model a person picks, so one test's pick is

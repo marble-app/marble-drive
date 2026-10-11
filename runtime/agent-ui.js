@@ -3662,6 +3662,55 @@
     .stop:hover { background: var(--paper-3); }
     .stop[hidden] { display: none; }
 
+    /* Talk: the microphone left of Send. Drawn like Stop beside it, without
+       the disc: it is a way in, not a state. While it listens it is the cross
+       that throws the clip away. Nothing on it moves at rest. */
+    .talk {
+      flex: none; width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer;
+      display: grid; place-items: center; background: none; color: var(--muted); padding: 0;
+      transition: background-color 180ms var(--settle), color 180ms var(--settle);
+    }
+    .talk:hover { background: var(--paper-3); color: var(--ink); }
+    .talk:active { background: color-mix(in srgb, var(--ink) 12%, var(--paper-3)); }
+    .talk[hidden] { display: none; }
+    .talk > span { display: grid; place-items: center; }
+    .talk .talk-cancel { display: none; }
+    .composer:is([data-voice="listening"], [data-voice="writing"]) .talk .talk-mic { display: none; }
+    .composer:is([data-voice="listening"], [data-voice="writing"]) .talk .talk-cancel { display: grid; }
+    /* Listening, and writing it down, stand where the words will land, at
+       the box's own height. The trace is the one moving thing, and only while
+       there is sound to draw. */
+    .voice-line {
+      grid-area: editor; min-width: 0; box-sizing: border-box; min-height: 28px; padding: 3px 0;
+      display: flex; align-items: center; gap: 8px; color: var(--muted); font-weight: 500; cursor: text;
+    }
+    .voice-line[hidden] { display: none; }
+    .composer:is([data-voice="listening"], [data-voice="writing"], [data-voice="error"]) .editor { visibility: hidden; }
+    .voice-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .voice-trace { flex: none; width: 56px; height: 16px; color: var(--ink); overflow: visible; }
+    .voice-line:not([data-state="listening"]) .voice-trace { display: none; }
+    .voice-line[data-state="error"] { color: var(--danger); font-weight: 400; cursor: default; }
+    .voice-line[data-state="error"] .voice-word { white-space: normal; }
+    .voice-retry, .voice-stop, .read-aloud {
+      flex: none; font: inherit; color: var(--accent-ink); background: none; border: 0;
+      padding: 2px 6px; border-radius: 6px; cursor: pointer;
+    }
+    .voice-retry:hover, .voice-stop:hover, .read-aloud:hover { background: var(--accent-soft); }
+    .voice-retry[hidden] { display: none; }
+    /* Speaking is said in the bar of words under the box, so the box stays
+       free to type the next thing. */
+    .voice-speaking { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+    .voice-speaking[hidden] { display: none; }
+    .voice-speaking .voice-trace { width: 36px; height: 12px; }
+    /* A prompt that was said, not typed. */
+    .msg-said { margin-top: 4px; font-size: 12px; font-weight: 400; color: var(--muted); white-space: normal; }
+    /* Read aloud, under a reply: shown on the latest, and on any other when
+       the pointer or focus is in it. A finger has no hover, so it always is. */
+    .msg-acts { margin: 4px 0 0 -6px; font-size: 12px; visibility: hidden; user-select: none; }
+    .msg.agent:hover > .msg-acts, .msg.agent:focus-within > .msg-acts, .msg.agent[data-latest] > .msg-acts { visibility: visible; }
+    @media (hover: none) { .msg-acts { visibility: visible; } }
+    .log[data-voice-off] .msg-acts { display: none; }
+
     /* The card a pasted thing opens into (the peek), and the fallback strip
        for an old message whose text has no token for its block. */
     .attach {
@@ -3818,6 +3867,23 @@
     :host([data-chrome="phone"]) .stop::before { background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); }
     :host([data-chrome="phone"]) .stop:active::before { background: var(--paper-3); }
     :host([data-chrome="phone"]) .commit { gap: 2px; }
+
+    :host([data-chrome="phone"]) .talk { position: relative; width: 44px; height: 44px; }
+    :host([data-chrome="phone"]) .talk, :host([data-chrome="phone"]) .talk:hover, :host([data-chrome="phone"]) .talk:active { background: none; }
+    :host([data-chrome="phone"]) .talk::before {
+      content: ''; position: absolute; left: 6px; top: 6px; width: 32px; height: 32px;
+      border-radius: 50%; transition: background-color 180ms var(--settle);
+    }
+    :host([data-chrome="phone"]) .talk > * { position: relative; z-index: 1; }
+    :host([data-chrome="phone"]) .talk:active::before { background: var(--paper-3); }
+    /* As in Messages: the microphone stands where Send will, until there are
+       words to send. Listening, Send is back, to send what was said. */
+    :host([data-chrome="phone"]) .composer[data-talk]:not([data-words]):not([data-voice="listening"]) .send { display: none; }
+    :host([data-chrome="phone"]) .composer[data-words]:not([data-voice]) .talk { display: none; }
+    :host([data-chrome="phone"]) .voice-line { min-height: 44px; font-size: 17px; padding: 10px 0; }
+    /* A finger's worth of target for the words that act. */
+    :host([data-chrome="phone"]) .voice-speaking { font-size: 14px; }
+    :host([data-chrome="phone"]) :is(.voice-stop, .voice-retry, .read-aloud) { min-height: 44px; padding: 0 10px; font-size: 14px; }
     :host([data-chrome="phone"]) .editor { min-height: 44px; font-size: 17px; padding: 10px 0; }
     :host([data-chrome="phone"]) .attach { min-height: 44px; }
     /* The sheet the chip opens. It is inside the shadow root because the
@@ -4011,6 +4077,36 @@
     return mark;
   };
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
+  /** Talk: a microphone in the stroke of Send beside it. Cancel, while
+   *  listening, is the cross every sheet closes with. */
+  const MIC_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.6" y="1.6" width="4.8" height="8" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.2 7.6a4.8 4.8 0 0 0 9.6 0M8 12.4v2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  const CANCEL_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  /** The trace: what the microphone or the reply sounds like, as one line. */
+  const TRACE_POINTS = 15;
+  const TRACE_SVG = `<svg class="voice-trace" viewBox="0 0 ${TRACE_POINTS - 1} 16" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" points=""/></svg>`;
+
+  // Whether this drive can hear and speak (runtime/voice.js, /agent/voice):
+  // asked once a page, and again when Settings › Voice changes it.
+  let voiceInfo = null;
+  const readVoice = (fresh = false) => {
+    const api = window.marble?.agent;
+    if (!api?.voice) return Promise.resolve({ available: false, on: false });
+    if (!voiceInfo || fresh) voiceInfo = api.voice().catch(() => ({ available: false, on: false }));
+    return voiceInfo;
+  };
+  addEventListener('marble:voice', () => { readVoice(true); });
+  /** A reply as words for the device's own voice, on a drive with no OpenAI
+   *  key: the host's speakable() is the full version of this. */
+  const plainSpoken = (text) => String(text ?? '')
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/^\s*\|.*\|\s*$/gm, '')
+    .replace(/^\s*(#{1,6}|[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/[*_`~>#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   /** What happens when Claude's usage runs out, in two glyphs. The handoff is a
    *  baton: an arc leaving the runner it is with and coming down on the next
    *  one, which is what switching CLI mid-turn actually is. The pause is the
@@ -4296,8 +4392,10 @@
             <div class="field">
               <div class="chips" hidden></div>
               <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" enterkeyhint="send" autocapitalize="sentences" data-empty></div>
+              <div class="voice-line" hidden aria-live="polite"><span class="voice-word"></span>${TRACE_SVG}<button type="button" class="voice-retry" hidden>Try again</button></div>
               <div class="commit">
                 <button type="button" class="stop" hidden aria-label="Stop">${STOP_ICON}</button>
+                <button type="button" class="talk" hidden aria-label="Talk"><span class="talk-mic">${MIC_ICON}</span><span class="talk-cancel">${CANCEL_ICON}</span></button>
                 <button type="submit" class="send" aria-label="Send" disabled>${SEND_ICON}</button>
               </div>
             </div>
@@ -4319,6 +4417,7 @@
                 </div>
               </div>
               <div class="selection" hidden></div>
+              <div class="voice-speaking" hidden aria-live="polite"><span class="voice-word">Speaking</span>${TRACE_SVG}<button type="button" class="voice-stop" aria-label="Stop speaking">Stop</button></div>
               <span class="bar-space"></span>
               <div class="dispatch" hidden role="radiogroup" aria-label="How to send while a turn runs"></div>
               <button type="button" class="mode" hidden aria-label="CLI mode — click or Shift+Tab to change"></button>
@@ -4420,6 +4519,44 @@
       });
       this.sendButton = root.querySelector('.send');
       this.stopButton = root.querySelector('.stop');
+      this.talkButton = root.querySelector('.talk');
+      this.voiceLine = root.querySelector('.voice-line');
+      this.voiceWord = this.voiceLine.querySelector('.voice-word');
+      this.voiceRetry = this.voiceLine.querySelector('.voice-retry');
+      this.voiceSpeaking = root.querySelector('.voice-speaking');
+      this.voiceStop = root.querySelector('.voice-stop');
+      // Turns this composer sent, and the ones among them that were said
+      // aloud: only those are spoken back, and only in this tab.
+      this.sentTurns = new Set();
+      this.spokenTurns = new Set();
+      this.voiceSession = null;
+      armHint(this.talkButton, () => (this.form.dataset.voice === 'listening' || this.form.dataset.voice === 'writing' ? 'Cancel\nEsc' : 'Talk'));
+      this.talkButton.addEventListener('click', () => {
+        const state = this.form.dataset.voice;
+        if (state === 'listening' || state === 'writing') this.cancelVoice();
+        else this.talk();
+      });
+      this.voiceStop.addEventListener('click', () => this.stopSpeaking());
+      this.voiceRetry.addEventListener('click', () => this.retryVoice());
+      // A press in the box while the words are being written down keeps
+      // them there to read before they go.
+      this.voiceLine.addEventListener('pointerdown', () => {
+        if (this.form.dataset.voice === 'writing') {
+          this.voiceHold = true;
+          this.voiceWord.textContent = 'Writing it down. It will wait here';
+        } else if (this.form.dataset.voice === 'error') {
+          this.setVoice('');
+          requestAnimationFrame(() => this.focusInput());
+        }
+      });
+      this.onVoiceKey = (event) => {
+        if (event.key !== 'Escape' || !this.form.dataset.voice) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.form.dataset.voice === 'speaking') this.stopSpeaking();
+        else this.cancelVoice();
+      };
+      this.onVoiceInfo = () => this.paintVoice();
 
       this.seen = 0;
       this.seenQueue = 0;
@@ -4502,6 +4639,12 @@
       syncSegCurrent(this.dispatchEl);
       this.form.addEventListener('submit', (event) => {
         event.preventDefault();
+        // Send while listening sends what was said so far.
+        if (this.form.dataset.voice === 'listening') {
+          this.voiceSendNow = true;
+          this.voiceSession?.send();
+          return;
+        }
         this.submit();
       });
       this.input.addEventListener('keydown', (event) => {
@@ -4662,6 +4805,8 @@
       this.unwatchTheme = watchPageTheme(this);
       addEventListener('marble:agent-context', this.onContext);
       addEventListener('marble:chat-detail', this.onDetail);
+      addEventListener('marble:voice', this.onVoiceInfo);
+      this.paintVoice();
       this.onLeave ??= () => this.saveTail();
       addEventListener('pagehide', this.onLeave);
       this.paintDetail();
@@ -4703,6 +4848,13 @@
       this.unwatchTheme = null;
       removeEventListener('marble:agent-context', this.onContext);
       removeEventListener('marble:chat-detail', this.onDetail);
+      removeEventListener('marble:voice', this.onVoiceInfo);
+      // A composer taken off the page stops listening and speaking with it.
+      if (this.form.dataset.voice) {
+        this.voiceSession?.cancel();
+        if (this.form.dataset.voice === 'speaking') this.stopSpeaking();
+        this.setVoice('');
+      }
       removeEventListener('pagehide', this.onLeave);
       this.saveTail();
       this.off?.();
@@ -4727,6 +4879,219 @@
 
     focusInput() {
       this.input.focus({ preventScroll: true });
+    }
+
+    // ---------------------------------------------------------- voice
+    //
+    // Talk, left of Send, listens (runtime/voice.js); the host writes the clip
+    // down and the words go in as a prompt said aloud; when that turn ends its
+    // reply is spoken. Every state is the form's `data-voice` in this shadow
+    // root, so nothing of it is ever filed. docs/AGENTS.md, "Voice".
+
+    async paintVoice() {
+      const info = await readVoice();
+      this.voice = info;
+      const can = Boolean(info.available && info.on && globalThis.marbleVoice);
+      this.talkButton.hidden = !can;
+      this.form.toggleAttribute('data-talk', can);
+      // Read aloud stays where speech is on: in the drive's voice with a key,
+      // in the device's without one.
+      this.logEl.toggleAttribute('data-voice-off', info.on === false);
+      const state = this.form.dataset.voice;
+      if (!can && (state === 'listening' || state === 'writing')) this.cancelVoice();
+      this.updateSendable();
+    }
+
+    setVoice(state, word = '') {
+      if (state) this.form.dataset.voice = state;
+      else delete this.form.dataset.voice;
+      const inBox = state === 'listening' || state === 'writing' || state === 'error';
+      this.voiceLine.hidden = !inBox;
+      this.voiceLine.dataset.state = state;
+      this.voiceWord.textContent = word;
+      this.voiceRetry.hidden = true;
+      this.voiceSpeaking.hidden = state !== 'speaking';
+      const cancel = state === 'listening' || state === 'writing';
+      this.talkButton.setAttribute('aria-label', cancel ? 'Cancel' : 'Talk');
+      this.resetTrace(this.voiceLine);
+      this.resetTrace(this.voiceSpeaking);
+      clearTimeout(this.voiceErrorTimer);
+      // Esc belongs to the voice while it listens or speaks, before anything
+      // else on the page that would close on it.
+      const keys = Boolean(state) && state !== 'error';
+      if (keys && !this.voiceKeys) addEventListener('keydown', this.onVoiceKey, true);
+      if (!keys && this.voiceKeys) removeEventListener('keydown', this.onVoiceKey, true);
+      this.voiceKeys = keys;
+      this.updateSendable();
+    }
+
+    /** The trace: the last few levels as one line, flat when nothing is
+     *  heard, and still under reduced motion. Redrawn only when it changed. */
+    drawTrace(host, level) {
+      const levels = host.traceLevels ?? (host.traceLevels = []);
+      levels.push(Math.max(0, Math.min(1, level || 0)));
+      if (levels.length > TRACE_POINTS) levels.shift();
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const offset = TRACE_POINTS - levels.length;
+      const points = levels.map((v, i) => `${i + offset},${(8 + (i % 2 ? 1 : -1) * Math.round(Math.sqrt(v) * 12) / 2).toFixed(1)}`).join(' ');
+      if (points === host.tracePoints) return;
+      host.tracePoints = points;
+      host.querySelector('.voice-trace polyline')?.setAttribute('points', points);
+    }
+
+    resetTrace(host) {
+      host.traceLevels = [];
+      host.tracePoints = `0,8 ${TRACE_POINTS - 1},8`;
+      host.querySelector('.voice-trace polyline')?.setAttribute('points', host.tracePoints);
+    }
+
+    /** Talk: listen until quiet follows speech, or Send; then write it down. */
+    async talk() {
+      const V = globalThis.marbleVoice;
+      if (!V) return;
+      if (this.form.dataset.voice === 'speaking') this.stopSpeaking();
+      V.unlock();
+      this.voiceHold = false;
+      this.voiceSendNow = false;
+      const session = V.listen({
+        maxSeconds: this.voice?.maxSeconds ?? 120,
+        onLevel: (level) => { if (this.voiceSession === session) this.drawTrace(this.voiceLine, level); },
+      });
+      this.voiceSession = session;
+      this.setVoice('listening', 'Listening');
+      let clip;
+      try {
+        clip = await session.done;
+      } catch (err) {
+        if (this.voiceSession === session) this.voiceError(err.message);
+        return;
+      }
+      if (this.voiceSession !== session) return;
+      if (!clip) {
+        this.voiceSession = null;
+        this.setVoice('');
+        return;
+      }
+      await this.writeDown(session, clip);
+    }
+
+    async writeDown(session, clip, { again = false } = {}) {
+      const V = globalThis.marbleVoice;
+      this.setVoice('writing', 'Writing it down');
+      let text;
+      try {
+        const here = this.api?.context?.() ?? {};
+        text = again ? await V.retry() : await V.transcribe(clip, { doc: here.viewing ?? here.target ?? '' });
+      } catch (err) {
+        if (this.voiceSession === session) this.voiceError(err.message, { retry: Boolean(err.retry) });
+        return;
+      }
+      if (this.voiceSession !== session) return;
+      this.voiceSession = null;
+      this.setVoice('');
+      this.landWords(text);
+    }
+
+    /** The words land in the box after whatever was typed, and go, unless
+     *  the box was held or this drive waits for a look. While a turn runs
+     *  they steer it: talking to someone working is correcting them. */
+    landWords(text) {
+      const words = String(text ?? '').trim();
+      if (!words) return;
+      const before = this.input.value.trim();
+      this.input.value = before ? `${before} ${words}` : words;
+      this.onEdited();
+      this.autosize();
+      const send = !this.voiceHold && (this.voiceSendNow || this.voice?.sendWhenStop !== false);
+      if (!send) {
+        this.focusInput();
+        return;
+      }
+      const dispatch = this.running ? (this.voice?.whileRunning === 'queue' ? 'queue' : 'steer') : null;
+      this.submit({ dispatch, spoken: true });
+    }
+
+    cancelVoice() {
+      const session = this.voiceSession;
+      this.voiceSession = null;
+      session?.cancel?.();
+      this.setVoice('');
+    }
+
+    retryVoice() {
+      const session = { cancel() {} };
+      this.voiceSession = session;
+      this.writeDown(session, null, { again: true });
+    }
+
+    voiceError(message, { retry = false } = {}) {
+      this.voiceSession = null;
+      this.setVoice('error', message);
+      this.voiceRetry.hidden = !retry;
+      this.voiceErrorTimer = setTimeout(() => {
+        if (this.form.dataset.voice === 'error') this.setVoice('');
+      }, retry ? 12_000 : 8_000);
+    }
+
+    /** A turn's reply, spoken: by the host in the drive's voice, or by the
+     *  device where there is no OpenAI key. One reply at a time per tab. */
+    async speakTurn(turn) {
+      const V = globalThis.marbleVoice;
+      if (!V || !turn) return;
+      const info = this.voice ?? await readVoice();
+      const state = this.form.dataset.voice;
+      if (state === 'listening' || state === 'writing') return;
+      let handle = null;
+      const ended = () => {
+        if (this.playing !== handle) return;
+        this.playing = null;
+        if (this.form.dataset.voice === 'speaking') this.setVoice('');
+      };
+      if (info.available) {
+        handle = V.play(`/agent/turns/${encodeURIComponent(turn)}/speech`, {
+          onLevel: (level) => { if (this.playing === handle) this.drawTrace(this.voiceSpeaking, level); },
+          onEnd: ended,
+        });
+      } else {
+        const text = plainSpoken(this.turns.get(turn)?.lastText?.text) || 'Done.';
+        handle = V.say(text, { onEnd: ended });
+      }
+      this.playing = handle;
+      this.setVoice('speaking');
+    }
+
+    stopSpeaking() {
+      const handle = this.playing;
+      this.playing = null;
+      handle?.stop();
+      if (this.form.dataset.voice === 'speaking') this.setVoice('');
+    }
+
+    /** A turn this tab said aloud is spoken back when it ends; with "Always",
+     *  every turn sent from here. Never a turn read back from history. */
+    speakEnded(turn) {
+      const info = this.voice;
+      if (!info?.on || !info.available) return;
+      const spoken = this.spokenTurns.has(turn) && info.readAloud !== 'never';
+      const always = info.readAloud === 'always' && this.sentTurns.has(turn);
+      if (spoken || always) this.speakTurn(turn);
+    }
+
+    /** Read aloud, under a finished reply: any reply, typed or said. */
+    offerReadAloud(turn) {
+      const node = this.turns.get(turn)?.lastText?.node;
+      if (!node?.isConnected || node.querySelector(':scope > .msg-acts')) return;
+      for (const old of this.logEl.querySelectorAll('.msg.agent[data-latest]')) old.removeAttribute('data-latest');
+      node.setAttribute('data-latest', '');
+      const acts = h('div', 'msg-acts');
+      const read = h('button', 'read-aloud', 'Read aloud');
+      read.type = 'button';
+      read.addEventListener('click', () => {
+        globalThis.marbleVoice?.unlock?.();
+        this.speakTurn(turn);
+      });
+      acts.append(read);
+      node.append(acts);
     }
 
     /** A first sentence written by something other than the hand: the marks
@@ -5929,6 +6294,9 @@
         || this.attachments.length > 0
         || this.composerChips.some((chip) => chip.kind === 'skill' || chip.kind === 'compact');
       this.sendButton.disabled = this.sending || noAgent || !canSend;
+      // On a phone the microphone takes Send's place while the box is empty.
+      this.form.toggleAttribute('data-words', canSend);
+      if (this.form.dataset.voice === 'listening') this.sendButton.disabled = false;
     }
 
     /** Whether the person has started a message here: the same test the send
@@ -6027,7 +6395,7 @@
       this.fitSetup();
     }
 
-    async submit({ dispatch = null } = {}) {
+    async submit({ dispatch = null, spoken = false } = {}) {
       if (this.sending) return;
       // A drafted question was for this one message.
       if (this.draftPlaceholder != null) {
@@ -6114,7 +6482,11 @@
           this.paintFailover();
           this.dispatchEvent(new CustomEvent('conversation', { detail: { id }, bubbles: true, composed: true }));
         }
-        await this.api.send(id, { prompt, dispatch: mode, ...context });
+        const sent = await this.api.send(id, { prompt, dispatch: mode, ...context, ...(spoken ? { spoken: true } : {}) });
+        if (sent?.turnId) {
+          this.sentTurns.add(sent.turnId);
+          if (spoken) this.spokenTurns.add(sent.turnId);
+        }
         // Whoever lent this composer out learns the words left it: Describe
         // mode steps back as soon as its brief is on its way.
         this.dispatchEvent(new CustomEvent('sent', { detail: { id, prompt }, bubbles: true, composed: true }));
@@ -6832,7 +7204,12 @@
           // the envelope the agent reads them in.
           const relayed = parseRelayed(event.text);
           if (relayed) for (const block of relayed) this.append(turn, this.relayedMessage(block));
-          else this.append(turn, this.userMessage(event.text, event.from ?? null));
+          else {
+            const node = this.userMessage(event.text, event.from ?? null);
+            // Said, not typed: the words are the prompt, and the audio is gone.
+            if (event.spoken) node.append(h('div', 'msg-said', 'Said aloud'));
+            this.append(turn, node);
+          }
           break;
         }
         case 'turn.queued':
@@ -6889,6 +7266,8 @@
           // An ask needs an answer, so a folded callout unfolds itself.
           this.removeAttribute('data-folded');
           this.ask(turn, event);
+          // Said aloud, it says it needs an OK; the OK itself is a press.
+          if (!this.backfilling && !this.replaying && this.spokenTurns.has(turn)) this.speakTurn(turn);
           break;
         case 'ask.answered':
         case 'ask.void':
@@ -7757,6 +8136,8 @@
       }
       if (this.running?.turn === turn) this.setRunning(null);
       this.offerChoices(turn);
+      if (status === 'completed') this.offerReadAloud(turn);
+      if (!this.backfilling && !this.replaying) this.speakEnded(turn);
     }
 
     undone(turn, event) {
@@ -8492,6 +8873,12 @@
     .status { font-size: 12px; color: var(--faint); min-height: 1.2em; }
     .status.error { color: var(--danger); }
     .pane-usage { display: flex; flex-direction: column; gap: 16px; }
+    .pane-voice { display: flex; flex-direction: column; gap: 14px; }
+    .pane-voice[hidden] { display: none; }
+    .pane-voice .empty { margin: 0; color: var(--faint); font-size: 13px; }
+    .pane-voice select { flex: 1; }
+    .voice-usage h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+    .voice-usage p { margin: 0; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
     .pane-usage[hidden], .body[hidden], .pane-chat[hidden] { display: none; }
     /* Chat: how agents show up on the page, and the keys. */
     .pane-chat { display: flex; flex-direction: column; gap: 14px; }
@@ -8560,7 +8947,7 @@
       return value === null ? pref.byDefault : value === '1';
     } catch { return pref.byDefault; }
   };
-  const TABS = new Set(['settings', 'chat', 'usage']);
+  const TABS = new Set(['settings', 'chat', 'voice', 'usage']);
   const CHAT_KEYS = [
     ['⌘J', 'Ask about the selection, or what the pointer is on'],
     ['⌘⇧J', 'Show or hide the chat'],
@@ -8579,10 +8966,12 @@
           <div class="tabs" role="tablist" aria-label="Settings sections">
             <button type="button" role="tab" data-tab="settings" aria-selected="true">Settings</button>
             <button type="button" role="tab" data-tab="chat" aria-selected="false">Chat</button>
+            <button type="button" role="tab" data-tab="voice" aria-selected="false">Voice</button>
             <button type="button" role="tab" data-tab="usage" aria-selected="false">Usage</button>
           </div>
           <div class="body" data-pane="settings"></div>
           <div class="pane-chat" data-pane="chat" hidden></div>
+          <div class="pane-voice" data-pane="voice" hidden></div>
           <div class="pane-usage" data-pane="usage" hidden></div>
           <p class="status"></p>
           <div class="actions">
@@ -8592,6 +8981,7 @@
         </div>`;
       this.body = root.querySelector('.body');
       this.chatPane = root.querySelector('.pane-chat');
+      this.voicePane = root.querySelector('.pane-voice');
       this.usagePane = root.querySelector('.pane-usage');
       this.status = root.querySelector('.status');
       this.saveButton = root.querySelector('.save');
@@ -8650,6 +9040,7 @@
       }
       this.body.hidden = this.tab !== 'settings';
       this.chatPane.hidden = this.tab !== 'chat';
+      this.voicePane.hidden = this.tab !== 'voice';
       this.usagePane.hidden = this.tab !== 'usage';
       this.shadowRoot.querySelector('.sheet').dataset.tab = this.tab;
       this.saveButton.hidden = this.tab === 'usage';
@@ -8688,11 +9079,15 @@
       let providers = [];
       let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, cursor: false, openai: false } };
       let usage = { meters: [] };
+      let voice = null;
+      this.voicePane.replaceChildren(h('p', 'empty', 'Loading…'));
+      this.voiceLoaded = false;
       try {
-        [providers, settings, usage] = await Promise.all([
+        [providers, settings, usage, voice] = await Promise.all([
           this.api.providers(),
           this.api.settings(),
           this.api.usage().catch(() => ({ meters: [] })),
+          this.api.voice ? this.api.voice().catch(() => null) : null,
         ]);
       } catch (err) {
         this.body.replaceChildren();
@@ -8801,7 +9196,9 @@
       projects.append(add);
       this.body.replaceChildren(agents, keys, projects);
       this.loaded = true;
+      this.fillVoice(voice, settings);
       fillUsageDetail(this.usagePane, usage.meters ?? []);
+      this.fillVoiceUsage(voice);
       this.loadHistory();
     }
 
@@ -8825,6 +9222,115 @@
         if (token === this.historyToken) charts.render(host, history);
       } catch {
         if (token === this.historyToken) charts.renderMessage(host, "Couldn't read usage history.");
+      }
+    }
+
+
+    /** Settings › Voice: whether chats listen, when replies are read aloud,
+     *  in which voice, and the OpenAI key they need (the one Codex uses). */
+    fillVoice(info, settings) {
+      if (!info) {
+        this.voicePane.replaceChildren(h('p', 'empty', "Couldn't read the voice settings."));
+        return;
+      }
+      const chosen = settings.voice ?? info;
+      const speech = document.createElement('fieldset');
+      speech.append(h('legend', '', 'Speech'));
+      const check = (name, label, detail, on) => {
+        const row = h('label', 'pref');
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.name = name;
+        box.checked = on;
+        row.append(box, h('span', '', label), h('span', 'detail', detail));
+        return row;
+      };
+      speech.append(
+        check('voice-on', 'Talk to chats', 'A microphone left of Send. What you say goes in as the prompt.', chosen.on !== false),
+        check('voice-send', 'Send when I stop', 'Off, the words wait in the box for a look before they go.', chosen.sendWhenStop !== false),
+      );
+      const choice = (legend, name, options, value) => {
+        const set = document.createElement('fieldset');
+        set.append(h('legend', '', legend));
+        for (const [id, label, detail] of options) {
+          const row = h('label', 'pref');
+          const radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.name = name;
+          radio.value = id;
+          radio.checked = id === value;
+          row.append(radio, h('span', '', label));
+          if (detail) row.append(h('span', 'detail', detail));
+          set.append(row);
+        }
+        return set;
+      };
+      const reading = choice('Read replies aloud', 'voice-read', [
+        ['spoken', 'When I spoke', 'A reply to something you said is said back.'],
+        ['always', 'Always', 'Every reply to a message sent from this page.'],
+        ['never', 'Never', 'Read aloud under a reply still reads it.'],
+      ], chosen.readAloud ?? 'spoken');
+      const running = choice('Said while a chat is working', 'voice-running', [
+        ['steer', 'Steer it', 'The words reach the agent while it works.'],
+        ['queue', 'Queue it', 'The words wait until it is done.'],
+      ], chosen.whileRunning ?? 'steer');
+      const sound = document.createElement('fieldset');
+      sound.append(h('legend', '', 'Voice'));
+      const row = h('div', 'key');
+      const select = document.createElement('select');
+      select.name = 'voice-voice';
+      select.setAttribute('aria-label', 'Voice');
+      for (const id of info.voices ?? ['marin', 'cedar']) {
+        const option = h('option', '', id[0].toUpperCase() + id.slice(1));
+        option.value = id;
+        select.append(option);
+      }
+      select.value = chosen.voice ?? 'marin';
+      const sample = h('button', 'link', 'Play sample');
+      sample.type = 'button';
+      sample.disabled = !info.available;
+      sample.addEventListener('click', () => this.playSample(select.value, sample));
+      row.append(select, sample);
+      sound.append(row, h('p', 'hint', 'Replies are read by an OpenAI voice. What you say is sent to OpenAI to be written down, and is not kept.'));
+      const key = document.createElement('fieldset');
+      key.append(h('legend', '', 'OpenAI key'));
+      if (!info.available) key.append(h('p', 'hint', 'Voice needs an OpenAI key on this drive.'));
+      key.append(this.keyRow('openai', 'OpenAI API key, shared with Codex', settings.keys?.openai, { field: 'key-openai-voice' }));
+      this.voicePane.replaceChildren(speech, reading, running, sound, key);
+      this.voiceLoaded = true;
+    }
+
+    /** Minutes heard and spoken this month, from the host's counts. */
+    fillVoiceUsage(info) {
+      const usage = info?.usage;
+      if (!usage || (!usage.heardSeconds && !usage.spokenChars)) return;
+      const minutes = (n) => (n < 1 ? 'under a minute' : `${Math.round(n)} min`);
+      // About 15 characters a second, at the pace the voice is asked for.
+      const line = `${minutes(usage.heardSeconds / 60)} heard · ${minutes(usage.spokenChars / 900)} spoken`;
+      const section = h('section', 'voice-usage');
+      section.append(h('h3', '', 'Voice this month'), h('p', '', line[0].toUpperCase() + line.slice(1)));
+      this.usagePane.prepend(section);
+    }
+
+    async playSample(voice, button) {
+      const V = globalThis.marbleVoice;
+      if (!V) return;
+      V.unlock();
+      button.disabled = true;
+      try {
+        const response = await fetch('/agent/voice/sample', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice }),
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "OpenAI didn't answer. Try again.");
+        const url = URL.createObjectURL(await response.blob());
+        V.play(url, { onEnd: () => { URL.revokeObjectURL(url); button.disabled = false; } });
+      } catch (err) {
+        button.disabled = false;
+        this.status.textContent = err.message;
+        this.status.classList.add('error');
       }
     }
 
@@ -8856,14 +9362,14 @@
       return [group, key];
     }
 
-    keyRow(name, label, set) {
+    keyRow(name, label, set, { field = `key-${name}` } = {}) {
       const wrap = document.createElement('label');
       wrap.append(document.createTextNode(label));
       const row = document.createElement('div');
       row.className = 'key';
       const input = document.createElement('input');
       input.type = 'password';
-      input.name = `key-${name}`;
+      input.name = field;
       input.autocomplete = 'off';
       input.autocapitalize = 'off';
       input.setAttribute('autocorrect', 'off');
@@ -8928,9 +9434,24 @@
       if (cursor) keys.cursor = cursor;
       if (openai) keys.openai = openai;
       if (Object.keys(keys).length) patch.keys = keys;
+      const $ = (selector) => this.shadowRoot.querySelector(selector);
+      if (this.voiceLoaded) {
+        patch.voice = {
+          on: Boolean($('input[name="voice-on"]')?.checked),
+          sendWhenStop: Boolean($('input[name="voice-send"]')?.checked),
+          readAloud: $('input[name="voice-read"]:checked')?.value ?? 'spoken',
+          whileRunning: $('input[name="voice-running"]:checked')?.value ?? 'steer',
+          voice: $('select[name="voice-voice"]')?.value ?? 'marin',
+        };
+      }
+      // A key given for voice is checked with OpenAI before it is kept, as
+      // Codex's is; it is the same key.
+      const voiceKey = $('input[name="key-openai-voice"]')?.value.trim();
       try {
+        if (voiceKey && !keys.openai) await this.api.voiceKey(voiceKey);
         await this.api.saveSettings(patch);
         dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+        dispatchEvent(new CustomEvent('marble:voice'));
         this.close();
       } catch (err) {
         this.status.textContent = err.message;

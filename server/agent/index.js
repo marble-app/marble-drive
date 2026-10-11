@@ -12,6 +12,8 @@ import { enginePath, examine } from '../engine.js';
 import { build as buildStarter, composeScript } from '../gallery.js';
 import { createHub } from './hub.js';
 import { createKeyStore } from './keys.js';
+import { createVoice } from './voice/openai.js';
+import { createVoiceUsage, voiceSettings } from './voice/settings.js';
 import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { nameConversation } from './namer.js';
@@ -253,6 +255,29 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
 
   await runner.boot();
 
+  // The ears and the voice (docs/AGENTS.md, "Voice"): OpenAI's, on the key
+  // the drive keeps for Codex. A drive with no OpenAI key has no voice; one
+  // whose agents run on the owner's login does not borrow the owner's.
+  const voice = createVoice({
+    keys,
+    baseURL: config.openaiBase,
+    settings: async () => voiceSettings((await agentStore.settings()).voice),
+  });
+  // Names the drive spells its own way, so they come back spelled that way:
+  // the open document's title and what is at the top of the drive.
+  const voiceTitles = async (doc) => {
+    const titles = [];
+    if (doc) {
+      const found = await store.stat(doc).catch(() => null);
+      if (found?.title) titles.push(found.title);
+    }
+    for (const entry of await store.list({ folder: '', recursive: false }).catch(() => [])) {
+      const name = String(entry.title || entry.name || '').trim();
+      if (name && !titles.includes(name)) titles.push(name);
+    }
+    return titles.slice(0, 40);
+  };
+
   const routes = createAgentRoutes({
     store: agentStore,
     runner,
@@ -286,6 +311,10 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     intent: config.agentNaming ? (input) => readIntent({ ...input, model: config.agentNamingModel }) : null,
     readSource: (docPath) => store.read(docPath),
     onLook: look,
+    voice,
+    voiceUsage: createVoiceUsage({ dir }),
+    voiceTitles,
+    voiceMaxSeconds: config.voiceMaxSeconds ?? 120,
     log,
   });
 

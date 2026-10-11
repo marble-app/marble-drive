@@ -70,5 +70,9 @@ export function createKeyStore({ file }) {
     return env;
   };
 
-  return { write, flags, asEnv, file };
+  /** One key's value, for the host's own calls (server/agent/voice): never
+   *  sent to a page, never logged, never put in argv. */
+  const value = (name) => (Object.hasOwn(FIELDS, name) ? current()[name] ?? null : null);
+
+  return { write, flags, asEnv, value, file };
 }
