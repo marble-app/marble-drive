@@ -28,6 +28,7 @@ export const APPS = [
   { id: 'whiteboard', source: 'starters/whiteboard.mrbl', icon: 'doc', starter: 'whiteboard', seeded: () => 'Board', derived: true },
   { id: 'design-system', source: 'templates/design-system.mrbl', icon: 'doc', seeded: () => 'Design System' },
   { id: 'design-donts', source: 'templates/design-donts.mrbl', icon: 'doc', seeded: () => "Design Don'ts" },
+  { id: 'projects', source: 'templates/projects.mrbl', icon: 'doc', seeded: () => 'Projects' },
   { id: 'note', source: 'starters/note.mrbl', icon: 'doc', starter: 'note', derived: true },
 ];
 

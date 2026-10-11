@@ -1675,7 +1675,7 @@ __ICON__
       // they always were), in a Built-in section of the shell's tree, or
       // hidden. Search still finds them, and they are still files either way.
       const OWN = decodeURIComponent(location.pathname.replace(/^\/a\//, '')) || 'drive';
-      const SYSTEM = new Set([OWN, 'drive', 'Agents', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"]);
+      const SYSTEM = new Set([OWN, 'drive', 'Agents', 'Projects', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"]);
       const isSystem = (entry) => entry?.kind === 'doc' && (entry.system ?? SYSTEM.has(entry.path));
       const setAside = (entry) => {
         const v = document.body.getAttribute('data-builtin');

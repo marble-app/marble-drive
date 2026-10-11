@@ -22,7 +22,7 @@ const DOCS_MAX = 40;
 const CSS_MAX = 60_000;
 const SCRIPT_MAX = 80_000;
 // The drive's own pages are the frame apps sit in, not apps to take from.
-const SYSTEM = new Set(['Drive', 'drive', 'Agents', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts", 'System/Design System', "System/Design Don'ts", 'start-here']);
+const SYSTEM = new Set(['Drive', 'drive', 'Agents', 'Projects', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts", 'System/Design System', "System/Design Don'ts", 'start-here']);
 const REGION_TAGS = new Set(['section', 'aside', 'article', 'table', 'form', 'figure', 'nav', 'details', 'fieldset']);
 const HEADINGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'legend', 'caption', 'summary', 'figcaption']);
 

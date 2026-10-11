@@ -33,7 +33,7 @@ import { build as buildStarter, list as listStarters } from '../server/gallery.j
 import { check as checkRemote, serveOff, serveOn, serveStatus, tailnetUrl } from '../server/remote.js';
 import { splitPath, parsePath } from '../server/paths.js';
 import { updateApps } from '../server/app-updates.js';
-import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignDonts, seedDesignSystem, seedDrive, seedStartHere } from '../server/seed.js';
+import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignDonts, seedDesignSystem, seedDrive, seedProjects, seedStartHere } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
 import { createStandby, whereIsHome } from '../server/standby.js';
 import { createLeaseClient } from '../server/hub/lease-client.js';
@@ -197,6 +197,7 @@ async function serve() {
   await seedStartHere(drive.store);
   await seedDrive(drive.store, { name: config.home });
   await seedAgents(drive.store);
+  await seedProjects(drive.store);
   await seedChat(drive.store);
   await seedBoard(drive.store);
   await seedDesignSystem(drive.store);
