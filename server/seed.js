@@ -1,8 +1,8 @@
 // What a brand new drive has in it after the host seeds it.
 //
-// The Drive document, the Agents library, the Chat app, the Board, and the
-// Design System and its Don'ts in a System folder — each written once, the
-// first time the host sees the drive without it.
+// Start here first, then the Drive document, the Agents library, the Chat
+// app, the Board, and the Design System and its Don'ts in a System folder —
+// each written once, the first time the host sees the drive without it.
 // Not because a drive should arrive full, but because the alternative is a host
 // that serves a folder with nothing in it and an address that 404s — and because
 // the Drive being an ordinary document in the drive is the claim this whole repo
@@ -18,6 +18,9 @@ import { readManifest, writeManifest } from './app-updates.js';
 import { link as iconLink } from './favicon.js';
 import { build as buildStarter, composeScript, STARTERS } from './gallery.js';
 import { titleize } from './paths.js';
+import { START_HERE } from './start-here.js';
+
+export { START_HERE };
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -161,4 +164,42 @@ export async function buildConsole({ title = 'Console' } = {}) {
 
 export async function seedConsole(store, { name = 'Console', title = 'Console' } = {}) {
   return seedOnce(store, 'console', name, () => buildConsole({ title }));
+}
+
+// ---------------------------------------------------------------- Start here
+
+/** Start here: the first page a new drive opens on. Three things to try, and
+ *  a question whose answer becomes the person's first document. An ordinary
+ *  document with the affordances its markers need composed in, like a starter. */
+export async function buildStartHere({ title = 'Start here' } = {}) {
+  const [template, script] = await Promise.all([
+    fsp.readFile(path.join(REPO, 'templates', 'start-here.mrbl'), 'utf8'),
+    composeScript(['editable', 'state', 'history', 'status']),
+  ]);
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId())
+    .replace('__SCRIPT__', () => `<script>\n${script}\n</script>`);
+}
+
+/**
+ * Start here, for a new drive only, and before anything else is written: a
+ * drive that already has documents, or has had pages seeded into it, is
+ * someone's already, and is not handed a page about getting started. Whether
+ * it was written or passed over is remembered, so deleting the page is final.
+ */
+export async function seedStartHere(store, { name = START_HERE, title = 'Start here' } = {}) {
+  const manifest = await readManifest(store.marbleDir);
+  if (Object.hasOwn(manifest.seeded, 'start-here')) return { seeded: false, path: manifest.seeded['start-here'] };
+  const fresh = !Object.keys(manifest.seeded).length && !(await store.list({ recursive: true })).some((e) => e.kind === 'doc');
+  if (!fresh) {
+    manifest.seeded['start-here'] = null;
+    await writeManifest(store.marbleDir, manifest);
+    return { seeded: false, path: null };
+  }
+  await store.write(name, await buildStartHere({ title }), { label: 'seeded' });
+  manifest.seeded['start-here'] = name;
+  await writeManifest(store.marbleDir, manifest);
+  return { seeded: true, path: name };
 }

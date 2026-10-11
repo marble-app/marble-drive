@@ -40,6 +40,7 @@ import { build as buildStarter, list as listStarters, preview as starterPreview 
 import { createChannels, forVisitor, lookFrame } from './sse.js';
 import { createStore } from './store/index.js';
 import { readDriveSettings } from './drive-settings.js';
+import { startHereFor } from './start-here.js';
 import { createAwakeClock, createProgress } from './awake.js';
 import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
@@ -918,6 +919,10 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (await genui.handle(req, res, url)) return;
 
       if (route === '/') {
+        // A new drive's first visits open Start here, until it is deleted or
+        // all three of its rows are ticked (server/start-here.js).
+        const first = await startHereFor(store, req);
+        if (first) return send(res, 302, '', { Location: `/a/${encodeURIComponent(first)}` });
         // Land on the Drive if it is there. It is an ordinary document with no
         // standing, so deleting it falls back to whatever exists.
         const landing = (await store.has(config.home))
