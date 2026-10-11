@@ -277,6 +277,11 @@
       setup: () => ask('/agent/setup'),
       connectClaude: (key) => ask('/agent/setup', { method: 'POST', body: { key } }),
       connectAgent: (provider, key) => ask('/agent/setup', { method: 'POST', body: { provider, key } }),
+      // Connect your Claude: the host runs `claude setup-token` and answers
+      // its sign-in address; the code Claude's page shows goes back to it.
+      claudeSignIn: () => ask('/agent/claude/sign-in', { method: 'POST' }),
+      claudeSignInCode: (code) => ask('/agent/claude/sign-in/code', { method: 'POST', body: { code } }),
+      claudeSignInCancel: () => ask('/agent/claude/sign-in', { method: 'DELETE' }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
       // Whether this drive can hear and speak, and how it was set to.
