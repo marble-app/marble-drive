@@ -97,12 +97,12 @@ test('the token is read whole, on one line or cut across several, and errors are
   assert.equal(findSignInError('Paste code here if prompted >'), null);
 });
 
-test('the pseudo-terminal is util-linux script on Linux and BSD script on a Mac, 1000 columns wide', () => {
+test('the pseudo-terminal is script on Linux (util-linux or busybox) and BSD script on a Mac, 1000 columns wide', () => {
   const linux = ptyCommand(['claude', 'setup-token'], 'linux');
   assert.equal(linux.command, 'script');
-  assert.deepEqual(linux.args.slice(0, 4), ['-q', '-f', '-e', '-c']);
-  assert.match(linux.args[4], /^stty cols 1000 rows 50 2>\/dev\/null; exec 'claude' 'setup-token'$/);
-  assert.equal(linux.args[5], '/dev/null');
+  assert.deepEqual(linux.args.slice(0, 3), ['-q', '-f', '-c']);
+  assert.match(linux.args[3], /^stty cols 1000 rows 50 2>\/dev\/null; exec 'claude' 'setup-token'$/);
+  assert.equal(linux.args[4], '/dev/null');
   const mac = ptyCommand(['/opt/my claude', 'setup-token'], 'darwin');
   assert.deepEqual(mac.args.slice(0, 4), ['-q', '/dev/null', 'sh', '-c']);
   assert.match(mac.args[4], /exec '\/opt\/my claude' 'setup-token'$/);

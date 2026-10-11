@@ -129,10 +129,11 @@ export function ptyCommand(argv, platform = process.platform) {
   const inner = `stty cols 1000 rows 50 2>/dev/null; exec ${argv.map(quote).join(' ')}`;
   // BSD script (macOS): script [-q] file command…, no -c.
   if (platform === 'darwin') return { command: 'script', args: ['-q', '/dev/null', 'sh', '-c', inner] };
-  // util-linux script: -c runs the command, -e passes its exit code on, -f
-  // writes as it comes. The typescript goes to /dev/null; what it shows still
-  // comes out on stdout.
-  return { command: 'script', args: ['-q', '-f', '-e', '-c', inner, '/dev/null'] };
+  // util-linux script (and busybox's, on Alpine): -c runs the command, -f
+  // writes as it comes. The typescript goes to /dev/null; what it shows
+  // still comes out on stdout. No -e: busybox has none, and the exit code is
+  // not what says whether it worked; the token is.
+  return { command: 'script', args: ['-q', '-f', '-c', inner, '/dev/null'] };
 }
 
 class SignInError extends Error {
