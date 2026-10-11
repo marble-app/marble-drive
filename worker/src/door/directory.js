@@ -21,6 +21,11 @@ const NONCE_MS = 2 * 60 * 1000;
 const AUDIT_DAYS = 180;
 export const DEFAULT_MAX_DRIVES = 10;
 export const STEPS = ['machine', 'install', 'check'];
+// A drive handed a spare (docs/ACCOUNTS.md, "The spare drive") has two steps
+// instead: its settings written, then its host started with them.
+export const SPARE_STEPS = ['name', 'start'];
+// A spare's sprite: d-spare-<hex>. No drive name can give that (names.js).
+export const SPARE_SPRITE = /^d-spare-[0-9a-f]{6,16}$/;
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -285,18 +290,24 @@ export class DirectoryCore {
       if (await this.storage.get(`drive:${name}`)) refuse(409, `${name} is taken.`);
       if ((await this.liveDriveCount()) >= this.maxDrives) refuse(503, 'Bryan has made as many drives as he can for now. Your invite still works; try again later.');
 
-      const drive = { name, owner: acct.id, sprite: `d-${name}`, homes: {}, state: 'queued', created: this.iso(), steps: {} };
+      // A spare that is ready becomes this drive: the door sprite only names
+      // it, writes its settings and restarts it. Fly can't rename a sprite,
+      // so it keeps its own name and this record maps the drive's name to it.
+      const spare = await this.takeSpare(name);
+      const drive = spare
+        ? { name, owner: acct.id, sprite: spare.sprite, spare: { sprite: spare.sprite, url: spare.url }, homes: {}, state: 'queued', created: this.iso(), steps: {} }
+        : { name, owner: acct.id, sprite: `d-${name}`, homes: {}, state: 'queued', created: this.iso(), steps: {} };
       await this.storage.put(`drive:${name}`, drive);
       if (held?.ok) await this.storage.put(`invite:${held.hash}`, { ...held.invite, uses: held.invite.uses - 1 });
       await this.storage.put(`acct:${acct.id}`, { ...acct, held: null, approved: false, drives: [...(acct.drives ?? []), name] });
-      await this.audit('drive-asked', { account: acct.id, detail: { drive: name, invite: held?.ok ? held.invite.id : null } });
+      await this.audit('drive-asked', { account: acct.id, detail: { drive: name, invite: held?.ok ? held.invite.id : null, spare: spare?.sprite ?? null } });
       return { drive: this.driveView(drive) };
     });
   }
 
   driveView(d) {
     if (!d) return null;
-    return { name: d.name, owner: d.owner, homes: d.homes ?? {}, sprite: d.sprite ?? null, state: d.state, steps: d.steps ?? {}, failed: d.failed ?? null, created: d.created };
+    return { name: d.name, owner: d.owner, homes: d.homes ?? {}, sprite: d.sprite ?? null, spare: d.spare ?? null, state: d.state, steps: d.steps ?? {}, failed: d.failed ?? null, created: d.created };
   }
 
   async drive(name) {
@@ -308,8 +319,16 @@ export class DirectoryCore {
     return [...all.values()].map((d) => this.driveView(d)).sort((a, b) => a.created.localeCompare(b.created));
   }
 
+  /** The drives the door sprite has to make, oldest first. `credit` is
+   *  passed through as it is on the record: the starter credit's settings
+   *  (MARBLE_CREDIT_URL and MARBLE_CREDIT_TOKEN, as `{ url, token }`) for the
+   *  door sprite to write into the drive's settings. */
   async queued() {
-    return (await this.listDrives()).filter((d) => d.state === 'queued');
+    const all = await this.storage.list({ prefix: 'drive:' });
+    return [...all.values()]
+      .filter((d) => d.state === 'queued')
+      .sort((a, b) => a.created.localeCompare(b.created))
+      .map((d) => ({ ...this.driveView(d), ...(d.credit ? { credit: d.credit } : {}) }));
   }
 
   async step(name, { step, state, url, sprite }) {
@@ -324,12 +343,13 @@ export class DirectoryCore {
           refuse(400, 'ready needs the sprite URL');
         }
         if (origin.protocol !== 'https:') refuse(400, 'the sprite URL is https');
-        const steps = Object.fromEntries(STEPS.map((s) => [s, 'done']));
+        const steps = Object.fromEntries((d.spare ? SPARE_STEPS : STEPS).map((s) => [s, 'done']));
         await this.storage.put(`drive:${name}`, { ...d, state: 'ready', homes: { ...(d.homes ?? {}), fly: origin.origin }, sprite: sprite ? str(sprite, 64) : d.sprite, steps, failed: null });
         await this.audit('drive-ready', { account: d.owner, detail: { drive: name } });
         return { ok: true };
       }
-      if (!STEPS.includes(step)) refuse(400, `step is one of ${STEPS.join(', ')}`);
+      const known = d.spare ? SPARE_STEPS : STEPS;
+      if (!known.includes(step)) refuse(400, `step is one of ${known.join(', ')}`);
       if (state === 'failed') {
         await this.storage.put(`drive:${name}`, { ...d, state: 'failed', failed: step, steps: { ...(d.steps ?? {}), [step]: 'failed' } });
         await this.audit('drive-failed', { account: d.owner, detail: { drive: name, step } });
@@ -337,6 +357,22 @@ export class DirectoryCore {
       }
       if (!['now', 'done'].includes(state)) refuse(400, 'state is now, done, failed or ready');
       await this.storage.put(`drive:${name}`, { ...d, state: 'making', steps: { ...(d.steps ?? {}), [step]: state } });
+      return { ok: true };
+    });
+  }
+
+  /** A spare that couldn't be handed over: the drive goes back to the queue
+   *  to be made from nothing, and the spare is kept as failed for Bryan to
+   *  look at and remove. */
+  async unspare(name) {
+    return this.exclusive(async () => {
+      const d = await this.storage.get(`drive:${name}`);
+      if (!d) refuse(404, 'No such drive.');
+      if (!d.spare) refuse(409, `${name} was not given a spare.`);
+      const { spare, ...rest } = d;
+      await this.storage.put(`drive:${name}`, { ...rest, sprite: `d-${name}`, homes: {}, state: 'queued', steps: {}, failed: null });
+      await this.storage.put(`spare:${spare.sprite}`, { sprite: spare.sprite, url: spare.url ?? null, state: 'failed', made: this.iso(), failedFor: name });
+      await this.audit('spare-failed', { account: d.owner, detail: { drive: name, spare: spare.sprite } });
       return { ok: true };
     });
   }
@@ -350,6 +386,73 @@ export class DirectoryCore {
       await this.audit(on ? 'drive-held' : 'drive-released', { account: d.owner, detail: { drive: name } });
       return { drive: this.driveView(next) };
     });
+  }
+
+  // ------------------------------------------------------------- spares
+
+  async listSpares() {
+    const all = await this.storage.list({ prefix: 'spare:' });
+    return [...all.values()].sort((a, b) => a.made.localeCompare(b.made));
+  }
+
+  /** The spares, and how many more drives sign-up may make: a spare past
+   *  that would never be given out. */
+  async spares() {
+    return { spares: await this.listSpares(), room: Math.max(0, this.maxDrives - (await this.liveDriveCount())) };
+  }
+
+  /** The door sprite's word on one spare: `making` when it starts one,
+   *  `ready` with its URL when it is made and asleep, `failed` if not. */
+  async spareStep({ sprite, state, url }) {
+    if (typeof sprite !== 'string' || !SPARE_SPRITE.test(sprite)) refuse(400, 'sprite is d-spare-<hex>');
+    return this.exclusive(async () => {
+      const key = `spare:${sprite}`;
+      const have = await this.storage.get(key);
+      if (state === 'making') {
+        if (have) refuse(409, `${sprite} is already known.`);
+        await this.storage.put(key, { sprite, url: null, state: 'making', made: this.iso() });
+        return { ok: true };
+      }
+      if (!have) refuse(404, 'No such spare.');
+      if (state === 'ready') {
+        let origin;
+        try {
+          origin = new URL(url);
+        } catch {
+          refuse(400, 'ready needs the sprite URL');
+        }
+        if (origin.protocol !== 'https:') refuse(400, 'the sprite URL is https');
+        await this.storage.put(key, { ...have, url: origin.origin, state: 'ready', ready: this.iso() });
+        await this.audit('spare-ready', { detail: { spare: sprite } });
+        return { ok: true };
+      }
+      if (state === 'failed') {
+        await this.storage.put(key, { ...have, state: 'failed' });
+        await this.audit('spare-failed', { detail: { spare: sprite } });
+        return { ok: true };
+      }
+      refuse(400, 'state is making, ready or failed');
+    });
+  }
+
+  /** Forget a spare: no sign-up is given it. Its sprite is left as it is. */
+  async forgetSpare(sprite) {
+    return this.exclusive(async () => {
+      if (!(await this.storage.get(`spare:${sprite}`))) refuse(404, 'No such spare.');
+      await this.storage.delete(`spare:${sprite}`);
+      await this.audit('spare-forgotten', { detail: { spare: sprite } });
+      return { ok: true };
+    });
+  }
+
+  /** The oldest ready spare, taken off the list for `name`. Called inside
+   *  claimDrive's lock, so two sign-ups never get the same one. */
+  async takeSpare(name) {
+    const ready = (await this.listSpares()).find((s) => s.state === 'ready' && s.url);
+    if (!ready) return null;
+    await this.storage.delete(`spare:${ready.sprite}`);
+    await this.audit('spare-given', { detail: { spare: ready.sprite, drive: name } });
+    return ready;
   }
 
   // ------------------------------------------------------------- sessions
@@ -483,6 +586,10 @@ export class Directory {
       }
       if ((m = /^\/drives\/([a-z0-9-]{1,40})\/step$/.exec(path)) && method === 'POST') return json(200, await c.step(m[1], await body(request)));
       if ((m = /^\/drives\/([a-z0-9-]{1,40})\/hold$/.exec(path)) && method === 'POST') return json(200, await c.hold(m[1], (await body(request)).on !== false));
+      if ((m = /^\/drives\/([a-z0-9-]{1,40})\/unspare$/.exec(path)) && method === 'POST') return json(200, await c.unspare(m[1]));
+      if (method === 'GET' && path === '/spares') return json(200, await c.spares());
+      if (method === 'POST' && path === '/spares') return json(200, await c.spareStep(await body(request)));
+      if ((m = /^\/spares\/(d-spare-[0-9a-f]{6,16})$/.exec(path)) && method === 'DELETE') return json(200, await c.forgetSpare(m[1]));
       if ((m = /^\/accounts\/([0-9a-f]{16})$/.exec(path)) && method === 'GET') {
         const a = await c.accountView(m[1]);
         return a ? json(200, a) : json(404, { why: 'No such account.' });

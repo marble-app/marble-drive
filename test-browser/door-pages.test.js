@@ -27,10 +27,12 @@ const SAMPLES = {
   asked: () => pages.notInvited({ asked: true }),
   name: () => pages.nameDrive({}),
   'name-taken': () => pages.nameDrive({ value: 'garden', said: 'garden is taken.', ok: false, status: 409 }),
-  'name-free': () => pages.nameDrive({ value: 'ana', said: 'ana is free.', ok: true }),
+  'name-free': () => pages.nameDrive({ value: 'ana', said: 'Free. You can’t change it later.', ok: true }),
   'making-now': () => pages.making({ drive: { name: 'ana', state: 'making', steps: { machine: 'done', install: 'now' } } }),
   'making-failed': () => pages.making({ drive: { name: 'ana', state: 'failed', failed: 'install', steps: { machine: 'done', install: 'failed' } } }),
   'making-ready': () => pages.making({ drive: { name: 'ana', state: 'ready', steps: {} } }),
+  'opening-spare': () => pages.making({ drive: { name: 'ana', state: 'making', spare: { sprite: 'd-spare-3fa9c1d2' }, steps: { name: 'done', start: 'now' } } }),
+  'opening-spare-long': () => pages.making({ drive: { name: 'ana-lima-research-notes-2026', state: 'queued', spare: { sprite: 'd-spare-3fa9c1d2' }, steps: {} } }),
   account: () => pages.account({
     account: { name: 'Ana', email: 'ana@example.com', methods: [{ provider: 'google', email: 'ana.lima.longer.address@example.com' }] },
     drives: [{ name: 'ana-lima-research-notes', state: 'ready' }],
@@ -46,7 +48,7 @@ const server = http.createServer(async (req, res) => {
   const name = req.url.slice(1).split('?')[0];
   if (name === 'name/check') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, said: 'ana is free.' }));
+    return res.end(JSON.stringify({ ok: true, said: 'Free. You can’t change it later.' }));
   }
   const make = SAMPLES[name];
   if (!make) {
