@@ -9,6 +9,11 @@
 #                                  a drive the door asked for (the door sprite runs this)
 #   tools/sprite-provision.sh --resume <name> --door <name> --account <id> --keys <file>
 #   tools/sprite-provision.sh --remove <name> --door <name>
+#   tools/sprite-provision.sh --spare <sprite> --keys <file> [--org <org>] [--local]
+#                                  a spare drive made ahead, nobody's yet (the door sprite)
+#   tools/sprite-provision.sh --door <name> --from-spare <sprite> --account <id> --keys <file>
+#                                  hand that spare to the drive someone asked for
+#   tools/sprite-provision.sh --remove <sprite> --spare <sprite>
 #
 # Makes sprite t-<person>, gives it a passphrase and its own settings, deploys
 # the pushed main to it, opens its URL behind the passphrase, and prints a note
@@ -23,7 +28,17 @@
 # and its agent's browser), and the door's settings: its public keys from
 # --keys, the drive's name, and its owner's account. It prints `step: <step>
 # <state>` lines and `url: <sprite URL>` for the door sprite to report, and no
-# note, no passphrase, and no roster entry.
+# note, no passphrase, and no roster entry. --settings <file> adds the
+# drive's starter credit settings (MARBLE_CREDIT_* lines) to its sprite.env.
+#
+# --spare: a drive made ahead (docs/ACCOUNTS.md, "The spare drive"). Sprite
+# <sprite> (d-spare-<hex>), label marble-user, deployed and checked like a door
+# drive but with no name or owner: its gate is closed to everyone, and it
+# sleeps until it is handed over. --from-spare hands it to a drive: Fly can't
+# rename a sprite, so it keeps its name (the door's Directory maps the drive's
+# name to it). It keeps its passphrase, gets the door's settings for <name>
+# and <id>, restarts with them, and prints `step: name|start now|done` and
+# `url:`, in seconds.
 #
 # The roster (person, sprite, URL, passphrase, agent) is kept on this Mac in
 # ~/.config/marble-drive/testers.json — never an API key. --local deploys this
@@ -32,7 +47,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ORG=marble-drive AGENT=api KEY_FILE="" REMOVE=0 RESUME=0 PERSON="" DEPLOY_FLAGS=()
-DOOR="" ACCOUNT="" KEYS_FILE=""
+DOOR="" ACCOUNT="" KEYS_FILE="" SPARE="" FROM_SPARE="" EXTRA_FILE=""
 # What deploys a release to the sprite; a test points this at a stub.
 DEPLOY="${MARBLE_SPRITE_DEPLOY:-$HERE/sprite-deploy.sh}"
 ROSTER_DIR="$HOME/.config/marble-drive"
@@ -54,12 +69,18 @@ while [[ $# -gt 0 ]]; do
     --door) DOOR=${2:?}; shift 2 ;;
     --account) ACCOUNT=${2:?}; shift 2 ;;
     --keys) KEYS_FILE=${2:?}; shift 2 ;;
+    --spare) SPARE=${2:?}; shift 2 ;;
+    --from-spare) FROM_SPARE=${2:?}; shift 2 ;;
+    --settings) EXTRA_FILE=${2:?}; shift 2 ;;
     -h|--help) usage ;;
     -*) usage ;;
     *) [[ -z "$PERSON" ]] || usage; PERSON=$1; shift ;;
   esac
 done
 [[ -n "$DOOR" && -z "$PERSON" ]] && PERSON=$DOOR
+[[ -n "$SPARE" && -z "$PERSON" ]] && PERSON=$SPARE
+[[ -z "$SPARE" || -z "$DOOR" ]] || die "--spare makes a spare for nobody yet; hand it over with --door <name> --from-spare <sprite>"
+[[ -z "$FROM_SPARE" || -n "$DOOR" ]] || die "--from-spare hands a spare to a drive: give --door <name> too"
 [[ -n "$PERSON" ]] || usage
 [[ "$AGENT" == api || "$AGENT" == subscription ]] || die "--agent is api or subscription"
 [[ -z "$KEY_FILE" || "$AGENT" == api ]] || die "--key-file is for --agent api"
@@ -69,11 +90,30 @@ SLUG="$(printf '%s' "$PERSON" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-
 [[ -n "$SLUG" ]] || die "\"$PERSON\" has nothing a sprite name can use"
 SPRITE="t-$SLUG"
 LABEL=marble-tester
-step() { [[ -z "$DOOR" ]] || printf 'step: %s %s\n' "$1" "$2"; }
+step() { [[ -z "$DOOR" && -z "$SPARE" ]] || printf 'step: %s %s\n' "$1" "$2"; }
+SPARE_NAME='^d-spare-[0-9a-f]{6,16}$'
+
+read_keys() {
+  [[ -r "$KEYS_FILE" ]] || die "--keys names a readable file of the door's public keys"
+  DOOR_KEYS="$(tr -s ' \t\n' ' ' <"$KEYS_FILE" | sed 's/^ *//; s/ *$//')"
+  [[ "$DOOR_KEYS" =~ ^[A-Za-z0-9_-]+:[A-Za-z0-9+/=]+( [A-Za-z0-9_-]+:[A-Za-z0-9+/=]+)*$ ]] \
+    || die "the keys file is <key id>:<base64 public key> entries separated by spaces"
+}
+
+if [[ -n "$SPARE" ]]; then
+  [[ "$SPARE" =~ $SPARE_NAME ]] || die "\"$SPARE\" is not a spare's sprite name (d-spare-<hex>)"
+  [[ "$PERSON" == "$SPARE" ]] || die "--spare names the sprite; give the same name to --remove"
+  [[ $RESUME == 0 ]] || die "a spare that stopped part way is removed and made again, not resumed"
+  [[ -z "$EXTRA_FILE" ]] || die "--settings is for a drive with an owner; a spare gets its settings when it is handed over"
+  [[ "$AGENT" == api && -z "$KEY_FILE" ]] || die "spares use their person's own key; --agent and --key-file are not for them"
+  SPRITE=$SPARE
+  LABEL=marble-user
+  [[ $REMOVE == 1 ]] || read_keys
+fi
 
 if [[ -n "$DOOR" ]]; then
   # The same rule as the door's (worker/src/door/names.js).
-  [[ "$DOOR" =~ ^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$ && "$DOOR" != *--* && ! "$DOOR" =~ ^(mac|pc|t|d)- ]] \
+  [[ "$DOOR" =~ ^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$ && "$DOOR" != *--* && ! "$DOOR" =~ ^(mac|pc|t|d|spare)- ]] \
     || die "\"$DOOR\" is not a drive name (3 to 30 of a-z, 0-9 and -)"
   [[ "$PERSON" == "$DOOR" ]] || die "--door names the drive; give the same name to --resume or --remove"
   SPRITE="d-$DOOR"
@@ -81,11 +121,26 @@ if [[ -n "$DOOR" ]]; then
   [[ "$AGENT" == api && -z "$KEY_FILE" ]] || die "--door drives use their person's own key; --agent and --key-file are not for them"
   if [[ $REMOVE == 0 ]]; then
     [[ "$ACCOUNT" =~ ^[0-9a-f]{16}$ ]] || die "--account is the owner's account id (16 hex digits)"
-    [[ -r "$KEYS_FILE" ]] || die "--keys names a readable file of the door's public keys"
-    DOOR_KEYS="$(tr -s ' \t\n' ' ' <"$KEYS_FILE" | sed 's/^ *//; s/ *$//')"
-    [[ "$DOOR_KEYS" =~ ^[A-Za-z0-9_-]+:[A-Za-z0-9+/=]+( [A-Za-z0-9_-]+:[A-Za-z0-9+/=]+)*$ ]] \
-      || die "the keys file is <key id>:<base64 public key> entries separated by spaces"
+    read_keys
   fi
+  if [[ -n "$FROM_SPARE" ]]; then
+    [[ "$FROM_SPARE" =~ $SPARE_NAME ]] || die "\"$FROM_SPARE\" is not a spare's sprite name (d-spare-<hex>)"
+    [[ $RESUME == 0 && $REMOVE == 0 ]] || die "--from-spare only hands a spare over; to remove it use --remove $FROM_SPARE --spare $FROM_SPARE"
+    SPRITE=$FROM_SPARE
+  fi
+fi
+
+# --settings: the starter credit's settings for this drive, one KEY=value a
+# line. Only MARBLE_CREDIT_* names, and values a sprite.env can hold.
+EXTRA=""
+if [[ -n "$EXTRA_FILE" ]]; then
+  [[ -n "$DOOR" && $REMOVE == 0 ]] || die "--settings is for a drive the door asked for"
+  [[ -r "$EXTRA_FILE" ]] || die "cannot read $EXTRA_FILE"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" =~ ^MARBLE_CREDIT_[A-Z0-9_]+=[^[:space:],]+$ ]] || die "--settings holds only MARBLE_CREDIT_<NAME>=<value> lines, with no space or comma in a value (${line%%=*})"
+    EXTRA+="$line"$'\n'
+  done <"$EXTRA_FILE"
 fi
 
 exists() { sprite list -o "$ORG" --prefix "$SPRITE" 2>/dev/null | grep -qx "$SPRITE"; }
@@ -113,8 +168,66 @@ if [[ $REMOVE == 1 ]]; then
   read -r -p "Type $SPRITE to confirm: " typed
   [[ "$typed" == "$SPRITE" ]] || die "not confirmed; nothing was destroyed"
   sprite destroy -o "$ORG" --force "$SPRITE"
-  [[ -n "$DOOR" ]] || roster drop
+  [[ -n "$DOOR" || -n "$SPARE" ]] || roster drop
   say "destroyed $SPRITE"
+  exit 0
+fi
+
+# The settings of a drive the door asked for, beside its passphrase: its
+# public keys, the name a pass must be for, and the account it must name.
+# `tools` keeps the passphrase off the browser: nobody was given it, and a
+# person comes in by signing in. Then the starter credit's, if any.
+door_settings() {
+  echo "MARBLE_DOOR_KEYS=$DOOR_KEYS"
+  echo "MARBLE_DOOR_NAME=$DOOR"
+  echo "MARBLE_DOOR_OWNER=$ACCOUNT"
+  echo "MARBLE_DRIVE_GATE=tools"
+  echo "MARBLE_DRIVE_PUBLIC_URL=https://$DOOR.marbledrive.app"
+  [[ -z "$EXTRA" ]] || printf '%s' "$EXTRA"
+}
+
+# ------------------------------------------------------ handing a spare over
+
+if [[ -n "$FROM_SPARE" ]]; then
+  exists || die "no sprite $SPRITE in $ORG to hand over"
+  WORK="$(mktemp -d)"
+  chmod 700 "$WORK"
+  trap 'rm -rf "$WORK"' EXIT
+  step name now
+  say "giving $SPRITE to $DOOR.marbledrive.app"
+  SETTINGS="$(on -- cat "$REMOTE_CONFIG/sprite.env" 2>/dev/null)" || die "$SPRITE has no settings; it is not a spare"
+  grep -q '^MARBLE_DOOR_OWNER=' <<<"$SETTINGS" && die "$SPRITE already has an owner; it is not a spare"
+  PASSPHRASE="$(sed -n 's/^MARBLE_DRIVE_SECRET=//p' <<<"$SETTINGS")"
+  PROVIDER="$(sed -n 's/^MARBLE_DRIVE_AGENT_PROVIDER=//p' <<<"$SETTINGS")"
+  [[ -n "$PASSPHRASE" ]] || die "$SPRITE's settings have no passphrase"
+  umask 077
+  {
+    echo "# $SPRITE — a spare made by tools/sprite-provision.sh, given to $DOOR on $(date -u +%Y-%m-%d)"
+    echo "MARBLE_DRIVE_SECRET=$PASSPHRASE"
+    echo "MARBLE_DRIVE_SECURE_COOKIE=1"
+    echo "MARBLE_DRIVE_AGENT_PROVIDER=${PROVIDER:-claude-api}"
+    door_settings
+  } >"$WORK/sprite.env"
+  on --file "$WORK/sprite.env:$REMOTE_CONFIG/sprite.env" -- chmod 600 "$REMOTE_CONFIG/sprite.env"
+  step name done
+
+  step start now
+  say "restarting $SPRITE with its settings"
+  on -- bash /home/sprite/app/release.sh apply >&2
+  URL="$(sprite info -o "$ORG" -s "$SPRITE" 2>/dev/null | awk '/^URL:/ {print $2}')"
+  [[ -n "$URL" ]] || die "could not read $SPRITE's URL"
+  ok=0
+  for _ in $(seq 1 30); do
+    [[ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")" == 200 ]] && { ok=1; break; }
+    sleep 1
+  done
+  [[ $ok == 1 ]] || die "$URL/health did not answer after the restart"
+  # Now it has an owner, a browser is sent to sign in for this name.
+  where="$(curl -s -o /dev/null -H 'Accept: text/html' -w '%{http_code} %{redirect_url}' "$URL/")"
+  [[ "$where" == 302*"marbledrive.app/enter"* || "$where" == 302*"/gate"* ]] || die "$URL/ did not send a browser to sign in (got: $where)"
+  step start done
+  say "gave $SPRITE to $DOOR.marbledrive.app"
+  echo "url: $URL"
   exit 0
 fi
 
@@ -137,6 +250,8 @@ finish() {
     if [[ -n "$DOOR" ]]; then
       echo "  tools/sprite-provision.sh --resume $DOOR --door $DOOR --account $ACCOUNT --keys <file> --org $ORG" >&2
       echo "  tools/sprite-provision.sh --remove $DOOR --door $DOOR --org $ORG" >&2
+    elif [[ -n "$SPARE" ]]; then
+      echo "  tools/sprite-provision.sh --remove $SPARE --spare $SPARE --org $ORG" >&2
     else
       echo "  tools/sprite-provision.sh --remove $SLUG --org $ORG" >&2
     fi
@@ -172,14 +287,12 @@ umask 077
   echo "MARBLE_DRIVE_SECURE_COOKIE=1"
   echo "MARBLE_DRIVE_AGENT_PROVIDER=$PROVIDER"
   if [[ -n "$DOOR" ]]; then
-    # The door: its public keys, the name a pass must be for, and the account
-    # it must name. `tools` keeps the passphrase off the browser: nobody was
-    # given it, and a person comes in by signing in.
+    door_settings
+  elif [[ -n "$SPARE" ]]; then
+    # A spare has the door's keys but no name or owner yet, so its gate lets
+    # nobody in; `tools` keeps the passphrase (nobody's) off the browser.
     echo "MARBLE_DOOR_KEYS=$DOOR_KEYS"
-    echo "MARBLE_DOOR_NAME=$DOOR"
-    echo "MARBLE_DOOR_OWNER=$ACCOUNT"
     echo "MARBLE_DRIVE_GATE=tools"
-    echo "MARBLE_DRIVE_PUBLIC_URL=https://$DOOR.marbledrive.app"
   fi
 } >"$WORK/sprite.env"
 on -- sh -c "mkdir -p $REMOTE_CONFIG && chmod 700 $REMOTE_CONFIG"
@@ -220,13 +333,14 @@ done
 # Asked as a browser: the gate sends a browser to its passphrase page and
 # answers anything else with a 401.
 where="$(curl -s -o /dev/null -H 'Accept: text/html' -w '%{http_code} %{redirect_url}' "$URL/")"
-if [[ -n "$DOOR" ]]; then
+if [[ -n "$DOOR" || -n "$SPARE" ]]; then
   # A door drive sends a browser to sign in (or, asked from its own machine,
-  # to its passphrase page). Either way it is closed.
+  # to its passphrase page). Either way it is closed. A spare, with nobody's
+  # name on it, sends every browser to its passphrase page.
   [[ "$where" == 302*"marbledrive.app/enter"* || "$where" == 302*"/gate"* ]] || die "$URL/ did not send a browser to sign in (got: $where)"
   step check done
   DONE=1
-  say "made $SPRITE for $DOOR.marbledrive.app"
+  if [[ -n "$SPARE" ]]; then say "made the spare $SPRITE; it sleeps until it is handed over"; else say "made $SPRITE for $DOOR.marbledrive.app"; fi
   echo "url: $URL"
   exit 0
 fi

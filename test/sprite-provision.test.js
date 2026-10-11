@@ -15,7 +15,7 @@ const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'to
 const ACCOUNT = 'a1b2c3d4e5f60718';
 const KEYS = 'k1:MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE= k0:MCowBQYDK2VwAyEAd75Wsd0EdS0pT0Ka5gS6bGpIyFTmd5r5tKX9WR1Xd8A=';
 
-async function rig({ deployFails = false, enter = '302 https://marbledrive.app/enter?drive=ana&to=%2F' } = {}) {
+async function rig({ deployFails = false, enter = '302 https://marbledrive.app/enter?drive=ana&to=%2F', remoteEnv = null, existing = '', applyFails = false } = {}) {
   const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sprite-provision-'));
   const bin = path.join(home, 'bin');
   const got = path.join(home, 'got');
@@ -24,9 +24,11 @@ async function rig({ deployFails = false, enter = '302 https://marbledrive.app/e
   await fsp.writeFile(path.join(bin, 'sprite'), `#!/usr/bin/env bash
 echo "sprite $*" >>"${home}/calls"
 case "$1" in
-  list) exit 0 ;;
+  list) printf '%s' '${existing}'; [[ -n '${existing}' ]] && echo; exit 0 ;;
   info) echo "URL: https://d-ana-abc.sprites.app"; exit 0 ;;
   exec)
+    if [[ "$*" == *" cat "* ]]; then [[ -f "${home}/remote-env" ]] && cat "${home}/remote-env" && exit 0; exit 1; fi
+    if [[ "$*" == *"release.sh apply"* ]]; then ${applyFails ? 'exit 4' : 'exit 0'}; fi
     while [[ $# -gt 0 ]]; do
       if [[ "$1" == --file ]]; then src="\${2%%:*}"; dst="\${2#*:}"; cp "$src" "${got}/$(basename "$dst")"; shift 2; continue; fi
       shift
@@ -40,6 +42,7 @@ if [[ "$*" == *redirect_url* ]]; then printf '%s' '${enter}'; else printf 200; f
 `, { mode: 0o755 });
   const deploy = path.join(bin, 'deploy');
   await fsp.writeFile(deploy, `#!/usr/bin/env bash\necho "deploy $*" >>"${home}/calls"\n${deployFails ? 'exit 3' : 'exit 0'}\n`, { mode: 0o755 });
+  if (remoteEnv) await fsp.writeFile(path.join(home, 'remote-env'), remoteEnv);
   const keys = path.join(home, 'door-keys');
   await fsp.writeFile(keys, `${KEYS}\n`);
   const run = (args) =>
@@ -124,4 +127,109 @@ test('a drive that does not send a browser to sign in is not done', async () => 
   assert.notEqual(run.status, 0);
   assert.match(run.stderr, /did not send a browser to sign in/);
   assert.doesNotMatch(run.stdout, /^url: /m);
+});
+
+const SPARE = 'd-spare-3fa9c1d2';
+const SPARE_ENV = `# ${SPARE}\nMARBLE_DRIVE_SECRET=Zq8yP3rT6vW9xB2nM5kL7jH4\nMARBLE_DRIVE_SECURE_COOKIE=1\nMARBLE_DRIVE_AGENT_PROVIDER=claude-api\nMARBLE_DOOR_KEYS=${KEYS}\nMARBLE_DRIVE_GATE=tools\n`;
+const envLines = async (r) => (await fsp.readFile(path.join(r.got, 'sprite.env'), 'utf8')).trim().split('\n').filter((l) => !l.startsWith('#'));
+
+test('--spare makes a drive for nobody yet: the door keys, no name, no owner, closed, and its URL', async () => {
+  const r = await rig({ enter: '302 https://d-spare-3fa9c1d2-abc.sprites.app/gate?next=%2F' });
+  const run = r.run(['--spare', SPARE, '--keys', r.keys]);
+  assert.equal(run.status, 0, run.stderr);
+  const lines = await envLines(r);
+  assert.deepEqual(lines.map((l) => l.split('=')[0]), ['MARBLE_DRIVE_SECRET', 'MARBLE_DRIVE_SECURE_COOKIE', 'MARBLE_DRIVE_AGENT_PROVIDER', 'MARBLE_DOOR_KEYS', 'MARBLE_DRIVE_GATE']);
+  assert.match(run.stdout, /^url: https:\/\/d-ana-abc\.sprites\.app$/m);
+  const calls = await r.calls();
+  assert.ok(calls.includes(`sprite create -o marble-drive --skip-console --label marble-user ${SPARE}`), calls.join('\n'));
+  assert.ok(calls.some((c) => c.startsWith(`deploy ${SPARE} --org marble-drive`)));
+  await assert.rejects(fsp.access(path.join(r.home, '.config', 'marble-drive', 'testers.json')), 'no roster entry');
+});
+
+test('--spare wants a d-spare-<hex> name and takes no owner settings', async () => {
+  const r = await rig();
+  for (const bad of ['d-ana', 'spare-1', 'd-spare-XYZ123', 'd-spare-1']) {
+    const run = r.run(['--spare', bad, '--keys', r.keys]);
+    assert.notEqual(run.status, 0, bad);
+    assert.match(run.stderr, /not a spare's sprite name/, bad);
+  }
+  assert.match(r.run(['--spare', SPARE, '--door', 'ana', '--keys', r.keys]).stderr, /--from-spare/);
+  const settings = path.join(r.home, 'credit');
+  await fsp.writeFile(settings, 'MARBLE_CREDIT_TOKEN=x\n');
+  assert.match(r.run(['--spare', SPARE, '--keys', r.keys, '--settings', settings]).stderr, /--settings is for a drive with an owner/);
+  assert.deepEqual(await r.calls(), [''], 'no sprite call');
+});
+
+test('--from-spare hands the spare to a drive: same passphrase, the door settings and credit, restarted, in two steps', async () => {
+  const r = await rig({ remoteEnv: SPARE_ENV, existing: SPARE });
+  const credit = path.join(r.home, 'credit');
+  await fsp.writeFile(credit, '# the starter credit\nMARBLE_CREDIT_URL=https://marbledrive.app/_credit\nMARBLE_CREDIT_TOKEN=tok_0123456789abcdef\n', { mode: 0o600 });
+  const run = r.run(['--door', 'ana', '--from-spare', SPARE, '--account', ACCOUNT, '--keys', r.keys, '--settings', credit]);
+  assert.equal(run.status, 0, run.stderr);
+  const lines = await envLines(r);
+  const value = (k) => lines.find((l) => l.startsWith(`${k}=`))?.slice(k.length + 1);
+  assert.deepEqual(lines.map((l) => l.split('=')[0]), [
+    'MARBLE_DRIVE_SECRET',
+    'MARBLE_DRIVE_SECURE_COOKIE',
+    'MARBLE_DRIVE_AGENT_PROVIDER',
+    'MARBLE_DOOR_KEYS',
+    'MARBLE_DOOR_NAME',
+    'MARBLE_DOOR_OWNER',
+    'MARBLE_DRIVE_GATE',
+    'MARBLE_DRIVE_PUBLIC_URL',
+    'MARBLE_CREDIT_URL',
+    'MARBLE_CREDIT_TOKEN',
+  ]);
+  assert.equal(value('MARBLE_DRIVE_SECRET'), 'Zq8yP3rT6vW9xB2nM5kL7jH4', 'the spare keeps its passphrase');
+  assert.equal(value('MARBLE_DOOR_NAME'), 'ana');
+  assert.equal(value('MARBLE_DOOR_OWNER'), ACCOUNT);
+  assert.equal(value('MARBLE_DRIVE_PUBLIC_URL'), 'https://ana.marbledrive.app');
+  assert.equal(value('MARBLE_CREDIT_URL'), 'https://marbledrive.app/_credit');
+  assert.equal(value('MARBLE_CREDIT_TOKEN'), 'tok_0123456789abcdef');
+  assert.ok(!run.stdout.includes('Zq8yP3rT6vW9xB2nM5kL7jH4') && !run.stdout.includes('tok_0123'), 'nothing secret printed');
+  const steps = run.stdout.split('\n').filter((l) => l.startsWith('step: '));
+  assert.deepEqual(steps, ['step: name now', 'step: name done', 'step: start now', 'step: start done']);
+  assert.match(run.stdout, /^url: https:\/\/d-ana-abc\.sprites\.app$/m);
+  const calls = await r.calls();
+  assert.ok(!calls.some((c) => c.startsWith('sprite create') || c.startsWith('deploy')), 'nothing made, nothing deployed');
+  assert.ok(calls.some((c) => c.includes(`-s ${SPARE}`) && c.includes('release.sh apply')), 'restarted with its settings');
+});
+
+test('--from-spare refuses a sprite that already has an owner, and stops if the restart fails', async () => {
+  const owned = await rig({ remoteEnv: `${SPARE_ENV}MARBLE_DOOR_OWNER=${ACCOUNT}\n`, existing: SPARE });
+  const run = owned.run(['--door', 'ana', '--from-spare', SPARE, '--account', ACCOUNT, '--keys', owned.keys]);
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /already has an owner/);
+
+  const broken = await rig({ remoteEnv: SPARE_ENV, existing: SPARE, applyFails: true });
+  const res = broken.run(['--door', 'ana', '--from-spare', SPARE, '--account', ACCOUNT, '--keys', broken.keys]);
+  assert.notEqual(res.status, 0);
+  assert.doesNotMatch(res.stdout, /^url: /m);
+  assert.equal(res.stdout.split('\n').filter((l) => l.startsWith('step: ')).at(-1), 'step: start now');
+
+  const missing = await rig({ remoteEnv: SPARE_ENV });
+  assert.match(missing.run(['--door', 'ana', '--from-spare', SPARE, '--account', ACCOUNT, '--keys', missing.keys]).stderr, /no sprite d-spare-3fa9c1d2/);
+});
+
+test('--settings takes only MARBLE_CREDIT_* lines a sprite.env can hold', async () => {
+  const r = await rig();
+  const file = path.join(r.home, 'credit');
+  for (const bad of ['MARBLE_DRIVE_SECRET=x', 'MARBLE_CREDIT_TOKEN=a,b', 'MARBLE_CREDIT_TOKEN=a b', 'MARBLE_CREDIT_URL=']) {
+    await fsp.writeFile(file, `${bad}\n`);
+    const run = r.run(['--door', 'ana', '--account', ACCOUNT, '--keys', r.keys, '--settings', file]);
+    assert.notEqual(run.status, 0, bad);
+    assert.match(run.stderr, /--settings holds only MARBLE_CREDIT_/, bad);
+  }
+  assert.deepEqual(await r.calls(), [''], 'no sprite call');
+  await fsp.writeFile(file, 'MARBLE_CREDIT_URL=https://marbledrive.app/_credit\nMARBLE_CREDIT_TOKEN=tok\n');
+  const ok = r.run(['--door', 'ana', '--account', ACCOUNT, '--keys', r.keys, '--settings', file]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.deepEqual((await envLines(r)).slice(-2), ['MARBLE_CREDIT_URL=https://marbledrive.app/_credit', 'MARBLE_CREDIT_TOKEN=tok']);
+});
+
+test('--door refuses spare- names, which are a spare sprite’s', async () => {
+  const r = await rig();
+  const run = r.run(['--door', 'spare-3fa9c1', '--account', ACCOUNT, '--keys', r.keys]);
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /is not a drive name/);
 });
