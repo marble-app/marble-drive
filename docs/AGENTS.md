@@ -655,6 +655,46 @@ way its CLI writes it (Codex's own `Error:` line, past its MCP servers' logs).
 Codex's models and efforts come from `codex debug models` (the ones it lists);
 naming falls back to Codex last, only on its login.
 
+### Connect your Claude
+
+A person can put a drive's Claude on their own Pro or Max plan from the
+browser, without a terminal. The sheet that does it opens from Agents ›
+Settings › Claude, and from any page that fires
+`document.dispatchEvent(new CustomEvent('marble:connect-claude'))`.
+
+Pressing Open Claude sign-in asks the host (`POST /agent/claude/sign-in`) to
+run `claude setup-token` in a pseudo-terminal and answer the sign-in address
+it prints. The page opens that address in a new tab. Claude's page shows a
+code; the person pastes it into the sheet, and `POST
+/agent/claude/sign-in/code` hands it to the same run. The long-lived token it
+prints is kept in the agent keys file as `claude`, next to the API keys, and
+reaches `claude-subscription` as `CLAUDE_CODE_OAUTH_TOKEN`. The switch moves
+to the login, and a default of Claude moves with it. `claude-api` never sees
+the token. Settings › Claude then says "On your Claude plan", with Disconnect.
+
+The pseudo-terminal is the system's `script` (`server/agent/claude-signin.js`),
+not a native module, and it is made 1000 columns wide so nothing wraps. Only
+one sign-in runs at a time. A sign-in with no code after
+`MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS` (600) is killed, and so is one the sheet
+was closed on. The routes sit behind the gate like every `/agent` route.
+
+What `claude setup-token` prints was read from Claude Code 2.1.281 on Linux,
+with a fresh HOME and `BROWSER=false`. It asks nothing first, tries to open a
+browser, and after about three seconds prints the address, both as a terminal
+hyperlink and as text, then `Paste code here if prompted >`. A pasted code
+reaches it through the pseudo-terminal. A wrong code gets `OAuth error:
+Request failed with status code 400` and `Press Enter to retry`, which the
+host reads as a refusal and ends the run. A good code gets `Your OAuth token
+(valid for 1 year):` and the `sk-ant-oat…` token on its own line.
+`test/fixtures/fake-claude-setup-token.mjs` draws the same screen. Record it
+again if a new Claude Code changes it.
+
+Not yet tried end to end with a real sign-in. The first real one should be on
+t-bryan: open Agents › Settings, choose Claude login, press Connect your
+Claude, sign in, paste the code, and send a chat. If the code is refused
+there, the fallback is Codex's `--device-auth` pattern, where the person
+types a short code on Anthropic's page instead. The sheet stays the same.
+
 ## The drawer
 
 Every document gets a launcher (bottom right, `⌘J`). The drawer slides over the
