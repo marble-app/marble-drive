@@ -281,6 +281,8 @@
       usage: () => ask('/agent/usage'),
       // Whether this drive can hear and speak, and how it was set to.
       voice: () => ask('/agent/voice'),
+      // An OpenAI key for voice, checked with OpenAI before it is kept.
+      voiceKey: (key) => ask('/agent/voice/key', { method: 'POST', body: { key } }),
       asks: () => ask('/agent/asks'),
       usageHistory: (weeks) => ask(weeks ? `/agent/usage/history?weeks=${enc(weeks)}` : '/agent/usage/history'),
       workspace: () => ask('/agent/workspace'),

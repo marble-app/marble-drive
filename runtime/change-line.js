@@ -1404,6 +1404,10 @@
     const isQuestion = (text) => /\?\s*$/.test(text) || QUESTION.test(String(text).trim());
 
     function ended(s, event) {
+      // A line said aloud is answered aloud, as the composer's are
+      // (agent-ui.js speakEnded). The line listens from phase 2 (hold ⌘J);
+      // until then nothing marks one spoken.
+      if (s.spoken && s.turn && event.type !== 'turn.removed') globalThis.marbleVoice?.play(`/agent/turns/${encodeURIComponent(s.turn)}/speech`);
       s.turn = null;
       s.awaiting = false;
       s.stop = false;
