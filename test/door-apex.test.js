@@ -165,6 +165,22 @@ test('no invite: open by invitation, Ask for access records it once, and says wh
   assert.equal((await b.go('/')).headers.get('location'), '/name');
 });
 
+test('/ask before signing in, as from a share page: sign in to ask; signed in already, on as usual', async () => {
+  const w = world();
+  const stranger = await w.b().go('/ask');
+  assert.equal(stranger.status, 200);
+  const page = await text(stranger);
+  assert.match(page, /Sign in, then ask Bryan for one/);
+  assert.match(page, /Continue with Google/);
+  const code = await w.invite();
+  const ana = w.b();
+  await signInWith(ana, 'google', { invite: code, fake: w.fake });
+  await ana.form('/name', { name: 'ana' });
+  const back = await ana.go('/ask');
+  assert.equal(back.status, 303);
+  assert.equal(back.headers.get('location'), '/');
+});
+
 test('/enter: the owner gets a grant for their drive; anyone else is told it isn’t theirs, and not whose it is', async () => {
   const w = world();
   const code = await w.invite({ uses: 2 });

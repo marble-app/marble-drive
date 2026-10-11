@@ -205,17 +205,19 @@ function providerButtons(providers, { invite = null, to = null } = {}) {
   return `<div class="stack">${buttons.join('')}</div>`;
 }
 
-export function signIn({ providers, to = null, drive = null }) {
+export function signIn({ providers, to = null, drive = null, asking = false }) {
   const lede = drive
     ? `Sign in to open <span class="addr">${esc(drive)}.${APEX_HOST}</span>.`
-    : 'Documents that are apps, in a drive of your own.';
+    : asking
+      ? 'Documents that are apps, in a drive of your own. Sign in, then ask Bryan for one.'
+      : 'Documents that are apps, in a drive of your own.';
   return page({
     title: 'Sign in · Marble Drive',
     body: `<section class="card">
 <h1>Sign in</h1>
 <p class="lede">${lede}</p>
 ${providerButtons(providers, { to })}
-<p class="small">New here? You need an invite link from Bryan.</p>
+<p class="small">${asking ? 'Have an invite link from Bryan? Open it instead.' : 'New here? You need an invite link from Bryan.'}</p>
 </section>
 ${foot}`,
   });
