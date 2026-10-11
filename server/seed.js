@@ -1,8 +1,8 @@
 // What a brand new drive has in it after the host seeds it.
 //
-// The Drive document, the Agents library, the Chat app, the Board, the
-// Design System and its Don'ts — each written once, the first time the host
-// sees the drive without it.
+// The Drive document, the Agents library, the Chat app, the Board, and the
+// Design System and its Don'ts in a System folder — each written once, the
+// first time the host sees the drive without it.
 // Not because a drive should arrive full, but because the alternative is a host
 // that serves a folder with nothing in it and an address that 404s — and because
 // the Drive being an ordinary document in the drive is the claim this whole repo
@@ -49,10 +49,18 @@ export async function buildDrive({ name = 'drive', title = 'My Drive' } = {}) {
  * version it was built from is remembered too, which is the base
  * server/app-updates.js merges from when the template moves on.
  */
-async function seedOnce(store, appId, name, build) {
+async function seedOnce(store, appId, name, build, { before = [] } = {}) {
   const manifest = await readManifest(store.marbleDir);
   const known = manifest.seeded[appId];
   if (known) return { seeded: false, path: known };
+  // Where an earlier release seeded it: a drive from before the manifest that
+  // has it there keeps it there, rather than getting a second copy.
+  for (const earlier of before) {
+    if (earlier === name || !(await store.has(earlier))) continue;
+    manifest.seeded[appId] = earlier;
+    await writeManifest(store.marbleDir, manifest);
+    return { seeded: false, path: earlier };
+  }
   if (!(await store.has(name))) {
     await store.write(name, await build(), { label: 'seeded' });
     const source = currentSource(appById(appId));
@@ -115,8 +123,13 @@ export async function buildDesignSystem({ title = 'Design system' } = {}) {
     .replace(/__ID__/g, () => newId());
 }
 
-export async function seedDesignSystem(store, { name = 'Design System', title = 'Design system' } = {}) {
-  return seedOnce(store, 'design-system', name, () => buildDesignSystem({ title }));
+/** The folder a new drive keeps the pages that are for its agents more than
+ *  for its person. `.marble/apps.json` records where each one went, which is
+ *  where the design-system skill and the agents' instructions look. */
+export const SYSTEM_FOLDER = 'System';
+
+export async function seedDesignSystem(store, { name = `${SYSTEM_FOLDER}/Design System`, title = 'Design system' } = {}) {
+  return seedOnce(store, 'design-system', name, () => buildDesignSystem({ title }), { before: ['Design System'] });
 }
 
 /** The design system's other half: what the drive's apps refuse — the tells
@@ -131,8 +144,8 @@ export async function buildDesignDonts({ title = "Design don'ts" } = {}) {
     .replace(/__ID__/g, () => newId());
 }
 
-export async function seedDesignDonts(store, { name = "Design Don'ts", title = "Design don'ts" } = {}) {
-  return seedOnce(store, 'design-donts', name, () => buildDesignDonts({ title }));
+export async function seedDesignDonts(store, { name = `${SYSTEM_FOLDER}/Design Don'ts`, title = "Design don'ts" } = {}) {
+  return seedOnce(store, 'design-donts', name, () => buildDesignDonts({ title }), { before: ["Design Don'ts"] });
 }
 
 /** The Console: every drive, from one page. Only where the console is on

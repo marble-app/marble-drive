@@ -23,7 +23,7 @@ const port = await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', 
 test.after(() => drive.close());
 
 test('the seeded Drive, Agents, Design System and Design Don\'ts pages name nobody\'s folders', async () => {
-  for (const doc of ['drive', 'Agents', 'Design System', "Design Don'ts"]) {
+  for (const doc of ['drive', 'Agents', 'System/Design System', "System/Design Don'ts"]) {
     const source = await drive.store.read(doc);
     assert.ok(source, `${doc} was seeded`);
     assert.doesNotMatch(source, /Bryan/, `${doc} names the owner`);
