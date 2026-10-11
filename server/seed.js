@@ -151,6 +151,22 @@ export async function seedDesignDonts(store, { name = `${SYSTEM_FOLDER}/Design D
   return seedOnce(store, 'design-donts', name, () => buildDesignDonts({ title }), { before: ["Design Don'ts"] });
 }
 
+/** Projects: the drive's work grouped by what it is for, beside Agents. Its
+ *  file holds only the owner's projects; the views are the host's
+ *  (runtime/projects.js), so like the Console it never needs patching for
+ *  them, and a new drive starts with no projects and its chats' suggestions. */
+export async function buildProjects({ title = 'Projects' } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'projects.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedProjects(store, { name = 'Projects', title = 'Projects' } = {}) {
+  return seedOnce(store, 'projects', name, () => buildProjects({ title }));
+}
+
 /** The Console: every drive, from one page. Only where the console is on
  *  (admin-p2); its code is the host's (runtime/console.js), so the file is a
  *  place, not a program, and never needs patching. */

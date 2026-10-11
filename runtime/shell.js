@@ -78,7 +78,7 @@
   ];
   // The pages a drive is seeded with, at its top, as the Drive names them
   // (templates/drive.mrbl, SYSTEM). The host may say so on the entry instead.
-  const SYSTEM = new Set(['drive', 'Agents', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"]);
+  const SYSTEM = new Set(['drive', 'Agents', 'Projects', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"]);
   // The three apps New can send a sentence to, as the Drive's New menu has
   // them, and which one Enter goes to: the one used last, shared with it.
   const PROMPT_APPS = [
@@ -2649,7 +2649,7 @@
       const pop = this.settingsPop;
       const chips = pop.querySelector('.chips');
       chips.replaceChildren();
-      const order = [HOME_DOC, 'Agents', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"];
+      const order = [HOME_DOC, 'Agents', 'Projects', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"];
       const apps = this.docs().filter((d) => this.isSystem(d))
         .sort((a, b) => (order.indexOf(a.path) + 1 || 99) - (order.indexOf(b.path) + 1 || 99));
       for (const d of apps) {
