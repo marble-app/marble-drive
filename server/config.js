@@ -255,6 +255,8 @@ export function loadConfig(env = process.env) {
     // Where a pasted API key is checked before it is kept (server/agent/key-check.js).
     anthropicBase: str('MARBLE_DRIVE_ANTHROPIC_BASE', 'https://api.anthropic.com'),
     openaiBase: str('MARBLE_DRIVE_OPENAI_BASE', 'https://api.openai.com'),
+    // The longest clip voice sends to be written down (server/agent/voice).
+    voiceMaxSeconds: num('MARBLE_DRIVE_VOICE_MAX_SECONDS', 120),
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),

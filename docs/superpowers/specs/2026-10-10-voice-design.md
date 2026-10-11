@@ -10,7 +10,48 @@ still read and change documents while you talk.
 
 The readable copy, with mockups, is the drive page **Notes and Sketches/Agents
 and Chat/Voice**. The plan is `docs/superpowers/plans/2026-10-10-voice.md`.
-Nothing here is built.
+Phase 1 (talk in the composer, hear the answer, Settings › Voice) is built on
+the `voice` branch; how it works is `docs/AGENTS.md`, "Voice". Phases 2 and 3
+and v2 are not.
+
+## Checked against OpenAI's docs, 2026-10-10
+
+Before building, every OpenAI name this spec relies on was checked against
+developers.openai.com:
+
+- `gpt-transcribe` is real: "the recommended model for transcribing recorded
+  speech", $0.0045 a minute, on `POST /v1/audio/transcriptions`. Its hints go
+  as multipart fields: `prompt` (free text), `keywords[]` (one field per term)
+  and `languages[]`. The answer is `{ text, languages }`. Files up to 25 MB, in
+  mp3, mp4, mpeg, mpga, m4a, wav or webm. The host sends `file`, `model` and
+  `keywords[]`; for `whisper-1` it sends the terms as `prompt` instead.
+- `gpt-4o-mini-tts` is still the speech model the docs name, on
+  `POST /v1/audio/speech` with `model`, `voice`, `input`, `instructions` and
+  `response_format` (mp3 by default; opus, aac, flac, wav, pcm). Thirteen
+  voices: alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer,
+  verse, marin and cedar, with marin and cedar "for best quality". The docs
+  repeat that a listener must be told the voice is AI-generated.
+- `gpt-live-transcribe` exists for live transcription. `gpt-live-1` and
+  `gpt-realtime-2.1` (v2) were not checked: nothing in phase 1 uses them;
+  the v2 spike checks them first.
+
+Nothing in the spec had to change. Speed is left at the model's own: the
+docs do not promise `speed` on `gpt-4o-mini-tts`, so pace is asked for in
+`instructions` ("an even, unhurried pace").
+
+## As built, where it differs
+
+- **Speaking.** The spec has the microphone become Stop while a reply plays,
+  and also has Talk stop the reply and listen. Both cannot be one button, so
+  Talk stays the microphone (press it to talk over the reply) and the bar
+  under the box says "Speaking", with the trace and a Stop word beside it.
+  Esc stops it too.
+- **A turn waiting on an OK** is spoken as soon as it asks, not when it ends:
+  the speech route answers a running turn that holds an open ask with "It
+  needs your OK. It's on the screen."
+- **The ⌘J line** plays a spoken line's reply when it ends (`change-line.js`
+  `ended()`), but nothing marks a line spoken until phase 2 gives it a
+  microphone.
 
 ## What is there today
 
@@ -297,6 +338,28 @@ to do:
 - Transcribing on the home machine; streaming partial words; keeping audio.
 
 ## Open questions
+
+**Defaulted, pending Bryan.** Phase 1 was built before these were answered.
+Each takes the proposal below, and each that was cheap to make a choice is a
+choice in Settings › Voice:
+
+- (1) The microphone is drawn only on a drive with an OpenAI key; without one,
+  Settings › Voice says "Voice needs an OpenAI key on this drive." and offers
+  the field (the same key as Codex).
+- (2) What you say is sent when you stop. "Send when I stop" (on) turns it
+  off, and then the words wait in the box. Pressing the box while they are
+  being written down keeps them there either way.
+- (3) Said while a turn runs, it steers. "Said while a chat is working" can
+  be Queue instead.
+- (4) Replies are read aloud only when you spoke ("Read replies aloud": When I
+  spoke, Always, Never). Read aloud under any reply reads it.
+- (5) The voice is marin, at the model's normal pace. All thirteen are in the
+  list, with Play sample.
+- (6) No spoken line while a long turn works: that is phase 2.
+- (8) No transcription on the PC.
+- (9) Friends' drives: voice is off unless the drive has its own OpenAI key.
+  Voice never uses the owner's login, so this needs no switch.
+- (7) v2 is not started.
 
 1. Will you put an OpenAI API key on the drive for voice (about 2¢ a minute
    of talk)? Codex may be on your ChatGPT login, which cannot pay for audio.

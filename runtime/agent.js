@@ -279,6 +279,10 @@
       connectAgent: (provider, key) => ask('/agent/setup', { method: 'POST', body: { provider, key } }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
+      // Whether this drive can hear and speak, and how it was set to.
+      voice: () => ask('/agent/voice'),
+      // An OpenAI key for voice, checked with OpenAI before it is kept.
+      voiceKey: (key) => ask('/agent/voice/key', { method: 'POST', body: { key } }),
       asks: () => ask('/agent/asks'),
       usageHistory: (weeks) => ask(weeks ? `/agent/usage/history?weeks=${enc(weeks)}` : '/agent/usage/history'),
       workspace: () => ask('/agent/workspace'),
@@ -321,7 +325,7 @@
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
 
-      send(id, { prompt, target, viewing, selection, also, dispatch, surface, brief } = {}) {
+      send(id, { prompt, target, viewing, selection, also, dispatch, surface, brief, spoken } = {}) {
         const here = context();
         const body = {
           prompt,
@@ -341,6 +345,9 @@
         // Where it was typed, when that is an app for talking rather than a
         // document being worked on. Only `chat` is understood.
         if (surface) body.context.surface = surface;
+        // Said aloud (runtime/voice.js): the agent is asked for a reply that
+        // sounds right spoken, and the chat marks the prompt "Said aloud".
+        if (spoken === true) body.context.spoken = true;
         // Sending is attending: whatever this tab just asked of an agent is
         // what this tab is following, and may draw its work on the page.
         agent.attend(id);

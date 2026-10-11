@@ -1354,6 +1354,36 @@ test('a turn sent from the Chat app is told to answer, not to edit the app', asy
   await runner.close();
 });
 
+test('a spoken turn is told its reply will be heard, once, after the Chat app line', async () => {
+  const { store, runner, spawned } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'Chat', viewing: 'Chat', surface: 'chat', spoken: true } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  const prompt = spawned.at(-1).prompt;
+  const said = prompt.indexOf('They said this aloud, and your reply will be read aloud to them.');
+  assert.ok(said > 0);
+  assert.equal(prompt.indexOf('They said this aloud', said + 1), -1, 'once');
+  assert.ok(prompt.indexOf('Sent from the Chat app') < said, 'after the Chat app line');
+  assert.match(prompt, /no lists, headings, tables, code, links, file paths or ids/);
+  assert.match(prompt, /if a word doesn't fit, take the nearest document or term that does/);
+  assert.equal((await store.turn(`${id}-t1`)).context.spoken, true);
+  const user = (await store.events(id)).find((e) => e.type === 'user');
+  assert.equal(user.spoken, true);
+  await runner.close();
+});
+
+test('a typed turn is not told it will be heard', async () => {
+  const { store, runner, spawned } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'garden', viewing: 'garden', spoken: 'yes' } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  assert.doesNotMatch(spawned.at(-1).prompt, /They said this aloud/);
+  assert.equal((await store.turn(`${id}-t1`)).context.spoken, undefined);
+  const user = (await store.events(id)).find((e) => e.type === 'user');
+  assert.equal(user.spoken, undefined);
+  await runner.close();
+});
+
 test('a conversation whose project is gone fails its turn plainly', async () => {
   const { store, runner } = await setup({ capability: 'full' });
   const { id } = await store.createConversation({ provider: 'fake', project: 'gone' });
@@ -1540,6 +1570,19 @@ test('a steer that waited wraps the model prompt, not the user event', async () 
   assert.equal(user.text, 'script:hello\nkeep going');
   const echoed = (await store.events(id)).find((e) => e.turn === second.turnId && e.type === 'text');
   assert.match(echoed.text, /^prompt:While you were working I added this note/);
+  await runner.close();
+});
+
+test('a spoken steer still opens with the course-correction note', async () => {
+  const { store, runner, spawned } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const first = await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } });
+  const second = await runner.send(id, { prompt: 'script:hello\nactually the other one', context: { target: 'd', spoken: true }, dispatch: 'steer' });
+  await finished(store, first.turnId);
+  await finished(store, second.turnId);
+  const prompt = spawned.at(-1).prompt;
+  assert.match(prompt, /^While you were working I added this note/);
+  assert.match(prompt, /They said this aloud/);
   await runner.close();
 });
 
