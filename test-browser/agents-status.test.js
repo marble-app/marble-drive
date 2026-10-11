@@ -34,8 +34,8 @@ const working = async (title, { began, stepped, words }) => {
   return id;
 };
 
-const quietId = await working('Stuck build', { began: 30 * MIN, stepped: 12 * MIN, words: 'Running a command' });
-const busyId = await working('Builder', { began: 2 * MIN, stepped: 10_000, words: 'Changing garden' });
+const quietId = await working('Stuck build', { began: 30 * MIN, stepped: 12 * MIN, words: 'Testing that it works' });
+const busyId = await working('Builder', { began: 2 * MIN, stepped: 10_000, words: 'Updating garden' });
 
 const openAgents = async (options = {}) => {
   const { page, errors } = await host.newPage(options);
@@ -52,7 +52,7 @@ test('Glance on the bar leads with the work going on, and a chat with no step fo
   const { page, errors } = await openAgents();
   const glance = page.locator('.topbar .glance');
   await page.waitForFunction(() => document.querySelector('.topbar .glance .glance-lead')?.textContent === '2 working');
-  assert.equal(await glance.locator('.glance-sub').textContent(), 'Builder: Changing garden');
+  assert.equal(await glance.locator('.glance-sub').textContent(), 'Builder: Updating garden');
   assert.equal(await glance.getAttribute('data-lead'), 'working');
   assert.equal(await glance.locator('.dot').getAttribute('data-state'), 'running');
   assert.equal(await glance.isEnabled(), true);
@@ -81,7 +81,7 @@ test('a working chat goes Quiet on its own, with nothing arriving to say so', as
   await page.waitForFunction((id) => document.querySelector(`.conv[data-id="${id}"] > .dot`)?.dataset.state === 'quiet', busyId);
   // Both are quiet now; the bar still says two are working, and says how long.
   assert.equal(await page.locator('.topbar .glance .glance-lead').textContent(), '2 working');
-  assert.match(await page.locator('.topbar .glance .glance-sub').textContent(), /^Builder: Quiet for \d+ min, last changing garden$/);
+  assert.match(await page.locator('.topbar .glance .glance-sub').textContent(), /^Builder: Quiet for \d+ min, last updating garden$/);
   assert.equal(await page.locator('.topbar .glance .dot').getAttribute('data-state'), 'quiet');
   assert.deepEqual(errors, []);
   await page.close();
@@ -109,7 +109,7 @@ test('below desk width the bar keeps the lead and drops the chat\'s line; the ph
   await page.waitForFunction(() => document.querySelector('.topbar .glance .glance-lead')?.textContent === '2 working');
   assert.equal(await glance.isVisible(), true);
   assert.equal(await glance.locator('.glance-sub').isVisible(), false);
-  assert.match(await glance.getAttribute('title'), /^Builder: Changing garden/);
+  assert.match(await glance.getAttribute('title'), /^Builder: Updating garden/);
   // Nothing on the bar runs past its edge.
   const overflow = await page.evaluate(() => {
     const bar = document.querySelector('.topbar');

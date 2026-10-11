@@ -3,6 +3,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+// The card's words come first, as the page and the host load them.
+import '../runtime/agent-words.js';
 import '../runtime/agent-status.js';
 
 const S = () => globalThis.marbleAgentStatus;
@@ -46,18 +48,18 @@ test('only a running turn is ever Quiet: a question, the queue and finished chat
 
 test('a step in plain words, and what a summary keeps of it', () => {
   const { stepWords, stepOf, kindOf } = S();
-  assert.equal(stepWords({ type: 'tool.call', name: 'mcp__marble__apply_ops', input: { path: 'Notes/Ai2 Project Notes.mrbl', ops: [] } }), 'Changing Ai2 Project Notes');
-  assert.equal(stepWords({ type: 'tool.call', name: 'Bash', input: { command: 'npm test' } }), 'Running a command');
-  assert.equal(stepWords({ type: 'tool.call', name: 'Read', input: { file_path: '/drive/Design System.mrbl' } }), 'Reading Design System');
-  assert.equal(stepWords({ type: 'tool.call', name: 'mcp__browser__browser_click', input: {} }), 'Looking at the page in the browser');
-  assert.equal(stepWords({ type: 'tool.call', name: 'Agent', input: {} }), 'Working with helpers');
-  assert.equal(stepWords({ type: 'ask', tool: 'Bash', displayName: 'Bash' }), 'Asking you to allow Bash');
-  assert.equal(stepWords({ type: 'ask', tool: 'AskUserQuestion' }), 'Asking you a question');
+  assert.equal(stepWords({ type: 'tool.call', name: 'mcp__marble__apply_ops', input: { path: 'Notes/Ai2 Project Notes.mrbl', ops: [] } }), 'Updating Ai2 Project Notes');
+  assert.equal(stepWords({ type: 'tool.call', name: 'Bash', input: { command: 'npm test' } }), 'Testing that it works');
+  assert.equal(stepWords({ type: 'tool.call', name: 'Read', input: { file_path: '/drive/Design System.mrbl' } }), 'Reading through the files');
+  assert.equal(stepWords({ type: 'tool.call', name: 'mcp__browser__browser_click', input: {} }), 'Clicking around the page');
+  assert.equal(stepWords({ type: 'tool.call', name: 'Agent', input: {} }), 'Handing part of the work to a helper');
+  assert.equal(stepWords({ type: 'ask', tool: 'Bash', displayName: 'Bash' }), 'Needs your OK');
+  assert.equal(stepWords({ type: 'ask', tool: 'AskUserQuestion' }), 'Needs your answer');
   assert.equal(stepWords({ type: 'text', text: 'hello' }), null);
   assert.equal(kindOf({ type: 'tool.result' }), null);
 
   const step = stepOf({ seq: 9, t: NOW, turn: 'abc-t2', type: 'tool.call', name: 'Write', input: { file_path: '/x/Plan.mrbl', content: 'x'.repeat(50_000) } });
-  assert.deepEqual(step, { t: NOW, turn: 'abc-t2', kind: 'change', tool: 'Write', words: 'Changing Plan' });
+  assert.deepEqual(step, { t: NOW, turn: 'abc-t2', kind: 'change', tool: 'Write', words: 'Writing a new piece' });
   assert.ok(JSON.stringify(step).length < 200, 'a summary carries none of the input');
   assert.equal(stepOf({ type: 'text', t: NOW }), null);
 });

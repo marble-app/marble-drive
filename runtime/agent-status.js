@@ -48,10 +48,14 @@
     return p ? leaf(p) : null;
   };
 
-  /** A step in the words a person would use for it, or null. */
+  /** A step in the words a person would use for it, or null. They are the
+   *  progress card's words (runtime/agent-words.js) wherever that is loaded,
+   *  so a chat says the same thing in its card, its row and here. */
   const stepWords = (e) => {
     const kind = kindOf(e);
     if (!kind) return null;
+    const card = globalThis.marbleAgentWords;
+    if (card) return e.type === 'ask' ? card.askSay(e) : card.plainStep(toolOf(e), e.input ?? {}).say;
     if (e.type === 'ask') {
       if (e.tool === 'AskUserQuestion') return 'Asking you a question';
       return `Asking you to allow ${e.displayName || e.tool || 'a step'}`;
