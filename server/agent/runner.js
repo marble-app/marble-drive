@@ -1009,9 +1009,21 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (lostSession) {
       error = `${error} — the provider no longer has this conversation's session; the next message starts a new one`;
     }
+    // Starter credit spent (worker/src/credit.js): said in the drive's words,
+    // and marked so the page can offer Connect your Claude. Not a usage
+    // window, so nothing is handed off.
+    let creditOut = false;
+    if (status === 'failed' && error && typeof turn.provider?.creditUsedUp === 'function') {
+      try {
+        creditOut = Boolean(turn.provider.creditUsedUp(error));
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
+    }
+    if (creditOut) error = 'Starter credit used up.';
     let usageMark = null;
     let pendingHandoff = false;
-    if (!lostSession && status === 'failed') {
+    if (!lostSession && !creditOut && status === 'failed') {
       const meta = await store.conversation(turn.conversationId);
       if (usageHandoffDue({ provider: turn.provider?.id, usageLane: meta?.usageLane, error })) {
         const ready = await cursorReadiness(meta);
@@ -1052,7 +1064,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           // did after the host restarts (store.summary).
           ...(store.lastStep?.(turn.conversationId) ? { lastStep: store.lastStep(turn.conversationId) } : {}),
         });
-        await emit(turn, { type: `turn.${status}`, applied, ...(error ? { error } : {}), ...(usageMark ?? {}) });
+        await emit(turn, { type: `turn.${status}`, applied, ...(error ? { error } : {}), ...(usageMark ?? {}), ...(creditOut ? { creditUsedUp: true } : {}) });
       } finally {
         // The terminal status is the LAST store write. Anyone polling the
         // turn (tests, GET /agent/conversations/:id, the UI) treats a
@@ -1067,6 +1079,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           applied,
           usage: turn.usage,
           ...(usageMark ? { usageStopped: true, canSwitch: usageMark.canSwitch } : {}),
+          ...(creditOut ? { creditUsedUp: true } : {}),
         });
       }
     } finally {

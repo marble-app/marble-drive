@@ -179,3 +179,25 @@ test('a share link through the edge still reaches its page', async (t) => {
   assert.match(share, /^marble_share=/);
   assert.equal((await h.call(opened.headers.get('location'), { headers: { cookie: share, ...html, ...viaEdge } })).status, 200);
 });
+
+test('a share page offers Ask for access at the door; the owner’s view does not, and a drive with no door offers nothing', async (t) => {
+  const look = async (env) => {
+    const h = await host(env);
+    t.after(() => h.close());
+    const owner = await gateCookie(h);
+    const made = await h.call('/drive/shares', { method: 'POST', headers: { cookie: owner, 'Content-Type': 'application/json', Origin: h.base }, body: JSON.stringify({ path: 'Notes', role: 'view' }) });
+    const { link } = await made.json();
+    const opened = await h.call(link.href, { headers: html });
+    const visitor = (opened.headers.get('set-cookie') ?? '').split(';')[0];
+    return {
+      visitor: await (await h.call('/a/Notes', { headers: { cookie: visitor, ...html } })).text(),
+      owner: await (await h.call('/a/Notes', { headers: { cookie: owner, ...html } })).text(),
+    };
+  };
+  const on = await look(DOOR);
+  assert.match(on.visitor, /runtime\/share\.js[^"]*" data-role="view" data-door="https:\/\/marbledrive\.app\/ask"/);
+  assert.doesNotMatch(on.owner, /data-door=|runtime\/share\.js/);
+  const off = await look({});
+  assert.match(off.visitor, /runtime\/share\.js[^"]*" data-role="view" data-marble-transient/);
+  assert.doesNotMatch(off.visitor, /data-door=/);
+});

@@ -40,6 +40,7 @@ import { build as buildStarter, list as listStarters, preview as starterPreview 
 import { createChannels, forVisitor, lookFrame } from './sse.js';
 import { createStore } from './store/index.js';
 import { readDriveSettings } from './drive-settings.js';
+import { startHereFor } from './start-here.js';
 import { createAwakeClock, createProgress } from './awake.js';
 import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
@@ -424,7 +425,10 @@ export async function createDrive(config, { log = console, agentProviders = null
     // their link lets them do, and keeps a read-only page read-only.
     if (visit) {
       tags += `\n<script src="${runtimeUrl('collab.js')}" data-marble-transient></script>`;
-      tags += `\n<script src="${runtimeUrl('share.js')}" data-role="${escapeHtml(visit.role)}" data-marble-transient></script>`;
+      // With the door on, the page ends with a quiet "Make your own" that
+      // goes to Ask for access; with it off there is nowhere to send them.
+      const ask = door.askUrl ? ` data-door="${escapeHtml(door.askUrl)}"` : '';
+      tags += `\n<script src="${runtimeUrl('share.js')}" data-role="${escapeHtml(visit.role)}"${ask} data-marble-transient></script>`;
       return source.includes('</body>')
         ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
         : source + tags;
@@ -918,6 +922,10 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (await genui.handle(req, res, url)) return;
 
       if (route === '/') {
+        // A new drive's first visits open Start here, until it is deleted or
+        // all three of its rows are ticked (server/start-here.js).
+        const first = await startHereFor(store, req);
+        if (first) return send(res, 302, '', { Location: `/a/${encodeURIComponent(first)}` });
         // Land on the Drive if it is there. It is an ordinary document with no
         // standing, so deleting it falls back to whatever exists.
         const landing = (await store.has(config.home))

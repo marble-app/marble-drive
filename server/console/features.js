@@ -427,7 +427,7 @@ export async function collect({ driveDir, src, days = 14, now = Date.now(), home
 // ------------------------------------------------------------------ draft
 
 const LEAD = /^([A-Z][\w .'-]{1,30}?):\s/;
-const APPS = new Set(['Agents', 'drive', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"]);
+const APPS = new Set(['Agents', 'drive', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts", 'System/Design System', "System/Design Don'ts"]);
 
 /** A first grouping, by rules only (the order the spec gives): a spec page,
  *  a worktree, a chat's own commits, a commit subject's lead. What it cannot

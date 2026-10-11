@@ -13,6 +13,7 @@
 // no owner yet (bryan, until a claim invite hands it over) is routed exactly
 // as before.
 
+import { CREDIT_PATH, credit } from './credit.js';
 import { apex, clearPass, doorReady, edgeVerifyKeys, mintPass, passCookie, PASS_COOKIE } from './door/apex.js';
 import { directory } from './door/directory.js';
 import { readCookie } from './door/oauth.js';
@@ -158,6 +159,9 @@ const making = () => page(503, 'This drive is still being made', 'Try again in a
 export async function route(request, env, { fetchImpl = fetch, now = Date.now(), ctx = null } = {}) {
   const url = new URL(request.url);
   const host = url.hostname;
+  // Starter credit's proxy (worker/src/credit.js): on with its own key,
+  // whether or not the door is, so a drive made by hand can use it.
+  if (host === APEX && (url.pathname === CREDIT_PATH || url.pathname.startsWith(`${CREDIT_PATH}/`))) return credit(request, env, { fetchImpl, ctx });
   // The apex is the door once it is switched on (worker/src/door/apex.js),
   // and the placeholder until then.
   if (host === APEX || host === `www.${APEX}`) return doorReady(env) ? apex(request, env, { fetchImpl, now, ctx }) : placeholder();

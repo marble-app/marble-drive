@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<!-- A page to use, not an app to build: it opens ready to type in, and ⌘J
+     is the way to ask for a change (runtime/agent-marks.js, Build mode). -->
+<meta name="marble-build" content="off">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* ------------------------------------------------------------------ tokens
+
+     The first page a new drive opens on (server/seed.js, the / route in
+     server/app.js). It is an ordinary document: three things to try, each a
+     row that ticks itself in the file when it has been tried, and a question
+     whose answer becomes the person's first real document. The tokens are the
+     Design System's, written once as light-dark() pairs. */
+  :root {
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    --paper: light-dark(#fafaf7, #16181a);
+    --paper-2: light-dark(#f3f1ea, #1e2124);
+    --paper-3: light-dark(#eceae1, #262a2e);
+    --card: light-dark(#ffffff, #1c1f22);
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --shadow: 0 1px 2px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.28)), 0 2px 4px light-dark(rgba(74,66,52,.03), rgba(0,0,0,.18));
+    --r: 12px;
+    --r-sm: 8px;
+    --r-text: 4px;
+    --pill: 999px;
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms;
+    --t: 200ms;
+    --ui: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  /* Width answers are asked of the root, not the window: a chat docked
+     beside the page shrinks <html> and leaves the viewport alone. */
+  html { container: page / inline-size; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--card); color: var(--ink);
+    font: 14px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+
+  /* One reading column: a page of three things is read top to bottom. */
+  .page { max-width: 40rem; margin: 0 auto; padding: 3.5rem 2.75rem 6rem; }
+  h1 { margin: 0 0 .5rem; font-size: 1.65rem; font-weight: 500; letter-spacing: -.015em; line-height: 1.2; }
+  .lede { margin: 0 0 2rem; color: var(--muted); font-size: .95rem; line-height: 1.55; text-wrap: pretty; }
+
+  /* ------------------------------------------------------------------ rows
+
+     The three are one list, with hairlines between them and no card around
+     each: a card is for a thing you move, and these stay where they are. The
+     number is the row's state. Done, it fills with ink and becomes a tick,
+     the state dot's "review" (Design System, Components). Whether a row is
+     done is one attribute on the row, data-done, filed as an op, so it is in
+     the file and comes back on reload. */
+  .steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  .step {
+    display: grid; grid-template-columns: 1.75rem minmax(0, 1fr); gap: .9rem;
+    padding: 1.35rem 0 1.5rem; border-bottom: 1px solid var(--line);
+  }
+  .num {
+    width: 1.75rem; height: 1.75rem; margin-top: -.1rem; border-radius: 999px;
+    display: grid; place-items: center;
+    border: 1px solid var(--line); color: var(--muted);
+    font: 600 .8rem/1 var(--ui); font-variant-numeric: tabular-nums;
+    transition: background var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .num svg { display: none; width: 14px; height: 14px; }
+  .step[data-done="yes"] .num { background: var(--ink); border-color: var(--ink); color: var(--card); }
+  .step[data-done="yes"] .num .digit { display: none; }
+  .step[data-done="yes"] .num svg { display: block; }
+  .step h2 { position: relative; margin: 0; font-size: 1rem; font-weight: 500; letter-spacing: -.005em; line-height: 1.4; }
+  /* Said to a screen reader, which cannot see the tick. */
+  .step[data-done="yes"] h2::after {
+    content: ", done"; position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .note { margin: .15rem 0 0; color: var(--muted); font-size: .9rem; text-wrap: pretty; }
+  kbd {
+    display: inline-block; min-width: 1.5em; text-align: center; padding: 0 .3em;
+    font: .86em/1.4 var(--mono); color: var(--muted);
+    border: 1px solid var(--line); border-radius: 4px; background: none;
+  }
+
+  /* ----------------------------------------------------------------- fields
+
+     A field is editable text in a box: one hairline all the way round, the
+     tint under the pointer, and the accent ring while it has the caret.
+     Empty, it says what goes in it. */
+  .field {
+    margin: .75rem 0 0; min-height: 2.6rem; padding: .55rem .75rem;
+    border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card);
+    outline: none; overflow-wrap: anywhere; cursor: text;
+    transition: background var(--t-fast) var(--snap), box-shadow var(--t-fast) var(--snap);
+  }
+  .field:hover { background: var(--accent-soft); }
+  .field:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  .field:empty::before { content: attr(data-placeholder); color: var(--placeholder); pointer-events: none; }
+
+  /* --------------------------------------------------------- the question
+
+     Four answers to start from, as outline pills because choosing one is a
+     setting on the answer, not the page's action. The one action is Make it,
+     filled with ink. */
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .85rem 0 0; }
+  .chip {
+    appearance: none; border: 1px solid var(--line); background: none; color: var(--muted);
+    padding: .3rem .8rem; border-radius: var(--pill); cursor: pointer; font-size: .85rem;
+    transition: color var(--t) var(--ease), background var(--t) var(--ease), border-color var(--t) var(--ease);
+  }
+  .chip:hover { color: var(--ink); background: var(--paper-3); }
+  .chip[aria-pressed="true"] { color: var(--ink); background: var(--accent-soft); border-color: var(--accent); }
+  .ask { display: flex; gap: .5rem; align-items: flex-start; }
+  .ask .field { flex: 1 1 auto; min-width: 0; }
+  .go {
+    flex: none; margin-top: .75rem; min-height: 2.6rem;
+    appearance: none; border: 1px solid var(--ink); background: var(--ink); color: var(--card);
+    padding: 0 1.1rem; border-radius: var(--pill); cursor: pointer; font-size: .9rem; font-weight: 500;
+    transition: box-shadow var(--t) var(--ease);
+  }
+  .go:hover { box-shadow: var(--shadow); }
+  .go[aria-busy="true"] { cursor: progress; opacity: .7; }
+  /* A press answers on the way down, in colour. Nothing here scales. */
+  button:active { filter: brightness(.9); }
+  button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+
+  .foot { margin: 1.75rem 0 0; color: var(--faint); font-size: .82rem; text-wrap: pretty; }
+
+  @container page (max-width: 620px) {
+    .page { padding: 2rem 1.1rem 6rem; }
+    .ask { flex-direction: column; align-items: stretch; }
+    .go { margin-top: .5rem; }
+  }
+  /* A finger is not a mouse: 44pt to press, and 16px in a field so iOS does
+     not zoom the page to show it. */
+  @media (pointer: coarse) {
+    .chip { min-height: 2.75rem; padding: 0 1rem; }
+    .go { min-height: 2.75rem; }
+    .field { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body data-marble-id="__ID__">
+<main class="page" data-marble-id="sh-page">
+  <h1 data-marble-id="sh-title" data-marble-editable>Start here</h1>
+  <p class="lede" data-marble-id="sh-lede" data-marble-editable>Every page here is a document that works like an app. You change one by using it, or by asking Claude to change it.</p>
+
+  <ol class="steps" data-marble-id="sh-steps">
+    <li class="step" data-step="write" data-marble-id="sh-write">
+      <span class="num" aria-hidden="true"><span class="digit">1</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
+      <div data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__">Write something here</h2>
+        <p class="note" data-marble-id="__ID__">It's saved as you type. Close the tab and it's still here.</p>
+        <p class="field" data-marble-id="sh-box" data-marble-editable data-placeholder="Anything: a to-do, a line about your day"></p>
+      </div>
+    </li>
+
+    <li class="step" data-step="ask" data-marble-id="sh-ask">
+      <span class="num" aria-hidden="true"><span class="digit">2</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
+      <div data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__">Ask Claude to change this page</h2>
+        <p class="note" data-marble-id="__ID__">Press <kbd>⌘J</kbd> (<kbd>Ctrl J</kbd> on Windows) and try “put these three in a row”.</p>
+      </div>
+    </li>
+
+    <li class="step" data-step="keep" data-marble-id="sh-keep">
+      <span class="num" aria-hidden="true"><span class="digit">3</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
+      <div data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__">What do you want to keep here?</h2>
+        <p class="note" data-marble-id="__ID__">Claude makes your first document from your answer.</p>
+        <div class="chips" data-marble-id="sh-chips" data-marble-choose="data-kind" data-marble-of=".step" data-marble-look="off" aria-label="Start from">
+          <button type="button" class="chip" data-marble-id="__ID__" data-marble-value="A class">A class</button>
+          <button type="button" class="chip" data-marble-id="__ID__" data-marble-value="A trip">A trip</button>
+          <button type="button" class="chip" data-marble-id="__ID__" data-marble-value="A research project">A research project</button>
+          <button type="button" class="chip" data-marble-id="__ID__" data-marble-value="A reading list">A reading list</button>
+        </div>
+        <div class="ask" data-marble-id="__ID__">
+          <p class="field" data-marble-id="sh-answer" data-marble-editable data-placeholder="Say what it is and what goes in it"></p>
+          <button type="button" class="go" data-marble-id="sh-make"
+            data-marble-run="Make this person's first document in their drive from what they wrote in the answer field: a page they will use, not a sample. Use a starter that fits (doc, sheet, board…), fill it with their own words, name it after the thing, and put it at the top of the drive. Then tick the row this button is in. Keep it to one document."
+            data-marble-scope="sh-keep"
+            data-marble-on="press">Make it</button>
+        </div>
+      </div>
+    </li>
+  </ol>
+
+  <p class="foot" data-marble-id="sh-foot"><span data-marble-id="sh-done" data-marble-editable>When this page has done its job, delete it; nothing else needs it.</span></p>
+</main>
+__SCRIPT__
+<script>
+// The page's own behaviour: each row ticks itself the first time it has been
+// tried, and the tick is an op, so it is in the file (data-done="yes") and
+// the host can tell when all three are done and / goes back to the Drive.
+//
+//   1  the first input in the box under it;
+//   2  the list of rows changing from outside the page, which is what an
+//      agent's op looks like when it lands;
+//   3  the agent Make it starts, which ticks the row itself (its brief says so).
+//
+// A chip fills the answer with a start the person finishes. Make it with an
+// empty answer puts the caret there instead of starting an agent.
+(() => {
+  const begin = (marble) => {
+    const steps = document.querySelector('[data-marble-id="sh-steps"]');
+    if (!steps) return;
+    const row = (name) => document.querySelector(`[data-step="${name}"]`);
+    const done = (el) => el?.getAttribute('data-done') === 'yes';
+
+    function tick(el) {
+      if (!el || done(el)) return;
+      const id = marble.id(el);
+      if (!id) return;
+      el.setAttribute('data-done', 'yes');
+      marble.op({ type: 'setAttr', id, name: 'data-done', value: 'yes' }, { immediate: true });
+    }
+
+    // ---- 1: written in
+    document.addEventListener('input', (event) => {
+      const box = event.target?.closest?.('[data-marble-id="sh-box"]');
+      if (box) tick(box.closest('[data-step]'));
+    });
+
+    // ---- 2: changed by asking
+    const ask = row('ask');
+    if (ask && !done(ask)) {
+      const fields = ['sh-box', 'sh-answer'];
+      const inField = (el) => fields.some((id) => el?.closest?.(`[data-marble-id="${id}"]`));
+      // The page's own bookkeeping: a tick, a chip's choice, typing in a field.
+      const own = (op) => (op.type === 'setAttr' && (op.name === 'data-done' || op.name === 'data-kind' || /^aria-/.test(op.name)))
+        || ((op.type === 'setText' || op.type === 'setInner') && inField(marble.byId?.(op.id) ?? null));
+      const inList = (id) => {
+        if (!id) return false;
+        const el = document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`);
+        return Boolean(el && (el === steps || steps.contains(el)));
+      };
+      let watch = null;
+      const changed = () => {
+        watch?.disconnect();
+        document.removeEventListener('marble:ops', onOps);
+        tick(ask);
+      };
+      const onOps = (event) => {
+        const ops = event.detail?.ops ?? [];
+        if (ops.some((op) => !own(op) && [op.id, op.parentId, op.beforeId].some(inList))) changed();
+      };
+      document.addEventListener('marble:ops', onOps);
+      // The list's own children and attributes. Page-only chrome (anything
+      // transient, a marble- class, ARIA state) is not a change to the page.
+      const real = (node) => node.nodeType === 1 && !node.hasAttribute('data-marble-transient');
+      const pageOnly = (m) => {
+        if (m.type === 'childList') return ![...m.addedNodes, ...m.removedNodes].some(real);
+        if (/^(aria-|data-marble-)/.test(m.attributeName)) return true;
+        if (m.attributeName === 'class') {
+          const strip = (value) => String(value ?? '').split(/\s+/).filter((c) => c && !c.startsWith('marble-')).sort().join(' ');
+          return strip(m.oldValue) === strip(steps.getAttribute('class'));
+        }
+        return false;
+      };
+      watch = new MutationObserver((mutations) => {
+        if (mutations.some((m) => !pageOnly(m))) changed();
+      });
+      watch.observe(steps, { childList: true, attributes: true, attributeOldValue: true });
+    }
+
+    // ---- 3: the question
+    const answer = () => document.querySelector('[data-marble-id="sh-answer"]');
+    const starts = () => [...document.querySelectorAll('[data-marble-id="sh-chips"] [data-marble-value]')]
+      .map((chip) => `${chip.getAttribute('data-marble-value')}: `);
+    document.addEventListener('click', (event) => {
+      const chip = event.target?.closest?.('[data-marble-id="sh-chips"] [data-marble-value]');
+      const field = answer();
+      if (!chip || !field) return;
+      const id = marble.id(field);
+      const prior = field.textContent;
+      // A start replaces another start, never words the person wrote.
+      if (!prior.trim() || starts().includes(prior)) {
+        const text = `${chip.getAttribute('data-marble-value')}: `;
+        const op = { type: 'setText', id, text };
+        field.textContent = text;
+        marble.record?.({ redo: [op], undo: [{ type: 'setText', id, text: prior }] });
+        marble.op(op, { immediate: true });
+      }
+      // Either way the caret waits at the end of the answer.
+      field.focus();
+      const range = document.createRange();
+      range.selectNodeContents(field);
+      range.collapse(false);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    // Before the automation's own listener on the document: nothing to make
+    // from yet, so the press goes to the answer.
+    const make = document.querySelector('[data-marble-id="sh-make"]');
+    make?.addEventListener('click', async (event) => {
+      const field = answer();
+      const said = (field?.textContent ?? '').trim();
+      if (!said || starts().some((start) => start.trim() === said)) {
+        event.stopPropagation();
+        event.preventDefault();
+        field?.focus();
+        return;
+      }
+      // The brief asks the agent to tick the row. If its turn ends with a
+      // new document in the drive and the row still open, the page does.
+      const keep = row('keep');
+      if (done(keep) || watching) return;
+      watching = true;
+      const before = new Set(((await marble.docs?.().catch(() => [])) ?? []).map((doc) => doc.path ?? doc.name));
+      const settle = new MutationObserver(async () => {
+        if (make.getAttribute('aria-busy') === 'true') return;
+        settle.disconnect();
+        watching = false;
+        const after = (await marble.docs?.().catch(() => [])) ?? [];
+        if (after.some((doc) => !before.has(doc.path ?? doc.name))) tick(row('keep'));
+      });
+      settle.observe(make, { attributes: true, attributeFilter: ['aria-busy'] });
+    });
+    let watching = false;
+
+    // Whose Claude this is, said only when the drive is on starter credit.
+    // Drawn, not written: it is true of this drive today, not of the page.
+    const credit = () => marble.agent?.settings?.().then((settings) => {
+      if (settings?.defaultProvider !== 'claude-credit') return;
+      const foot = document.querySelector('[data-marble-id="sh-foot"]');
+      if (!foot || foot.querySelector('.credit')) return;
+      const line = document.createElement('span');
+      line.className = 'credit';
+      line.setAttribute('data-marble-transient', '');
+      line.textContent = 'Claude is on starter credit for now. ';
+      foot.prepend(line);
+    }).catch(() => {});
+    if (marble.agent) credit();
+    else addEventListener('marble:agent', credit, { once: true });
+  };
+
+  if (window.marble) begin(window.marble);
+  else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+})();
+</script>
+</body>
+</html>

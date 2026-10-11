@@ -110,6 +110,7 @@ form { margin: 0; }
 /* The steps while a drive is made: done, now, waiting, each a row with a
    drawn state. Only the working row is in ink, and only it moves. */
 .steps { margin: 0 0 1rem; padding: 0; list-style: none; }
+.steps:last-child { margin-bottom: 0; }
 .steps li { display: flex; align-items: center; gap: .65rem; padding: .5rem 0; border-top: 1px solid var(--line); color: var(--muted); }
 .steps li:first-child { border-top: 0; padding-top: .1rem; }
 .steps svg { flex: none; width: 16px; height: 16px; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -205,17 +206,19 @@ function providerButtons(providers, { invite = null, to = null } = {}) {
   return `<div class="stack">${buttons.join('')}</div>`;
 }
 
-export function signIn({ providers, to = null, drive = null }) {
+export function signIn({ providers, to = null, drive = null, asking = false }) {
   const lede = drive
     ? `Sign in to open <span class="addr">${esc(drive)}.${APEX_HOST}</span>.`
-    : 'Documents that are apps, in a drive of your own.';
+    : asking
+      ? 'Documents that are apps, in a drive of your own. Sign in, then ask Bryan for one.'
+      : 'Documents that are apps, in a drive of your own.';
   return page({
     title: 'Sign in · Marble Drive',
     body: `<section class="card">
 <h1>Sign in</h1>
 <p class="lede">${lede}</p>
 ${providerButtons(providers, { to })}
-<p class="small">New here? You need an invite link from Bryan.</p>
+<p class="small">${asking ? 'Have an invite link from Bryan? Open it instead.' : 'New here? You need an invite link from Bryan.'}</p>
 </section>
 ${foot}`,
   });
@@ -290,7 +293,7 @@ export function nameDrive({ value = '', said = '', ok = null, status = 200 }) {
 <label class="label" for="name">Address</label>
 <div class="field"><input id="name" name="name" value="${esc(value)}" required minlength="3" maxlength="30" pattern="[a-z0-9-]{3,30}" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="said" placeholder="yourname" autofocus><span class="suffix">.${APEX_HOST}</span></div>
 <p class="said" id="said" role="status" aria-live="polite"${state ? ` data-ok="${state}"` : ''}>${esc(said)}</p>
-<button class="btn one" type="submit">Make my drive</button>
+<button class="btn one" type="submit">Open my drive</button>
 </form>
 <p class="small">Names are public. Bryan runs Marble Drive and can reach the machine your drive runs on. Nobody else can open it unless you share a page.</p>
 </section>`,
@@ -329,6 +332,10 @@ const NAME_SCRIPT = `(() => {
 })();`;
 
 const STEP_WORDS = { machine: 'Making its machine', install: 'Installing Marble Drive', check: 'Checking it answers' };
+// A drive handed the spare the door sprite keeps ready: already made, so it
+// only takes its name and starts.
+const SPARE_WORDS = { name: 'Giving it your name', start: 'Starting it' };
+const wordsFor = (drive) => (drive.spare ? SPARE_WORDS : STEP_WORDS);
 const ICONS =
   '<svg class="i i-done" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></svg>' +
   '<svg class="i i-now" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 5.5 5.5"/></svg>' +
@@ -338,7 +345,7 @@ const ICONS =
 /** Each step's state for the page: done, now, wait or failed. Between two
  *  reports, the first step not yet done is the one working. */
 export function stepStates(drive) {
-  const order = Object.keys(STEP_WORDS);
+  const order = Object.keys(wordsFor(drive));
   const out = {};
   for (const step of order) {
     const s = drive.state === 'ready' ? 'done' : drive.steps?.[step];
@@ -353,15 +360,17 @@ export function stepStates(drive) {
 
 export function making({ drive }) {
   const states = stepStates(drive);
-  const rows = Object.entries(STEP_WORDS)
+  const words = wordsFor(drive);
+  const rows = Object.entries(words)
     .map(([step, words]) => `<li data-step="${step}" data-state="${states[step]}">${ICONS}<span>${words}</span></li>`)
     .join('\n');
   const ready = drive.state === 'ready';
   const failed = drive.state === 'failed';
   const address = `${esc(drive.name)}.${APEX_HOST}`;
   const enter = `/enter?drive=${encodeURIComponent(drive.name)}&to=%2F`;
+  if (drive.spare && !ready && !failed) return opening({ drive, rows, address, enter });
   const lede = failed
-    ? `Making it stopped at “${esc(STEP_WORDS[drive.failed] ?? 'a step')}”. Bryan sees this in his list of drives and will finish it; you don’t need to do anything.`
+    ? `Making it stopped at “${esc(words[drive.failed] ?? 'a step')}”. Bryan sees this in his list of drives and will finish it; you don’t need to do anything.`
     : ready
       ? `Your drive is at <span class="addr">${address}</span>.`
       : `This takes a few minutes. You can close this tab: your drive will be at <span class="addr">${address}</span>.`;
@@ -378,6 +387,39 @@ ${failed ? '' : `<a class="btn one" id="open" ${ready ? `href="${esc(enter)}"` :
     script: ready || failed ? '' : MAKING_SCRIPT,
   });
 }
+
+/** The spare being handed over: two quick steps, then the tab goes to the
+ *  drive by itself. If the spare can't be used the drive is made from
+ *  nothing, and the page reloads as the three-step one. */
+function opening({ drive, rows, address, enter }) {
+  return page({
+    title: 'Opening your drive · Marble Drive',
+    body: `<section class="card making" data-src="/making/${esc(drive.name)}.json" data-enter="${esc(enter)}">
+<h1>Opening <span class="addr">${address}</span></h1>
+<p class="lede">A few seconds.</p>
+<ul class="steps">
+${rows}
+</ul>
+</section>`,
+    script: OPENING_SCRIPT,
+  });
+}
+
+// Asks every second; when it is ready, goes on to the drive.
+const OPENING_SCRIPT = `(() => {
+  const card = document.querySelector('.making');
+  const tick = () => fetch(card.dataset.src, { headers: { accept: 'application/json' } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => {
+      if (!j) return setTimeout(tick, 2000);
+      if (j.state === 'ready') return location.replace(card.dataset.enter);
+      if (j.state === 'failed' || !j.spare) return location.reload();
+      for (const li of card.querySelectorAll('[data-step]')) li.dataset.state = j.steps[li.dataset.step] || 'wait';
+      setTimeout(tick, 1000);
+    })
+    .catch(() => setTimeout(tick, 2000));
+  setTimeout(tick, 1000);
+})();`;
 
 // Asks how far it has got every few seconds, and stops when it is done.
 const MAKING_SCRIPT = `(() => {

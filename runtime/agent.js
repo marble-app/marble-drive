@@ -275,10 +275,19 @@
       // Can this drive run an agent: Claude or Codex, signed in or on a key.
       // And a key itself, checked with Anthropic or OpenAI before it is kept.
       setup: () => ask('/agent/setup'),
+      // Not now on the first-visit popup, kept for the drive.
+      setupLater: () => ask('/agent/setup/later', { method: 'POST' }),
       connectClaude: (key) => ask('/agent/setup', { method: 'POST', body: { key } }),
       connectAgent: (provider, key) => ask('/agent/setup', { method: 'POST', body: { provider, key } }),
+      // Connect your Claude: the host runs `claude setup-token` and answers
+      // its sign-in address; the code Claude's page shows goes back to it.
+      claudeSignIn: () => ask('/agent/claude/sign-in', { method: 'POST' }),
+      claudeSignInCode: (code) => ask('/agent/claude/sign-in/code', { method: 'POST', body: { code } }),
+      claudeSignInCancel: () => ask('/agent/claude/sign-in', { method: 'DELETE' }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
+      // Starter credit: whose, how much is used. `fresh` asks the proxy now.
+      credit: ({ fresh = false } = {}) => ask(fresh ? '/agent/credit?fresh=1' : '/agent/credit'),
       // Whether this drive can hear and speak, and how it was set to.
       voice: () => ask('/agent/voice'),
       // An OpenAI key for voice, checked with OpenAI before it is kept.

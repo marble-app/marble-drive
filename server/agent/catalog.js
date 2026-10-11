@@ -141,7 +141,7 @@ export function pickCursorPickerModels(models) {
   return [auto, best].filter(Boolean);
 }
 
-export const PICKER_PROVIDER_ORDER = ['claude-subscription', 'codex', 'cursor', 'claude-api'];
+export const PICKER_PROVIDER_ORDER = ['claude-subscription', 'claude-credit', 'codex', 'cursor', 'claude-api'];
 
 export function sortProviders(list) {
   const rank = (id) => {

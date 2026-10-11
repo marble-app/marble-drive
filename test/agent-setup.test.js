@@ -112,7 +112,7 @@ async function makeDrive({ login = false, claude = true, codex = null, fake = tr
     });
     return { status: response.status, body: await response.json().catch(() => ({})) };
   };
-  return { api, keys };
+  return { api, keys, base };
 }
 
 test.after(async () => {
@@ -140,6 +140,27 @@ test('a drive signed in to a Claude login asks for nothing', async () => {
 test('a drive with no Claude agent at all asks for nothing', async () => {
   const { api } = await makeDrive({ claude: false });
   assert.equal((await api('GET', '/agent/setup')).body.needed, false);
+});
+
+test('Not now is kept for the drive, so another tab is not asked, until a key connects', async () => {
+  const { api } = await makeDrive();
+  assert.equal((await api('GET', '/agent/setup')).body.later, false);
+  const said = await api('POST', '/agent/setup/later');
+  assert.equal(said.status, 200);
+  assert.equal(said.body.later, true);
+  assert.equal(said.body.needed, true, 'still not set up: Not now only stops the asking');
+  // A new tab asks the host, and the host remembers.
+  assert.equal((await api('GET', '/agent/setup')).body.later, true);
+  // Connecting a key clears it, so if Claude ever stops running the first visit asks again.
+  await api('POST', '/agent/setup', { key: GOOD });
+  assert.equal((await api('GET', '/agent/setup')).body.later, false);
+});
+
+test('Not now has to come from the drive\'s own pages', async () => {
+  const { api, base } = await makeDrive();
+  const res = await fetch(`${base}/agent/setup/later`, { method: 'POST', headers: { Origin: 'https://elsewhere.example' } });
+  assert.equal(res.status, 403);
+  assert.equal((await api('GET', '/agent/setup')).body.later, false);
 });
 
 test('a key Anthropic accepts is kept, and Claude switches to it', async () => {

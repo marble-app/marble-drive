@@ -20,6 +20,8 @@ import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
 import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
+import { creditView } from './credit.js';
+import { createClaudeSignIn } from './claude-signin.js';
 import { checkAnthropicKey, checkOpenAIKey } from './key-check.js';
 import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
@@ -119,8 +121,12 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, log = console }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, credit = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, log = console }) {
   let detected = null;
+  // Connect your Claude: `claude setup-token` run for the page, one at a time
+  // (server/agent/claude-signin.js). Made on first use.
+  let signIn = claudeSignIn;
+  const claudeSignInRun = () => (signIn ??= createClaudeSignIn({ log }));
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
   const undoing = new Set();
@@ -131,19 +137,36 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   // Build mode's routes, once the builds exist (server/agent/index.js).
   let buildRoutes = null;
 
-  // One Claude, signed in one of two ways: the Claude login
-  // (claude-subscription) or an API key (claude-api). `claudeAuth` says which;
-  // until someone sets it, the drive's default agent does.
-  const CLAUDE = { login: 'claude-subscription', api: 'claude-api' };
-  const claudeAuth = (settings) =>
-    settings.claudeAuth === 'api' || settings.claudeAuth === 'login'
-      ? settings.claudeAuth
-      : settings.defaultProvider === CLAUDE.api ? 'api' : 'login';
-  const activeClaude = (settings) => CLAUDE[claudeAuth(settings)];
-  const isClaude = (id) => id === CLAUDE.login || id === CLAUDE.api;
+  // One Claude, signed in one of three ways: the Claude login
+  // (claude-subscription), an API key (claude-api), or starter credit
+  // (claude-credit, only on a drive the door gave credit to). `claudeAuth`
+  // says which. Until someone sets it, the drive's default agent does; and a
+  // drive with credit and nothing of its own, no key and no login, is on
+  // credit, so a new drive's agent works before anyone brings a key.
+  const CLAUDE = { login: 'claude-subscription', api: 'claude-api', credit: 'claude-credit' };
+  const hasCredit = () => providers.has(CLAUDE.credit);
+  async function claudeAuth(settings) {
+    const chosen = settings.claudeAuth;
+    if (chosen === 'api' || chosen === 'login') return chosen;
+    if (chosen === 'credit' && hasCredit()) return 'credit';
+    const fallback = settings.defaultProvider === CLAUDE.api ? 'api' : 'login';
+    if (!hasCredit() || chosen === 'credit') return fallback;
+    if (settings.defaultProvider === CLAUDE.credit) return 'credit';
+    if (keys && (await keys.flags()).anthropic) return fallback;
+    if (fallback === 'login' && (await detectAll()).find((p) => p.id === CLAUDE.login)?.signedIn) return 'login';
+    return 'credit';
+  }
+  const activeClaude = async (settings) => CLAUDE[await claudeAuth(settings)];
+  const isClaude = (id) => id === CLAUDE.login || id === CLAUDE.api || id === CLAUDE.credit;
+  /** This drive's starter credit, for a page: null on a drive without it. */
+  async function creditState(settings, { fresh = false } = {}) {
+    if (!hasCredit() || !credit?.available) return null;
+    const active = (await claudeAuth(settings)) === 'credit';
+    return creditView(await credit.read({ fresh }), { active });
+  }
   // Codex is one agent either way: its key, when set, is what it runs on.
   const CODEX = 'codex';
-  const NO_KEYS = { anthropic: false, cursor: false, openai: false };
+  const NO_KEYS = { anthropic: false, claude: false, cursor: false, openai: false };
 
   /** The agent new chats start on: the saved default when it can run, else
    *  the first that can, in the picker's order. A drive that signed Codex in
@@ -151,10 +174,11 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
    *  button and the day on a Claude that is not signed in. With nothing that
    *  can run, the saved choice stands. */
   async function runnableDefault(settings) {
-    const saved = isClaude(settings.defaultProvider) ? activeClaude(settings) : settings.defaultProvider;
+    const active = await activeClaude(settings);
+    const saved = isClaude(settings.defaultProvider) ? active : settings.defaultProvider;
     const list = await detectAll();
     if (list.find((p) => p.id === saved)?.signedIn) return saved;
-    const ready = list.find((p) => p.signedIn && (!isClaude(p.id) || p.id === activeClaude(settings)));
+    const ready = list.find((p) => p.signedIn && (!isClaude(p.id) || p.id === active));
     return ready?.id ?? saved;
   }
 
@@ -163,8 +187,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     return {
       ...settings,
       defaultProvider: await runnableDefault(settings),
-      claudeAuth: claudeAuth(settings),
+      claudeAuth: await claudeAuth(settings),
       keys: keys ? await keys.flags() : NO_KEYS,
+      credit: await creditState(settings),
       voice: voiceSettings(settings.voice),
     };
   };
@@ -175,7 +200,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   // <marble-agent-setup>). A drive with neither agent has nothing to set up.
   const setupState = async () => {
     const settings = await store.settings();
-    const hasClaude = providers.has(CLAUDE.login) || providers.has(CLAUDE.api);
+    const hasClaude = providers.has(CLAUDE.login) || providers.has(CLAUDE.api) || hasCredit();
     const hasCodex = providers.has(CODEX);
     const flags = keys ? await keys.flags() : NO_KEYS;
     const key = Boolean(flags.anthropic);
@@ -192,8 +217,15 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       key: openai,
     };
     const offers = [...(hasClaude ? ['claude'] : []), ...(codex.installed ? ['codex'] : [])];
-    const ready = (hasClaude && (key || login)) || codex.signedIn;
-    return { needed: offers.length > 0 && !ready, login, key, claudeAuth: claudeAuth(settings), offers, codex };
+    // Starter credit runs Claude until it is used up; a reading that could
+    // not be made is not used up.
+    const onCredit = await creditState(settings);
+    const creditRuns = Boolean(onCredit?.active && !onCredit.usedUp);
+    const ready = (hasClaude && (key || login || creditRuns)) || codex.signedIn;
+    // `later`: someone on this drive said Not now to the first-visit popup.
+    // Kept for the drive, so a new tab or another device does not ask again;
+    // the popup still opens when someone asks for it (runtime/agent-ui.js).
+    return { needed: offers.length > 0 && !ready, later: Boolean(settings.setupLater), login, key, claudeAuth: await claudeAuth(settings), offers, codex, ...(onCredit ? { credit: onCredit } : {}) };
   };
 
   /** POST /agent/setup for Codex: the key checked with OpenAI and kept, and
@@ -209,9 +241,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     await keys.write({ openai: key });
     detected = null;
     const settings = await store.settings();
-    const current = isClaude(settings.defaultProvider) ? activeClaude(settings) : settings.defaultProvider;
+    const current = isClaude(settings.defaultProvider) ? await activeClaude(settings) : settings.defaultProvider;
     const runs = (await detectAll()).find((p) => p.id === current)?.signedIn;
-    if (!runs) await store.saveSettings({ defaultProvider: CODEX });
+    await store.saveSettings({ setupLater: null, ...(runs ? {} : { defaultProvider: CODEX }) });
     return [200, { ...(await setupState()), checked: verdict === 'ok' }];
   }
 
@@ -298,7 +330,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   async function startConversation(body) {
     // Asked for Claude either way, a new conversation gets the Claude the
     // switch chose; one already started keeps the back-end it began on.
-    if (isClaude(body.provider)) body.provider = activeClaude(await store.settings());
+    if (isClaude(body.provider)) body.provider = await activeClaude(await store.settings());
     if (!providers.has(body.provider)) return { status: 400, error: `no provider "${body.provider}"` };
     const from = body.handoffFrom ? await store.conversation(body.handoffFrom) : null;
     if (body.handoffFrom && !from) return { status: 404, error: `no conversation "${body.handoffFrom}"` };
@@ -468,7 +500,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
 
     if (route === '/agent/providers' && method === 'GET') {
       const settings = await store.settings();
-      const active = activeClaude(settings);
+      const active = await activeClaude(settings);
       const defaultId = isClaude(settings.defaultProvider) ? active : settings.defaultProvider;
       return json(res, 200, (await detectAll())
         .filter((p) => !isClaude(p.id) || p.id === active)
@@ -552,6 +584,15 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     }
 
     if (route === '/agent/setup' && method === 'GET') return json(res, 200, await setupState());
+    if (route === '/agent/setup/later' && method === 'POST') {
+      await store.saveSettings({ setupLater: new Date().toISOString() });
+      return json(res, 200, await setupState());
+    }
+    // Starter credit, read fresh when a page asks after a turn ended.
+    if (route === '/agent/credit' && method === 'GET') {
+      const state = await creditState(await store.settings(), { fresh: url.searchParams.get('fresh') === '1' });
+      return json(res, 200, state ?? { available: false });
+    }
     if (route === '/agent/setup' && method === 'POST') {
       if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
       const body = await readJson(req, maxBody);
@@ -567,8 +608,47 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       await keys.write({ anthropic: key });
       detected = null;
       const current = (await store.settings()).defaultProvider;
-      await store.saveSettings({ claudeAuth: 'api', ...(isClaude(current) ? { defaultProvider: CLAUDE.api } : {}) });
+      // Connected: should it ever stop running, the first visit asks again.
+      await store.saveSettings({ claudeAuth: 'api', setupLater: null, ...(isClaude(current) ? { defaultProvider: CLAUDE.api } : {}) });
       return json(res, 200, { ...(await setupState()), checked: verdict === 'ok' });
+    }
+
+    // Connect your Claude (the sheet in runtime/agent-ui.js). Starting runs
+    // `claude setup-token` and answers the sign-in address it prints; the
+    // code Claude's page shows comes back to the same run, and the long-lived
+    // token it prints is kept like an API key. Claude then runs on that plan:
+    // the switch goes to the login, and a default of Claude (on a key or on
+    // credit) follows it. Like every /agent route these are the owner's: the
+    // gate is in front of them, a share link never reaches them, and a change
+    // has to come from this drive's own pages.
+    if (route === '/agent/claude/sign-in' && (method === 'POST' || method === 'DELETE')) {
+      if (method === 'DELETE') {
+        signIn?.cancel();
+        return json(res, 200, { ok: true });
+      }
+      if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
+      if (!providers.has(CLAUDE.login)) return json(res, 400, { error: "This drive doesn't have Claude." });
+      try {
+        return json(res, 200, await claudeSignInRun().start());
+      } catch (err) {
+        return json(res, err.status ?? 502, { error: err.message });
+      }
+    }
+    if (route === '/agent/claude/sign-in/code' && method === 'POST') {
+      if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
+      const body = await readJson(req, maxBody);
+      let token = null;
+      try {
+        ({ token } = await claudeSignInRun().finish(body.code));
+      } catch (err) {
+        return json(res, err.status ?? 502, { error: err.message });
+      }
+      await keys.write({ claude: token });
+      detected = null;
+      const current = (await store.settings()).defaultProvider;
+      const claudeDefault = !current || String(current).startsWith('claude');
+      await store.saveSettings({ claudeAuth: 'login', setupLater: null, ...(claudeDefault ? { defaultProvider: CLAUDE.login } : {}) });
+      return json(res, 200, { ...(await setupState()), connected: true });
     }
 
     if (route === '/agent/settings') {
@@ -577,7 +657,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         const body = await readJson(req, maxBody);
         const patch = {};
         if (typeof body.defaultProvider === 'string') patch.defaultProvider = body.defaultProvider;
-        if (body.claudeAuth === 'login' || body.claudeAuth === 'api') {
+        if (body.claudeAuth === 'login' || body.claudeAuth === 'api' || (body.claudeAuth === 'credit' && hasCredit())) {
           patch.claudeAuth = body.claudeAuth;
           // A default of "Claude" follows the switch to whichever pays.
           const current = patch.defaultProvider ?? (await store.settings()).defaultProvider;
@@ -1155,5 +1235,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     defaultProvider: async () => runnableDefault(await store.settings()),
     /** Build mode's routes (server/build/routes.js), behind these same checks. */
     useBuilds(routes) { buildRoutes = routes; },
+    /** Ends a Claude sign-in still waiting for its code. */
+    close() { signIn?.close(); },
   };
 }

@@ -610,6 +610,7 @@ the value. Backups of `.marble/` therefore do not take them.
 |---|---|---|
 | `claude-subscription` | `claude -p --input-format stream-json`, the initialize handshake then the prompt on stdin, `--model` / `--effort` from the conversation (none means your own settings), `--permission-mode` from the conversation (`auto` unless picked) | `full`: the terminal's own configuration, cwd the project, every built-in tool, plus Marble's document MCP and browser MCP; prompts and questions come back to the drawer |
 | `claude-api` | the same, with `ANTHROPIC_API_KEY`; without it the turn fails rather than fall back to the login | the same |
+| `claude-credit` | the same, with `ANTHROPIC_BASE_URL` set to `MARBLE_CREDIT_URL` and the drive's `MARBLE_CREDIT_TOKEN` as `ANTHROPIC_API_KEY`. Only on a drive with both settings, and the default there until it has a key or a login of its own ([ACCOUNTS.md](ACCOUNTS.md#starter-credit)) | the same |
 | `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `full`: `--add-dir` the drive, `--sandbox disabled`, cwd the drive, hook allows Cursor's own tools, Marble's document tools, and Marble's `MCP:browser_*` (`bin/marble-cursor-hook.js`) |
 | `codex` | `codex exec --json`, prompt on stdin, `resume <thread>` after the first turn, `-m` / `model_reasoning_effort` from the conversation (none means `~/.codex/config.toml`), the sandbox from its mode, `CODEX_API_KEY` when a key is set | `full`: the person's own Codex, cwd the project, plus `marble_drive` and `marble_browser`; `documents`: `--ignore-user-config`, read-only, no shell (`features.shell_tool` and `unified_exec` off), in the empty workspace |
 
@@ -654,6 +655,46 @@ record a new one when a CLI changes its output. A provider may also offer
 way its CLI writes it (Codex's own `Error:` line, past its MCP servers' logs).
 Codex's models and efforts come from `codex debug models` (the ones it lists);
 naming falls back to Codex last, only on its login.
+
+### Connect your Claude
+
+A person can put a drive's Claude on their own Pro or Max plan from the
+browser, without a terminal. The sheet that does it opens from Agents ›
+Settings › Claude, and from any page that fires
+`document.dispatchEvent(new CustomEvent('marble:connect-claude'))`.
+
+Pressing Open Claude sign-in asks the host (`POST /agent/claude/sign-in`) to
+run `claude setup-token` in a pseudo-terminal and answer the sign-in address
+it prints. The page opens that address in a new tab. Claude's page shows a
+code; the person pastes it into the sheet, and `POST
+/agent/claude/sign-in/code` hands it to the same run. The long-lived token it
+prints is kept in the agent keys file as `claude`, next to the API keys, and
+reaches `claude-subscription` as `CLAUDE_CODE_OAUTH_TOKEN`. The switch moves
+to the login, and a default of Claude moves with it. `claude-api` never sees
+the token. Settings › Claude then says "On your Claude plan", with Disconnect.
+
+The pseudo-terminal is the system's `script` (`server/agent/claude-signin.js`),
+not a native module, and it is made 1000 columns wide so nothing wraps. Only
+one sign-in runs at a time. A sign-in with no code after
+`MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS` (600) is killed, and so is one the sheet
+was closed on. The routes sit behind the gate like every `/agent` route.
+
+What `claude setup-token` prints was read from Claude Code 2.1.281 on Linux,
+with a fresh HOME and `BROWSER=false`. It asks nothing first, tries to open a
+browser, and after about three seconds prints the address, both as a terminal
+hyperlink and as text, then `Paste code here if prompted >`. A pasted code
+reaches it through the pseudo-terminal. A wrong code gets `OAuth error:
+Request failed with status code 400` and `Press Enter to retry`, which the
+host reads as a refusal and ends the run. A good code gets `Your OAuth token
+(valid for 1 year):` and the `sk-ant-oat…` token on its own line.
+`test/fixtures/fake-claude-setup-token.mjs` draws the same screen. Record it
+again if a new Claude Code changes it.
+
+Not yet tried end to end with a real sign-in. The first real one should be on
+t-bryan: open Agents › Settings, choose Claude login, press Connect your
+Claude, sign in, paste the code, and send a chat. If the code is refused
+there, the fallback is Codex's `--device-auth` pattern, where the person
+types a short code on Anthropic's page instead. The sheet stays the same.
 
 ## The drawer
 

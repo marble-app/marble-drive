@@ -247,3 +247,61 @@ test('audit lines name the kind and the account, and never a code or a session i
   const mine = (await d.call('GET', `/log?account=${a.id}`)).data.lines;
   assert.ok(mine.every((l) => l.account === a.id));
 });
+
+// ---------------------------------------------------------------- credit
+
+test('credit: a token is kept only as its hash, with the default cap and nothing spent', async () => {
+  const d = dir();
+  const r = await d.call('POST', '/credit/t-ana/token', {});
+  assert.equal(r.status, 200);
+  assert.match(r.data.token, /^mdc_[0-9a-f]{48}$/);
+  assert.equal(r.data.credit.cap, 5);
+  assert.equal(r.data.credit.spent, 0);
+  assert.equal(r.data.credit.on, true);
+  const stored = JSON.stringify([...d.storage.map.entries()]);
+  assert.ok(!stored.includes(r.data.token), 'the token itself is never stored');
+  const { sha256Hex } = await import('../worker/src/door/tokens.js');
+  const byHash = await d.call('GET', `/credit/token/${await sha256Hex(r.data.token)}`);
+  assert.equal(byHash.data.name, 't-ana');
+});
+
+test('credit: an invite can carry its own amount, and the drive it makes is minted with it', async () => {
+  const d = dir();
+  const owner = (await d.call('POST', '/identity', { ...bob, name: 'Bryan Min', invite: await invite(d, { owner: true }) })).data.account;
+  assert.equal(owner.role, 'owner');
+  const code = await invite(d, { credit: 12.5 });
+  assert.equal((await d.call('GET', '/invites')).data.invites.find((i) => !i.owner).credit, 12.5);
+  const a = (await d.call('POST', '/identity', { ...ana, invite: code })).data.account;
+  assert.equal((await d.call('POST', '/drive', { account: a.id, name: 'ana' })).status, 200);
+  const minted = (await d.call('POST', '/credit/ana/token', {})).data.credit;
+  assert.equal(minted.cap, 12.5);
+  assert.equal(minted.by, 'Bryan', 'the owner first name');
+  // An explicit cap wins, and a second mint keeps the cap it had.
+  assert.equal((await d.call('POST', '/credit/ana/token', { cap: 3 })).data.credit.cap, 3);
+  assert.equal((await d.call('POST', '/credit/ana/token', {})).data.credit.cap, 3);
+});
+
+test('credit: amounts and names out of range are refused in words', async () => {
+  const d = dir();
+  assert.match((await d.call('POST', '/invite', { credit: -1 })).data.why, /from 0 to 1000/);
+  assert.match((await d.call('POST', '/credit/ana/token', { cap: 'lots' })).data.why, /from 0 to 1000/);
+  assert.equal((await d.call('POST', '/credit/Ana/token', {})).status, 404, 'not a route at all');
+  assert.equal((await d.call('POST', '/credit/ana', { cap: 2 })).status, 404, 'no credit to set yet');
+  assert.equal((await d.call('POST', '/credit/spend', { name: 'nobody', micros: 5 })).status, 404);
+});
+
+test('credit: spends add up exactly, even when they land together, and a reset starts over', async () => {
+  const d = dir();
+  await d.call('POST', '/credit/ana/token', { cap: 1 });
+  await Promise.all(Array.from({ length: 20 }, () => d.call('POST', '/credit/spend', { name: 'ana', micros: 50_000 })));
+  const after = (await d.call('GET', '/credit/ana')).data;
+  assert.equal(after.spent, 1);
+  assert.equal(after.left, 0);
+  assert.equal(after.requests, 20);
+  const usedUp = (await d.call('GET', '/log')).data.lines.filter((l) => l.kind === 'credit-used-up');
+  assert.equal(usedUp.length, 1, 'said once, when it ran out');
+  const reset = (await d.call('POST', '/credit/ana', { reset: true, by: 'Bryan' })).data.credit;
+  assert.equal(reset.spent, 0);
+  assert.equal(reset.by, 'Bryan');
+  assert.equal((await d.call('GET', '/credit')).data.drives.length, 1);
+});

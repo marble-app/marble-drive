@@ -10,7 +10,7 @@
 //   /ask                   Ask for access
 //   /name                  name your drive (GET the form, POST the claim)
 //   /name/check?n=         free, taken, or what is wrong with it
-//   /making/<name>[.json]  the steps while it is made
+//   /making/<name>[.json]  the steps while it is made, or opened from a spare
 //   /enter?drive=&to=      a grant for the drive, if it is yours
 //   /account               your drive and how you sign in
 //   /signout[/everywhere]  end this session, or all of them
@@ -24,7 +24,7 @@
 // a drive post here.
 
 import { directory } from './directory.js';
-import { nameProblem } from './names.js';
+import { nameProblem, nameSuggestions } from './names.js';
 import { APEX_ORIGIN, DoorError, cookie, finish, isProvider, providerReady, readCookie, start } from './oauth.js';
 import * as pages from './pages.js';
 import { returnPath } from './paths.js';
@@ -143,6 +143,17 @@ async function onward(session, dir) {
   return pages.notInvited({ name: account.name, email: account.email });
 }
 
+export const FREE_NAME = 'Free. You can’t change it later.';
+
+/** The first name suggested from the person's own that nobody has, or ''. */
+async function suggestName(account, dir) {
+  for (const n of nameSuggestions(account.name, account.email).slice(0, 8)) {
+    const d = await dir('GET', `/drives/${n}`);
+    if (d.status === 404) return n;
+  }
+  return '';
+}
+
 /** Ask the door sprite to look at its queue. It is woken by this; a poke that
  *  fails is logged, and the next one finds the drive still queued. */
 function poke(env, fetchImpl, ctx) {
@@ -172,7 +183,10 @@ const ADMIN = [
   ['GET', /^\/drives$/],
   ['GET', /^\/queue$/],
   ['GET', /^\/log$/],
-  ['POST', /^\/drives\/[a-z0-9-]{1,40}\/(step|hold)$/],
+  ['POST', /^\/drives\/[a-z0-9-]{1,40}\/(step|hold|unspare)$/],
+  ['GET', /^\/spares$/],
+  ['POST', /^\/spares$/],
+  ['DELETE', /^\/spares\/d-spare-[0-9a-f]{6,16}$/],
 ];
 
 async function admin(request, env, path) {
@@ -268,6 +282,10 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
 
     if (path === '/ask') {
       const kept = await unseal(env.DOOR_SIGNING_KEY, 'ask', readCookie(request, ASK_COOKIE), { now });
+      // Not signed in yet, as someone who followed a share page's "Ask for a
+      // drive of your own" is: sign in first, and the callback brings anyone
+      // without an invite back here to ask. Signed in already: on as usual.
+      if (!kept && method === 'GET' && !(await sessionOf(request, dir))) return pages.signIn({ providers: providersOf(env), asking: true });
       if (!kept) return redirect('/');
       if (method === 'GET') return pages.notInvited({ name: kept.name, email: kept.email, asked: kept.asked });
       if (method === 'POST') {
@@ -315,7 +333,7 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
       const why = nameProblem(n);
       if (why) return json(200, { ok: false, said: why });
       const d = await dir('GET', `/drives/${n}`);
-      return json(200, d.ok ? { ok: false, said: `${n} is taken.` } : { ok: true, said: `${n} is free.` });
+      return json(200, d.ok ? { ok: false, said: `${n} is taken.` } : { ok: true, said: FREE_NAME });
     }
 
     if (path === '/name') {
@@ -325,7 +343,11 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
       if (!env.DOOR_SPRITE_URL) {
         return pages.problem({ title: 'Drives can’t be made yet', text: 'Bryan hasn’t switched on making drives. Your invite still works; try again later.', status: 503, action: { href: '/account', label: 'Your account' } });
       }
-      if (method === 'GET') return pages.nameDrive({});
+      if (method === 'GET') {
+        // Filled from her Google or GitHub name, so most people just press.
+        const value = await suggestName(session.account, dir);
+        return pages.nameDrive(value ? { value, said: FREE_NAME, ok: true } : {});
+      }
       if (method === 'POST') {
         if (!sameOrigin(request)) return crossSite();
         let name = '';
@@ -345,7 +367,7 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
       if (!session) return m[2] ? json(401, { why: 'sign in' }) : signedOut();
       const d = await dir('GET', `/drives/${m[1]}`);
       if (!d.ok || d.data.owner !== session.account.id) return m[2] ? json(403, { why: 'not yours' }) : pages.notYours({ email: session.account.email });
-      if (m[2]) return json(200, { state: d.data.state, steps: pages.stepStates(d.data), failed: d.data.failed ?? null });
+      if (m[2]) return json(200, { state: d.data.state, spare: Boolean(d.data.spare), steps: pages.stepStates(d.data), failed: d.data.failed ?? null });
       return pages.making({ drive: d.data });
     }
 

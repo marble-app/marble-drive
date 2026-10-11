@@ -107,6 +107,39 @@
   keys({ keyboard: window.marblePhone?.keyboard });
   window.marblePhone?.onKeyboard?.(keys);
 
+  // ------------------------------------------------------------ the footer
+  //
+  // A person who likes what they were shown can ask for a drive of their own.
+  // One quiet line after the page's own content, in the flow (never floating
+  // over the document), and only when the drive is on the door: the host
+  // passes Ask for access as data-door, or nothing. The owner never sees it,
+  // since this script is only ever sent to a share link's visitor.
+  const DOOR = script?.dataset.door;
+  if (DOOR && /^https:\/\//.test(DOOR)) {
+    const foot = document.createElement('marble-share-foot');
+    foot.setAttribute('data-marble-transient', '');
+    const shadow = foot.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `<style>
+      /* In the flow, across a grid or flex body, and clear of the mark that
+         sits fixed in the bottom-left corner. */
+      :host { all: initial; display: block; grid-column: 1 / -1; flex: 0 0 100%; box-sizing: border-box;
+        padding: 32px 16px calc(56px + env(safe-area-inset-bottom, 0px)); text-align: center;
+        --muted: #5f6368; --ink: #111111; --accent: #9bb6cf;
+        font: 400 12.5px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--muted); }
+      @media (prefers-color-scheme: dark) { :host { --muted: #a3a7ab; --ink: #e8e6e1; --accent: #7fa8c9; } }
+      p { margin: 0; }
+      a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+      a:hover { color: var(--ink); }
+      a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+      .dot { padding: 0 6px; }
+    </style>
+    <p>Made in Marble Drive<span class="dot" aria-hidden="true">·</span><a target="_blank" rel="noopener"></a></p>`;
+    const link = shadow.querySelector('a');
+    link.href = DOOR;
+    link.textContent = 'Ask for a drive of your own';
+    (document.body ?? document.documentElement).append(foot);
+  }
+
   // A refusal is only worth saying to someone who just did something: a page
   // that addresses its own elements on load would otherwise greet a reader
   // with an error they did not cause.

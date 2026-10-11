@@ -83,10 +83,14 @@ test('an invite, Google, a name, and the drive is queued; the door sprite is pok
 
   const home = await b.go('/');
   assert.equal(home.headers.get('location'), '/name');
-  assert.match(await text(await b.go('/name')), /Name your drive/);
+  const named = await text(await b.go('/name'));
+  assert.match(named, /Name your drive/);
+  assert.match(named, /value="ana"/, 'filled from her Google name');
+  assert.match(named, /Free\. You can’t change it later\./);
+  assert.match(named, />Open my drive</);
 
   const check = await (await b.go('/name/check?n=ana')).json();
-  assert.deepEqual(check, { ok: true, said: 'ana is free.' });
+  assert.deepEqual(check, { ok: true, said: 'Free. You can’t change it later.' });
   assert.equal((await (await b.go('/name/check?n=pc-ana')).json()).ok, false);
 
   const crossSite = await b.form('/name', { name: 'ana' }, 'https://bob.marbledrive.app');
@@ -163,6 +167,22 @@ test('no invite: open by invitation, Ask for access records it once, and says wh
   await w.adminCall('POST', '/approve', { request: requests[0].id });
   await signInWith(b, 'github', {});
   assert.equal((await b.go('/')).headers.get('location'), '/name');
+});
+
+test('/ask before signing in, as from a share page: sign in to ask; signed in already, on as usual', async () => {
+  const w = world();
+  const stranger = await w.b().go('/ask');
+  assert.equal(stranger.status, 200);
+  const page = await text(stranger);
+  assert.match(page, /Sign in, then ask Bryan for one/);
+  assert.match(page, /Continue with Google/);
+  const code = await w.invite();
+  const ana = w.b();
+  await signInWith(ana, 'google', { invite: code, fake: w.fake });
+  await ana.form('/name', { name: 'ana' });
+  const back = await ana.go('/ask');
+  assert.equal(back.status, 303);
+  assert.equal(back.headers.get('location'), '/');
 });
 
 test('/enter: the owner gets a grant for their drive; anyone else is told it isn’t theirs, and not whose it is', async () => {

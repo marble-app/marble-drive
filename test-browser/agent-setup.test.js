@@ -1,6 +1,6 @@
 // The first visit to a drive whose Claude has no login and no key: a popup
 // asks for an API key right there, checks it with Anthropic, and gets out of
-// the way. "Not now" lasts the tab; a page inside another asks nothing.
+// the way. "Not now" is kept for the drive; a page inside another asks nothing.
 
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -44,7 +44,7 @@ test.after(async () => {
 /** Each test starts from a drive with no key, on the Claude login. */
 async function fresh() {
   await host.reset();
-  await host.drive.agents.store.saveSettings({ claudeAuth: 'login', defaultProvider: 'claude-subscription' });
+  await host.drive.agents.store.saveSettings({ claudeAuth: 'login', defaultProvider: 'claude-subscription', setupLater: null });
   await fetch(`${host.base}/agent/settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Origin: host.base },
@@ -98,11 +98,13 @@ test('a wrong key is refused in place; a right one connects Claude and closes', 
   assert.equal(await dialogOpen(next.page), false);
 });
 
-test('Not now lasts the tab: moving to another document does not ask again, a new visit does', async () => {
+test('Not now is kept for the drive: another page, and a new tab, are not asked again', async () => {
   const { page } = await fresh();
   await page.goto(`${host.base}/a/garden`);
   await setup(page).locator('button.later').click();
   assert.equal(await dialogOpen(page), false);
+  // The drive keeps it, not only this tab.
+  await page.waitForFunction(async () => (await window.marble.agent.setup()).later === true);
 
   await page.goto(`${host.base}/a/orchard`);
   await page.waitForFunction(() => Boolean(document.querySelector('marble-agent-setup')));
@@ -112,8 +114,13 @@ test('Not now lasts the tab: moving to another document does not ask again, a ne
   const other = await host.newPage();
   pages.push(other.page);
   await other.page.goto(`${host.base}/a/orchard`);
-  await setup(other.page).locator('h2', { hasText: 'Connect Claude' }).waitFor();
-  assert.equal(await dialogOpen(other.page), true, 'a new visit asks again');
+  await other.page.waitForFunction(() => Boolean(document.querySelector('marble-agent-setup')));
+  await other.page.waitForTimeout(600);
+  assert.equal(await dialogOpen(other.page), false, 'a new tab: not asked either');
+
+  // Asked for, it still opens.
+  assert.equal(await other.page.evaluate(() => document.querySelector('marble-agent-setup').offer()), true);
+  assert.equal(await dialogOpen(other.page), true);
 });
 
 test('Escape is Not now', async () => {

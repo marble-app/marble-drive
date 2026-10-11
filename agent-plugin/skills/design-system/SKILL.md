@@ -14,14 +14,16 @@ because its owner may have changed it and this skill cannot know.
 ## Find it and read it
 
 The page lives wherever the drive keeps it. `.marble/apps.json` records where
-under `seeded["design-system"]`. It defaults to `Design System` at the root.
-If the page is missing, use `tokens.css` next to this file. It holds the
-shipped tokens and nothing more.
+under `seeded["design-system"]`. A new drive keeps it in its System folder,
+`System/Design System`; a drive from before that has it at the root as
+`Design System`. If the page is missing, use `tokens.css` next to this file.
+It holds the shipped tokens and nothing more.
 
 The page is about 240 KB, so read the part you need, not the whole file:
 
 ```sh
 f="$(node -e 'const m=require("./.marble/apps.json");console.log((m.seeded["design-system"]||"Design System")+".mrbl")' 2>/dev/null || echo 'Design System.mrbl')"
+[ -f "$f" ] || f="System/Design System.mrbl"
 sed -n '/^  :root {/,/^  }/p' "$f"            # the tokens, light-dark() pairs, each with its reason
 grep -n 'class="k"' "$f"                      # the section map: 00 sources … 12 starting an app
 ```
@@ -39,11 +41,13 @@ Next to it is a second page, **Design Don'ts**. It is the system's other half:
 what the apps refuse, and mostly the tells that make a page look generated
 rather than made. Each tell is painted for real next to what the system does
 instead. `.marble/apps.json` records where it is under
-`seeded["design-donts"]`. It defaults to `Design Don'ts` at the root. Where the
-two pages disagree, the Design System wins.
+`seeded["design-donts"]`: beside the Design System, in `System/` on a new
+drive and at the root on an older one. Where the two pages disagree, the
+Design System wins.
 
 ```sh
 d="$(node -e 'const m=require("./.marble/apps.json");console.log((m.seeded["design-donts"]||"Design Don\x27ts")+".mrbl")' 2>/dev/null || echo "Design Don'ts.mrbl")"
+[ -f "$d" ] || d="System/Design Don'ts.mrbl"
 grep -n 'class="k"' "$d"                                # the section map
 sed -n '/id="fingernail"/,/<\/section>/p' "$d"          # the one to check first
 sed -n '/data-marble-id="scan-pre">/,/<\/pre>/p' "$d"   # the scan to run before shipping

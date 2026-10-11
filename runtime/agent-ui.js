@@ -1223,7 +1223,22 @@
     }
     slideThumb(track, { animate: false });
   };
-  const PICKER_PROVIDER_ORDER = ['claude-subscription', 'codex', 'cursor', 'claude-api'];
+  const PICKER_PROVIDER_ORDER = ['claude-subscription', 'claude-credit', 'codex', 'cursor', 'claude-api'];
+  // Starter credit (docs/ACCOUNTS.md). Connect your Claude is the sheet that
+  // signs a drive in to its person's own Claude plan; whatever draws it
+  // listens for this event and calls preventDefault. Answers whether it did.
+  const connectClaude = () => !document.dispatchEvent(new CustomEvent('marble:connect-claude', { cancelable: true }));
+  const dollars = (n) => {
+    const v = Math.max(0, Number(n) || 0);
+    return Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`;
+  };
+  /** "On Bryan's starter credit", or without a name when the drive has none. */
+  const creditWhose = (credit) => (credit?.by ? `On ${credit.by}\u2019s starter credit` : 'On starter credit');
+  const creditUsed = (credit) => (credit?.known ? `${dollars(credit.spent)} of ${dollars(credit.cap)} used` : 'How much is used can\u2019t be read right now.');
+  // Said once on this drive, the first time less than a dollar is left.
+  const CREDIT_LOW_SAID = 'marble-credit-low-said';
+  // At zero the sheet opens by itself, once a page: the note stays for later.
+  let creditSheetOpened = false;
   const sortProviders = (list) => {
     const rank = (id) => {
       const index = PICKER_PROVIDER_ORDER.indexOf(id);
@@ -4382,6 +4397,13 @@
               <button type="button" class="usage-leave quiet">Leave it</button>
             </div>
           </div>
+          <div class="usage-note credit-note" hidden>
+            <p class="credit-note-text"></p>
+            <div class="actions">
+              <button type="button" class="credit-connect">Connect your Claude</button>
+              <button type="button" class="credit-leave quiet">Not now</button>
+            </div>
+          </div>
           <div class="queued" hidden data-combine="0">
             <div class="queued-bar" hidden role="group" aria-label="How queued prompts are sent">
               <button type="button" class="queued-individually" aria-pressed="true">Send individually</button>
@@ -4476,6 +4498,12 @@
       this.detailButton.addEventListener('click', () => writeDetail(readDetail() === 'simple' ? 'technical' : 'simple'));
       this.onDetail = () => this.paintDetail();
       this.paintDetail();
+      this.creditNote = root.querySelector('.credit-note');
+      this.creditNoteText = root.querySelector('.credit-note-text');
+      root.querySelector('.credit-connect').addEventListener('click', () => {
+        if (!connectClaude()) window.marble?.agent?.openSettings?.('settings');
+      });
+      root.querySelector('.credit-leave').addEventListener('click', () => this.hideCreditNote());
       this.usageSwitch.addEventListener('click', () => this.switchFromUsage());
       this.usageLeave.addEventListener('click', () => this.leaveUsage());
       this.dispatchEl = root.querySelector('.dispatch');
@@ -6991,6 +7019,7 @@
       this.turns.clear();
       this.usageLeft = new Set();
       this.hideUsageNote();
+      this.hideCreditNote();
       this.prompts.clear();
       this.live = null;
       this.lastAsk = null;
@@ -7280,6 +7309,8 @@
           this.endLive();
           this.finish(turn, event);
           if (event.type === 'turn.failed' && event.usageStopped && this.failoverMode() === 'pause' && !this.backfilling) this.showUsageNote(event);
+          if (event.type === 'turn.failed' && event.creditUsedUp && !this.backfilling) this.creditUsedUp();
+          if (event.type === 'turn.completed' && this.meta?.provider === 'claude-credit' && !this.backfilling) this.checkCreditLeft();
           break;
         case 'turn.undone':
           this.undone(turn, event);
@@ -7545,6 +7576,41 @@
     hideUsageNote() {
       if (this.usageNote) this.usageNote.hidden = true;
       this.usageAsk = null;
+    }
+
+    /** Starter credit, in the composer's line: used up, with the sheet
+     *  opened once; or under a dollar left, said once on this drive. */
+    showCreditNote(text) {
+      if (!this.creditNote) return;
+      this.creditNoteText.textContent = text;
+      this.creditNote.hidden = false;
+    }
+
+    hideCreditNote() {
+      if (this.creditNote) this.creditNote.hidden = true;
+    }
+
+    creditUsedUp() {
+      this.showCreditNote('Starter credit used up. Connect your Claude to keep going.');
+      if (!creditSheetOpened) {
+        creditSheetOpened = true;
+        connectClaude();
+      }
+    }
+
+    async checkCreditLeft() {
+      try {
+        if (localStorage.getItem(CREDIT_LOW_SAID)) return;
+      } catch { /* private mode: said at most once a page */ }
+      let credit = null;
+      try {
+        credit = await this.api?.credit?.({ fresh: true });
+      } catch {
+        return;
+      }
+      if (!credit?.active || !credit.low) return;
+      try { localStorage.setItem(CREDIT_LOW_SAID, '1'); } catch { /* private mode */ }
+      this.showCreditNote(`Under a dollar of ${credit.by ? `${credit.by}\u2019s ` : ''}starter credit left.`);
     }
 
     switchFromUsage() {
@@ -8859,6 +8925,17 @@
     .claude-auth label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
     .claude-key { grid-column: 2; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
     .claude-key[hidden] { display: none; }
+    /* Starter credit: whose it is and how much is used, then the two ways
+       off it. Quiet until it matters, so no colour and no meter. */
+    .claude-credit { grid-column: 2; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+    .claude-credit[hidden] { display: none; }
+    .claude-credit p { margin: 0; }
+    .claude-credit .credit-used { color: var(--muted); font-size: 12px; }
+    .credit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; }
+    .claude-plan { grid-column: 2; display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: var(--muted); }
+    .claude-plan[hidden] { display: none; }
+    .claude-plan button.link { padding-left: 0; font-size: 12px; }
+    .claude-plan span + button.link { padding-left: 6px; }
     .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
     .project { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
     .project code { font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
@@ -9077,7 +9154,7 @@
       this.usagePane.replaceChildren(h('p', 'empty', 'Loading…'));
       this.setTab(this.tab);
       let providers = [];
-      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, cursor: false, openai: false } };
+      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, claude: false, cursor: false, openai: false } };
       let usage = { meters: [] };
       let voice = null;
       this.voicePane.replaceChildren(h('p', 'empty', 'Loading…'));
@@ -9335,9 +9412,15 @@
     }
 
     /** Claude signs in with the Claude login or an API key: one agent, one
-     *  switch. The key field shows only while "API key" is on. */
+     *  switch. The key field shows only while "API key" is on; under the
+     *  login, the person's own plan, connected from here (Connect your
+     *  Claude) or disconnected. A drive the door gave starter credit has a
+     *  third way, and while it is on, the line says whose credit and how much
+     *  of it is used. */
     claudeSwitch(settings) {
-      const auth = settings.claudeAuth === 'api' ? 'api' : 'login';
+      const credit = settings.credit ?? null;
+      const ways = [...(credit ? [['credit', 'Starter credit']] : []), ['login', 'Claude login'], ['api', 'API key']];
+      const auth = ways.some(([value]) => value === settings.claudeAuth) ? settings.claudeAuth : 'login';
       const group = document.createElement('div');
       group.className = 'claude-auth';
       group.setAttribute('role', 'radiogroup');
@@ -9346,7 +9429,20 @@
       key.className = 'claude-key';
       key.append(this.keyRow('anthropic', 'Claude API key', settings.keys?.anthropic));
       key.hidden = auth !== 'api';
-      for (const [value, text] of [['login', 'Claude login'], ['api', 'API key']]) {
+      const onCredit = credit ? this.creditLine(credit, () => choose('api')) : null;
+      if (onCredit) onCredit.hidden = auth !== 'credit';
+      const plan = this.claudePlan(settings);
+      plan.hidden = auth !== 'login';
+      const radios = new Map();
+      const choose = (value) => {
+        const radio = radios.get(value);
+        if (radio) radio.checked = true;
+        key.hidden = value !== 'api';
+        if (onCredit) onCredit.hidden = value !== 'credit';
+        plan.hidden = value !== 'login';
+        if (value === 'api') key.querySelector('input')?.focus();
+      };
+      for (const [value, text] of ways) {
         const label = document.createElement('label');
         const radio = document.createElement('input');
         radio.type = 'radio';
@@ -9355,11 +9451,65 @@
         radio.checked = value === auth;
         radio.addEventListener('change', () => {
           key.hidden = value !== 'api';
+          if (onCredit) onCredit.hidden = value !== 'credit';
+          plan.hidden = value !== 'login';
         });
+        radios.set(value, radio);
         label.append(radio, document.createTextNode(text));
         group.append(label);
       }
-      return [group, key];
+      return onCredit ? [group, onCredit, key, plan] : [group, key, plan];
+    }
+
+    /** "On Bryan's starter credit · $3.90 of $5 used", with the two ways off
+     *  it: the person's own Claude plan, or a key. */
+    creditLine(credit, useKey) {
+      const line = h('div', 'claude-credit');
+      line.append(h('p', 'credit-whose', creditWhose(credit)), h('p', 'credit-used', creditUsed(credit)));
+      const actions = h('div', 'credit-actions');
+      const connect = h('button', '', 'Connect your Claude');
+      connect.type = 'button';
+      connect.addEventListener('click', () => {
+        // Nothing drew the sheet: the key is the other way in.
+        if (connectClaude()) this.close();
+        else useKey();
+      });
+      const instead = h('button', 'link', 'Use an API key instead');
+      instead.type = 'button';
+      instead.addEventListener('click', useKey);
+      actions.append(connect, instead);
+      line.append(actions);
+      return line;
+    }
+
+    /** The plan Claude's login runs on when it was connected from the
+     *  browser, and the way to connect one: the sheet, by its event. */
+    claudePlan(settings) {
+      const plan = h('div', 'claude-plan');
+      if (settings.keys?.claude) {
+        const off = h('button', 'link', 'Disconnect');
+        off.type = 'button';
+        off.addEventListener('click', async () => {
+          try {
+            await this.api.saveSettings({ keys: { claude: '' } });
+            dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+            await this.fill();
+          } catch (err) {
+            this.status.textContent = err.message;
+            this.status.classList.add('error');
+          }
+        });
+        plan.append(h('span', '', 'On your Claude plan'), off);
+        return plan;
+      }
+      const connect = h('button', 'link', 'Connect your Claude');
+      connect.type = 'button';
+      connect.addEventListener('click', () => {
+        this.close();
+        document.dispatchEvent(new CustomEvent('marble:connect-claude'));
+      });
+      plan.append(connect);
+      return plan;
     }
 
     keyRow(name, label, set, { field = `key-${name}` } = {}) {
@@ -9470,7 +9620,9 @@
   // offers a key field right away: for Claude, for Codex, or a choice of the
   // two when the drive has both. The host checks the key with Anthropic or
   // OpenAI before keeping it; the page never holds it past the request.
-  // "Not now" lasts the tab, so moving between documents does not ask again.
+  // "Not now" is kept for the drive (POST /agent/setup/later), so a new tab or
+  // another device does not ask again; the tab also remembers it, so moving
+  // between documents does not wait on the host to know.
   const SETUP_DISMISSED = 'marble-agent-setup-dismissed';
   const SETUP_CSS = `
     dialog {
@@ -9625,12 +9777,12 @@
       } catch {
         return;
       }
-      if (!state?.needed || !this.isConnected) return;
+      if (!state?.needed || state.later || !this.isConnected) return;
       this.present(state);
     }
 
     /** Opened on request (the line's Set up, change-line.js), whatever Not
-     *  now said for this tab: someone asked for it. Answers whether the host
+     *  now said for this tab or the drive: someone asked for it. Answers whether the host
      *  had anything to connect. */
     async offer() {
       let state = null;
@@ -9645,6 +9797,9 @@
     }
 
     present(state) {
+      // Starter credit used up: the way on is the person's own Claude, in
+      // its sheet. The key field is for when nothing draws one.
+      if (state.credit?.usedUp && connectClaude()) return;
       const offers = (Array.isArray(state.offers) ? state.offers : ['claude']).filter((id) => SETUP_AGENTS[id]);
       this.offers = offers.length ? offers : ['claude'];
       this.choice.hidden = this.offers.length < 2;
@@ -9681,9 +9836,12 @@
       try {
         sessionStorage.setItem(SETUP_DISMISSED, '1');
       } catch {
-        // Nothing to remember it in; it is closed for this page either way.
+        // Nothing to remember it in; the drive still keeps it.
       }
       this.dialog.close();
+      // For the drive, so the next tab does not ask. A host that cannot keep
+      // it leaves this tab's answer standing.
+      this.api?.setupLater?.().catch(() => {});
     }
 
     async connect() {
@@ -9726,6 +9884,179 @@
   }
 
   customElements.define('marble-agent-setup', MarbleAgentSetup);
+
+  // ------------------------------------------------------------ connect your Claude
+
+  // The person's own Claude plan, from the browser: the host runs `claude
+  // setup-token` (server/agent/claude-signin.js) and answers its sign-in
+  // address; this opens it in a new tab, she signs in there and is shown a
+  // code, and the code pasted here goes back to the same run. The one action
+  // is the sign-in until a code is in the field, then it is Connect.
+  //
+  // Opened from Agents › Settings › Claude, and by any page that fires
+  // `document.dispatchEvent(new CustomEvent('marble:connect-claude'))` (the
+  // credit line, Start here, a chat that ran out). "Use an API key instead"
+  // is the key popup above, opened for Claude whatever Not now said.
+  const CONNECT_CSS = `
+    .steps { margin: 0 0 16px; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 8px; }
+    .steps li { counter-increment: step; display: grid; grid-template-columns: 1.4em 1fr; font-size: 13.5px; color: var(--ink); }
+    .steps li::before { content: counter(step); color: var(--muted); font-variant-numeric: tabular-nums; }
+    .actions { justify-content: space-between; align-items: center; }
+    button.link.key { padding-left: 0; }
+    button.link.key:hover { color: var(--ink); }
+  `;
+
+  class MarbleClaudeConnect extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>${TOKENS}${SETUP_CSS}${CONNECT_CSS}</style>
+        <dialog aria-labelledby="claude-connect-title" aria-describedby="claude-connect-lede">
+          <form>
+            <h2 id="claude-connect-title">Connect your Claude</h2>
+            <p class="lede" id="claude-connect-lede">Agents on this drive then run on your Claude plan, not on credit.</p>
+            <ol class="steps">
+              <li>Sign in to Claude in the tab this opens</li>
+              <li>Copy the code it shows you and paste it here</li>
+            </ol>
+            <label>Code from Claude
+              <input name="code" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+            </label>
+            <p class="status" role="status" aria-live="polite"></p>
+            <div class="actions">
+              <button type="button" class="link key">Use an API key instead</button>
+              <button type="submit" class="save">Open Claude sign-in</button>
+            </div>
+          </form>
+        </dialog>`;
+      this.dialog = root.querySelector('dialog');
+      this.form = root.querySelector('form');
+      this.input = root.querySelector('input[name="code"]');
+      this.status = root.querySelector('.status');
+      this.action = root.querySelector('.save');
+      this.keyButton = root.querySelector('.key');
+      // A sign-in the host started for this sheet and has not finished.
+      this.started = false;
+      this.busy = false;
+    }
+
+    get api() {
+      return window.marble?.agent;
+    }
+
+    connectedCallback() {
+      this.unwatchTheme = watchPageTheme(this);
+      // Cancelled, so whoever fired it knows the sheet is drawn.
+      this.onAsk = (event) => { event.preventDefault(); this.open(); };
+      document.addEventListener('marble:connect-claude', this.onAsk);
+      this.form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (this.busy) return;
+        if (this.input.value.trim()) this.connect();
+        else this.signIn();
+      });
+      // The action follows the field: a code in it is a code to send.
+      this.input.addEventListener('input', () => this.label());
+      this.keyButton.addEventListener('click', () => {
+        this.close();
+        document.querySelector('marble-agent-setup')?.present({ offers: ['claude'] });
+      });
+      this.dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        this.close();
+      });
+      // A press on the backdrop is outside the form: the sheet goes.
+      this.dialog.addEventListener('click', (event) => {
+        if (event.target === this.dialog) this.close();
+      });
+    }
+
+    disconnectedCallback() {
+      this.unwatchTheme?.();
+      this.unwatchTheme = null;
+      document.removeEventListener('marble:connect-claude', this.onAsk);
+    }
+
+    label() {
+      this.action.textContent = this.input.value.trim() ? 'Connect' : 'Open Claude sign-in';
+    }
+
+    open() {
+      if (this.dialog.open) return;
+      this.input.value = '';
+      this.input.disabled = false;
+      this.label();
+      this.say('');
+      this.dialog.showModal();
+      this.action.focus();
+    }
+
+    /** Closed before the code came back: the run the host is holding for it
+     *  is ended now rather than at its timeout. */
+    close() {
+      if (this.started) this.api?.claudeSignInCancel?.().catch(() => {});
+      this.started = false;
+      this.dialog.close();
+    }
+
+    async signIn() {
+      // The tab opens on the press, before the host answers, or a browser
+      // that blocks pop-ups blocks it; it is pointed at the address once
+      // there is one, and cut off from this page.
+      const tab = window.open('', '_blank');
+      if (tab) tab.opener = null;
+      this.busy = true;
+      this.action.disabled = true;
+      this.say('Starting Claude sign-in…');
+      try {
+        const { url } = await this.api.claudeSignIn();
+        this.started = true;
+        if (tab && !tab.closed) tab.location.href = url;
+        else if (!window.open(url, '_blank', 'noopener')) throw new Error('The browser blocked the new tab. Allow pop-ups for this drive and try again.');
+        this.say('Signed in? Paste the code from Claude here.');
+        this.input.focus();
+      } catch (err) {
+        tab?.close();
+        this.say(err.message || "Claude's sign-in didn't start. Try again.", true);
+      }
+      this.busy = false;
+      this.action.disabled = false;
+    }
+
+    async connect() {
+      const code = this.input.value.trim();
+      this.busy = true;
+      this.action.disabled = true;
+      this.input.disabled = true;
+      this.say('Connecting…');
+      try {
+        await this.api.claudeSignInCode(code);
+        this.started = false;
+        this.input.value = '';
+        dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+        this.say('Connected. Agents now run on your Claude plan.');
+        setTimeout(() => this.dialog.close(), 900);
+      } catch (err) {
+        this.input.disabled = false;
+        // The run that would have taken it is over: back to the sign-in.
+        if (err.status === 409 || err.status === 400) {
+          this.started = false;
+          this.input.value = '';
+          this.label();
+        }
+        this.say(err.message || "Couldn't connect. Open Claude sign-in again.", true);
+      }
+      this.busy = false;
+      this.action.disabled = false;
+    }
+
+    say(text, error = false) {
+      this.status.textContent = text;
+      this.status.classList.toggle('error', error);
+    }
+  }
+
+  customElements.define('marble-claude-connect', MarbleClaudeConnect);
 
   // ------------------------------------------------------------ the drawer
 
@@ -11134,9 +11465,18 @@
     document.body.append(el);
   };
 
+  // Connect your Claude waits for its event on every top-level page.
+  const mountConnect = () => {
+    if (window.top !== window || document.querySelector('marble-claude-connect')) return;
+    const el = document.createElement('marble-claude-connect');
+    el.setAttribute('data-marble-transient', '');
+    document.body.append(el);
+  };
+
   const mount = () => {
     mountSettings();
     mountSetup();
+    mountConnect();
     const pageUsage = document.querySelector('header.topbar > .usage');
     if (pageUsage) watchUsage(pageUsage);
     bindNewChatKey();

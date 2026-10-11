@@ -10,8 +10,12 @@
 // prompts routed back to Marble over stream-json stdin so the person can
 // answer them from the drawer.
 //
-// The two providers differ only in billing: the subscription gets no API key
-// in its environment, so the CLI uses the login; the API provider hands it one.
+// The providers differ only in billing: the subscription gets no API key in
+// its environment, so the CLI uses the login (or the long-lived token of a
+// plan connected from the browser, CLAUDE_CODE_OAUTH_TOKEN); the API provider
+// hands it one; and starter credit (claude-credit) hands it the drive's own
+// credit token with ANTHROPIC_BASE_URL pointed at the credit proxy
+// (worker/src/credit.js), which adds the owner's key on the way to Anthropic.
 
 import path from 'node:path';
 
@@ -78,6 +82,17 @@ const skill = (name, description = '') => ({ id: String(name), name: String(name
 const DENIAL = /\b(denied by the Claude Code auto mode classifier|permission (?:for this action |to use [^\n]*?)?(?:was |is )?denied|requested permissions[^\n]*?(?:denied|rejected)|operation not permitted by (?:a )?hook|blocked by (?:a )?hook)\b/i;
 
 export const isDenial = (text) => DENIAL.test(String(text ?? ''));
+
+// What the credit proxy answers at a drive's cap: a 402 billing_error saying
+// "Starter credit used up". The CLI prints the status and the body.
+const CREDIT_USED_UP = /starter credit used up|\b402\b[^\n]*billing_error|billing_error[^\n]*\b402\b/i;
+export const creditUsedUp = (text) => CREDIT_USED_UP.test(String(text ?? ''));
+/** The two settings that put a drive on starter credit, or null. */
+export function creditSettings(env = {}) {
+  const url = String(env.MARBLE_CREDIT_URL ?? '').trim().replace(/\/+$/, '');
+  const token = String(env.MARBLE_CREDIT_TOKEN ?? '').trim();
+  return /^https?:\/\/\S+$/.test(url) && token ? { url, token } : null;
+}
 
 /** One line of `claude -p --output-format stream-json` as the runner's events.
  *  `state` is the runner's per-turn scratch: what a line means can depend on
@@ -206,6 +221,7 @@ export function parseClaudeLine(line, state = {}) {
 
 export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env, secrets, version = null } = {}) {
   const api = auth === 'api';
+  const credit = auth === 'credit';
   const live = () => ({ ...env, ...(typeof secrets === 'function' ? secrets() : secrets ?? {}) });
   let cliVersion = version;
   // One name for both: which one pays is a switch in Agents settings, not a
@@ -213,7 +229,7 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
   const label = 'Claude';
 
   return {
-    id: api ? 'claude-api' : 'claude-subscription',
+    id: api ? 'claude-api' : credit ? 'claude-credit' : 'claude-subscription',
     label,
     capability: 'full',
 
@@ -225,11 +241,20 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       const current = live();
       const probeEnv = pickEnv(current);
       if (api && current.ANTHROPIC_API_KEY) probeEnv.ANTHROPIC_API_KEY = current.ANTHROPIC_API_KEY;
+      // The person's own plan, connected from the browser (claude-signin.js):
+      // the CLI reads the token from its environment and answers as signed in.
+      if (!api && current.CLAUDE_CODE_OAUTH_TOKEN) probeEnv.CLAUDE_CODE_OAUTH_TOKEN = current.CLAUDE_CODE_OAUTH_TOKEN;
       const probe = await exec('claude', ['auth', 'status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'claude is not installed' };
       if (cliVersion == null) {
         const versionProbe = await exec('claude', ['--version'], { env: probeEnv });
         cliVersion = /(\d+\.\d+\.\d+)/.exec(`${versionProbe.stdout}\n${versionProbe.stderr}`)?.[1] ?? '';
+      }
+
+      if (credit) {
+        return creditSettings(current)
+          ? { installed: true, signedIn: true, detail: 'on starter credit' }
+          : { installed: true, signedIn: false, detail: 'this drive has no starter credit' };
       }
 
       if (api) {
@@ -303,6 +328,8 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       if (api && !current.ANTHROPIC_API_KEY) {
         throw new Error('No Claude API key is set — add one in Agents settings, or switch Claude to your login');
       }
+      const onCredit = credit ? creditSettings(current) : null;
+      if (credit && !onCredit) throw new Error('This drive has no starter credit. Connect your Claude in Agents settings.');
       // A full turn speaks stream-json: the initialize handshake first (it is
       // what makes AskUserQuestion available and answers with the skills
       // list), then the prompt as a user message. stdin stays open for the
@@ -319,6 +346,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
           // per command is unchanged.
           ...(full ? { BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS) } : {}),
           ...(api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {}),
+          // The drive's own token, never the owner's key: the proxy holds that.
+          ...(onCredit ? { ANTHROPIC_BASE_URL: onCredit.url, ANTHROPIC_API_KEY: onCredit.token } : {}),
+          ...(!api && !onCredit && current.CLAUDE_CODE_OAUTH_TOKEN ? { CLAUDE_CODE_OAUTH_TOKEN: current.CLAUDE_CODE_OAUTH_TOKEN } : {}),
         },
         stdin,
         ...(full ? { stdinOpen: true } : {}),
@@ -330,6 +360,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
     },
 
     parse: (line, state) => parseClaudeLine(line, state),
+
+    // The proxy said this drive's starter credit is spent.
+    ...(credit ? { creditUsedUp } : {}),
 
     // `--resume` with a session the CLI has deleted.
     lostSession: (error) => /no conversation found/i.test(String(error ?? '')),

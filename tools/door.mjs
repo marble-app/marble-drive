@@ -11,6 +11,17 @@
 //   node tools/door.mjs drives                      every drive, its state and owner
 //   node tools/door.mjs hold <name> [--off]         stop a drive at the edge, or let it go again
 //   node tools/door.mjs log [--account <id>]        the audit log, newest first
+//   node tools/door.mjs credit                      each drive's starter credit: spent, cap, whose
+//   node tools/door.mjs credit mint <name> [--cap <usd>] [--by <first name>] [--write <path>]
+//                                                   a credit token for a drive, door-made or made by
+//                                                   hand (t-<person>); its two settings are printed
+//                                                   once, or written to --write (mode 600)
+//   node tools/door.mjs credit cap <name> <usd>     change a drive's cap
+//   node tools/door.mjs credit reset <name>         what it spent back to nothing
+//   node tools/door.mjs credit off <name>           its token stops working
+//   (invite takes --credit <usd> too: the credit the drive it makes gets)
+//   node tools/door.mjs spares                      the drives kept ready for the next sign-ups
+//   node tools/door.mjs forget-spare <sprite>       stop handing that spare out (its sprite stays)
 //
 // Reads DOOR_URL and DOOR_ADMIN_TOKEN from ~/.config/marble-drive/door.env,
 // which must be mode 600. An invite link is printed once, when it is made:
@@ -68,7 +79,7 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
   const { flags, args } = parseArgs(argv);
   const [command, ...rest] = args;
   if (!command || flags.help) {
-    out('node tools/door.mjs invite | invites | requests | approve <id> | drives | hold <name> [--off] | log [--account <id>]');
+    out('node tools/door.mjs invite | invites | requests | approve <id> | drives | hold <name> [--off] | log [--account <id>] | credit [mint|cap|reset|off <name>] | spares | forget-spare <sprite>');
     return command ? 0 : 2;
   }
   let settings;
@@ -78,10 +89,10 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
     err(`door: ${e.message}`);
     return 1;
   }
-  const call = async (method, route, body) => {
+  const call = async (method, route, body, { under = '/_door' } = {}) => {
     let res;
     try {
-      res = await fetchImpl(new URL(`/_door${route}`, settings.url).href, {
+      res = await fetchImpl(new URL(`${under}${route}`, settings.url).href, {
         method,
         headers: { authorization: `Bearer ${settings.token}`, 'content-type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined,
@@ -96,6 +107,7 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
       data = {};
     }
     if (res.status === 401) throw new Error('the door refused the admin token in door.env');
+    if (res.status === 404 && under === '/_credit/admin' && !data.why) throw new Error('starter credit is off: the Worker has no CREDIT_ANTHROPIC_KEY');
     if (!res.ok) throw new Error(data.why ?? `the door answered ${res.status}`);
     return data;
   };
@@ -110,6 +122,7 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
           days: flags.days ? Number(flags.days) : 14,
           ...(flags.drive ? { drive: String(flags.drive), sprite: String(flags.sprite) } : {}),
           ...(flags.owner ? { owner: true } : {}),
+          ...(flags.credit !== undefined ? { credit: Number(flags.credit) } : {}),
         };
         const { link, invite } = await call('POST', '/invite', body);
         const what = invite.owner ? 'The owner’s invite' : invite.drive ? `Hands over ${invite.drive}` : `${invite.uses} use${invite.uses === 1 ? '' : 's'}`;
@@ -155,8 +168,74 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
         for (const l of lines) out(`${l.at}  ${l.kind.padEnd(16)} ${l.account ?? '-'}  ${l.detail ? JSON.stringify(l.detail) : ''}`.trimEnd());
         return 0;
       }
+      case 'credit': {
+        const credit = (method, route, body) => call(method, route, body, { under: '/_credit/admin' });
+        const [what, name, amount] = rest;
+        const used = (c) => `$${c.spent.toFixed(2)} of $${c.cap.toFixed(2)}`;
+        if (!what) {
+          const { drives } = await credit('GET', '/drives');
+          if (!drives.length) return out('No drive has starter credit yet.'), 0;
+          for (const line of pad([['name', 'used', 'whose', 'token', 'last used'], ...drives.map((c) => [c.name, used(c), c.by ?? '', c.on ? 'on' : 'off', day(c.last)])])) out(line);
+          return 0;
+        }
+        if (!name) throw new Error(`credit ${what} which drive?`);
+        const at = `/drives/${encodeURIComponent(name)}`;
+        if (what === 'mint') {
+          const { token, credit: c } = await credit('POST', `${at}/token`, {
+            ...(flags.cap !== undefined ? { cap: Number(flags.cap) } : {}),
+            ...(typeof flags.by === 'string' ? { by: flags.by } : {}),
+          });
+          const lines = `MARBLE_CREDIT_URL=${new URL('/_credit', settings.url).href}\nMARBLE_CREDIT_TOKEN=${token}\n`;
+          if (typeof flags.write === 'string') {
+            fs.writeFileSync(flags.write, lines, { mode: 0o600 });
+            fs.chmodSync(flags.write, 0o600);
+            out(`${name} has $${c.cap.toFixed(2)} of starter credit. Its two settings are in ${flags.write}; add them to the drive's sprite.env and restart it.`);
+          } else {
+            out(`${name} has $${c.cap.toFixed(2)} of starter credit. Add these two lines to its sprite.env and restart it; they are not shown again:`);
+            out(lines.trimEnd());
+          }
+          return 0;
+        }
+        if (what === 'cap') {
+          if (amount === undefined) throw new Error('credit cap <name> <dollars>');
+          const { credit: c } = await credit('POST', at, { cap: Number(amount) });
+          out(`${name}: ${used(c)} used.`);
+          return 0;
+        }
+        if (what === 'reset') {
+          const { credit: c } = await credit('POST', at, { reset: true });
+          out(`${name}: ${used(c)} used.`);
+          return 0;
+        }
+        if (what === 'off') {
+          await credit('DELETE', `${at}/token`);
+          out(`${name}'s credit token no longer works. Mint a new one to turn it back on.`);
+          return 0;
+        }
+        throw new Error(`no "credit ${what}": mint, cap, reset, off`);
+      }
+      case 'spares': {
+        const { spares, room } = await call('GET', '/spares');
+        if (!spares.length) out('No spare drives. With MARBLE_SPARE_DRIVES set on the door sprite, it makes one after its next poke.');
+        else for (const line of pad([['sprite', 'state', 'since', 'url'], ...spares.map((x) => [x.sprite, x.state === 'failed' && x.failedFor ? `failed for ${x.failedFor}` : x.state, day(x.ready ?? x.made), x.url ?? ''])])) out(line);
+        if (spares.some((x) => x.state === 'failed')) {
+          out('');
+          out('No new spare is made while one has failed. Forget it with node tools/door.mjs forget-spare <sprite>,');
+          out('then remove its sprite on the door sprite: tools/sprite-provision.sh --remove <sprite> --spare <sprite>');
+        }
+        if (room <= 0) out('Sign-up has made as many drives as MAX_DRIVES allows, so no spare is made.');
+        return 0;
+      }
+      case 'forget-spare': {
+        const sprite = rest[0];
+        if (!sprite || !/^d-spare-[0-9a-f]{6,16}$/.test(sprite)) throw new Error('forget which spare? node tools/door.mjs spares lists them (d-spare-<hex>)');
+        await call('DELETE', `/spares/${sprite}`);
+        out(`Forgot ${sprite}: no sign-up is given it. Its sprite is still there; remove it on the door sprite with`);
+        out(`  tools/sprite-provision.sh --remove ${sprite} --spare ${sprite}`);
+        return 0;
+      }
       default:
-        throw new Error(`no command "${command}": invite, invites, requests, approve, drives, hold, log`);
+        throw new Error(`no command "${command}": invite, invites, requests, approve, drives, hold, log, credit, spares, forget-spare`);
     }
   } catch (e) {
     err(`door: ${e.message}`);

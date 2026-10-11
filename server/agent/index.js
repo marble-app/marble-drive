@@ -11,11 +11,13 @@ import { fileURLToPath } from 'node:url';
 import { enginePath, examine } from '../engine.js';
 import { build as buildStarter, composeScript } from '../gallery.js';
 import { createHub } from './hub.js';
+import { createCreditReader } from './credit.js';
 import { createKeyStore } from './keys.js';
 import { createVoice } from './voice/openai.js';
 import { createVoiceUsage, voiceSettings } from './voice/settings.js';
 import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
+import { createClaudeSignIn } from './claude-signin.js';
 import { nameConversation } from './namer.js';
 import { drawWithCli } from './drawer.js';
 import { writeOffer } from './offer.js';
@@ -289,6 +291,8 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     maxBody: config.maxBodyBytes,
     gated: Boolean(config.secret),
     keys,
+    // Starter credit's balance, read with this drive's own token.
+    credit: createCreditReader({ url: config.creditUrl, token: config.creditToken }),
     anthropicBase: config.anthropicBase,
     openaiBase: config.openaiBase,
     skills,
@@ -315,6 +319,7 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     voiceUsage: createVoiceUsage({ dir }),
     voiceTitles,
     voiceMaxSeconds: config.voiceMaxSeconds ?? 120,
+    claudeSignIn: createClaudeSignIn({ waitMs: (config.claudeSignInSeconds ?? 600) * 1000, log }),
     log,
   });
 
@@ -389,6 +394,7 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
       }
     },
     async close() {
+      routes.close();
       await runner.close();
       hub.close();
       await lock.release();
