@@ -168,6 +168,13 @@ through.
   the page's own script tries to file.
 - A drive with no passphrase is open to anyone who can reach it, links or not,
   and the Share panel says so.
+- When the drive is on the door (`MARBLE_DOOR_*` set, [ACCOUNTS.md](ACCOUNTS.md)),
+  the visitor's page ends with one quiet line, "Made in Marble Drive · Ask for
+  a drive of your own", after the page's content and in its flow. The link
+  goes to Ask for access at `https://marbledrive.app/ask`, which asks someone
+  not signed in to sign in first and then offers the button. With no door the
+  line is not drawn: there is nowhere live to send them. The owner never sees
+  it, because `share.js` is only sent to a link's visitor.
 
 ## What a link does not protect against
 

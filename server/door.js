@@ -95,5 +95,9 @@ export function createDoor({ keys = new Map(), name = null, owner = null, cookie
     return url.href;
   }
 
-  return { configured, allows, who, enterUrl, cookieName, name };
+  /** Where a share page's "Make your own" goes: Ask for access at the door.
+   *  Null with no door, so a drive the door does not know offers nothing. */
+  const askUrl = configured ? new URL('/ask', origin).href : null;
+
+  return { configured, allows, who, enterUrl, askUrl, cookieName, name };
 }

@@ -424,7 +424,10 @@ export async function createDrive(config, { log = console, agentProviders = null
     // their link lets them do, and keeps a read-only page read-only.
     if (visit) {
       tags += `\n<script src="${runtimeUrl('collab.js')}" data-marble-transient></script>`;
-      tags += `\n<script src="${runtimeUrl('share.js')}" data-role="${escapeHtml(visit.role)}" data-marble-transient></script>`;
+      // With the door on, the page ends with a quiet "Make your own" that
+      // goes to Ask for access; with it off there is nowhere to send them.
+      const ask = door.askUrl ? ` data-door="${escapeHtml(door.askUrl)}"` : '';
+      tags += `\n<script src="${runtimeUrl('share.js')}" data-role="${escapeHtml(visit.role)}"${ask} data-marble-transient></script>`;
       return source.includes('</body>')
         ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
         : source + tags;

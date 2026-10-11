@@ -268,6 +268,10 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
 
     if (path === '/ask') {
       const kept = await unseal(env.DOOR_SIGNING_KEY, 'ask', readCookie(request, ASK_COOKIE), { now });
+      // Not signed in yet, as someone who followed a share page's "Ask for a
+      // drive of your own" is: sign in first, and the callback brings anyone
+      // without an invite back here to ask. Signed in already: on as usual.
+      if (!kept && method === 'GET' && !(await sessionOf(request, dir))) return pages.signIn({ providers: providersOf(env), asking: true });
       if (!kept) return redirect('/');
       if (method === 'GET') return pages.notInvited({ name: kept.name, email: kept.email, asked: kept.asked });
       if (method === 'POST') {
