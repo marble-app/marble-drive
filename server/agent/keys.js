@@ -12,9 +12,13 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 // The name a key is saved under, and the variable its CLI reads. Codex's is
-// CODEX_API_KEY: `codex exec` ignores OPENAI_API_KEY.
+// CODEX_API_KEY: `codex exec` ignores OPENAI_API_KEY. `claude` is not an API
+// key but the long-lived token `claude setup-token` gives for the person's
+// own Claude plan (server/agent/claude-signin.js); the Claude login provider
+// runs on it when it is set.
 const FIELDS = {
   anthropic: 'ANTHROPIC_API_KEY',
+  claude: 'CLAUDE_CODE_OAUTH_TOKEN',
   cursor: 'CURSOR_API_KEY',
   openai: 'CODEX_API_KEY',
 };

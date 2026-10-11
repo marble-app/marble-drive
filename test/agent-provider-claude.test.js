@@ -445,3 +445,24 @@ test('a model or effort another agent left on the chat is not handed to Claude',
   assert.equal(own[own.indexOf('--model') + 1], 'claude-sonnet-5');
   assert.equal(own[own.indexOf('--effort') + 1], 'max');
 });
+
+// A plan connected from the browser (Connect your Claude) is a long-lived
+// token in the keys file. The login provider is asked about it and runs on
+// it; the API provider never sees it, so a key someone chose still pays.
+test('the login runs on a connected plan token; the API key provider never gets it', async () => {
+  const seen = [];
+  const exec = async (command, args, options) => {
+    if (args[0] === 'auth') seen.push(options?.env);
+    return { code: 0, stdout: '{"loggedIn": true}', stderr: '', missing: false };
+  };
+  const secrets = () => ({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-plan', ANTHROPIC_API_KEY: 'sk-ant-api03-key' });
+  const login = createClaudeProvider({ auth: 'subscription', exec, env: { PATH: '/bin' }, secrets });
+  const api = createClaudeProvider({ auth: 'api', exec, env: { PATH: '/bin' }, secrets });
+  await login.detect();
+  await api.detect();
+  assert.deepEqual(seen[0], { PATH: '/bin', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-plan' });
+  assert.deepEqual(seen[1], { PATH: '/bin', ANTHROPIC_API_KEY: 'sk-ant-api03-key' });
+  assert.equal(login.spawn({ workspace: '/w', prompt: 'x' }).env.CLAUDE_CODE_OAUTH_TOKEN, 'sk-ant-oat01-plan');
+  assert.equal(login.spawn({ workspace: '/w', prompt: 'x' }).env.ANTHROPIC_API_KEY, undefined);
+  assert.equal(api.spawn({ workspace: '/w', prompt: 'x' }).env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+});

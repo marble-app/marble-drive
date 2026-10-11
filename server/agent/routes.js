@@ -20,6 +20,7 @@ import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
 import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
+import { createClaudeSignIn } from './claude-signin.js';
 import { checkAnthropicKey, checkOpenAIKey } from './key-check.js';
 import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
@@ -119,8 +120,12 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, log = console }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, log = console }) {
   let detected = null;
+  // Connect your Claude: `claude setup-token` run for the page, one at a time
+  // (server/agent/claude-signin.js). Made on first use.
+  let signIn = claudeSignIn;
+  const claudeSignInRun = () => (signIn ??= createClaudeSignIn({ log }));
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
   const undoing = new Set();
@@ -143,7 +148,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   const isClaude = (id) => id === CLAUDE.login || id === CLAUDE.api;
   // Codex is one agent either way: its key, when set, is what it runs on.
   const CODEX = 'codex';
-  const NO_KEYS = { anthropic: false, cursor: false, openai: false };
+  const NO_KEYS = { anthropic: false, claude: false, cursor: false, openai: false };
 
   /** The agent new chats start on: the saved default when it can run, else
    *  the first that can, in the picker's order. A drive that signed Codex in
@@ -569,6 +574,44 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       const current = (await store.settings()).defaultProvider;
       await store.saveSettings({ claudeAuth: 'api', ...(isClaude(current) ? { defaultProvider: CLAUDE.api } : {}) });
       return json(res, 200, { ...(await setupState()), checked: verdict === 'ok' });
+    }
+
+    // Connect your Claude (the sheet in runtime/agent-ui.js). Starting runs
+    // `claude setup-token` and answers the sign-in address it prints; the
+    // code Claude's page shows comes back to the same run, and the long-lived
+    // token it prints is kept like an API key. Claude then runs on that plan:
+    // the switch goes to the login, and a default of Claude (on a key or on
+    // credit) follows it. Like every /agent route these are the owner's: the
+    // gate is in front of them, a share link never reaches them, and a change
+    // has to come from this drive's own pages.
+    if (route === '/agent/claude/sign-in' && (method === 'POST' || method === 'DELETE')) {
+      if (method === 'DELETE') {
+        signIn?.cancel();
+        return json(res, 200, { ok: true });
+      }
+      if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
+      if (!providers.has(CLAUDE.login)) return json(res, 400, { error: "This drive doesn't have Claude." });
+      try {
+        return json(res, 200, await claudeSignInRun().start());
+      } catch (err) {
+        return json(res, err.status ?? 502, { error: err.message });
+      }
+    }
+    if (route === '/agent/claude/sign-in/code' && method === 'POST') {
+      if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
+      const body = await readJson(req, maxBody);
+      let token = null;
+      try {
+        ({ token } = await claudeSignInRun().finish(body.code));
+      } catch (err) {
+        return json(res, err.status ?? 502, { error: err.message });
+      }
+      await keys.write({ claude: token });
+      detected = null;
+      const current = (await store.settings()).defaultProvider;
+      const claudeDefault = !current || String(current).startsWith('claude');
+      await store.saveSettings({ claudeAuth: 'login', ...(claudeDefault ? { defaultProvider: CLAUDE.login } : {}) });
+      return json(res, 200, { ...(await setupState()), connected: true });
     }
 
     if (route === '/agent/settings') {
@@ -1155,5 +1198,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     defaultProvider: async () => runnableDefault(await store.settings()),
     /** Build mode's routes (server/build/routes.js), behind these same checks. */
     useBuilds(routes) { buildRoutes = routes; },
+    /** Ends a Claude sign-in still waiting for its code. */
+    close() { signIn?.close(); },
   };
 }
