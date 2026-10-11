@@ -382,7 +382,7 @@ test('a summary carries the last step and when the running turn began, and the l
   await store.appendEvent(id, { type: 'text', turn: turn.id, text: 'Tests pass.' });
   summary = await store.summary(id);
   assert.equal(summary.lastStep.kind, 'run');
-  assert.equal(summary.lastStep.words, 'Running a command');
+  assert.equal(summary.lastStep.words, 'Testing that it works', 'in the card\'s words');
   assert.equal(summary.lastStep.turn, turn.id);
   assert.deepEqual(store.lastStep(id), summary.lastStep);
 
@@ -393,7 +393,7 @@ test('a summary carries the last step and when the running turn began, and the l
   await again.ready();
   summary = await again.summary(id);
   assert.equal(summary.turnStartedAt, null);
-  assert.equal(summary.lastStep.words, 'Running a command');
+  assert.equal(summary.lastStep.words, 'Testing that it works', 'in the card\'s words');
 });
 
 test('turns since a time: every chat\'s, archived too, cut to times, outcome and page', async () => {

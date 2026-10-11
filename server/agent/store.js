@@ -17,6 +17,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import '../../runtime/agent-folders.js';
+import '../../runtime/agent-words.js';
 import '../../runtime/agent-status.js';
 import { fallbackTitle } from './namer.js';
 

@@ -1142,7 +1142,7 @@ test('a summary carries the last step in plain words, and every chat\'s turns si
   const { body: listed } = await api('GET', '/agent/conversations');
   const summary = listed.find((s) => s.id === made.conversationId);
   assert.equal(summary.lastStep.kind, 'change');
-  assert.equal(summary.lastStep.words, 'Changing status');
+  assert.equal(summary.lastStep.words, 'Updating status', 'the card\'s words');
   assert.equal(summary.lastStep.turn, made.turnId);
   assert.ok(summary.lastStep.t >= before);
   assert.equal(summary.turnStartedAt, null, 'a finished chat has no running turn');
