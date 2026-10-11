@@ -382,6 +382,21 @@
         transition: transform 120ms ${EASE}, filter 120ms ${EASE};
       }
 
+      /* A fingertip needs 44px to land on: the zone's label keeps its size on
+         the work and its buttons take the room round them; the fork's choices
+         grow, since they are the whole of what that moment asks. */
+      @media (pointer: coarse) {
+        .marble-zone-label { font-size: 13px; }
+        .marble-zone-label button { position: relative; }
+        .marble-zone-label button::after { content: ""; position: absolute; inset: -12px -2px; }
+        .marble-fork { font-size: 13.5px; }
+        .marble-fork-seg button, .marble-fork-acts button { min-height: 40px; }
+        .marble-fork-acts { gap: .35rem; }
+        .marble-zones-show { padding: .8rem .6rem; }
+      }
+      /* The corner it falls back to is clear of the notch and the rounded corner. */
+      .marble-zones-show { top: calc(20px + env(safe-area-inset-top, 0px)); right: calc(20px + env(safe-area-inset-right, 0px)); }
+
       @media (prefers-reduced-motion: reduce) {
         .marble-act-ring,
         .marble-act-live,

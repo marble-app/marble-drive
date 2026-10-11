@@ -165,7 +165,16 @@ __ICON__
   .row:hover .drop, .row:focus-within .drop { opacity: 1; }
   .row:hover .ago, .row:focus-within .ago { visibility: hidden; }
   .row .drop svg { width: 16px; height: 16px; }
-  @media (hover: none) { .row .drop { display: none; } }
+  /* No hover to bring Archive out, so a long press on the row does (and a
+     tap anywhere else puts it back), the way holding a row in Messages
+     offers what can be done to it. The row is chrome under the finger: a
+     hold on it is not a text selection with a loupe. */
+  @media (hover: none) {
+    .row .drop { display: none; }
+    .row.marble-armed .drop { display: grid; opacity: 1; }
+    .row.marble-armed .ago { visibility: hidden; }
+    .row .pick { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  }
   .side-empty { display: none; margin: 1.5rem 1.25rem; color: var(--faint); font-size: 13px; }
   .chats:empty + .side-empty { display: block; }
 
@@ -213,7 +222,7 @@ __ICON__
     background: color-mix(in srgb, var(--card) 88%, transparent); color: var(--ink);
     -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6);
     box-shadow: var(--shadow-lift); inset: auto; position: fixed;
-    transform-origin: top right;
+    transform-origin: top right; overflow-y: auto; overscroll-behavior: contain;
     opacity: 0; transform: scale(.96) translateY(-4px);
     transition: opacity var(--t) var(--ease-out), transform var(--t) var(--ease-out), overlay var(--t) allow-discrete, display var(--t) allow-discrete;
   }
@@ -477,6 +486,50 @@ __ICON__
     .hint { display: none; }
   }
 
+  /* ------------------------------------------------------------------ keys
+
+     A phone's keyboard covers the bottom of the window without telling the
+     page, and iOS slides what is visible down the window to keep the caret
+     clear. A room as tall as the window then had its field under the keys or
+     its bar off the top. While the keys are up (marble-keys, set by the
+     script), the app is the strip a person can see: as tall as it, and moved
+     down with it. Not otherwise: a pinch-zoom moves that strip too, and the
+     app must not chase a zoom. */
+  body.app.marble-keys {
+    position: relative; top: var(--vv-top, 0px);
+    height: calc(var(--vv-h, 100dvh) - var(--marble-shell-top, 0px));
+  }
+  /* The home bar is under the keys, so the field stops making room for it. */
+  body.marble-keys .dock { padding-bottom: .6rem; }
+  body.marble-keys .toast { bottom: calc(5.5rem + var(--kb, 0px)); }
+
+  /* ----------------------------------------------------------------- finger
+
+     What a hand needs and a pointer does not. Every field is 16px, because
+     iOS zooms the page in on a smaller one and leaves it zoomed; every
+     control has 44pt of reach, from its own box or from an invisible ::after
+     where the drawing should stay small; and what is pressed says so on the
+     way down, since nothing here is hovered first. */
+  @media (pointer: coarse) {
+    .find input, .field textarea, .ask .ask-other-text, .ask .deny-note { font-size: 16px; }
+    .find input { height: 40px; }
+    .bar .title, .hello .sub, .side-empty { font-size: 16px; }
+    .icon, .acts .icon, .row .drop { width: 44px; height: 44px; }
+    .model { height: 44px; padding: 0 .6rem 0 .85rem; font-size: 14px; }
+    .model:active { background: var(--paper-3); color: var(--ink); }
+    .menu button { min-height: 44px; font-size: 15px; }
+    .menu button:active { background: var(--paper-3); }
+    .send, .latest, .toast button, .work summary { position: relative; }
+    .send::after { content: ''; position: absolute; inset: -4px; }
+    .latest::after { content: ''; position: absolute; inset: -5px; }
+    .toast button::after { content: ''; position: absolute; inset: -8px -4px; }
+    .work summary::after { content: ''; position: absolute; inset: -10px -4px; }
+    .work summary:active { background: var(--paper-2); color: var(--ink); }
+    .idea { min-height: 44px; }
+    .ask .ask-options button, .ask .ask-actions button { min-height: 44px; }
+    .bar, .side-head, .dock .send, .ideas, .acts { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
     ::view-transition-group(*) { animation: none !important; }
@@ -514,7 +567,7 @@ __ICON__
       <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compose"/></svg>
     </button>
   </div>
-  <label class="find" data-marble-transient><input type="search" placeholder="Search" aria-label="Search chats" autocomplete="off" spellcheck="false"></label>
+  <label class="find" data-marble-transient><input type="search" placeholder="Search" aria-label="Search chats" autocomplete="off" spellcheck="false" enterkeyhint="search"></label>
   <div class="chats" role="list" data-marble-transient></div>
   <p class="side-empty" data-marble-id="__ID__" data-marble-editable>No chats yet.</p>
 </nav>
@@ -669,7 +722,13 @@ __ICON__
       const pick = h('button', 'pick');
       pick.type = 'button';
       pick.append(h('span', 't'), h('span', 'ago'));
-      pick.addEventListener('click', () => go(c.id));
+      pick.addEventListener('click', (e) => {
+        // The tap that ended a long press was the press, not a pick.
+        if (holding.done) { holding.done = false; e.preventDefault(); return; }
+        unarm();
+        go(c.id);
+      });
+      holdToArm(pick, li);
       const drop = h('button', 'icon drop');
       drop.type = 'button';
       drop.setAttribute('aria-label', 'Archive chat');
@@ -690,6 +749,44 @@ __ICON__
     else pick.removeAttribute('aria-current');
     return li;
   }
+
+  // A long press on a row brings out its Archive button where there is no
+  // hover to (the CSS for (hover: none)); a tap anywhere else puts it back.
+  // Timed by hand because iOS sends no contextmenu for a held button.
+  const holding = { timer: 0, from: null, done: false, armed: null };
+  const unarm = () => {
+    holding.armed?.classList.remove('marble-armed');
+    holding.armed = null;
+  };
+  const arm = (li) => {
+    if (holding.armed !== li) unarm();
+    holding.armed = li;
+    li.classList.add('marble-armed');
+    holding.done = true;
+  };
+  function holdToArm(pick, li) {
+    pick.addEventListener('pointerdown', (e) => {
+      holding.done = false;
+      if (e.pointerType === 'mouse') return;
+      holding.from = { x: e.clientX, y: e.clientY };
+      clearTimeout(holding.timer);
+      holding.timer = setTimeout(() => arm(li), 480);
+    });
+    // A finger that moves is scrolling the list, not holding a row.
+    pick.addEventListener('pointermove', (e) => {
+      if (holding.from && Math.hypot(e.clientX - holding.from.x, e.clientY - holding.from.y) > 8) clearTimeout(holding.timer);
+    });
+    for (const type of ['pointerup', 'pointercancel']) pick.addEventListener(type, () => clearTimeout(holding.timer));
+    // Android says it as a contextmenu; a mouse's right-click keeps its menu.
+    pick.addEventListener('contextmenu', (e) => {
+      if (!matchMedia('(hover: none)').matches) return;
+      e.preventDefault();
+      arm(li);
+    });
+  }
+  document.addEventListener('pointerdown', (e) => {
+    if (holding.armed && !holding.armed.contains(e.target)) unarm();
+  }, true);
 
   const heads = new Map();
   const headOf = (label) => {
@@ -850,6 +947,11 @@ __ICON__
     const r = modelBtn.getBoundingClientRect();
     menu.style.top = `${Math.round(r.bottom + 6)}px`;
     menu.style.right = `${Math.round(document.documentElement.clientWidth - r.right)}px`;
+    // No taller than what is left of the visible strip under the pill: with
+    // a phone's keyboard up that is not much, and the menu scrolls instead.
+    const vv = window.visualViewport;
+    const seen = vv ? vv.offsetTop + vv.height : innerHeight;
+    menu.style.maxHeight = `${Math.max(160, Math.round(seen - r.bottom - 18))}px`;
     modelBtn.setAttribute('aria-expanded', 'true');
   });
   menu.addEventListener('toggle', (e) => {
@@ -1360,10 +1462,44 @@ __ICON__
     const away = !body.classList.contains('marble-fresh') && !nearBottom();
     latest.classList.toggle('marble-shown', away);
   }
+  // Whether the reader is at the foot, kept as they scroll, so the log can
+  // stay there when it is the log that changes size: the keyboard coming up
+  // takes a third of a phone from the bottom, and the last reply went under it.
+  let atFoot = true;
   log.addEventListener('scroll', () => {
     body.classList.toggle('marble-scrolled', log.scrollTop > 4);
+    atFoot = nearBottom();
     paintLatest();
   }, { passive: true });
+  new ResizeObserver(() => {
+    if (atFoot && !body.classList.contains('marble-fresh')) toBottom();
+  }).observe(log);
+
+  // Whether a soft keyboard is up, for the rules under "keys". The host's
+  // phone layer (runtime/phone.js) says so on most phones; iOS, sliding the
+  // visible strip all the way down to this field at the foot of the window,
+  // leaves no keys under the strip for it to measure, so a strip shorter than
+  // the window while the field has the caret counts too, unzoomed.
+  const keysUp = () => {
+    if (window.marblePhone?.keyboard) return true;
+    const vv = window.visualViewport;
+    const el = document.activeElement;
+    const typing = el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable);
+    return Boolean(vv && coarse.matches && typing && Math.abs((vv.scale ?? 1) - 1) < 0.01 && innerHeight - vv.height >= 80);
+  };
+  const paintKeys = () => body.classList.toggle('marble-keys', keysUp());
+  // Again a frame later, once the phone layer has read the same resize: it
+  // is loaded after this script, so it hears every event second.
+  const paintKeysTwice = () => {
+    paintKeys();
+    requestAnimationFrame(paintKeys);
+  };
+  window.visualViewport?.addEventListener('resize', paintKeysTwice);
+  window.visualViewport?.addEventListener('scroll', paintKeysTwice);
+  addEventListener('resize', paintKeysTwice);
+  document.addEventListener('focusin', () => requestAnimationFrame(paintKeys));
+  document.addEventListener('focusout', () => setTimeout(paintKeys, 60));
+  addEventListener('DOMContentLoaded', () => window.marblePhone?.onKeyboard?.(paintKeys), { once: true });
   latest.addEventListener('click', () => toBottom(true));
 
   let toastTimer = 0;

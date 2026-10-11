@@ -33,8 +33,9 @@
     document.body.append(tip);
     return tip;
   }
-  /** Show lines of text near a point: [title, ...[label, value] | string]. */
-  function showTip(x, y, lines) {
+  /** Show lines of text near a point: [title, ...[label, value] | string].
+   *  Over a finger it goes above the point, where the hand is not. */
+  function showTip(x, y, lines, { above = false } = {}) {
     const t = tipEl();
     t.replaceChildren();
     for (const [i, line] of lines.entries()) {
@@ -61,15 +62,26 @@
     if (!t.matches(':popover-open')) t.showPopover();
     const w = t.offsetWidth;
     const hgt = t.offsetHeight;
-    const left = Math.min(innerWidth - w - 8, Math.max(8, x + 14));
-    const top = y + 16 + hgt > innerHeight - 8 ? Math.max(8, y - hgt - 12) : y + 16;
+    const left = above ? Math.min(innerWidth - w - 8, Math.max(8, x - w / 2)) : Math.min(innerWidth - w - 8, Math.max(8, x + 14));
+    const top = above
+      ? (y - hgt - 28 >= 8 ? y - hgt - 28 : Math.min(innerHeight - hgt - 8, y + 28))
+      : y + 16 + hgt > innerHeight - 8 ? Math.max(8, y - hgt - 12) : y + 16;
     t.style.left = `${left}px`;
     t.style.top = `${top}px`;
   }
+  // What a chart marks while its tip is up (the line chart's crosshair), put
+  // back when the tip goes.
+  const onHide = new Set();
   function hideTip() {
     if (tip?.matches(':popover-open')) tip.hidePopover();
+    for (const fn of onHide) fn();
   }
   addEventListener('scroll', hideTip, true);
+  // A finger has no hover to leave: its tip stays after the lift, to be read,
+  // and goes with the next touch anywhere that is not a chart.
+  addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' && !e.target.closest?.('svg.chart')) hideTip();
+  }, true);
 
   /** Hover and touch on an SVG, answered by `find(x, y)` → lines or null. */
   function hover(svg, find) {
@@ -80,12 +92,12 @@
       const kx = vb?.width ? vb.width / r.width : 1;
       const ky = vb?.height ? vb.height / r.height : 1;
       const lines = find((e.clientX - r.left) * kx, (e.clientY - r.top) * ky);
-      if (lines) showTip(e.clientX, e.clientY, lines);
+      if (lines) showTip(e.clientX, e.clientY, lines, { above: e.pointerType === 'touch' });
       else hideTip();
     };
     svg.addEventListener('pointermove', at);
     svg.addEventListener('pointerdown', at);
-    svg.addEventListener('pointerleave', hideTip);
+    svg.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') hideTip(); });
   }
 
   // ----------------------------------------------------------------- format
@@ -489,10 +501,13 @@
       if (!rows.length) return [when(b), 'Asleep, all of them'];
       return [when(b), ...rows];
     });
-    svg.addEventListener('pointerleave', () => {
+    const uncross = () => {
+      if (!cross.isConnected) return void onHide.delete(uncross);
       cross.setAttribute('x1', -10);
       cross.setAttribute('x2', -10);
-    });
+    };
+    onHide.add(uncross);
+    svg.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') uncross(); });
     el.replaceChildren(svg);
   }
 

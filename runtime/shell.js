@@ -281,8 +281,12 @@
 
     /* ── The bar ── */
     /* Shaded a step off the page's paper, so the bar reads as the frame's
-       even on a page whose own ground is that paper. */
-    .bar { top: 0; left: 0; width: 100vw; height: ${BAR}px; display: flex; align-items: center; gap: 6px; padding: 0 8px;
+       even on a page whose own ground is that paper. Under a notch or a
+       rounded corner (a phone on its side, a page saved to the home screen)
+       it reaches into the inset and keeps its buttons out of it; everywhere
+       else the insets are 0 and this is the plain 44px bar. */
+    .bar { top: 0; left: 0; width: 100vw; height: calc(${BAR}px + env(safe-area-inset-top, 0px)); display: flex; align-items: center; gap: 6px;
+      padding: env(safe-area-inset-top, 0px) max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px));
       background: color-mix(in srgb, var(--paper-2) 80%, var(--paper)); border-bottom: 1px solid var(--line); font-size: 13px; }
     .ib { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--muted); flex: none; }
     .ib:hover, .ib[aria-pressed="true"] { background: var(--paper-2); color: var(--ink); }
@@ -343,7 +347,8 @@
     button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
     /* ── The tree ── */
-    .nav { top: ${BAR}px; left: 0; bottom: 0; width: var(--nav-w, ${NAV}px); display: flex; flex-direction: column;
+    .nav { top: calc(${BAR}px + env(safe-area-inset-top, 0px)); left: 0; bottom: 0; width: var(--nav-w, ${NAV}px); display: flex; flex-direction: column;
+      padding: 0 0 env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
       background: var(--paper); border-right: 1px solid var(--line); font-size: 13px; }
     .search, .finder { margin: 10px 10px 6px; display: flex; align-items: center; gap: 8px; padding: 0 8px; height: 32px; border-radius: 8px; background: var(--paper-2); color: var(--faint); }
     .search input, .finder input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; color: var(--ink); padding: 0; }
@@ -464,7 +469,7 @@
        and a thin mark on the edge says that something is there. */
     :host([data-hide-nav]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${AWAY}ms;
       transition-duration: ${AWAY}ms, ${Math.round(AWAY * 0.7)}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, 0s; }
-    .hint { position: fixed; top: calc(${BAR}px + (100vh - ${BAR}px) / 2); width: 4px; height: 44px; margin-top: -22px; border-radius: 2px;
+    .hint { position: fixed; top: calc(${BAR}px + (100dvh - ${BAR}px) / 2); width: 4px; height: 44px; margin-top: -22px; border-radius: 2px;
       background: color-mix(in srgb, var(--ink) 22%, transparent); opacity: 0; pointer-events: none; transition: opacity 200ms var(--settle); }
     .hint[data-side="nav"] { left: 3px; }
     .hint[data-side="chat"] { right: 3px; }
@@ -484,7 +489,7 @@
        and a pointer on its way to them — or down from the tab bar — must not
        raise a pill over them. */
     .zone { position: fixed; top: 0; left: 0; width: 220px; height: 10px; }
-    .pill { position: fixed; top: 12px; left: 12px; display: flex; align-items: center; gap: 8px; padding: 5px 6px; max-width: 320px;
+    .pill { position: fixed; top: max(12px, env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px)); display: flex; align-items: center; gap: 8px; padding: 5px 6px; max-width: 320px;
       background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift);
       opacity: 0; transform: translateY(-8px); pointer-events: none; transition: opacity 180ms var(--settle), transform 180ms var(--settle); }
     .pill b { font-weight: 620; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -495,7 +500,8 @@
     @media (hover: none) { .zone { display: none; } :host(:not([data-open])) .pill { opacity: 1; transform: none; pointer-events: auto; } }
 
     /* ── Popovers: Share and the document's menu ── */
-    .pop { position: fixed; z-index: 2; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); padding: 6px; font-size: 13px; }
+    .pop { position: fixed; z-index: 2; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); padding: 6px; font-size: 13px;
+      overflow-y: auto; overscroll-behavior: contain; }
     /* Materialise rather than appear: a popover stays in the render tree,
        unreachable and invisible while closed, and grows from the corner
        nearest the button that opened it (--from, set when it is placed). A
@@ -589,12 +595,12 @@
     .sharing button:disabled { opacity: .5; cursor: default; }
     @media (prefers-reduced-motion: reduce) { .level, .lv-dot, .lv-dot::after, .sharing .copy { transition: none; } }
     /* Move or rename: the name, then where. */
-    .moving { width: 320px; padding: 12px; display: flex; flex-direction: column; gap: 8px; --shown-as: flex; }
+    .moving { width: min(320px, calc(100vw - 16px)); padding: 12px; display: flex; flex-direction: column; gap: 8px; --shown-as: flex; }
     .moving h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
     .moving .name { height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: inherit; color: var(--ink); background: var(--paper); }
     .moving .name:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
     .moving .finder { margin: 0; }
-    .dests { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
+    .dests { max-height: 220px; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 1px; }
     .dest { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 6px; color: var(--muted); text-align: left; white-space: nowrap; }
     .dest > span { overflow: hidden; text-overflow: ellipsis; }
     .dest:hover { background: var(--paper-2); color: var(--ink); }
@@ -640,7 +646,7 @@
     .publishing .status { padding: 9px 0; border-top: 1px solid var(--line); }
     .publishing .state { color: var(--ink); font-weight: 600; text-wrap: pretty; }
     .publishing .state .quiet { color: var(--muted); font-weight: 400; }
-    .publishing .changes { list-style: none; margin: 6px 0 0; padding: 0; max-height: 180px; overflow: auto; }
+    .publishing .changes { list-style: none; margin: 6px 0 0; padding: 0; max-height: 180px; overflow: auto; overscroll-behavior: contain; }
     .publishing .changes li { display: flex; gap: 8px; padding: 2px 0; font-size: 12.5px; min-width: 0; }
     .publishing .changes .file { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .publishing .changes .kind { margin-left: auto; color: var(--muted); flex: none; }
@@ -757,9 +763,96 @@
     .me-head > div { min-width: 0; }
     .me-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
     .me-row:empty { display: none; }
-    .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 8px); opacity: 0; pointer-events: none; background: var(--ink); color: var(--paper);
-      border-radius: 999px; padding: 7px 14px; font-size: 12.5px; transition: opacity 160ms var(--settle), transform 160ms var(--settle); }
+    /* Above the home bar, and above the keys while they are up (--kb, from
+       runtime/phone.js), where the home bar is under them. */
+    .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 8px); opacity: 0; pointer-events: none; background: var(--ink); color: var(--paper);
+      border-radius: 999px; padding: 7px 14px; font-size: 12.5px; max-width: calc(100vw - 32px); text-align: center; text-wrap: pretty;
+      transition: opacity 160ms var(--settle), transform 160ms var(--settle); }
+    :host([data-keyboard]) .toast { bottom: calc(12px + var(--kb, 0px)); }
     .toast[data-on] { opacity: 1; transform: translate(-50%, 0); }
+
+    /* ── In a hand ──
+       A finger is not a pointer: it is wider than a 28px button, it has no
+       hover to find what a press would do, and it brings a keyboard that
+       covers the bottom of the screen. Everything in this block is scoped to
+       a coarse pointer, so a desk keeps the frame exactly as it was drawn. */
+    @media (pointer: coarse) {
+      /* Type under 16px makes iOS zoom the page in when a field takes focus,
+         and it never zooms back out. */
+      .search input, .finder input, .moving .name, .ask textarea, .brief input, .brief textarea,
+      .publishing .msg, .sharing .url, .row input.rename { font-size: 16px; }
+      .search, .finder, .moving .name, .brief input, .sharing .url, .sharing .copy, .publishing .msg, .publishing .publish { height: 44px; }
+      .moving .go button, .brief .go button { height: 44px; padding: 0 16px; }
+
+      /* Every press is at least 44 square. The bar's buttons keep the size
+         they are drawn at and reach past it with an invisible ring; the
+         lists and menus get rows a finger can land on. */
+      .ib, .home, .new, .send, .crumbs .here, .chips a, .sharing .off, .sharing .own button, .offer .go, .offer .no { position: relative; }
+      :is(.ib, .home, .send)::before { content: ''; position: absolute; inset: -8px; }
+      :is(.new, .share, .crumbs .here)::before { content: ''; position: absolute; inset: -8px -2px; }
+      :is(.chips a, .sharing .off, .sharing .own button, .offer .go)::before { content: ''; position: absolute; inset: -9px -3px; }
+      .offer .no::before { content: ''; position: absolute; inset: -12px; }
+      .chips { gap: 8px 6px; }
+      /* Two such rings side by side meet in the middle of the gap rather
+         than overlap, so a press between two buttons goes to the nearer. */
+      .bar { gap: 16px; }
+      .bar .vr { margin: 0; }
+      /* A folder in the path clips its own name, so it cannot reach past
+         itself; it is as tall as the bar instead. */
+      .crumbs { align-self: stretch; }
+      .crumbs a { display: flex; align-items: center; min-height: 44px; }
+      .row, .row.app .go, .dest, .tpl, .menu button, .lines button, .all { min-height: 44px; }
+      .row.app .fold { width: 32px; height: 44px; }
+      .sec-h { min-height: 44px; margin-top: 4px; }
+      .sec-fold { align-self: stretch; padding: 0 8px 0 4px; }
+      .sec-act, .sec-grip { width: 44px; height: 44px; }
+
+      /* Holding a row opens its menu (bindRows); the hold must not also
+         start selecting its words. Text you can type in stays selectable. */
+      .bar, .row, .sec-h, .pill, .menu { -webkit-user-select: none; user-select: none; }
+      input, textarea { -webkit-user-select: text; user-select: text; }
+
+      /* The list ends where the keys begin, so its last rows can still be
+         scrolled into view while you search. */
+      :host([data-keyboard]) .nav { padding-bottom: var(--kb, 0px); }
+      /* The pill is a way into the frame, not something to type around, and
+         the key it names is no use to a finger. */
+      :host([data-keyboard]) .pill { opacity: 0; pointer-events: none; }
+      .pill kbd { display: none; }
+    }
+    /* With no hover, a press answers on the way down, in colour. Rows never
+       scale. A key named in the chrome is no use to a hand with no keys. */
+    @media (hover: none) {
+      :is(.ib, .home, .crumbs a, .crumbs .here, .row, .row.app .go, .sec-fold, .sec-act, .menu button, .dest, .tpl, .lines button, .level, .chips a, .all, .apps > .to, .sharing .off, .sharing .own button):active {
+        background: var(--paper-2); color: var(--ink); }
+      .pill kbd, .search kbd { display: none; }
+      /* Without a hover to raise it, the pill is always there, over whatever
+         the app keeps in its corner (a title, tabs, a back button). So it is
+         only the Drive's mark, one press wide, and the room it takes is
+         published (--marble-shell-corner-w and -h, see corner()) for an
+         app's top bar to keep clear of. The page's own name is on the page. */
+      .pill { gap: 0; padding: 0; width: 44px; height: 44px; justify-content: center; border-radius: 14px; }
+      .pill b { display: none; }
+    }
+
+    /* ── On a phone ──
+       There is no frame to open on a phone (layout.open is false below
+       ${PHONE}): the Drive keeps its own bars, and every app keeps its
+       corner, where it puts its title and its back button. So the pill that
+       opens the frame is not there to cover them. What can still open here
+       is a task with a field in it, Publish from the Drive's toolbar: it
+       stands on the keyboard as a sheet the width of the screen, rather
+       than hanging from a button the keys would cover. */
+    @media ${PHONE} {
+      .pill, .zone { display: none; }
+      .pop[data-sheet] { left: 0; right: 0; top: auto; bottom: var(--kb, 0px); width: auto;
+        max-height: calc(var(--vv-h, 100dvh) - 16px); overflow-y: auto; overscroll-behavior: contain;
+        border-width: 1px 0 0; border-radius: 16px 16px 0 0;
+        padding: 14px max(14px, env(safe-area-inset-right, 0px)) calc(14px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); }
+      :host([data-keyboard]) .pop[data-sheet] { padding-bottom: 14px; }
+      .pop[data-sheet][hidden] { transform: translateY(24px); }
+      @media (prefers-reduced-motion: reduce) { .pop[data-sheet][hidden] { transform: none; } }
+    }
 
     /* Arriving at a document with the shell open is not the shell opening. */
     :host([data-still]) *, :host([data-still]) *::before { transition: none !important; }
@@ -845,7 +938,7 @@
         <nav class="nav" aria-label="Drive tree">
           <button type="button" class="edge" role="separator" aria-orientation="vertical" aria-label="Resize the tree" title="Drag to resize · double-click to reset"></button>
           <div class="head">
-            <label class="search">${icon('search')}<input type="search" placeholder="Search" aria-label="Search the drive" autocomplete="off" spellcheck="false"><kbd>⌘K</kbd></label>
+            <label class="search">${icon('search')}<input type="search" placeholder="Search" aria-label="Search the drive" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="go"><kbd>⌘K</kbd></label>
           </div>
           <div class="scroll"></div>
           <div class="foot" hidden><a class="row" data-view="trash">${icon('trash')}<span>Trash</span></a></div>
@@ -853,7 +946,7 @@
         <div class="pop making" role="dialog" aria-label="New" hidden>
           <div class="start">
             <form class="ask" autocomplete="off">
-              <textarea rows="1" placeholder="Describe an app to build…" aria-label="Describe an app to build"></textarea>
+              <textarea rows="1" placeholder="Describe an app to build…" aria-label="Describe an app to build" enterkeyhint="send"></textarea>
               <button type="submit" class="send" aria-label="Build it as a new app" title="Build it as a new app" disabled>${icon('send')}</button>
             </form>
             <p class="sub">Prompt in</p>
@@ -868,7 +961,7 @@
             <div class="top"><button type="button" class="ib back" aria-label="Back to New" title="Back">${icon('back')}</button>${icon('doc')}<h3></h3></div>
             <p class="say"></p>
             <label for="mk-name">Name</label>
-            <input id="mk-name" class="name" autocomplete="off" spellcheck="false">
+            <input id="mk-name" class="name" autocomplete="off" spellcheck="false" autocorrect="off" enterkeyhint="go">
             <label for="mk-words">What do you want to build? <small>optional</small></label>
             <textarea id="mk-words" class="words" rows="3"></textarea>
             <p class="note" role="status"></p>
@@ -916,7 +1009,7 @@
               <span class="lv-says">${says}</span>
             </button>`).join('')}
           </div>
-          <div class="link"><input class="url" readonly aria-label="Link" spellcheck="false"><button type="button" class="copy">${icon('link')}Copy link</button></div>
+          <div class="link"><input class="url" readonly aria-label="Link" spellcheck="false" inputmode="none"><button type="button" class="copy">${icon('link')}Copy link</button></div>
           <p class="meta"><span></span><button type="button" class="off" hidden>Turn off</button></p>
           <p class="warn" hidden></p>
           <div class="own"><span><b>Your own link</b> · asks for your passphrase</span><button type="button" class="own-copy">Copy</button></div>
@@ -926,14 +1019,14 @@
           <h3></h3>
           <p class="lede"><span class="branch"></span><a class="web" target="_blank" rel="noopener" hidden></a></p>
           <div class="status"><p class="state" role="status"></p><ul class="changes"></ul></div>
-          <div class="compose"><input class="msg" aria-label="Message" maxlength="500" autocomplete="off"><button type="button" class="publish" disabled>Publish</button></div>
+          <div class="compose"><input class="msg" aria-label="Message" maxlength="500" autocomplete="off" autocapitalize="sentences" enterkeyhint="send"><button type="button" class="publish" disabled>Publish</button></div>
           <p class="result" hidden></p>
           <p class="last" hidden></p>
         </div>
         <div class="pop moving" role="dialog" aria-label="Move or rename" hidden>
           <h3>Move or rename</h3>
-          <input class="name" aria-label="Name" spellcheck="false" autocomplete="off">
-          <label class="finder">${icon('search')}<input class="find" type="search" placeholder="Find a folder" aria-label="Find a folder" autocomplete="off" spellcheck="false"></label>
+          <input class="name" aria-label="Name" spellcheck="false" autocomplete="off" autocorrect="off" enterkeyhint="done">
+          <label class="finder">${icon('search')}<input class="find" type="search" placeholder="Find a folder" aria-label="Find a folder" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="done"></label>
           <div class="dests" role="listbox" aria-label="Folders"></div>
           <p class="note"></p>
           <div class="go"><button type="button" class="cancel">Cancel</button><button type="button" class="ok" disabled>Move</button></div>
@@ -957,6 +1050,8 @@
       // A pointer that can hover is what reaching for a side is for; on a
       // touch screen every side simply stays pinned.
       this.fine = matchMedia('(hover: hover) and (pointer: fine)');
+      // No hover at all: the pill stays out at rest instead of rising.
+      this.handOnly = matchMedia('(hover: none)');
       this.shown = { nav: false, chat: false };
       this.quiet = { nav: false, chat: false };
       // A side the keyboard is using: brought out on purpose, or typed in.
@@ -1041,6 +1136,13 @@
       this.launcherWatch.observe(dot, { attributes: true, attributeFilter: ['hidden', 'data-state'] });
     }
 
+    /** How much of the top the bar takes: its 44px, and whatever a notch or
+     *  a status bar adds above it (env(safe-area-inset-top), which only CSS
+     *  can read, so it is read back off the bar's own padding). */
+    get barHeight() {
+      return BAR + (parseFloat(getComputedStyle(this.bar).paddingTop) || 0);
+    }
+
     /** What the drawer and anything else sitting in the page needs to know. */
     get layout() {
       const active = this.isOpen && !this.phone.matches;
@@ -1056,7 +1158,7 @@
         chat: true,
         pinNav: this.state.pinNav,
         pinChat: this.state.pinChat,
-        top: chatDocked ? BAR : BAR + GAP,
+        top: chatDocked ? this.barHeight : this.barHeight + GAP,
         gap: GAP,
         // How much of the window the tree takes, so the chat's edge knows
         // how far it may be pulled.
@@ -1297,6 +1399,18 @@
       if (window.marbleBuild) this.onBuild();
       this.onViewport = () => this.apply();
       this.phone.addEventListener('change', this.onViewport);
+      // The keyboard (runtime/phone.js): what sits at the bottom stands on
+      // it, and a popover open when it comes or goes is measured again
+      // against the part of the screen that is left.
+      this.offKeyboard = window.marblePhone?.onKeyboard?.((state) => {
+        this.toggleAttribute('data-keyboard', Boolean(state.keyboard));
+        this.replace();
+      });
+      this.toggleAttribute('data-keyboard', Boolean(window.marblePhone?.keyboard));
+      this.onVisible = () => this.replace();
+      window.visualViewport?.addEventListener('resize', this.onVisible);
+      // iOS draws :active only where something listens for the touch.
+      this.shadowRoot.addEventListener('touchstart', () => {}, { passive: true });
       this.onWindowResize = () => this.apply({ animate: false });
       addEventListener('resize', this.onWindowResize);
       this.bindEdge();
@@ -1319,6 +1433,8 @@
       if (this.onHash) removeEventListener('hashchange', this.onHash);
       document.documentElement.classList.remove('marble-shell-open');
       this.phone.removeEventListener('change', this.onViewport);
+      this.offKeyboard?.();
+      window.visualViewport?.removeEventListener('resize', this.onVisible);
       removeEventListener('resize', this.onWindowResize);
       removeEventListener('pointermove', this.onPointer, true);
       document.removeEventListener('mouseout', this.onLeave);
@@ -1328,6 +1444,8 @@
       removeEventListener('keydown', this.onKeyed, true);
       removeEventListener('pointerdown', this.onPress, true);
       this.fine.removeEventListener('change', this.onFine);
+      this.handOnly.removeEventListener('change', this.onFine);
+      document.getElementById('marble-shell-corner')?.remove();
       this.offDrive?.();
       if (this.onHide) removeEventListener('pagehide', this.onHide);
       this.offAgents?.();
@@ -1568,6 +1686,7 @@
       addEventListener('pointerdown', this.onPress, { capture: true, passive: true });
       this.onFine = () => this.apply({ animate: false });
       this.fine.addEventListener('change', this.onFine);
+      this.handOnly.addEventListener('change', this.onFine);
     }
 
     apply({ animate = true } = {}) {
@@ -1616,9 +1735,34 @@
       edge.setAttribute('aria-valuenow', String(this.navWidth));
       edge.setAttribute('aria-valuemin', String(NAV_MIN));
       edge.setAttribute('aria-valuemax', String(this.clampNav(NAV_MAX)));
-      this.dock(open ? { top: BAR, left: this.docked('nav') ? this.navWidth : 0 } : null, { animate: animate && !this.hasAttribute('data-still') });
+      this.dock(open ? { top: this.barHeight, left: this.docked('nav') ? this.navWidth : 0 } : null, { animate: animate && !this.hasAttribute('data-still') });
       if (open && !this.tree) this.load();
+      this.corner();
       this.announce();
+    }
+
+    /** The corner the pill keeps, published on the page's root while it is
+     *  out at rest (a touch screen with the frame put away), so an app's top
+     *  bar can keep clear of it: padding-left: var(--marble-shell-corner-w, 0px).
+     *  The right and bottom edges of the pill, inset included; nothing at all
+     *  on a desk, where it only rises when asked, or on a phone, where it is
+     *  not drawn. A transient stylesheet, like the dock: never the file's. */
+    corner() {
+      const pill = this.$('.pill');
+      const out = !this.hasAttribute('data-open') && this.handOnly.matches && !this.phone.matches;
+      // The layout box, not the client rect: the pill may be mid-rise.
+      const w = out ? Math.ceil(pill.offsetLeft + pill.offsetWidth) : 0;
+      const ht = out ? Math.ceil(pill.offsetTop + pill.offsetHeight) : 0;
+      let style = document.getElementById('marble-shell-corner');
+      if (!w || !ht) { style?.remove(); return; }
+      if (!style) {
+        style = document.createElement('style');
+        style.id = 'marble-shell-corner';
+        style.setAttribute('data-marble-transient', '');
+        document.head.append(style);
+      }
+      const text = `:root { --marble-shell-corner-w: ${w}px; --marble-shell-corner-h: ${ht}px; }`;
+      if (style.textContent !== text) style.textContent = text;
     }
 
     announce() {
@@ -2049,7 +2193,23 @@
       if (held) this.settle();
     }
 
+    /** The part of the window a person can see, top to bottom, in the
+     *  coordinates a fixed popover is placed in. On a desk that is the
+     *  window; on a phone with the keyboard up it is the strip above the
+     *  keys, which the browser may also have slid down the page. */
+    visible() {
+      const vv = window.visualViewport;
+      const top = vv ? Math.max(0, vv.offsetTop) : 0;
+      return { top, bottom: vv ? top + vv.height : innerHeight };
+    }
+
     place(pop, anchor, align) {
+      this.placed = { pop, anchor, align };
+      // A task with a field in it, on a phone, is a sheet on the keyboard
+      // (the phone block in STYLE); nothing here places it.
+      if (this.sheet(pop)) return;
+      const seen = this.visible();
+      pop.style.maxHeight = '';
       const r = anchor.getBoundingClientRect();
       pop.style.top = `${r.bottom + 6}px`;
       if (align === 'right') {
@@ -2061,23 +2221,53 @@
         pop.style.right = '';
         pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
       }
-      // Too near the foot of the window, it opens upward instead.
-      const up = r.bottom + 6 + pop.offsetHeight > innerHeight - 8;
-      if (up) pop.style.top = `${Math.max(8, r.top - 6 - pop.offsetHeight)}px`;
+      // Too near the foot of what can be seen, it opens upward instead, if
+      // there is more room above. Either way it is no taller than its room,
+      // and scrolls inside itself past that.
+      const below = seen.bottom - (r.bottom + 6) - 8;
+      const above = r.top - 6 - (seen.top + 8);
+      const up = pop.offsetHeight > below && above > below;
+      const room = Math.max(160, up ? above : below);
+      pop.style.maxHeight = `${room}px`;
+      if (up) pop.style.top = `${Math.max(seen.top + 8, r.top - 6 - Math.min(pop.offsetHeight, room))}px`;
       // It grows from the corner nearest the button that opened it.
       pop.style.setProperty('--from', `${align === 'right' ? 'right' : 'left'} ${up ? 'bottom' : 'top'}`);
+    }
+
+    /** Whether a popover is a sheet here: on a phone, for a task with a field
+     *  in it. A menu never is; it stays under what opened it. */
+    sheet(pop) {
+      const on = this.phone.matches && (pop === this.publishing || pop === this.moving);
+      pop.toggleAttribute('data-sheet', on);
+      if (on) {
+        for (const side of ['top', 'left', 'right', 'maxHeight']) pop.style[side] = '';
+        pop.style.setProperty('--from', 'center bottom');
+      }
+      return on;
+    }
+
+    /** The keyboard came or went, or the window changed: the open popover
+     *  is placed again against what can now be seen. */
+    replace() {
+      const { pop, anchor, align } = this.placed ?? {};
+      if (!pop || pop.hidden || pop.hasAttribute('data-sheet')) return;
+      if (anchor?.isConnected) this.place(pop, anchor, align);
     }
 
     /** Where a right-click was: the menu's corner at the pointer, flipped to
      *  stay on screen. */
     placeAt(pop, x, y) {
+      this.placed = null;
       pop.style.right = '';
+      pop.style.maxHeight = '';
+      const seen = this.visible();
       const w = pop.offsetWidth;
       const ht = pop.offsetHeight;
       const back = x + w + 8 > innerWidth;
-      const up = y + ht + 8 > innerHeight;
+      const up = y + ht + 8 > seen.bottom;
       pop.style.left = `${Math.max(8, back ? x - w : x)}px`;
-      pop.style.top = `${Math.max(8, up ? y - ht : y)}px`;
+      pop.style.top = `${Math.max(seen.top + 8, up ? y - ht : y)}px`;
+      pop.style.maxHeight = `${Math.max(160, seen.bottom - parseFloat(pop.style.top) - 8)}px`;
       // A menu at the pointer grows from the pointer.
       pop.style.setProperty('--from', `${back ? 'right' : 'left'} ${up ? 'bottom' : 'top'}`);
     }
@@ -2143,7 +2333,6 @@
       this.sharing.hidden = false;
       button.setAttribute('aria-expanded', 'true');
       this.place(this.sharing, button, 'right');
-      this.sharing.style.maxHeight = `${Math.max(160, innerHeight - button.getBoundingClientRect().bottom - 14)}px`;
       this.sharing.querySelector('.copy').focus({ preventScroll: true });
       this.loadShares();
     }
@@ -2180,7 +2369,6 @@
       this.pickApp(this.chosenApp());
       this.drawTemplates();
       this.place(this.making, this.newButton, 'left');
-      this.making.style.maxHeight = `${Math.max(200, innerHeight - this.newButton.getBoundingClientRect().bottom - 14)}px`;
       // Open to type: the first key after New is the first word.
       this.making.querySelector('.ask textarea').focus({ preventScroll: true });
     }
@@ -2438,7 +2626,6 @@
       this.settingsPop.hidden = false;
       button.setAttribute('aria-expanded', 'true');
       this.place(this.settingsPop, button, 'right');
-      this.settingsPop.style.maxHeight = `${Math.max(200, innerHeight - button.getBoundingClientRect().bottom - 14)}px`;
       this.settingsPop.querySelector('.level[aria-checked="true"]')?.focus({ preventScroll: true });
       // The choice is the Drive's, in its file; read it fresh.
       if (!this.tree) this.load().then(() => this.fillSettings());
@@ -2632,7 +2819,9 @@
       this.drawPublishing(null);
       pop.hidden = false;
       const button = this.$('[data-act="publish"]');
-      if (!button.hidden && this.hasAttribute('data-open') && path === this.gitBar) {
+      if (this.sheet(pop)) {
+        this.placed = { pop };
+      } else if (!button.hidden && this.hasAttribute('data-open') && path === this.gitBar) {
         button.setAttribute('aria-expanded', 'true');
         this.place(pop, button, 'right');
       } else if (anchor?.isConnected) {
@@ -3705,7 +3894,10 @@
           if (pin.path === this.here) a.setAttribute('aria-current', 'page');
           ul.append(this.item(a));
         }
-        if (!this.pins?.length) ul.append(h('li', 'empty', 'Drag a page or folder here to pin it.'));
+        // A finger does not carry rows (bindCarry); it holds one for its menu.
+        if (!this.pins?.length) ul.append(h('li', 'empty', this.fine.matches || !matchMedia('(pointer: coarse)').matches
+          ? 'Drag a page or folder here to pin it.'
+          : 'Hold a page or folder and choose Pin.'));
         return this.section(name, ul);
       }
       if (name === 'recent') {
@@ -3991,6 +4183,8 @@
       const input = h('input', 'rename');
       input.value = was;
       input.setAttribute('aria-label', 'Name of the pin');
+      input.setAttribute('enterkeyhint', 'done');
+      input.setAttribute('autocorrect', 'off');
       input.spellcheck = false;
       this.editing = true;
       span.replaceWith(input);
@@ -4025,20 +4219,32 @@
     }
 
     bindRows() {
+      // Android also answers a held finger with contextmenu, at about the
+      // moment the hold below does; one hold is one menu.
+      let heldAt = -Infinity;
       this.scroll.addEventListener('contextmenu', (event) => {
         if (event.target.closest('input')) return;
         const subject = this.subjectOf(event.target.closest('.row'));
         if (!subject) return;
         event.preventDefault();
+        if (press || performance.now() - heldAt < 1000) {
+          if (press) { unpress(); heldAt = performance.now(); this.swallowClick = true; this.rowMenu(subject, null); }
+          return;
+        }
         this.rowMenu(subject, { x: event.clientX, y: event.clientY });
       });
 
       // A held finger opens the menu: a phone has no right button, and iOS
       // fires no contextmenu at all. The press that opened it opens nothing.
+      // The menu hangs under the row rather than at the finger, which would
+      // cover its first lines.
       let press = null;
       const unpress = () => { clearTimeout(press?.timer); press = null; };
       this.scroll.addEventListener('pointerdown', (event) => {
         if (event.pointerType !== 'touch') return;
+        // A new press is a new gesture: if the last hold's lift never became
+        // a click (iOS may not send one), it must not eat this one.
+        this.swallowClick = false;
         const subject = this.subjectOf(event.target.closest('.row'));
         if (!subject) return;
         unpress();
@@ -4047,8 +4253,9 @@
           y: event.clientY,
           timer: setTimeout(() => {
             press = null;
+            heldAt = performance.now();
             this.swallowClick = true;
-            this.rowMenu(subject, { x: event.clientX, y: event.clientY });
+            this.rowMenu(subject, null);
           }, PRESS),
         };
       });

@@ -54,6 +54,12 @@
       background: color-mix(in srgb, var(--text-mark) 12%, var(--card, var(--paper, #fff)));
       border: 1px solid color-mix(in srgb, var(--text-mark) 30%, transparent); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
     .marble-text-tag:hover { background: color-mix(in srgb, var(--text-mark) 18%, var(--card, var(--paper, #fff))); }
+    /* A fingertip needs 44px to land on; the flag keeps its size by the
+       caret and takes the room round it. */
+    @media (pointer: coarse) {
+      .marble-text-tag::after { content: ""; position: absolute; inset: -10px -4px; }
+      .marble-text-tag:active { background: color-mix(in srgb, var(--text-mark) 22%, var(--card, var(--paper, #fff))); }
+    }
     .marble-text-tag:focus-visible { outline: 2px solid color-mix(in srgb, var(--text-mark) 50%, transparent); outline-offset: 1px; }
     .marble-text-caret.is-flip .marble-text-tag { left: auto; right: 0; border-radius: 6px 6px 1px 6px; }
     .marble-text-caret.is-low .marble-text-tag { bottom: auto; top: calc(100% + 3px); border-radius: 1px 6px 6px 6px; }

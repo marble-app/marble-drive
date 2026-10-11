@@ -53,12 +53,15 @@ __ICON__
      would be the browser's black. */
   html { container: doc / inline-size; background: var(--paper); }
   body {
-    --gutter: 1.5rem;
+    /* Never under a phone's rounded corner or its notch, held sideways. */
+    --gutter: max(1.5rem, env(safe-area-inset-left), env(safe-area-inset-right));
     margin: 0; padding: 0 0 max(3rem, env(safe-area-inset-bottom));
     background: var(--paper); color: var(--ink);
     font: 15px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
   }
-  button { font: inherit; color: inherit; }
+  /* Chrome is pressed, not read: a long press on a button is not the start of
+     a text selection. */
+  button { font: inherit; color: inherit; -webkit-user-select: none; user-select: none; }
   /* One ring, the same one, everywhere a key can land. */
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -66,7 +69,7 @@ __ICON__
      The gutter is on the rows rather than on <body>, because the strip below
      has to scroll edge to edge: padding on the body would start the columns
      3.1rem in on the left and give the right none. */
-  .top { display: grid; grid-template-columns: 1fr auto; column-gap: 1rem; align-items: start; padding: 2.25rem var(--gutter) 1.1rem; }
+  .top { display: grid; grid-template-columns: 1fr auto; column-gap: 1rem; align-items: start; padding: max(2.25rem, env(safe-area-inset-top)) var(--gutter) 1.1rem; }
   h1 { font-size: 1.4rem; line-height: 1.15; margin: 0 0 .2rem; letter-spacing: -.015em; }
   .lede { grid-column: 1 / -1; max-width: 40rem; margin: 0; color: var(--muted); font-size: .95rem; }
   /* With no host every control below still moves the page and none of it is
@@ -224,15 +227,19 @@ __ICON__
     outline: none; border-radius: var(--r-text); overflow-wrap: anywhere;
   }
   [data-marble-editable]:empty { min-height: 1.2em; }
-  [data-marble-editable]:hover { background: var(--accent-soft); }
+  /* Only under a pointer that hovers: a finger leaves the last thing it
+     touched "hovered", and the tint stayed behind on it. */
+  @media (hover: hover) { [data-marble-editable]:hover { background: var(--accent-soft); } }
   [data-marble-editable]:focus {
     background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
   }
 
   /* Said where the loss happened, which is the alternative to a dialog that
      asks before every delete and teaches people to dismiss dialogs. */
+  /* It stands on whatever is at the foot of the screen: the home bar, or the
+     keyboard while a card is being typed into (--kb, from runtime/phone.js). */
   .reversal {
-    position: fixed; left: var(--gutter); bottom: max(1rem, env(safe-area-inset-bottom));
+    position: fixed; left: var(--gutter); bottom: calc(var(--kb, 0px) + max(1rem, env(safe-area-inset-bottom)));
     z-index: 30; display: flex; align-items: center; gap: .6rem;
     padding: .45rem .5rem .45rem .8rem;
     border: 1px solid var(--line); border-radius: var(--r-sm);
@@ -242,6 +249,7 @@ __ICON__
     transition: opacity var(--t) var(--ease-out), transform var(--t) var(--ease-out);
   }
   .reversal[data-open] { opacity: 1; transform: none; pointer-events: auto; }
+  html[data-marble-keyboard] .reversal { bottom: calc(var(--kb, 0px) + .75rem); }
   .back {
     appearance: none; padding: .3rem .6rem; border: 0; border-radius: var(--r-text);
     background: var(--accent-soft); color: var(--accent-ink);
@@ -258,7 +266,7 @@ __ICON__
      *below* the one it is leaving. Stacked, the whole board is one vertical
      scroll and every gesture in it works with a thumb. */
   @container doc (max-width: 37rem) {
-    body { --gutter: 1.1rem; }
+    body { --gutter: max(1.1rem, env(safe-area-inset-left), env(safe-area-inset-right)); }
     .cols { flex-direction: column; overflow-x: visible; scroll-snap-type: none; }
     .col, .rail { flex: 1 1 auto; width: 100%; }
     .cards { min-height: 3rem; }
@@ -280,6 +288,23 @@ __ICON__
        under a finger adds up to something nobody can see. */
     .card > .marble-grip { right: .15rem; top: .05rem; opacity: 1; gap: .1rem; }
     .card > .marble-grip .marble-btn { width: 2.75rem; height: 2.75rem; font-size: 16px; line-height: 2.75rem; opacity: .7; }
+    /* And 16px for anything a finger types into: under that, iOS zooms the
+       page in on focus and leaves it there. The card's title keeps its weight
+       over its line, which is what tells them apart at one size. */
+    .lede, .card h3, .card p { font-size: 1rem; }
+    .col-head h2 { font-size: 1.0625rem; }
+  }
+
+  /* No hover on a touchscreen, so nothing stays lit after the finger has gone,
+     and a press answers in colour on the way down. */
+  @media (hover: none) {
+    .tool:hover, .drop:hover { color: var(--faint); background: none; }
+    .tool:not(.marble-off):active { color: var(--accent-ink); background: var(--accent-soft); }
+    .drop:active { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+    .add:hover, .rail:hover, .undo:hover:not(:disabled) { color: var(--muted); border-color: var(--line); }
+    .add:active, .rail:active, .undo:active:not(:disabled) { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }
+    .check:hover::before { border-color: var(--faint); }
+    .card[data-done="yes"] .check:hover::before { border-color: var(--accent-ink); }
   }
 
   /* No travel, no scale, no overshoot — a cross-fade and nothing else. */

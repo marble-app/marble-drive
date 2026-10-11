@@ -593,22 +593,29 @@
     // slide to the wrong resting spot. offsetWidth/Height have no transform.
     const m = { width: menu.offsetWidth, height: menu.offsetHeight };
     const pad = 8;
+    // The strip of the window a person can see. With a phone's keyboard up
+    // it is the visual viewport, slid some way down the layout one; a menu
+    // clamped to the layout viewport opened under the keys.
+    const vv = window.visualViewport;
+    const seenTop = vv ? Math.max(0, vv.offsetTop) : 0;
+    const seenBottom = vv ? Math.min(innerHeight, vv.offsetTop + vv.height) : innerHeight;
     // Above the trigger when there is room, below when there is not.
     const above = a.top - pad - m.height;
-    const top = above >= pad ? above : Math.min(a.bottom + pad, innerHeight - pad - m.height);
+    const fitsAbove = above >= seenTop + pad;
+    const top = fitsAbove ? above : Math.min(a.bottom + pad, seenBottom - pad - m.height);
     const want = align === 'center' ? a.left + a.width / 2 - m.width / 2
       : align === 'start' ? a.left
         : a.right - m.width;
     const left = Math.min(Math.max(pad, want), innerWidth - pad - m.width);
-    menu.style.top = `${Math.max(pad, Math.round(top))}px`;
+    menu.style.top = `${Math.max(seenTop + pad, Math.round(top))}px`;
     menu.style.left = `${Math.round(left)}px`;
-    menu.style.maxHeight = `${Math.round(Math.max(120, innerHeight - 2 * pad))}px`;
+    menu.style.maxHeight = `${Math.round(Math.max(120, seenBottom - seenTop - 2 * pad))}px`;
     // It grows out of the control that opened it: the origin is the trigger's
     // middle, on the edge the sheet actually opened from. A sheet that scales
     // up from its own centre reads as a thing that appeared; one that scales
     // up from the button reads as that button opening.
     const originX = Math.round(Math.min(Math.max(a.left + a.width / 2 - left, 0), m.width));
-    menu.style.transformOrigin = `${originX}px ${above >= pad ? '100%' : '0%'}`;
+    menu.style.transformOrigin = `${originX}px ${fitsAbove ? '100%' : '0%'}`;
   };
   const unfloatMenu = (menu) => {
     if (!menu) return;
@@ -837,6 +844,62 @@
     else openSegBox(box);
   };
   const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** Typing with thumbs: a touchscreen at a phone's width (the width every
+   *  phone layout here folds at). There Return is a new line and the send
+   *  button sends, as in Messages and every chat app on a phone: a soft
+   *  keyboard has no Shift-Return within reach, and a message sent half
+   *  written by the key beside the space bar cannot be taken back. A
+   *  hardware keyboard on a tablet is wider than this and keeps Return. */
+  const THUMBS = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse) and (max-width: 719px)') : { matches: false };
+  /** Whether a soft keyboard is up. runtime/phone.js says so on most phones,
+   *  but it measures the keys as the part of the window under the visible
+   *  strip, and iOS, sliding that strip all the way down to a composer at
+   *  the foot of the window, leaves nothing under it: the keys are up and
+   *  read as none. So a strip shorter than the window while a field has the
+   *  caret counts too, at a zoom of 1 (a pinch shrinks the strip with no
+   *  keys anywhere). */
+  const keysUp = () => {
+    if (window.marblePhone?.keyboard) return true;
+    const vv = window.visualViewport;
+    if (!vv || !matchMedia('(pointer: coarse)').matches || Math.abs((vv.scale ?? 1) - 1) > 0.01) return false;
+    let el = document.activeElement;
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+    const typing = Boolean(el && (el.isContentEditable || el.tagName === 'TEXTAREA'
+      || (el.tagName === 'INPUT' && !/^(button|checkbox|radio|range|color|file|submit|reset|image|hidden)$/i.test(el.type))));
+    return typing && window.innerHeight - vv.height >= 80;
+  };
+  /** Calls fn(up) whenever the keyboard comes up or goes. Returns the off. */
+  const watchKeys = (fn) => {
+    let last = null;
+    const check = () => {
+      const up = keysUp();
+      if (up !== last) fn((last = up));
+    };
+    // Now, and again a frame later: whichever of this and the phone layer
+    // hears a resize first, the second look has both.
+    const twice = () => {
+      check();
+      requestAnimationFrame(check);
+    };
+    const soon = () => requestAnimationFrame(check);
+    const late = () => setTimeout(check, 60);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', twice);
+    vv?.addEventListener('scroll', twice);
+    addEventListener('resize', twice);
+    document.addEventListener('focusin', soon, true);
+    document.addEventListener('focusout', late, true);
+    const offPhone = window.marblePhone?.onKeyboard?.(check);
+    check();
+    return () => {
+      vv?.removeEventListener('resize', twice);
+      vv?.removeEventListener('scroll', twice);
+      removeEventListener('resize', twice);
+      document.removeEventListener('focusin', soon, true);
+      document.removeEventListener('focusout', late, true);
+      offPhone?.();
+    };
+  };
   const ensureThumb = (track) => {
     let thumb = track.querySelector(':scope > .seg-thumb');
     if (!thumb) {
@@ -3839,6 +3902,53 @@
       .setup-scrim { transition: opacity 150ms ease; }
     }
 
+    /* ----------------------------------------------------------- the hand
+       What a finger needs, whatever the chrome. Only the phone chrome was
+       sized for one, and a conversation reaches a phone in others too: the
+       drawer on a narrow tablet, the callout at a selection, a tile. There the
+       editor inherited the page's 13–15px, and iOS zooms the whole page in on
+       any field under 16px and leaves it zoomed. So every field is 16px
+       under a finger, and every control that is a word or a small disc keeps
+       its look and gets a 44px reach from an invisible ::after. */
+    @media (pointer: coarse) {
+      .editor, .heading, .queued-text[contenteditable],
+      .ask .ask-other-text, .ask .deny-note { font-size: 16px; }
+      :host(:not([data-chrome="phone"])) .editor { min-height: 32px; padding: 5px 0; }
+      :host(:not([data-chrome="phone"])) :is(.send, .stop) { position: relative; }
+      :host(:not([data-chrome="phone"])) :is(.send, .stop)::after { content: ''; position: absolute; inset: -8px; }
+      :is(.ichip-clear, .selection-clear, .chip-remove, .peek-close, .queued-item button.dequeue,
+        .turn-footer button, .earlier, .queued-bar button, .queued-dispatch) { position: relative; }
+      :is(.ichip-clear, .selection-clear, .chip-remove)::after { content: ''; position: absolute; inset: -14px; }
+      :is(.peek-close, .queued-item button.dequeue)::after { content: ''; position: absolute; inset: -11px; }
+      :is(.turn-footer button, .earlier, .queued-bar button, .queued-dispatch)::after {
+        content: ''; position: absolute; inset: -12px -2px;
+      }
+      /* The setup strip's words. The phone chrome folds them into its chip and
+         a sheet of 44pt rows, which need no reach added. */
+      :host(:not([data-chrome="phone"])) :is(.presets-more, .custom-toggle, .failover, .detail, .mode, .seg-current) { position: relative; }
+      :host(:not([data-chrome="phone"])) :is(.presets-more, .custom-toggle, .failover, .detail, .mode, .seg-current)::after {
+        content: ''; position: absolute; inset: -12px -2px;
+      }
+      /* The radios under them: their reach is the input laid over the label,
+         so it is the input that grows. Not inside a menu, where rows touch. */
+      :host(:not([data-chrome="phone"])) :is(.seg-opts, .preset) input { inset: -11px 0; }
+      :host(:not([data-chrome="phone"])) :is(.seg-opts.is-drop .seg-menu, .presets-menu) input { inset: 0; }
+      /* A menu row, a slash command and an ask's option are read a row at a
+         time and hit with a thumb. */
+      .seg-opts.is-drop .seg-menu span, .presets-menu .preset span, .slash button,
+      .ask .ask-options button, .choice-ask button { min-height: 44px; align-items: center; }
+      .ask .ask-actions button, .usage-note button { min-height: 44px; padding-inline: 14px; }
+      .tool-group-head { min-height: 32px; align-items: center; }
+      /* A long press on chrome is a press, not a selection with a loupe. */
+      .bar, .commit, .queued-bar, .chips, .setup-chip, .also, .zone-jump, .turn-footer button {
+        -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      }
+    }
+    /* The keys cover the home bar, so the composer's floor stops making room
+       for it: the send button sits right on the keyboard, not a strip above. */
+    :host(.marble-keyboard) .composer { padding-bottom: var(--edge); }
+    :host([data-chrome="phone"].marble-keyboard) .composer { padding-bottom: 8px; }
+
     @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { :host, .log, .mast, .composer { transition: none; } .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
   `;
@@ -4185,7 +4295,7 @@
           <div class="row">
             <div class="field">
               <div class="chips" hidden></div>
-              <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" data-empty></div>
+              <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" enterkeyhint="send" autocapitalize="sentences" data-empty></div>
               <div class="commit">
                 <button type="button" class="stop" hidden aria-label="Stop">${STOP_ICON}</button>
                 <button type="submit" class="send" aria-label="Send" disabled>${SEND_ICON}</button>
@@ -4407,14 +4517,15 @@
           this.renderChips();
           return;
         }
-        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        // ⌘Enter is always a steer while a turn runs; Enter takes the bar's choice.
+        const steer = event.metaKey || event.ctrlKey;
+        const thumbs = THUMBS.matches && !steer;
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !thumbs) {
           event.preventDefault();
-          // ⌘Enter is always a steer while a turn runs; Enter takes the bar's choice.
-          const steer = event.metaKey || event.ctrlKey;
           this.submit(steer && this.running ? { dispatch: 'steer' } : {});
           return;
         }
-        if (event.key === 'Enter' && event.shiftKey) {
+        if (event.key === 'Enter' && (event.shiftKey || (thumbs && !event.isComposing))) {
           event.preventDefault();
           const item = closestItem(this.input);
           if (item) continueList(this.input, item);
@@ -4507,10 +4618,24 @@
         if (selection.length) this.skipSelection = false;
         this.updateContext();
       };
+      // Whether the reader is at the foot of the transcript, kept as they
+      // scroll, so the log can stay there when it is the log that changes
+      // size: the keyboard coming up takes a third of a phone's height from
+      // the bottom, and the last thing said went under it.
+      this.logStuck = true;
+      this.logEl.addEventListener('scroll', () => {
+        const log = this.logEl;
+        this.logStuck = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+      }, { passive: true });
     }
 
     get api() {
       return window.marble?.agent;
+    }
+
+    /** Return's key on the soft keyboard says what Return does here. */
+    paintEnterKey() {
+      this.input.enterKeyHint = THUMBS.matches ? 'enter' : 'send';
     }
 
     connectedCallback() {
@@ -4548,6 +4673,15 @@
       // every prompt: the log's foot follows it rather than being set once.
       this.queueObserver = new ResizeObserver(() => this.measureQueue());
       this.queueObserver.observe(this.queuedEl);
+      this.logObserver = new ResizeObserver(() => {
+        if (this.logStuck) this.logEl.scrollTop = this.logEl.scrollHeight;
+      });
+      this.logObserver.observe(this.logEl);
+      // The keyboard is up: the composer stops leaving room for the home bar.
+      // A marble- class, so it is never the file's.
+      this.offKeyboard = watchKeys((up) => this.classList.toggle('marble-keyboard', up));
+      this.paintEnterKey();
+      THUMBS.addEventListener?.('change', this.paintEnterKeyBound ??= () => this.paintEnterKey());
     }
 
     disconnectedCallback() {
@@ -4560,6 +4694,11 @@
       this.fitObserver = null;
       this.queueObserver?.disconnect();
       this.queueObserver = null;
+      this.logObserver?.disconnect();
+      this.logObserver = null;
+      this.offKeyboard?.();
+      this.offKeyboard = null;
+      THUMBS.removeEventListener?.('change', this.paintEnterKeyBound);
       this.unwatchTheme?.();
       this.unwatchTheme = null;
       removeEventListener('marble:agent-context', this.onContext);
@@ -5588,6 +5727,10 @@
       if (!this.setupSheet || this.setup?.hidden) return;
       const first = !this.sheetWanted;
       this.sheetWanted = true;
+      // Nothing in the sheet is typed, and a keyboard left up would sit over
+      // half of it: tapping the chip in mid-sentence puts the keys away, as
+      // tapping a picker in Messages does. The draft keeps its words.
+      if (first && keysUp() && this.shadowRoot.activeElement === this.input) this.input.blur();
       if (this.setupSheet.hidden) {
         this.setupHome = document.createComment('setup');
         this.setup.replaceWith(this.setupHome);
@@ -8384,6 +8527,18 @@
     .usage-group .meter[data-kind="share"] .meter-bar i { background: var(--muted); }
     .usage-group .meter-pct { font-size: 12.5px; font-variant-numeric: tabular-nums; font-weight: 500; text-align: right; }
     .usage-group .reset { grid-column: 2 / 4; font-size: 11.5px; color: var(--faint); }
+    /* Under a finger. The fields are 16px, or iOS zooms the page in on the
+       key field and leaves it there; the buttons and tabs are 44pt; and the
+       sheet centres on the strip a person can see, so with the keyboard up
+       the field being typed into is not under it. */
+    @media (pointer: coarse) {
+      input:not([type="checkbox"]):not([type="radio"]), select { font-size: 16px; min-height: 44px; }
+      button, .tabs button { min-height: 44px; }
+      .claude-auth label { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; }
+      .sheet { top: calc(var(--vv-top, 0px) + var(--vv-h, 100dvh) / 2);
+        max-height: calc(var(--vv-h, 100dvh) - 24px - env(safe-area-inset-top, 0px)); overscroll-behavior: contain; }
+      .sheet[data-tab="usage"] { max-height: calc(var(--vv-h, 100dvh) - 24px - env(safe-area-inset-top, 0px)); }
+    }
   `;
 
   // How agents show up on the page, in this browser. Until v4 these were
@@ -8626,6 +8781,10 @@
       const dir = document.createElement('input');
       dir.placeholder = '/absolute/path/to/repo';
       dir.name = 'project-path';
+      // A path, typed on a phone: no capital, no correction, no spelling.
+      dir.autocapitalize = 'off';
+      dir.setAttribute('autocorrect', 'off');
+      dir.spellcheck = false;
       dir.setAttribute('aria-label', 'Project path');
       const button = h('button', 'link', 'Add project');
       button.type = 'button';
@@ -8706,6 +8865,9 @@
       input.type = 'password';
       input.name = `key-${name}`;
       input.autocomplete = 'off';
+      input.autocapitalize = 'off';
+      input.setAttribute('autocorrect', 'off');
+      input.spellcheck = false;
       input.placeholder = set ? 'Set — paste to replace' : 'Not set';
       const clear = document.createElement('button');
       clear.type = 'button';
@@ -8832,6 +8994,13 @@
     .agent-choice label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
     .agent-choice .brand { width: 13px; height: 13px; flex: none; }
     @media (pointer: coarse) { .agent-choice label { min-height: 44px; padding: 0 18px; } }
+    /* The buttons are 44pt for a thumb, and the dialog stands in the strip a
+       person can see: centred on the window, the key field went under the
+       keyboard the moment it was tapped. */
+    @media (pointer: coarse) {
+      button { min-height: 44px; }
+      dialog { top: var(--vv-top, 0px); bottom: var(--kb, 0px); max-height: calc(var(--vv-h, 100dvh) - 24px); overflow: auto; overscroll-behavior: contain; }
+    }
     @media (prefers-reduced-motion: reduce) { .agent-choice label { transition: none; } }
   `;
 
@@ -8859,7 +9028,7 @@
               <label>${BRAND.codex}<input type="radio" name="agent" value="codex">Codex</label>
             </div>
             <label>API key
-              <input name="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+              <input name="key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="sk-ant-…">
             </label>
             <p class="hint">Make one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>. It stays on this drive and is never shown again.</p>
             <p class="status" role="status" aria-live="polite"></p>
@@ -9228,6 +9397,32 @@
       .resize { display: none; }
       .bar { padding-top: calc(18px + env(safe-area-inset-top, 0px)); }
       .pin { display: none; }
+      /* With the keyboard up the sheet is the strip a person can see, not the
+         window: iOS covers the bottom of the window with the keys and slides
+         what is visible down it to keep the caret clear, so a sheet pinned to
+         the window had its composer under the keys and its bar off the top.
+         Only while the keys are up (watchKeys): a pinch-zoom moves the
+         visible strip too, and the sheet must not chase that. */
+      :host(.marble-keyboard) .panel { top: var(--vv-top, 0px); bottom: var(--kb, 0px); }
+    }
+    /* Typing, in the page or in the chat, the corner button and its tools
+       step aside: on Android the keyboard lifts the page's foot, and a round
+       button riding up on it covers the line being typed. On a phone they
+       also step aside while the page has a menu or a modal sheet open
+       (marble-covered): the corner is where a sheet's own buttons and an app
+       bar's are, and the launcher sits over everything. */
+    :host(.marble-keyboard) .tray, :host(.marble-covered) .tray {
+      visibility: hidden; opacity: 0; transition: opacity 200ms var(--settle), visibility 0s linear 200ms; }
+    /* A finger needs 44pt where a pointer needed 30, so the bar's buttons
+       grow; the drawings in them stay the size they were. */
+    @media (pointer: coarse) {
+      .icon { width: 44px; height: 44px; border-radius: 10px; }
+      .icon:active { background: var(--paper-3); color: var(--ink); }
+      .title { min-height: 44px; }
+      .title:active { background: var(--paper-2); }
+      .menu [role="menuitem"] { min-height: 44px; justify-content: center; }
+      .menu [role="menuitem"]:active { background: var(--paper-2); }
+      .bar { -webkit-user-select: none; -webkit-touch-callout: none; }
     }
     @media (prefers-reduced-motion: reduce) {
       .panel { transition: opacity 150ms linear; }
@@ -9427,6 +9622,21 @@
       addEventListener('marble:agent-settings-saved', this.onSettingsSaved);
       this.onViewport = () => this.render();
       this.phone.addEventListener('change', this.onViewport);
+      // The keys up or down: the sheet stands on them and the corner button
+      // steps aside. A marble- class, so never the file's.
+      this.offKeyboard = watchKeys((up) => this.classList.toggle('marble-keyboard', up));
+      // On a phone the mast's "Also working here" count is a button, and the
+      // list it opens here is the chat switcher, which puts this page's chats first.
+      this.onWorkingHere = (event) => {
+        event.stopPropagation();
+        if (this.recent.hidden) this.toggleMenu(this.recent, this.titleButton, () => this.fillRecent());
+      };
+      this.view.addEventListener('marble:agent-working-here', this.onWorkingHere);
+      // Whether the page has a menu or a modal sheet open, asked again after
+      // anything that could open or close one. A popover says so with a
+      // toggle event, which does not bubble but is heard on the way down.
+      this.onMaybeCovered = () => requestAnimationFrame(() => this.paintCovered());
+      for (const type of ['toggle', 'click', 'keyup']) document.addEventListener(type, this.onMaybeCovered, true);
       this.onOutside = (event) => {
         if (!event.composedPath().some((node) => node === this.recent || node === this.actions || node === this.titleButton || node?.classList?.contains?.('more'))) this.hideMenus();
       };
@@ -9495,6 +9705,10 @@
       clearTimeout(this.trayTimer);
       if (this.onCalm) removeEventListener('pointermove', this.onCalm, true);
       this.phone.removeEventListener('change', this.onViewport);
+      this.offKeyboard?.();
+      this.offKeyboard = null;
+      this.view.removeEventListener('marble:agent-working-here', this.onWorkingHere);
+      for (const type of ['toggle', 'click', 'keyup']) document.removeEventListener(type, this.onMaybeCovered, true);
       removeEventListener('resize', this.onWindowResize);
       this.offSummaries?.();
       this.unwatchUsage?.();
@@ -9504,6 +9718,28 @@
 
     root(selector) {
       return this.shadowRoot.querySelector(selector);
+    }
+
+    /** On a phone, whether something of the page's is open over it that the
+     *  corner button would sit on: an open popover or a modal dialog, in the
+     *  page or one shadow root down (the shell's sheets). */
+    paintCovered() {
+      let covered = false;
+      if (this.phone.matches) {
+        const open = ':popover-open, dialog[open], [aria-modal="true"]';
+        // The runtime's own layers (callout, marks, review) are popovers held
+        // open for good, and let every touch through; they are not a menu.
+        const shown = (el) => {
+          if (el === this || this.contains(el) || !(el.checkVisibility?.() ?? true)) return false;
+          const box = el.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 && getComputedStyle(el).pointerEvents !== 'none';
+        };
+        const roots = [document, ...[...document.querySelectorAll('body > *')].map((el) => el !== this && el.shadowRoot).filter(Boolean)];
+        try {
+          covered = roots.some((root) => [...root.querySelectorAll(open)].some(shown));
+        } catch { /* an engine without :popover-open */ }
+      }
+      this.classList.toggle('marble-covered', covered);
     }
 
     /** Showing a finished conversation is seeing it. Said aloud as well as
@@ -9714,6 +9950,14 @@
       }
       this.pinButton.setAttribute('aria-pressed', String(this.pinned));
       this.panel.style.width = phone ? '' : `${this.width}px`;
+      // On a phone the drawer is a full-screen sheet, which is what the phone
+      // chrome was drawn for (the Agents page's): thumb-sized send and setup,
+      // type a thumb reads, and the title left to this sheet's own bar. Only
+      // ever set or taken off here, and only on a change: the conversation
+      // moves its setup row between the bar and a sheet on every set.
+      const chrome = this.view.getAttribute('data-chrome');
+      if (phone && chrome !== 'phone') this.view.setAttribute('data-chrome', 'phone');
+      else if (!phone && chrome === 'phone') this.view.removeAttribute('data-chrome');
       const docked = this.isOpen && !phone && (shell ? shell.mode === 'fit' : this.pinned);
       this.dock(docked, this.isOpen && !phone && !docked ? this.width + gap : 0);
       // Pinned, the page is still there to act on and the tray goes with it.
@@ -10186,6 +10430,14 @@
       const opening = menu.hidden;
       this.hideMenus();
       if (!opening) return;
+      // Hung from the bar wherever its foot is (a phone's bar is taller, for
+      // the thumb), and never taller than the sheet has left under it: with a
+      // keyboard up that is about half a phone, and a menu past it scrolled
+      // its last rows in under the keys.
+      const panel = this.panel.getBoundingClientRect();
+      const top = Math.round(this.bar.getBoundingClientRect().bottom - panel.top + 4);
+      menu.style.top = `${top}px`;
+      menu.style.maxHeight = `${Math.max(160, Math.round(Math.min(panel.height * 0.6, panel.height - top - 12)))}px`;
       menu.hidden = false;
       button.setAttribute('aria-expanded', 'true');
       fill();

@@ -227,12 +227,35 @@
       .marble-line-offer[data-compact] .marble-line-chip[data-act] > span { display: none; }
       .marble-line-offer[data-compact] .marble-line-chip[data-act][data-tip]:is(:hover, :focus-visible)::after { content: attr(data-tip); }
     }
-    /* A finger needs room to land. */
+    /* A finger needs room to land: 44px a target, and the words at 16px, under
+       which iOS zooms the page in on focus and never zooms back out. */
     @media (pointer: coarse) {
-      .marble-line-chip { height: 36px; font-size: 13.5px; }
+      .marble-line-chip { height: 44px; font-size: 14px; }
       .marble-line-send { width: 36px; height: 36px; }
-      .marble-line-input { font-size: 16px; padding: 6px 0; }
+      .marble-line-send::before { content: ""; position: absolute; inset: -4px; }
+      .marble-line-input { font-size: 16px; padding: 10px 0; }
+      .marble-line-opt, .marble-line-open { min-height: 44px; font-size: 14px; }
+      .marble-line-open { margin: 0 0 0 -6px; padding: 0 10px; }
     }
+    /* In a hand, the line is a sheet standing on the keyboard. Hung under its
+       thing it would be under the keys whenever the thing is in the lower
+       half of the screen, which is where a thumb has just scrolled it; at the
+       foot it is where the keys are, as a phone's own text actions are. It
+       reaches edge to edge, its top corners rounded, and keeps clear of the
+       home bar until the keyboard covers that. */
+    .marble-line[data-dock] { left: 0; right: 0; top: auto; bottom: var(--kb, 0px); width: auto;
+      max-height: var(--vv-h, 100dvh); overflow-y: auto; overscroll-behavior: contain;
+      border-radius: 16px 16px 0 0; transform-origin: 50% 100%;
+      padding: 8px max(8px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+      box-shadow: 0 0 0 1px var(--line-rule), 0 -8px 28px rgba(0, 0, 0, .12); }
+    .marble-line[data-dock]:focus-within { box-shadow: 0 0 0 1px var(--line-accent), 0 -8px 28px rgba(0, 0, 0, .12); }
+    html[data-marble-keyboard] .marble-line[data-dock] { padding-bottom: 8px; }
+    /* Six actions will not share a phone's width with their words, and cut
+       to "M…" they say nothing: in the sheet they keep their words on a row of
+       their own that a thumb slides along. */
+    .marble-line[data-dock] .marble-line-acts { flex: 1 0 100%; margin-left: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+    .marble-line[data-dock] .marble-line-acts::-webkit-scrollbar { display: none; }
+    .marble-line[data-dock] .marble-line-acts .marble-line-chip { flex: none; }
     .marble-line-input.is-previewing:empty::before { color: color-mix(in srgb, var(--line-ink) 70%, var(--line-faint)); }
     /* A preview keeps to one line: were it to wrap, the chips would move out
        from under the pointer showing it, and it would flicker. */
@@ -289,6 +312,14 @@
     const viewW = () => document.documentElement.clientWidth || innerWidth;
     const viewH = () => document.documentElement.clientHeight || innerHeight;
     const clamp = (n, lo, hi) => Math.max(lo, Math.min(n, hi));
+    // A hand, and whether the soft keyboard is up (phone.js says, for every page).
+    const coarse = matchMedia('(pointer: coarse)');
+    const keysUp = () => Boolean(window.marblePhone?.keyboard);
+    // The line docks as a sheet on the keyboard in a hand: always at phone
+    // width, and on a tablet while the keys are up, since that is when what
+    // hangs under its thing can be under them. A line Describe mode borrowed
+    // stays over its toolbar until the keys come up.
+    const docks = (s) => coarse.matches && (keysUp() || (!s.lent && viewW() < 720));
 
     // ------------------------------------------------------------ motion
     // Arriving and leaving are the card's small move run in opposite
@@ -299,7 +330,7 @@
     const motion = (el, frames, timing) => {
       try { return el.animate(frames, timing); } catch { return null; }
     };
-    const riseOf = (el) => (el.hasAttribute('data-flip') || el.dataset.scope === 'page' ? RISE : -RISE);
+    const riseOf = (el) => (el.hasAttribute('data-flip') || el.hasAttribute('data-dock') || el.dataset.scope === 'page' ? RISE : -RISE);
     const away = (el) => `translateY(${riseOf(el)}px) scale(0.98)`;
     function arrive(el) {
       if (still()) return motion(el, [{ opacity: 0 }, { opacity: 1 }], { duration: STILL, easing: 'linear' });
@@ -468,6 +499,17 @@
 
     function placeLine(s, r) {
       const el = s.el;
+      const dock = docks(s);
+      el.toggleAttribute('data-dock', dock);
+      if (dock) {
+        // Its place is the stylesheet's: the foot of what can be seen.
+        el.style.left = '';
+        el.style.top = '';
+        el.style.width = '';
+        el.toggleAttribute('data-flip', false);
+        fitChips(s);
+        return;
+      }
       const vw = viewW();
       // Describe mode's toolbar is the floor of a line lent to it.
       const vh = Math.min(viewH(), s.lent?.floor?.() ?? Infinity);
@@ -541,6 +583,33 @@
     addEventListener('scroll', schedule, true);
     addEventListener('resize', schedule);
     document.addEventListener('marble:ops', schedule);
+    // iOS says the keyboard moved only on the visual viewport.
+    window.visualViewport?.addEventListener('resize', schedule);
+
+    // The keys coming up turn a hung line into a sheet on them; and the thing
+    // it is about, if the sheet now covers it, is scrolled up into what is
+    // left of the screen, so the person can see what they are changing.
+    // After the keyboard's own slide: measured mid-slide it lands short.
+    let clearing = 0;
+    function clearOfSheet() {
+      clearTimeout(clearing);
+      clearing = setTimeout(() => {
+        const s = shown;
+        if (!s?.el?.hasAttribute('data-dock') || s.page) return;
+        const r = rectOf(s.lent ? [] : elementsOf(s.ids)) ?? s.lent?.span ?? null;
+        if (!r) return;
+        const sheet = s.el.getBoundingClientRect().top;
+        const top = window.visualViewport?.offsetTop ?? 0;
+        // As far as needed to clear the sheet, and no further than keeps the
+        // thing's own top on the screen.
+        const by = Math.min(r.bottom + OUT + GAP - sheet, r.top - OUT - GAP - top);
+        if (by > 0) window.scrollBy({ top: by, behavior: still() ? 'auto' : 'smooth' });
+      }, 340);
+    }
+    window.marblePhone?.onKeyboard?.((state) => {
+      schedule();
+      if (state.keyboard) clearOfSheet();
+    });
 
     // ------------------------------------------------------------ drawing
 
@@ -560,6 +629,9 @@
       input.setAttribute('aria-label', label);
       input.dataset.placeholder = label;
       input.spellcheck = true;
+      // ⏎ sends, so a phone's return key says Send.
+      input.setAttribute('enterkeyhint', 'send');
+      input.setAttribute('autocapitalize', 'sentences');
       input.textContent = text;
       input.addEventListener('keydown', (event) => onKey(s, event));
       input.addEventListener('input', () => {
@@ -721,7 +793,8 @@
       const row = s.chips;
       if (!row?.isConnected) return;
       const all = [...row.querySelectorAll('.marble-line-chip')];
-      const key = `${s.el?.style.width}|${all.map((c) => c.textContent).join('|')}`;
+      // Docked, the line is the window's width, which a turned phone changes.
+      const key = `${s.el?.style.width || viewW()}|${all.map((c) => c.textContent).join('|')}`;
       if (row.fitted === key) return;
       row.fitted = key;
       for (const c of all) c.hidden = false;

@@ -169,6 +169,9 @@ test('the host knows every marker the affordances and the starters wire', async 
   const NOT_MARKERS = new Set([
     'data-marble-id', 'data-marble-transient', 'data-marble-of', 'data-marble-by', 'data-marble-instruction',
     'data-marble-controls', 'data-marble-readonly', 'data-marble-look',
+    // The host's own word for the keyboard being up (runtime/phone.js): the
+    // page's state, which a page reads and nobody edits.
+    'data-marble-keyboard',
   ]);
   const wired = (source) => [...source.matchAll(/\[(data-marble-[a-z-]+)|RICH = '(data-marble-[a-z-]+)'/g)].map((m) => m[1] ?? m[2]);
   const sources = [['lib/affordances.js', await fsp.readFile(enginePath('lib/affordances.js'), 'utf8')]];

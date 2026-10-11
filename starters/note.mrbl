@@ -222,6 +222,8 @@ __ICON__
     /* Under 16px a phone zooms the whole page when the field takes focus, and
        the note behind it comes back twice the width of the screen. */
     .find { font-size: 1rem; min-height: 2.75rem; }
+    /* The name is typed into too, and at 15px it zoomed the page the same way. */
+    .name { font-size: 1rem; }
   }
 
   /* -------------------------------------------------------------- the sheet */
@@ -229,6 +231,11 @@ __ICON__
      with a keyboard up, is the keyboard. The browser scrolls the caret the
      least it can, and this is how much air it leaves when it does. */
   .sheet { min-width: 0; min-height: 0; overflow: auto; background: var(--card); scroll-padding-bottom: 2rem; }
+  /* The sheet is the one thing on the screen that scrolls, so a swipe that
+     runs out of note stops here instead of dragging the whole shell after it.
+     Held sideways, the page's far edge is under the notch or the rounded
+     corner, and the text keeps clear of it. */
+  .sheet { overscroll-behavior: contain; padding-right: env(safe-area-inset-right, 0px); }
 
   /* The page is the whole of the sheet under the toolbar, however little is
      written on it: a short note is still a full sheet of paper, and a press
@@ -384,11 +391,19 @@ __ICON__
        is, and saying it off screen is saying nothing. */
     .meta { display: none; }
     .meta[data-said] { display: block; padding: 0 .95rem .45rem; }
-    .rows { display: flex; gap: .3rem; overflow-x: auto; padding: 0 .45rem .5rem; }
+    /* A strip that scrolls sideways, and a swipe past its end is not a swipe
+       back a page in the browser's history. */
+    .rows { display: flex; gap: .3rem; overflow-x: auto; overscroll-behavior-x: contain; padding: 0 .45rem .5rem; }
     .row { flex: 0 0 auto; width: 9.5rem; }
     .open .s { display: none; }
     /* A phone reads at the Design System's seventeen. */
     .note { padding: 1rem 1rem 33vh; font-size: 17px; line-height: 1.5; }
+  }
+  /* And so does any touch screen, at any width: a phone held sideways is wider
+     than the narrow layout, and the note it opens at 15px is a field under 16px,
+     which iOS zooms the page into the moment it takes the caret. */
+  @media (pointer: coarse) {
+    .note { font-size: 17px; line-height: 1.5; }
   }
 
   /* The save pill belongs to the affordance library, and it is fixed to the
@@ -496,6 +511,18 @@ __ICON__
     background: var(--card); border-bottom: 1px solid var(--line);
   }
   .tools::-webkit-scrollbar { display: none; }
+  /* The row is chrome: a held finger asks what a button does, and selects
+     nothing and calls up nothing of the system's while it does. */
+  .tools { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  /* What a held button does, said over it. */
+  .tooltip {
+    position: fixed; z-index: 6; max-width: 16rem; padding: .35rem .6rem;
+    background: var(--card); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow);
+    font: 500 .82rem/1.3 var(--ui); white-space: nowrap; pointer-events: none;
+  }
+  .tooltip[hidden] { display: none; }
+  @media print { .tooltip { display: none !important; } }
   .tools[hidden] { display: none; }
   .tools .gap { flex: 0 0 1px; align-self: stretch; margin: .3rem .35rem; background: var(--line); }
   .tool {
@@ -519,6 +546,44 @@ __ICON__
   }
   @container app (max-width: 42rem) {
     .tools { padding-inline: .5rem; }
+  }
+  /* Twenty buttons do not fit across a phone, so the row scrolls sideways, and
+     the end of it is not a swipe back a page. */
+  .tools { overscroll-behavior-x: contain; }
+
+  /* ------------------------------------------------- on the keyboard
+
+     On a phone the keyboard is up for most of the time a note is open, and a
+     toolbar across the top is then a reach to the far end of the screen and
+     back for every bullet. So while something on the sheet has the keys, the
+     row stands on the keyboard instead, the way Notes and Notion put theirs:
+     the shell already ends where the keys begin, so the foot of the sheet is
+     the top of the keyboard. And the strip of notes and the search over them
+     fold away while you type, because with the keys up a phone has about
+     three hundred pixels left for the words. They come back the moment the
+     keyboard goes. The note's name stays, with the button that starts another. */
+  .tools .done { display: none; }
+  .tools .done:active { color: var(--ink); }
+  @container app (max-width: 42rem) {
+    html.marble-keys .sheet:focus-within > .tools {
+      order: 1; top: auto; bottom: 0;
+      border-bottom: 0; border-top: 1px solid var(--line);
+    }
+    /* The line being typed clears the row as well as the keys. */
+    html.marble-keys .sheet:focus-within { scroll-padding-bottom: 5.5rem; }
+    html.marble-keys .sheet:focus-within > .wc { bottom: 4.1rem; }
+    html.marble-keys body.app:has(> .sheet:focus-within) .rail > :is(.meta, .find, .rows) { display: none; }
+    /* The save pill stands on the row rather than over its Done, and the home
+       bar's inch is under the keys, so it is not left above them. */
+    html.marble-keys:has(.sheet:focus-within) .marble-status { bottom: calc(var(--kb, 0px) + 3.75rem); }
+    /* Without it, putting the keyboard away is a hunt for some part of the
+       screen that is not text. So the row carries a Done, at its far end and
+       held there while the rest scrolls under it. */
+    html.marble-keys .sheet:focus-within > .tools .done {
+      display: inline-grid; position: sticky; right: 0; margin-left: auto; padding-inline: .8rem;
+      background: var(--card); color: var(--accent-ink); font-weight: 600;
+      box-shadow: -8px 0 8px -4px var(--card);
+    }
   }
 
   /* The link under the caret: where it goes, and the two things you can do
@@ -556,8 +621,9 @@ __ICON__
   .lb-in:focus { outline: none; border-color: var(--accent-ink); }
   .lb-in[aria-invalid="true"] { border-color: var(--danger); }
   @media (hover: none), (pointer: coarse) {
-    .lb-btn, .lb-in { height: 2.5rem; }
+    .lb-btn, .lb-in { height: 2.75rem; }
     .lb-in { font-size: 1rem; }
+    .lb-url { line-height: 2.75rem; }
   }
 </style>
 <style>
@@ -719,9 +785,20 @@ __ICON__
   .tt-grip:hover, .tt-hm:hover, .tt-grip[aria-expanded="true"], .tt-hm[aria-expanded="true"] { background: var(--paper-3); color: var(--ink); }
   @media (hover: none) { .tt-grip, .tt-hm { opacity: .7; } }
   @media (pointer: coarse) {
-    .tt-grip, .tt-hm { width: 2.2rem; height: 2.2rem; }
+    .tt-grip, .tt-hm { width: 2.75rem; height: 2.75rem; }
     .tt-btn, .tt-find { height: 2.75rem; }
+    /* Every cell and every column's name is a field of its own, and a field
+       under 16px is one iOS zooms the page into when it takes the caret. The
+       column names lose their small capitals for the same reason. */
+    .note > .tt, .tt-find { font-size: 16px; }
+    .tt-t thead th { font-size: 1rem; letter-spacing: 0; text-transform: none; }
+    /* A chip is a press, and a finger is owed 44px for it; the pill stays the
+       size it is and the press lands around it. */
+    .tt-chip { position: relative; }
+    .tt-chip::after { content: ""; position: absolute; inset: -.55rem -.2rem; }
+    .tt-menu button { min-height: 2.75rem; }
   }
+  .tt-scroll { overscroll-behavior-x: contain; }
 
   /* What the bar and the handles leave on the rows: all derived, none filed. */
   .tt .marble-hide { display: none; }
@@ -740,6 +817,9 @@ __ICON__
     border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); color: var(--ink);
     box-shadow: 0 10px 28px light-dark(rgba(74,66,52,.16), rgba(0,0,0,.52)), 0 2px 6px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.3));
     font: 13.5px/1.4 var(--ui);
+    /* Under its button even on a phone, and never taller than the strip of
+       screen the keyboard leaves: what does not fit scrolls inside it. */
+    max-height: calc(var(--vv-h, 100dvh) - 16px); overflow-y: auto; overscroll-behavior: contain;
   }
   .tt-menu button {
     display: flex; align-items: center; gap: .55rem; width: 100%; padding: .42rem .6rem;
@@ -781,7 +861,7 @@ __ICON__
   <!-- The count, and whatever just happened. It is announced rather than only
        drawn: the way back from a deletion is said here and nowhere else. -->
   <p class="meta" role="status" data-marble-transient></p>
-  <input class="find" data-marble-transient type="search" placeholder="Search" aria-label="Search notes" autocomplete="off" spellcheck="false">
+  <input class="find" data-marble-transient type="search" placeholder="Search" aria-label="Search notes" autocomplete="off" spellcheck="false" autocapitalize="none" enterkeyhint="search">
   <div class="rows" id="rows" role="list" data-marble-transient></div>
 </nav>
 
@@ -876,6 +956,15 @@ __ICON__
       const el = document.activeElement;
       return Boolean(el && (el.isContentEditable || el.matches('input, textarea, select')));
     };
+    // Whether the keys are up at all is a third answer, and neither inset is
+    // it: a browser that slides the strip all the way down takes nothing off
+    // the bottom (--kb is 0 with the keyboard up), and Android shrinks the
+    // window itself, so the strip is the whole window and both are 0. What
+    // gives the keyboard away is a strip shorter than the window, or a window
+    // shorter than it has been at this width. It is a marble- class on <html>,
+    // so it is the page's, and reading the page back from the file leaves it.
+    let tallest = { width: 0, height: 0 };
+    let keys = false;
     const insets = () => {
       if (!vv) return;
       const up = touch.matches && typing();
@@ -885,6 +974,14 @@ __ICON__
       // The layout viewport never changed, so innerHeight is still the whole
       // screen and the difference is what the keyboard took.
       style.setProperty('--kb', (up ? Math.max(0, Math.round(innerHeight - vv.height - top)) : 0) + 'px');
+      if (tallest.width !== innerWidth) tallest = { width: innerWidth, height: 0 };
+      tallest.height = Math.max(tallest.height, innerHeight);
+      const now = up && (innerHeight - vv.height >= 80 || tallest.height - innerHeight >= 160);
+      document.documentElement.classList.toggle('marble-keys', now);
+      if (now !== keys) {
+        keys = now;
+        dispatchEvent(new CustomEvent('marble-note-keys'));
+      }
     };
     insets();
     vv?.addEventListener('resize', insets);
@@ -909,7 +1006,7 @@ __ICON__
 
       // Both belong to the page. The file is a document, not a session: which
       // field happens to be typeable is not a fact about these notes.
-      marble.pageOnly('contenteditable', 'spellcheck');
+      marble.pageOnly('contenteditable', 'spellcheck', 'autocapitalize', 'autocorrect');
 
       // ----------------------------------------------------------- the notes
 
@@ -1988,22 +2085,23 @@ __ICON__
       // another window while this one was looking elsewhere.
       function reopen() {
         const el = current();
-        if (flow && flow !== el) {
-          flow.removeAttribute('contenteditable');
-          flow.removeAttribute('spellcheck');
-        }
+        const TYPING = ['contenteditable', 'spellcheck', 'autocapitalize', 'autocorrect'];
+        if (flow && flow !== el) for (const name of TYPING) flow.removeAttribute(name);
         flow = el;
         here = null;
         if (!flow) return;
         if (isView(flow)) {
-          flow.removeAttribute('contenteditable');
-          flow.removeAttribute('spellcheck');
+          for (const name of TYPING) flow.removeAttribute(name);
           shadow = [];
           derive();
           return;
         }
         flow.setAttribute('contenteditable', 'true');
         flow.setAttribute('spellcheck', 'true');
+        // A phone keyboard asked for prose: a capital to start each sentence,
+        // and its corrections on.
+        flow.setAttribute('autocapitalize', 'sentences');
+        flow.setAttribute('autocorrect', 'on');
         shadow = readFlow();
         if (normalise()) file(false);
         derive();
@@ -2543,6 +2641,14 @@ __ICON__
         if (kind !== 'cmd') b.setAttribute('aria-pressed', 'false');
         tools.append(b);
       }
+      // Done puts the keyboard away. It is only drawn while one is up on a
+      // phone (the stylesheet decides), so the arrow keys, which only a
+      // hardware keyboard has, never land on it.
+      const done = document.createElement('button');
+      done.type = 'button';
+      done.className = 'tool done';
+      done.textContent = 'Done';
+      tools.append(done);
       sheet.prepend(tools);
 
       // A press on the toolbar must not take the caret out of the text it is
@@ -2550,7 +2656,54 @@ __ICON__
       tools.addEventListener('mousedown', (event) => {
         if (event.target.closest('.tool')) event.preventDefault();
       });
+      // A finger has no hover to learn a drawing by, so holding a button says
+      // what it does, over it, and the press that held it does nothing else.
+      const tip = document.createElement('div');
+      tip.className = 'tooltip';
+      tip.hidden = true;
+      tip.setAttribute('data-marble-transient', '');
+      tip.setAttribute('aria-hidden', 'true');
+      sheet.append(tip);
+      let holding = 0;
+      let unTip = 0;
+      let tipped = false;
+      tools.addEventListener('pointerdown', (event) => {
+        const b = event.target.closest('.tool');
+        if (!b || event.pointerType === 'mouse' || b.classList.contains('done')) return;
+        tipped = false;
+        clearTimeout(holding);
+        holding = setTimeout(() => {
+          tipped = true;
+          clearTimeout(unTip);
+          tip.textContent = b.getAttribute('aria-label') || b.textContent;
+          tip.hidden = false;
+          const r = b.getBoundingClientRect();
+          const w = tip.offsetWidth;
+          const h = tip.offsetHeight;
+          tip.style.left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8)) + 'px';
+          tip.style.top = (r.top - h - 8 > (window.visualViewport?.offsetTop ?? 0) ? r.top - h - 8 : r.bottom + 8) + 'px';
+        }, 450);
+      });
+      const letGo = () => {
+        clearTimeout(holding);
+        if (!tip.hidden) unTip = setTimeout(() => (tip.hidden = true), 900);
+      };
+      tools.addEventListener('pointerup', letGo);
+      tools.addEventListener('pointercancel', letGo);
+      tools.addEventListener('scroll', () => { clearTimeout(holding); tip.hidden = true; }, { passive: true });
+      tools.addEventListener('contextmenu', (event) => { if (event.target.closest('.tool')) event.preventDefault(); });
+
       tools.addEventListener('click', (event) => {
+        if (tipped) {
+          tipped = false;
+          return;
+        }
+        if (event.target.closest('.done')) {
+          settle();
+          document.activeElement?.blur?.();
+          getSelection()?.removeAllRanges();
+          return;
+        }
         const b = event.target.closest('.tool');
         if (!b || !flow || isView(flow)) return;
         RUN[b.dataset.kind]?.(b.dataset.name);
@@ -2561,7 +2714,7 @@ __ICON__
       // buttons, the way role="toolbar" promises.
       tools.addEventListener('keydown', (event) => {
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
-        const all = [...tools.querySelectorAll('.tool')];
+        const all = [...tools.querySelectorAll('.tool')].filter((b) => b.getClientRects().length);
         const at = all.indexOf(document.activeElement);
         if (at < 0) return;
         event.preventDefault();
@@ -2613,6 +2766,43 @@ __ICON__
         });
       });
 
+      // ------------------------------------------------- the caret over the row
+      //
+      // With the toolbar standing on the keyboard, the foot of the sheet is
+      // behind it, and a browser scrolls the caret only as far as the sheet's
+      // own edge. So the line being typed is kept clear of the row here: after
+      // each keystroke and each move of the caret, if it has gone under the
+      // row, the sheet comes up by the difference and a little air.
+      function clearOfRow() {
+        if (tools.hidden || !document.documentElement.classList.contains('marble-keys')) return;
+        const sel = getSelection();
+        if (!sel?.rangeCount || !flow?.contains(sel.focusNode)) return;
+        const bar = tools.getBoundingClientRect();
+        const pane = sheet.getBoundingClientRect();
+        if (bar.top <= pane.top + 1) return;
+        let rect = null;
+        try {
+          const range = document.createRange();
+          range.setStart(sel.focusNode, sel.focusOffset);
+          rect = [...range.getClientRects()].find((r) => r.height) ?? null;
+        } catch { /* a caret the range cannot stand on: the line will do */ }
+        if (!rect) rect = blockOf(sel.focusNode)?.getBoundingClientRect() ?? null;
+        if (!rect || !rect.height) return;
+        const air = 12;
+        if (rect.bottom > bar.top - air) sheet.scrollTop += rect.bottom - (bar.top - air);
+        else if (rect.top < pane.top + air) sheet.scrollTop -= pane.top + air - rect.top;
+      }
+      let clearing = false;
+      const clearSoon = () => {
+        if (clearing) return;
+        clearing = true;
+        requestAnimationFrame(() => { clearing = false; clearOfRow(); });
+      };
+      notes.addEventListener('input', clearSoon);
+      document.addEventListener('selectionchange', clearSoon);
+      // The row moves to the keys a frame after they arrive.
+      addEventListener('marble-note-keys', () => setTimeout(clearSoon, 60));
+
       // ----------------------------------------------------------- the link box
       //
       // With the caret in a link, where it goes is shown under it, with the way
@@ -2633,7 +2823,7 @@ __ICON__
           '<button type="button" class="lb-btn" data-do="unlink">Remove</button>' +
         '</div>' +
         '<form class="lb-edit">' +
-          '<input class="lb-in" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Paste or type a link" aria-label="Link address">' +
+          '<input class="lb-in" type="text" inputmode="url" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="Paste or type a link" aria-label="Link address">' +
           '<button type="submit" class="lb-btn lb-go">Apply</button>' +
         '</form>';
       sheet.append(box);
@@ -2642,14 +2832,23 @@ __ICON__
       let editing = null;
       let showing = null;
 
+      // Kept inside what the person can see. With a keyboard up that is not
+      // the window: the keys cover its foot and the browser may have slid the
+      // visible strip down it, and on a phone the toolbar is standing on the
+      // keys, so the box goes over the link rather than under the toolbar.
       function hang(rect) {
         box.hidden = false;
         const w = box.offsetWidth;
         const h = box.offsetHeight;
+        const vv = window.visualViewport;
+        const top = (vv?.offsetTop ?? 0) + 8;
+        let floor = (vv ? vv.offsetTop + vv.height : innerHeight) - 8;
+        const bar = tools.hidden ? null : tools.getBoundingClientRect();
+        if (bar && bar.top >= rect.bottom) floor = Math.min(floor, bar.top - 6);
         const left = Math.max(8, Math.min(rect.left, innerWidth - w - 8));
         const below = rect.bottom + 6;
         box.style.left = left + 'px';
-        box.style.top = (below + h > innerHeight - 8 ? Math.max(8, rect.top - h - 6) : below) + 'px';
+        box.style.top = (below + h > floor ? Math.max(top, rect.top - h - 6) : below) + 'px';
       }
 
       const closeBox = () => {
@@ -3517,9 +3716,14 @@ __ICON__
         if (!menu.matches(':popover-open')) menu.showPopover();
         const a = anchor.getBoundingClientRect();
         const m = menu.getBoundingClientRect();
+        // Kept inside what can be seen, which with a keyboard up is the strip
+        // above the keys rather than the window.
+        const vv = window.visualViewport;
+        const sky = (vv?.offsetTop ?? 0) + 8;
+        const floor = (vv ? vv.offsetTop + vv.height : innerHeight) - 8;
         const left = Math.max(8, Math.min(a.left, innerWidth - m.width - 8));
         let top = a.bottom + 4;
-        if (top + m.height > innerHeight - 8) top = Math.max(8, a.top - m.height - 4);
+        if (top + m.height > floor) top = Math.max(sky, Math.min(a.top - m.height - 4, floor - m.height));
         menu.style.left = `${left}px`;
         menu.style.top = `${top}px`;
         (menu.querySelector('[aria-checked="true"]:not(:disabled)') ?? menu.querySelector('button:not(:disabled)'))?.focus();
@@ -3652,7 +3856,7 @@ __ICON__
         el.className = 'tt-bar';
         el.setAttribute(T, '');
         el.innerHTML =
-          '<input class="tt-find" type="search" placeholder="Filter rows" aria-label="Filter rows" autocomplete="off" spellcheck="false">' +
+          '<input class="tt-find" type="search" placeholder="Filter rows" aria-label="Filter rows" autocomplete="off" spellcheck="false" autocapitalize="none" enterkeyhint="search">' +
           '<button class="tt-btn" type="button" data-act="cols" aria-haspopup="menu" aria-expanded="false">Columns</button>' +
           '<span class="tt-say" role="status" aria-live="polite"></span><span class="tt-count"></span>' +
           '<button class="tt-btn" type="button" data-act="copy" title="Copy the rows showing as a Markdown table">Copy as Markdown</button>' +
@@ -4086,6 +4290,12 @@ __SCRIPT__
   .note > * + .stamp { margin-top: .3rem; }
   .note > .stamp + * { margin-top: .85em; }
   .stamp time { color: var(--muted); }
+  /* When it was made can be typed over, and at 12.5px that field is one a
+     phone zooms the page into. On a touch screen the line is set at 16, and
+     stays quiet by its colour rather than its size. */
+  @media (pointer: coarse) {
+    .note > .stamp { font-size: 16px; }
+  }
 </style>
   <script data-marble-id="__ID__">
   // The stamp in a note. An island in the note's text, like the table and the
@@ -4103,7 +4313,7 @@ __SCRIPT__
   (() => {
     const ROOT = '.stamp[data-embed]';
     const ID = 'data-marble-id';
-    const QUIET = /^(class|style|contenteditable|spellcheck|tabindex|draggable|aria-|data-marble-)/;
+    const QUIET = /^(class|style|contenteditable|spellcheck|autocapitalize|autocorrect|tabindex|draggable|aria-|data-marble-)/;
     const pad = (n) => String(n).padStart(2, '0');
     const when = (d) => {
       const off = -d.getTimezoneOffset();

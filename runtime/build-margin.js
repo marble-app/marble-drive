@@ -305,6 +305,27 @@
     .marble-margin-card .reply button[aria-disabled="true"] { opacity: .3; cursor: default; }
     .marble-margin-card .reply svg { width: 13px; height: 13px; }
 
+    /* A hand: words to type at 16px, under which iOS zooms the page in on
+       focus and never zooms back out, and controls a fingertip can land on.
+       The head has the room for 44px; in a card, 40px keeps a row a row. */
+    @media (pointer: coarse) {
+      .marble-margin-card .words[contenteditable], .marble-margin-card .reply textarea { font-size: 16px; line-height: 1.4; }
+      .marble-margin .add, .marble-margin .tray, .marble-margin .back, .marble-margin .gone { height: 44px; font-size: 14px; }
+      .marble-margin .mh .arc, .marble-margin .mh .icon, .marble-margin .shut { width: 44px; height: 44px; }
+      .marble-margin-card .sb, .marble-margin-old .sb, .marble-margin-card .nfoot .model { height: 40px; padding: 0 12px; font-size: 13px; }
+      .marble-margin-card .icon, .marble-margin-old .icon { width: 40px; height: 40px; }
+      .marble-margin-card .k .arc { width: 40px; height: 40px; margin: -10px -12px -10px auto; }
+      .marble-margin-card .nfoot .send, .marble-margin-card .reply button { height: 40px; min-width: 40px; padding: 0 12px; justify-content: center; }
+      .marble-margin-card .row, .marble-margin-old .row { min-height: 40px; }
+      .marble-margin-pin .hit { display: block; }
+    }
+    /* A key on a button is for a keyboard; a phone's has no ⌘. */
+    @media (hover: none) { .marble-margin-card .nfoot .send kbd { display: none; } }
+    /* Each pin keeps its size on the app; in a hand it takes the 44px round
+       it to land on. A child, because both of the pin's own pseudo-elements
+       already draw its ring and its question. */
+    .marble-margin-pin .hit { display: none; position: absolute; inset: -11px; border-radius: 50%; }
+
     /* ---- the build's status (build-mode.js statusCard), heading the list
        while a build is in hand, and the last one to end under them. */
     .marble-margin .marble-bst { position: absolute; left: 18px; right: 18px; z-index: 1; }
@@ -688,8 +709,16 @@
       return card;
     };
 
+    // The room round a pin a fingertip lands in (the stylesheet shows it only
+    // in a hand).
+    const pinHit = () => {
+      const hit = h('span', 'hit');
+      hit.setAttribute('aria-hidden', 'true');
+      return hit;
+    };
     const drawPin = (mark, n) => {
       const pin = button('marble-margin-pin', String(n));
+      pin.append(pinHit());
       pin.dataset.id = mark.id;
       // A press picks it; a drag carries the mark, folded as it is, to
       // another place on the app (agent-marks.js placeAt).
@@ -897,7 +926,7 @@
         node.hidden = false;
         node.setAttribute('aria-expanded', String(picked === mark.id));
         node.setAttribute('aria-label', `${n}: ${kindOf(mark)} ${whereOf(mark)} · ${status.words}`);
-        pin.textContent = String(n);
+        pin.replaceChildren(String(n), pinHit());
         pin.dataset.key = status.key;
         pin.toggleAttribute('data-ring', status.ring != null);
         if (status.ring != null) pin.style.setProperty('--p', `${Math.round(status.ring * 100)}%`);

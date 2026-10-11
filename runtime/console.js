@@ -325,28 +325,42 @@
   function closePop() {
     if (pop?.matches(':popover-open')) pop.hidePopover();
   }
-  /** Hung under its trigger, in the top layer, grown from the nearest corner. */
-  function openPop(trigger, build) {
+  /** Hung under its trigger, in the top layer, grown from the nearest corner.
+   *  A task with fields (`sheet`) is a sheet on the keyboard on a phone. */
+  function openPop(trigger, build, { sheet = false, width = null } = {}) {
     closePop();
     pop?.remove();
-    pop = h('div.pop', { popover: 'auto', [TRANSIENT]: true, role: 'dialog' });
+    const asSheet = sheet && narrow();
+    pop = h('div.pop', { popover: 'auto', [TRANSIENT]: true, role: 'dialog', 'data-sheet': asSheet ? true : null, style: width ? { width } : null });
     pop.append(build(closePop));
     document.body.append(pop);
     const r = trigger.getBoundingClientRect();
     pop.showPopover();
-    const w = pop.offsetWidth;
-    const alignRight = r.left + w > innerWidth - 12;
-    const left = alignRight ? Math.max(12, r.right - w) : Math.max(12, r.left);
-    const below = r.bottom + 8 + pop.offsetHeight < innerHeight - 12 || r.top < innerHeight / 2;
-    pop.style.left = `${left}px`;
-    pop.style.top = below ? `${r.bottom + 6}px` : `${Math.max(12, r.top - 6 - pop.offsetHeight)}px`;
-    pop.style.setProperty('--origin', `${below ? 'top' : 'bottom'} ${alignRight ? 'right' : 'left'}`);
+    if (!asSheet) {
+      // Inside the strip that can be seen, on whichever side of the button
+      // has more room, and no taller than that room: what does not fit
+      // scrolls inside the popover, never off the screen.
+      const vv = window.visualViewport;
+      const top = vv ? vv.offsetTop : 0;
+      const bottom = vv ? vv.offsetTop + vv.height : innerHeight;
+      const w = pop.offsetWidth;
+      const alignRight = r.left + w > innerWidth - 12;
+      const left = Math.max(12, Math.min(innerWidth - 12 - w, alignRight ? r.right - w : r.left));
+      const roomBelow = bottom - 12 - (r.bottom + 6);
+      const roomAbove = r.top - 6 - (top + 12);
+      const below = pop.offsetHeight <= roomBelow || roomBelow >= roomAbove;
+      const room = Math.max(160, below ? roomBelow : roomAbove);
+      if (pop.offsetHeight > room) pop.style.maxHeight = `${Math.floor(room)}px`;
+      pop.style.left = `${left}px`;
+      pop.style.top = below ? `${r.bottom + 6}px` : `${Math.max(top + 12, r.top - 6 - pop.offsetHeight)}px`;
+      pop.style.setProperty('--origin', `${below ? 'top' : 'bottom'} ${alignRight ? 'right' : 'left'}`);
+    }
     pop.querySelector('input, button.primary')?.focus();
   }
 
   function confirmTyped(trigger, { title, body, word, action, run }) {
     openPop(trigger, (close) => {
-      const input = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: word, 'aria-label': `Type ${word}` });
+      const input = h('input', { type: 'text', autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go', placeholder: word, 'aria-label': `Type ${word}` });
       const go = h('button.btn.danger.primary', { type: 'button', disabled: true, text: action });
       input.addEventListener('input', () => { go.disabled = input.value.trim() !== word; });
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !go.disabled) go.click(); });
@@ -359,7 +373,7 @@
         h('p.soft', { text: body }),
         h('div.field', {}, h('label', { text: `Type ${word} to confirm` }), input),
         h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), go));
-    });
+    }, { sheet: true });
   }
 
   // -------------------------------------------------------------- skeleton
@@ -432,7 +446,22 @@
     thumb.style.width = `${on.offsetWidth}px`;
     thumb.style.transform = `translateX(${on.offsetLeft}px)`;
   }
-  new ResizeObserver(placeThumb).observe(seg);
+  /** On a phone the views are a strip that scrolls: the current one is kept in
+   *  it, with a little of its neighbour showing so the strip reads as more. */
+  function showTab(smooth = true) {
+    const on = seg.querySelector('[aria-selected="true"]');
+    if (!on || seg.scrollWidth <= seg.clientWidth + 1) return;
+    const margin = 32;
+    let left = seg.scrollLeft;
+    if (on.offsetLeft - margin < left) left = on.offsetLeft - margin;
+    else if (on.offsetLeft + on.offsetWidth + margin > left + seg.clientWidth) left = on.offsetLeft + on.offsetWidth + margin - seg.clientWidth;
+    if (left === seg.scrollLeft) return;
+    seg.scrollTo({ left, behavior: smooth && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant' });
+  }
+  new ResizeObserver(() => {
+    placeThumb();
+    showTab(false);
+  }).observe(seg);
 
   function setView(id) {
     if (S.view === id) return;
@@ -442,6 +471,7 @@
     S.arrived.delete(id);
     for (const b of seg.querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.view === id));
     placeThumb();
+    showTab();
     if (id === 'workshop') loadChats();
     if (id === 'dashboard') loadUsage(S.range);
     if (id === 'features') features?.load();
@@ -710,15 +740,14 @@
 
   function readLog(trigger, name) {
     openPop(trigger, (close) => {
-      const pre = h('pre.lines', { style: { 'max-height': '60vh', margin: '0' }, text: 'Reading…' });
+      const pre = h('pre.lines', { style: { 'max-height': 'min(60vh, calc(var(--vv-h, 100dvh) - 9rem))', margin: '0' }, text: 'Reading…' });
       api(`drives/${encodeURIComponent(name)}/log?lines=400`).then(({ text }) => {
         pre.textContent = text || '(empty)';
         requestAnimationFrame(() => { pre.scrollTop = pre.scrollHeight; });
       }).catch((err) => { pre.textContent = err.message; });
       const body = h('div.pop-body', {}, h('h4', { text: `${name}: the host's log` }), pre, h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Close', onclick: close })));
       return body;
-    });
-    pop.style.width = 'min(46rem, calc(100vw - 2rem))';
+    }, { width: 'min(46rem, calc(100vw - 2rem))' });
   }
 
   function claude(d) {
@@ -884,6 +913,7 @@
         type: 'text',
         inputmode: 'numeric',
         pattern: '[0-9]*',
+        enterkeyhint: 'done',
         'data-key': `set:${d.name}:${key}`,
         placeholder: `${fallback} (default)`,
         value,
@@ -902,6 +932,8 @@
         input.closest('.field').toggleAttribute('data-dirty', key in p.set || p.unset.includes(key));
         pendingBar(d);
       });
+      // Done puts the keys away on a phone, and the bar of changes is there.
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && window.marblePhone?.touch) input.blur(); });
       return h('div.field', { 'data-dirty': dirty ? true : null }, h('label', { text: `${label} (${unit})` }), input);
     });
     const others = [...env.values()].filter((e) => !KNOWN.has(e.key));
@@ -913,8 +945,8 @@
 
   function addSetting(trigger, d) {
     openPop(trigger, (close) => {
-      const key = h('input', { type: 'text', placeholder: 'MARBLE_DRIVE_SOMETHING', autocomplete: 'off', spellcheck: 'false' });
-      const value = h('input', { type: 'text', placeholder: 'value (empty removes it)', autocomplete: 'off', spellcheck: 'false' });
+      const key = h('input', { type: 'text', placeholder: 'MARBLE_DRIVE_SOMETHING', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'next' });
+      const value = h('input', { type: 'text', placeholder: 'value (empty removes it)', autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'done' });
       const error = h('p.error');
       const go = () => {
         const k = key.value.trim().toUpperCase();
@@ -930,6 +962,7 @@
         S.forceDetail = Date.now();
         paint();
       };
+      key.addEventListener('keydown', (e) => { if (e.key === 'Enter') value.focus(); });
       value.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
       return h('div.pop-body', {},
         h('h4', { text: `A setting on ${d.name}` }),
@@ -937,7 +970,7 @@
         h('div.field', {}, h('label', { text: 'Value' }), value),
         error,
         h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), h('button.btn.primary', { type: 'button', text: 'Add to the changes', onclick: go })));
-    });
+    }, { sheet: true });
   }
 
   function pendingBar(d) {
@@ -1195,7 +1228,7 @@
       let target = choose?.names?.[0] ?? choose?.fixed;
       const select = choose?.names ? h('select', {}, choose.names.map((n, j) => h('option', { value: n, text: j === 0 ? `${n} (where it came from)` : n }))) : null;
       const body = h('p.soft', { style: { 'font-size': '.85rem' } });
-      const input = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Type the drive to confirm' });
+      const input = h('input', { type: 'text', autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go', 'aria-label': 'Type the drive to confirm' });
       const label = h('label');
       const go = h('button.btn.danger.primary', { type: 'button', disabled: true });
       const redraw = () => {
@@ -1220,7 +1253,7 @@
         body,
         h('div.field', {}, label, input),
         h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), go));
-    });
+    }, { sheet: true });
   }
 
   function restoreCopy(trigger, r) {
@@ -1715,8 +1748,8 @@
 
   function newDrive(trigger) {
     openPop(trigger, (close) => {
-      const name = h('input', { type: 'text', placeholder: 'Their first name', autocomplete: 'off', spellcheck: 'false' });
-      const key = h('input', { type: 'password', placeholder: 'sk-ant-… (or they add their own)', autocomplete: 'off' });
+      const name = h('input', { type: 'text', placeholder: 'Their first name', autocomplete: 'off', autocapitalize: 'words', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go' });
+      const key = h('input', { type: 'password', placeholder: 'sk-ant-… (or they add their own)', autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go' });
       const keyField = h('div.field', {}, h('label', { text: 'Their Anthropic API key, optional' }), key);
       let agent = 'api';
       const which = h('div');
@@ -1733,6 +1766,7 @@
         make.disabled = !slug();
         make.textContent = slug() ? `Make t-${slug()}` : 'Make the drive';
       });
+      for (const field of [name, key]) field.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !make.disabled) make.click(); });
       make.addEventListener('click', async () => {
         error.textContent = '';
         make.disabled = true;
@@ -1755,7 +1789,7 @@
         keyField,
         error,
         h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), make));
-    });
+    }, { sheet: true });
   }
 
   // ------------------------------------------------------------- dashboard
@@ -1831,7 +1865,7 @@
       body);
     // Drawn once the card is in the page, so it knows its width.
     requestAnimationFrame(() => {
-      if (showTable) body.replaceChildren(tableOf());
+      if (showTable) body.replaceChildren(h('div.table-scroll', {}, tableOf()));
       else CH().whenSized(body, () => drawChart(body));
     });
     return el;
@@ -2035,7 +2069,7 @@
 
   function pasteBill(trigger) {
     openPop(trigger, (close) => {
-      const area = h('textarea', { rows: '9', placeholder: 'From:\n09/19/2026\nTo:\n09/25/2026\nTotal Spend\n$6.75\n…\nSprites: RAM    $6.05', spellcheck: 'false', 'aria-label': 'The Cost Explorer page, pasted' });
+      const area = h('textarea', { rows: '9', placeholder: 'From:\n09/19/2026\nTo:\n09/25/2026\nTotal Spend\n$6.75\n…\nSprites: RAM    $6.05', spellcheck: 'false', autocapitalize: 'none', autocorrect: 'off', 'aria-label': 'The Cost Explorer page, pasted' });
       const error = h('p.error');
       const save = h('button.btn.primary', { type: 'button', text: 'Use this bill' });
       save.addEventListener('click', async () => {
@@ -2055,12 +2089,12 @@
         h('p.soft', { style: { 'font-size': '.85rem' }, text: 'Open Billing → Cost Explorer on fly.io, pick a range, select the page and paste it here (the per-app view works too). Every estimate is then scaled to match it.' }),
         area, error,
         h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), save));
-    });
+    }, { sheet: true });
   }
 
   function setBudget(trigger, current) {
     openPop(trigger, (close) => {
-      const input = h('input', { type: 'number', min: '0', step: '1', inputmode: 'decimal', placeholder: 'e.g. 25', value: current ?? '', 'aria-label': 'Monthly budget in dollars' });
+      const input = h('input', { type: 'number', min: '0', step: '1', inputmode: 'decimal', enterkeyhint: 'done', placeholder: 'e.g. 25', value: current ?? '', 'aria-label': 'Monthly budget in dollars' });
       const error = h('p.error');
       const save = async (value) => {
         try {
@@ -2081,7 +2115,7 @@
         h('div.foot', {},
           current ? h('button.btn.quiet', { type: 'button', text: 'No budget', onclick: () => save(null) }) : h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }),
           h('button.btn.primary', { type: 'button', text: 'Save', onclick: () => save(input.value) })));
-    });
+    }, { sheet: true });
   }
 
   /** In a drive's detail: its last seven days, its month so far, and why it was up. */

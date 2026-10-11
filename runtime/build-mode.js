@@ -449,10 +449,39 @@
       .marble-build-run { padding-left: 8px; gap: 3px; }
       .marble-build-run .w { max-width: 120px; }
     }
+    /* A hand: 44px to land on wherever there is room for it (in the toolbar,
+       its own 36px, which is Describe's), and words to type at 16px, under
+       which iOS zooms the page in on focus and never zooms back out. */
     @media (pointer: coarse) {
-      .marble-build-btn { height: 36px; line-height: 36px; }
-      .marble-build-x { width: 36px; height: 36px; }
+      .marble-build-btn { height: 44px; line-height: 44px; padding: 0 14px; font-size: 14px; }
+      .marble-build-x { width: 44px; height: 44px; }
+      .marble-build-run button { width: 36px; height: 36px; }
+      .marble-build-write .field, .marble-build-compose textarea, .marble-build-find input { font-size: 16px; }
+      .marble-build-find { height: 44px; border-radius: 22px; }
+      .marble-build-send, .marble-build-round { height: 40px; min-width: 40px; padding: 0 12px; justify-content: center; }
+      .marble-build-write .pic button { width: 28px; height: 28px; top: -10px; right: -10px; }
+      .marble-build-kinds button { padding: 0 10px; min-height: 40px; display: inline-flex; align-items: center; font-size: 13px; }
+      .marble-build-row > button.pick { min-height: 44px; padding: 8px 10px; }
+      .marble-build-row .acts button { height: 40px; padding: 0 12px; font-size: 13px; }
+      .marble-build-pop .foot button { display: inline-flex; align-items: center; min-height: 40px; }
+      .marble-build-pc .inc { height: 36px; line-height: 36px; padding: 0 14px; top: 26px; }
+      .marble-build-pc .del { width: 36px; height: 36px; top: 4px; right: 4px; }
+      .marble-build-line .more { padding: 10px 0; }
+      .marble-build-thread .lines { max-height: min(300px, 40vh); }
     }
+    /* A key shown on a button says what a keyboard would press; a phone's has
+       no ⌘, so the button says it alone. */
+    @media (hover: none) { .marble-build-send kbd { display: none; } }
+    /* In a hand a thread is a task with a field to write in: it is a sheet
+       standing on the keyboard, edge to edge, not a card by its pin that the
+       keys would come up over (placeThread sets data-dock). */
+    .marble-build-thread[data-dock] { left: 0; right: 0; top: auto; bottom: var(--kb, 0px);
+      width: auto; max-width: none; max-height: var(--vv-h, 100dvh); overflow-y: auto; overscroll-behavior: contain;
+      border-radius: 16px 16px 0 0; transform-origin: 50% 100%;
+      padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+    html[data-marble-keyboard] .marble-build-thread[data-dock] { padding-bottom: 8px; }
+    /* The corner button steps aside while the keys are up, as the chat's does. */
+    html[data-marble-keyboard] .marble-build-handle { opacity: 0; pointer-events: none; }
     @media (prefers-reduced-transparency: reduce) {
       .marble-build-sel, .marble-build-thread, .marble-build-pieces { background: var(--b-card); -webkit-backdrop-filter: none; backdrop-filter: none; }
     }
@@ -1079,6 +1108,9 @@
       field.setAttribute('aria-multiline', 'true');
       field.setAttribute('aria-label', label);
       field.dataset.placeholder = placeholder;
+      // Return is a new line here (⌘↵ sends), and a reply is a sentence.
+      field.setAttribute('enterkeyhint', 'enter');
+      field.setAttribute('autocapitalize', 'sentences');
       const pics = h('div', 'pics');
       const act = h('div', 'act');
       act.append(h('span', 'sp'));
@@ -1216,6 +1248,11 @@
       const pin = M.elementOf(threadFor)?.getBoundingClientRect();
       if (!pin?.width) { thread.hidden = true; return; }
       thread.hidden = false;
+      // In a hand, at phone width or with the keys up, it docks on the
+      // keyboard, and the stylesheet says where.
+      const dock = matchMedia('(pointer: coarse)').matches && (innerWidth < 720 || Boolean(window.marblePhone?.keyboard));
+      thread.toggleAttribute('data-dock', dock);
+      if (dock) { thread.style.left = ''; thread.style.top = ''; return; }
       const t = thread.getBoundingClientRect();
       let left = pin.right + 10;
       if (left + t.width > innerWidth - 12) left = pin.left - t.width - 10;
@@ -1625,6 +1662,10 @@
     findInput.type = 'search';
     findInput.placeholder = 'Find a piece';
     findInput.setAttribute('aria-label', 'Find a piece');
+    // It filters as it is typed, so the return key only puts the keys away.
+    findInput.setAttribute('enterkeyhint', 'search');
+    findInput.autocapitalize = 'off';
+    findInput.spellcheck = false;
     find.append(findInput);
     findInput.addEventListener('input', () => { findWords = findInput.value.trim().toLowerCase(); drawPieces(); });
     const kinds = h('div', 'marble-build-kinds');
@@ -1902,6 +1943,9 @@
     addEventListener('scroll', reframe, true);
     addEventListener('resize', reframe);
     document.addEventListener('marble:ops', reframe);
+    // The keys coming up or going decide whether a thread docks (phone.js).
+    window.visualViewport?.addEventListener('resize', reframe);
+    window.marblePhone?.onKeyboard?.(reframe);
     M.onChange(() => { paintBar(); });
 
     // ⌘⇧D from Use: the handle's key, already Describe's (agent-marks.js).

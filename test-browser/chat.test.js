@@ -36,13 +36,13 @@ test('a fresh chat greets, then sends, streams a reply and files itself in the s
   await host.reset();
   const { page, errors } = await openChat();
   assert.equal(await page.locator('.hello').isVisible(), true);
-  assert.equal(await page.locator('.send').isDisabled(), true);
+  assert.equal(await page.locator('.field .send').isDisabled(), true);
 
   await send(page, 'script:hello');
-  await page.locator('.me', { hasText: 'script:hello' }).waitFor();
+  await page.locator('.thread .me', { hasText: 'script:hello' }).waitFor();
   await page.locator('.reply .md strong', { hasText: 'there' }).waitFor();
   assert.equal(await page.locator('.hello').isVisible(), false);
-  assert.equal(await page.locator('.me').count(), 1, 'the drawn bubble is the one the host confirmed');
+  assert.equal(await page.locator('.thread .me').count(), 1, 'the drawn bubble is the one the host confirmed');
   assert.equal(await page.locator('.reply .md li').count(), 2);
 
   const id = await page.evaluate(() => location.hash.slice(1));
@@ -61,7 +61,7 @@ test('an idea fills the field, and the work between words folds into one line', 
   const { page, errors } = await openChat();
   await page.locator('.idea').first().click();
   assert.equal(await page.locator('.field textarea').inputValue(), 'Explain an idea simply');
-  assert.equal(await page.locator('.send').isDisabled(), false);
+  assert.equal(await page.locator('.field .send').isDisabled(), false);
 
   await send(page, 'script:tools');
   await page.locator('.reply .md', { hasText: 'Two steps later.' }).waitFor();
@@ -79,14 +79,14 @@ test('a reply can be stopped, and a reload reads the chat back', async () => {
   await host.reset();
   const { page, errors } = await openChat();
   await send(page, 'script:slow');
-  await page.locator('.send[data-mode="stop"]').waitFor();
-  await page.locator('.dots').waitFor();
-  await page.locator('.send').click();
+  await page.locator('.field .send[data-mode="stop"]').waitFor();
+  await page.locator('.thread .dots').waitFor();
+  await page.locator('.field .send').click();
   await page.locator('.note', { hasText: 'Stopped.' }).waitFor();
-  assert.equal(await page.locator('.send').getAttribute('data-mode'), 'send');
+  assert.equal(await page.locator('.field .send').getAttribute('data-mode'), 'send');
 
   await page.reload();
-  await page.locator('.me', { hasText: 'script:slow' }).waitFor();
+  await page.locator('.thread .me', { hasText: 'script:slow' }).waitFor();
   await page.locator('.note', { hasText: 'Stopped.' }).waitFor();
   assert.equal(await page.locator('.hello').isVisible(), false);
   assert.deepEqual(errors, []);
@@ -121,7 +121,7 @@ test('on a phone the list comes first and a chat is pushed in over it', async ()
   await row.tap();
   await page.waitForFunction(() => Math.abs(document.querySelector('.room').getBoundingClientRect().left) < 1);
   await page.locator('.reply .md strong', { hasText: 'there' }).waitFor();
-  await page.locator('.back').tap();
+  await page.locator('.room .back').tap();
   await page.waitForFunction(() => document.querySelector('.room').getBoundingClientRect().left >= 380);
   assert.deepEqual(errors, []);
 });
@@ -155,7 +155,7 @@ test('words handed over as #ask= are the first message, sent once', async () => 
   await host.reset();
   const { page, errors } = await host.newPage();
   await page.goto(`${host.base}/a/Chat#ask=${encodeURIComponent('script:hello')}`);
-  await page.locator('.me', { hasText: 'script:hello' }).waitFor();
+  await page.locator('.thread .me', { hasText: 'script:hello' }).waitFor();
   await page.locator('.reply .md strong', { hasText: 'there' }).waitFor();
   assert.doesNotMatch(await page.evaluate(() => location.hash), /ask=/);
   const count = async () => {
@@ -167,6 +167,6 @@ test('words handed over as #ask= are the first message, sent once', async () => 
   await page.waitForFunction(() => Boolean(window.marble?.agent));
   await page.waitForTimeout(500);
   assert.equal(await count(), before, 'a reload sent nothing');
-  assert.equal(await page.locator('.me').count(), 1);
+  assert.equal(await page.locator('.thread .me').count(), 1);
   assert.deepEqual(errors, []);
 });

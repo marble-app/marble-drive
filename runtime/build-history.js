@@ -69,6 +69,13 @@
     .marble-history .btn:hover { background: var(--b-paper-3); }
     .marble-history .btn:focus-visible { outline: 2px solid var(--b-mark); outline-offset: 1px; }
     .marble-history .btn[aria-disabled="true"] { opacity: .45; cursor: default; }
+    .marble-history .btn:active { background: var(--b-paper-3); }
+    /* A fingertip needs 44px to land on. */
+    @media (pointer: coarse) {
+      .marble-history .x { width: 44px; height: 44px; }
+      .marble-history .btn { height: 40px; padding: 0 14px; font-size: 13.5px; }
+      .marble-history .ev > button.eh { min-height: 44px; }
+    }
   `;
 
   const h = (tag, className = '', text = null) => {

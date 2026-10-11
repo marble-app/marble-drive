@@ -168,6 +168,19 @@
       border-right: 1.5px solid color-mix(in srgb, var(--var-ink) 30%, transparent);
       border-bottom: 1.5px solid color-mix(in srgb, var(--var-ink) 30%, transparent);
     }
+    /* A fingertip needs 44px to land on. The pill keeps its size on the
+       element and its arrows take the room round them; the surface's
+       controls grow. */
+    @media (pointer: coarse) {
+      .marble-variations-step, .marble-variations-open { position: relative; width: 28px; height: 28px; }
+      .marble-variations-step::after, .marble-variations-open::after { content: ""; position: absolute; inset: -8px -4px; }
+      .marble-variations-name { font-size: 13px; }
+      .marble-variations-shut { width: 44px; height: 44px; margin: -8px -6px -8px 0; }
+      .marble-variations-use, .marble-variations-keep { min-height: 40px; padding: 0 14px; display: inline-flex; align-items: center; font-size: 13px; }
+      .marble-variations-grab { width: 32px; height: 32px; }
+      .marble-variations-step:active, .marble-variations-open:active, .marble-variations-keep:active,
+      .marble-variations-shut:active { background: color-mix(in srgb, var(--var-ink) 12%, transparent); }
+    }
     @media (prefers-reduced-transparency: reduce) {
       .marble-variations-panel { background: var(--var-paper); -webkit-backdrop-filter: none; backdrop-filter: none; }
     }

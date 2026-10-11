@@ -245,6 +245,13 @@ the reason instead of the rule.
 10. Reasons above rules.
 11. Affordances with their history part, and Mod+Z bound.
 12. Dragged things track one to one and spring on release.
+13. The phone. Every field types at 16px or more on a coarse pointer, or iOS
+    zooms the page on focus. What is fixed to the bottom stands on
+    `var(--kb, 0px)`, a sheet is never taller than `var(--vv-h, 100dvh)`, and
+    a floating button steps aside under `html[data-marble-keyboard]` (the host
+    publishes all three on every page). Full-height layouts use `dvh`, never
+    `vh`. Fixed edges pad with `env(safe-area-inset-*)`. Fields say what
+    return does with `enterkeyhint`.
 
 ## Rejected. Do not bring these back
 
@@ -266,7 +273,8 @@ is a regression. The ones that recur most:
 ## Check your work
 
 Render it in both schemes and at phone and desk widths (360, 460, 620, 820,
-1100). Look for hover-only controls, sideways overflow, and contrast of
+1100). Look for hover-only controls, sideways overflow, a field under 16px,
+a bottom bar the keyboard would cover, and contrast of
 `--faint` text under 4.5:1 where it carries meaning. Run `check_document`
 after any rewrite. Run the Don'ts page's scan against the file and answer
 every hit: fix it, or know why it is legitimate. If what you built looks wrong

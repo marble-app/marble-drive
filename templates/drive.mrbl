@@ -261,7 +261,10 @@ __ICON__
     display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .75rem;
     align-content: start;
   }
-  .item { position: relative; cursor: pointer; user-select: none; touch-action: none; }
+  /* A finger on a row is the list scrolling until it has been held still, so
+     the browser keeps the pan; the lift asks for the finger by holding (see
+     "a held finger" in the script) and stops the scroll itself from there. */
+  .item { position: relative; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
   /* Every row and card fades and settles into place together rather than
      popping in mid-refresh — a folder that just changed should look like it
      changed, not like it was always like this. `animation-delay` is set per
@@ -1279,6 +1282,174 @@ __ICON__
   @media (prefers-reduced-motion: reduce) {
     .fp[data-fk="audio"].marble-is-ready .fp-wave { animation: none; }
   }
+
+  /* --------------------------------------------------------------- the hand */
+  /* A finger, at any width. iOS zooms the page into any field set under 16px
+     the moment it is focused and never zooms back, so every field a thumb can
+     reach is 16px here, and a label you can rename is 16px while it is being
+     renamed. Every control a thumb presses is at least 44px tall, however
+     small it is drawn. */
+  @media (pointer: coarse) {
+    .search input, .sheet-ask textarea, .start input[type="text"], .start textarea { font-size: 16px; }
+    .listhead [data-marble-editable]:focus, .side [data-marble-editable]:focus,
+    .quota [data-marble-editable]:focus { font-size: 16px; }
+    .search input { min-height: 2.75rem; }
+    .crumb, .chip, .mats-head, .sheet-all, .start-foot button, .start-ideas button, .up-foot button,
+    .nav-item, .pin, .menu button { min-height: 2.75rem; }
+    .menu { overflow-y: auto; overscroll-behavior: contain; }
+    .chip { padding-left: .95rem; padding-right: .95rem; }
+    .toggle button { min-width: 2.75rem; min-height: 2.75rem; }
+    .item .more { width: 2.75rem; height: 2.75rem; }
+    .sheet-send { width: 2.75rem; height: 2.75rem; }
+    .fp-play { position: relative; }
+    .fp-play::before { content: ''; position: absolute; inset: -6px; }
+    body[data-view] .item[data-material] { min-height: 2.75rem; padding-left: .75rem; }
+    body[data-view] .item[data-material] .more { width: 2.25rem; height: 2.75rem; opacity: .6; }
+    .item[data-material] .name b { font-size: .86rem; }
+    /* Chrome is pressed, not read: a held finger on a crumb or a tab should
+       not start a text selection. The names in the file stay selectable. */
+    .topbar .status, .crumbs, .toolbar, .side, .listhead, .menu, .sheet-h, .mats-head {
+      -webkit-user-select: none; user-select: none;
+    }
+    .side [data-marble-editable], .listhead [data-marble-editable] { -webkit-user-select: text; user-select: text; }
+  }
+  /* Adding a file is a drop on a desk. A phone has nothing to drag one from,
+     so it gets the picker the drop stands in for. */
+  #add-files { display: none; }
+  /* No pointer to hover with, so nothing waits for one: a row's ⋮ is always
+     there (a held finger opens the same menu), and the keys a menu offers are
+     keys a phone does not have. */
+  @media (hover: none) {
+    .item .more { opacity: .6; }
+    body[data-view="grid"] .item:not([data-material]) .name { padding-right: 2.4rem; }
+    .menu button .key { display: none; }
+    #add-files { display: block; }
+  }
+
+  /* -------------------------------------------------------------- the phone */
+  /* Narrower than the shell's own phone width (runtime/shell.js), the Drive
+     draws its own frame, and on a phone that frame is one pane edge to edge:
+     a bar at the top that is mostly the search, the listing as the one thing
+     that scrolls, and the sidebar turned into a thumb bar at the sill —
+     New, the four places, then the pins, scrolling sideways if there are many.
+     The rail this replaces took a fifth of a 393px screen to show four glyphs,
+     and pushed a 320px one sideways. */
+  @media (max-width: 719px) {
+    body { height: 100dvh; }
+    .topbar {
+      gap: .75rem;
+      padding: calc(.5rem + env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) .5rem max(1rem, env(safe-area-inset-left, 0px));
+    }
+    .brand { min-width: 0; flex: 0 0 auto; }
+    .search { min-width: 0; }
+    .status { margin-left: 0; }
+
+    .shell { flex-direction: column; }
+    .main { order: 1; flex: 1 1 auto; min-height: 0; margin: 0; border-radius: 0; }
+    .crumbs { padding: .7rem max(.75rem, env(safe-area-inset-right, 0px)) .1rem max(.75rem, env(safe-area-inset-left, 0px)); }
+    .toolbar {
+      flex-wrap: wrap; row-gap: .4rem;
+      padding: .3rem max(1rem, env(safe-area-inset-right, 0px)) .55rem max(1rem, env(safe-area-inset-left, 0px));
+    }
+    .chip { white-space: nowrap; }
+    .items { overscroll-behavior: contain; }
+    body[data-view="grid"] .items:not([data-rep]) {
+      grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: .6rem;
+      padding: .4rem max(.75rem, env(safe-area-inset-right, 0px)) 1.5rem max(.75rem, env(safe-area-inset-left, 0px));
+    }
+    body[data-view="list"] .listhead,
+    body[data-view="list"] .item { grid-template-columns: 1fr 6.5rem 2.75rem; gap: .75rem; padding-left: 1rem; padding-right: .4rem; }
+    body[data-view="list"] .item { min-height: 3rem; padding-top: .2rem; padding-bottom: .2rem; }
+    body[data-view="timeline"] .items { padding: .4rem 1rem 3rem 2.6rem; }
+    .item.trow .thumb { width: 4.4rem; height: 2.9rem; }
+    body[data-view="weight"] .items { padding: .5rem 1rem 2rem; }
+    body[data-view="weight"] .item { gap: .6rem; }
+    .wrank { display: none; }
+    .wname { flex: 1 1 auto; width: auto; }
+    .wbar { flex: 0 1 4rem; min-width: 2rem; }
+    .wmeta { width: auto; }
+    .tgrid { grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .6rem; }
+    body[data-view] .items[data-gallery] { padding: .6rem 1rem 2rem; }
+
+    /* The thumb bar. In the flow at the foot of the column rather than fixed
+       over the listing, so the last row is never under it or under the home
+       indicator; it goes while the keyboard is up, because what you are typing
+       into is the only thing on screen then. */
+    .side {
+      order: 2; flex: 0 0 auto; flex-direction: row; align-items: center; gap: .1rem;
+      overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: none;
+      padding: .3rem max(.5rem, env(safe-area-inset-right, 0px)) calc(.3rem + env(safe-area-inset-bottom, 0px)) max(.5rem, env(safe-area-inset-left, 0px));
+      border-top: 1px solid var(--line);
+    }
+    .side::-webkit-scrollbar { display: none; }
+    /* The chat's round button floats in the bottom-right corner over this bar;
+       the bar leaves it its corner rather than a tab under it. */
+    html:has(marble-agent-drawer:not([data-launcher-away])) .side {
+      padding-right: calc(4.75rem + env(safe-area-inset-right, 0px));
+    }
+    html[data-marble-keyboard] .side { display: none; }
+    .side .new {
+      position: sticky; left: 0; z-index: 1; flex: 0 0 auto; align-self: center;
+      width: 2.75rem; height: 2.75rem; margin: 0 .3rem 0 0; padding: 0; justify-content: center;
+      border-radius: 999px;
+    }
+    .side .nav, .side .pins { display: flex; flex: 0 0 auto; gap: .1rem; min-height: 0; }
+    .side .nav-item, .side .pin {
+      flex-direction: column; justify-content: center; gap: .15rem;
+      min-width: 3.6rem; max-width: 5.5rem; min-height: 2.75rem; padding: .2rem .45rem;
+      border-radius: 10px; font-size: .7rem; line-height: 1.2;
+    }
+    .side .nav-item .ico { font-size: 1.05rem; line-height: 1; }
+    /* The labels come back as captions. A tap on one is a tap on the tab, not
+       a rename: renaming the places is a desk's job, and a caret in a tab bar
+       would put the keyboard up over the page you were trying to reach. */
+    .side .nav-item > [data-marble-editable], .side .pin > [data-marble-editable] {
+      display: block; flex: 0 0 auto; max-width: 100%; pointer-events: none;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* The corner cards stand on the thumb bar, and on the keyboard while it is up. */
+    .toast, .uploads {
+      left: max(.75rem, env(safe-area-inset-left, 0px));
+      bottom: calc(4.1rem + env(safe-area-inset-bottom, 0px));
+    }
+    .toast { max-width: calc(100vw - 1.5rem); }
+    .uploads { width: auto; right: max(.75rem, env(safe-area-inset-right, 0px)); }
+    html[data-marble-keyboard] .toast, html[data-marble-keyboard] .uploads { bottom: calc(var(--kb, 0px) + .75rem); }
+
+    /* Menus stay hung off what opened them, kept inside the part of the
+       screen the keyboard leaves, and scroll inside themselves. */
+    .sheet, .menu {
+      max-width: calc(100vw - 1rem); max-height: calc(var(--vv-h, 100dvh) - 1rem);
+      overflow-y: auto; overscroll-behavior: contain;
+    }
+
+    /* The brief is a task with fields, so on a phone it is a sheet from the
+       foot of the screen, standing on the keyboard while one is up. Its
+       actions stay at the bottom of it however far the fields scroll, and the
+       preview steps aside while you type so the field you are in is seen. */
+    .start {
+      left: 0; right: 0; top: auto; bottom: var(--kb, 0px); width: auto;
+      max-height: calc(var(--vv-h, 100dvh) - 2rem);
+      padding: 1.1rem max(1rem, env(safe-area-inset-right, 0px)) 0 max(1rem, env(safe-area-inset-left, 0px));
+      border-radius: 16px 16px 0 0; overscroll-behavior: contain;
+      transform: translateY(100%); transform-origin: 50% 100%;
+    }
+    .start[data-open="1"] { transform: none; }
+    .start-foot {
+      position: sticky; bottom: 0; z-index: 1; background: var(--card);
+      padding-bottom: calc(.85rem + env(safe-area-inset-bottom, 0px));
+    }
+    html[data-marble-keyboard] .start-foot { padding-bottom: .85rem; }
+    /* The chat's corner button floats over everything; Create is not put under it. */
+    html:has(marble-agent-drawer:not([data-launcher-away])) .start-foot {
+      padding-right: calc(3.5rem + env(safe-area-inset-right, 0px));
+    }
+    html[data-marble-keyboard] .start-shot { display: none; }
+  }
+  @media (max-width: 719px) and (prefers-reduced-motion: reduce) {
+    .start, .start[data-open="1"] { transform: none; }
+  }
 </style>
 </head>
 <body class="drive" data-marble-id="__ID__" data-view="grid">
@@ -1289,7 +1460,7 @@ __ICON__
     <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
   </div>
   <div class="search" data-marble-transient>
-    <input id="q" type="search" placeholder="Search in Drive" autocomplete="off" aria-label="Search in Drive">
+    <input id="q" type="search" placeholder="Search in Drive" autocomplete="off" aria-label="Search in Drive" enterkeyhint="search" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
   <div class="status" id="status" data-marble-transient><span class="dot"></span><span id="status-text">offline</span></div>
 </header>
@@ -1297,7 +1468,7 @@ __ICON__
 <div class="shell" data-marble-id="__ID__">
 
   <aside class="side" data-marble-id="__ID__">
-    <button class="new" id="new" data-marble-transient><span class="plus">+</span><span class="label">New</span></button>
+    <button class="new" id="new" aria-label="New" data-marble-transient><span class="plus">+</span><span class="label">New</span></button>
 
     <ul class="nav" id="nav" data-marble-id="__ID__" data-marble-sortable="nav">
       <li class="nav-item" data-marble-id="__ID__" data-nav="drive" data-marble-removable>
@@ -1400,7 +1571,7 @@ __ICON__
        them you used last; a click on one sends there instead, or, with nothing
        typed, simply opens it. -->
   <form class="sheet-ask" id="sheet-ask" autocomplete="off">
-    <textarea id="ask" rows="1" placeholder="Describe an app to build…" aria-label="Describe an app to build"></textarea>
+    <textarea id="ask" rows="1" placeholder="Describe an app to build…" aria-label="Describe an app to build" enterkeyhint="send" autocapitalize="sentences"></textarea>
     <button type="submit" class="sheet-send" id="ask-send" aria-label="Send to Chat" title="Send to Chat" disabled>
       <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 15.5V4.5M5.5 9 10 4.5 14.5 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -1420,6 +1591,9 @@ __ICON__
       <b>Board</b><small>Sketch it first</small>
     </button>
   </div>
+  <!-- Shown only where there is no desktop to drop a file from. -->
+  <button type="button" class="sheet-all" id="add-files">Add files</button>
+  <input id="add-files-pick" type="file" multiple hidden>
   <h3 class="sheet-h">Start from a template</h3>
   <div class="tgrid" id="starters" data-compact></div>
   <button type="button" class="sheet-all" id="all-templates">All templates</button>
@@ -1436,9 +1610,9 @@ __ICON__
     <h2 id="start-title"></h2>
     <p class="start-blurb" id="start-blurb"></p>
     <label class="start-label" for="start-name">Name</label>
-    <input id="start-name" type="text" autocomplete="off" spellcheck="false">
+    <input id="start-name" type="text" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="sentences" enterkeyhint="go">
     <label class="start-label" for="start-prompt">What do you want to build? <span>optional</span></label>
-    <textarea id="start-prompt" rows="3"></textarea>
+    <textarea id="start-prompt" rows="3" autocapitalize="sentences"></textarea>
     <div class="start-ideas" id="start-ideas"></div>
   </div>
   <div class="start-foot">
@@ -2920,9 +3094,12 @@ __ICON__
         startScrim.setAttribute('data-open', '1');
         startPanel.setAttribute('data-open', '1');
         // Selected, not just filled: the name a template suggests is a name you
-        // should be able to replace by typing.
-        name.focus();
-        name.select();
+        // should be able to replace by typing. A phone keeps its keyboard down
+        // until a field is tapped, so the sheet opens showing what it is about.
+        if (!matchMedia('(pointer: coarse)').matches) {
+          name.focus();
+          name.select();
+        }
       }
 
       // Out of the card that was pressed, and back into it. The panel is
@@ -3080,6 +3257,13 @@ __ICON__
         const item = event.target.closest('.item');
         if (!item) return pick(null);
         const more = event.target.closest('.more');
+        // A finger has no second click to wait for: on a phone a tap opens,
+        // the way every list under a thumb does, and a held finger is how it
+        // says which one (see "a held finger").
+        if (byTouch && !more && !(event.metaKey || event.ctrlKey || event.shiftKey)) {
+          pick(item.dataset.path);
+          return openItem(item);
+        }
         // Cmd or Shift adds and removes without disturbing the rest — the
         // keyboard half of what the marquee does with a drag.
         if (!more && (event.metaKey || event.ctrlKey || event.shiftKey)) {
@@ -3098,6 +3282,8 @@ __ICON__
 
       items.addEventListener('dblclick', (event) => {
         if (Date.now() - dragged < 400) return;
+        // The first tap already opened it.
+        if (byTouch) return;
         if (event.target.closest('.more')) return;
         openItem(event.target.closest('.item'), { newTab: event.metaKey || event.ctrlKey });
       });
@@ -3174,6 +3360,11 @@ __ICON__
         query = search.value.trim().toLowerCase();
         draw();
       });
+      // The results are already showing as you type; on a phone the Search
+      // key puts the keyboard away so you can see them.
+      search.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.isComposing && matchMedia('(pointer: coarse)').matches) search.blur();
+      });
 
       // ------------------------------------------------------------ the verbs
 
@@ -3189,13 +3380,32 @@ __ICON__
         // rect is read from the button held in scope, not from the event: this
         // handler awaits, and after the await the event's currentTarget is gone.
         sheet.setAttribute('data-open', '1');
+        sheet.style.maxHeight = '';
+        sheet.style.transformOrigin = '';
         const box = newButton.getBoundingClientRect();
         const r = room();
         sheet.style.left = Math.max(r.left, Math.min(box.left, r.right - sheet.offsetWidth)) + 'px';
-        sheet.style.top = Math.max(r.top, Math.min(box.bottom + 6, r.bottom - sheet.offsetHeight)) + 'px';
+        // On a phone New sits in the thumb bar at the foot of the screen, so
+        // the menu hangs above it instead, as short as the room above allows,
+        // rather than sliding down over the button that opened it.
+        const below = r.bottom - (box.bottom + 6);
+        const above = box.top - 6 - r.top;
+        let h = sheet.offsetHeight;
+        if (h > below && above > below) {
+          if (h > above) {
+            sheet.style.maxHeight = above + 'px';
+            h = above;
+          }
+          sheet.style.top = box.top - 6 - h + 'px';
+          sheet.style.transformOrigin = 'left bottom';
+        } else {
+          sheet.style.top = Math.max(r.top, Math.min(box.bottom + 6, r.bottom - h)) + 'px';
+        }
         // Open to type: the field has the keyboard before the menu has finished
-        // growing, so the first keystroke after New is the first word.
-        document.querySelector('#ask').focus({ preventScroll: true });
+        // growing, so the first keystroke after New is the first word. Not on
+        // a phone, where the keyboard would cover the templates the menu is
+        // mostly for: there the field is one tap away.
+        if (!matchMedia('(pointer: coarse)').matches) document.querySelector('#ask').focus({ preventScroll: true });
       });
 
       document.querySelector('#mk').addEventListener('click', async () => {
@@ -3545,14 +3755,19 @@ __ICON__
       // docked tree and a docked chat each take their share as a margin on the
       // root, a chat floating over the page says what it covers, and a popover
       // kept inside the bare window would open under any of them.
+      // On a phone the keyboard takes the bottom of the window without the
+      // window saying so; the visual viewport is the part still seen.
       function room() {
         const css = getComputedStyle(document.documentElement);
         const cover = parseFloat(css.getPropertyValue('--marble-chat-cover')) || 0;
+        const vv = window.visualViewport;
+        const seenTop = vv ? Math.max(0, vv.offsetTop) : 0;
+        const seenBottom = vv ? Math.min(innerHeight, vv.offsetTop + vv.height) : innerHeight;
         return {
           left: (parseFloat(css.marginLeft) || 0) + 8,
-          top: (parseFloat(css.marginTop) || 0) + 8,
+          top: Math.max(parseFloat(css.marginTop) || 0, seenTop) + 8,
           right: innerWidth - (parseFloat(css.marginRight) || 0) - cover - 8,
-          bottom: innerHeight - 8,
+          bottom: seenBottom - 8,
         };
       }
 
@@ -3563,9 +3778,10 @@ __ICON__
         menu.setAttribute('role', 'menu');
         menu.style.left = '0px';
         menu.style.top = '0px';
+        menu.style.maxHeight = '';
         menu.setAttribute('data-open', '1');
         const w = menu.offsetWidth;
-        const h = menu.offsetHeight;
+        let h = menu.offsetHeight;
         const r = room();
         let x;
         let y;
@@ -3573,7 +3789,16 @@ __ICON__
           const box = anchor.getBoundingClientRect();
           x = box.left;
           y = box.bottom + 4;
-          if (y + h > r.bottom) y = Math.max(r.top, box.top - h - 4);
+          const below = r.bottom - y;
+          const above = box.top - 4 - r.top;
+          if (h > below && h > above && matchMedia('(pointer: coarse)').matches) {
+            // A hand gets the menu beside the row it is holding, never over
+            // it: on the side with more room, scrolling inside itself when
+            // even that is short of the whole menu.
+            h = Math.max(below, above);
+            menu.style.maxHeight = h + 'px';
+            if (above > below) y = box.top - 4 - h;
+          } else if (y + h > r.bottom) y = Math.max(r.top, box.top - h - 4);
           menu.style.transformOrigin = 'top left';
         } else {
           x = anchor.x;
@@ -3623,7 +3848,72 @@ __ICON__
       let byTouch = false;
       addEventListener('pointerdown', (event) => {
         byTouch = event.pointerType === 'touch';
+        heldClick = false;
       }, true);
+
+      // ------------------------------------------------------ a held finger
+      //
+      // A tap opens, so a finger needs another way to say "this one": it
+      // holds. Held still on a row for a moment, the row is picked and its
+      // menu hangs under it, the same menu right-click and ⋮ open. Moving on
+      // from there, without lifting, picks the row up to drop into a folder,
+      // which is how a finger drags here at all: before the hold the same
+      // movement was the list scrolling, and the browser keeps it.
+      const HOLD_MS = 450;
+      let holding = null;
+      // The click a browser may still send when a held finger lifts is not a tap.
+      let heldClick = false;
+
+      function hold(item) {
+        if (!holding || holding.fired || holding.item !== item) return;
+        holding.fired = true;
+        clearTimeout(holding.timer);
+        heldClick = true;
+        if (lifting?.item === item) lifting.held = true;
+        sheet.removeAttribute('data-open');
+        if (!picked.has(item.dataset.path)) pick(item.dataset.path);
+        openMenu(item, item);
+      }
+
+      function letGo() {
+        if (!holding) return;
+        clearTimeout(holding.timer);
+        holding = null;
+      }
+
+      items.addEventListener('pointerdown', (event) => {
+        letGo();
+        if (event.pointerType === 'mouse' || event.button) return;
+        const item = event.target.closest('.item');
+        if (!item || event.target.closest('.more')) return;
+        holding = { item, x: event.clientX, y: event.clientY, fired: false };
+        holding.timer = setTimeout(() => hold(item), HOLD_MS);
+      });
+      addEventListener('pointermove', (event) => {
+        if (!holding || holding.fired) return;
+        if (Math.hypot(event.clientX - holding.x, event.clientY - holding.y) > 8) letGo();
+      });
+      addEventListener('pointerup', () => {
+        if (holding && !holding.fired) letGo();
+        else holding = null;
+      });
+      // The browser took the finger for a scroll.
+      addEventListener('pointercancel', letGo);
+      // Swallowed wherever it lands: where the menu had no room under the
+      // row it opened over it, and the finger lifting is not a press on
+      // whichever of its items is under it now.
+      addEventListener('click', (event) => {
+        if (!heldClick) return;
+        heldClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }, true);
+      // Once the finger has held, its movement is the row's, not the list's.
+      // This is the one place the scroll can still be refused: a touchmove the
+      // page has not let go of yet.
+      items.addEventListener('touchmove', (event) => {
+        if (lifting?.held && event.cancelable) event.preventDefault();
+      }, { passive: false });
 
       // Right-click is the desktop's way of asking "what can I do with this?"
       // A row answers with its own menu — the same one its ⋮ opens — and the
@@ -3634,6 +3924,13 @@ __ICON__
         if (event.shiftKey) return; // the browser's own menu, still one key away
         const item = event.target.closest('.item');
         if (!item && byTouch) return;
+        // Android says a long press is a right-click; it is the held finger
+        // above, whichever of the two noticed first, and answers once.
+        if (item && byTouch) {
+          event.preventDefault();
+          hold(item);
+          return;
+        }
         // The menu key, or Shift+F10, reports no pointer at all.
         const keyboard = event.clientX === 0 && event.clientY === 0;
         if (!item) {
@@ -4010,16 +4307,25 @@ __ICON__
         if (event.button) return;
         const item = event.target.closest('.item');
         if (!item || event.target.closest('.more') || view === 'trash') return;
-        lifting = { item, x: event.clientX, y: event.clientY, moved: false };
+        // A finger lifts only once it has held (see "a held finger"); until
+        // then the same movement is the list scrolling.
+        lifting = { item, x: event.clientX, y: event.clientY, moved: false, touch: event.pointerType !== 'mouse', held: false };
       });
 
       addEventListener('pointermove', (event) => {
         if (!lifting) return;
-        const far = Math.hypot(event.clientX - lifting.x, event.clientY - lifting.y) > 6;
+        // A finger that has held still for half a second still trembles.
+        const far = Math.hypot(event.clientX - lifting.x, event.clientY - lifting.y) > (lifting.touch ? 10 : 6);
         if (!far && !lifting.moved) return;
+        if (lifting.touch && !lifting.held) {
+          lifting = null;
+          return;
+        }
 
         if (!lifting.moved) {
           lifting.moved = true;
+          // The menu the hold opened was the question; moving on is the answer.
+          menu.removeAttribute('data-open');
           lifting.item.classList.add('marble-lifting');
           ghost.textContent = lifting.item.querySelector('b').textContent;
           ghost.setAttribute('data-open', '1');
@@ -4035,6 +4341,17 @@ __ICON__
           over = folder && folder !== lifting.item ? folder : null;
           over?.classList.add('marble-drop');
         }
+      });
+
+      // A drag the browser took back (a call, the app switcher) lands nowhere.
+      addEventListener('pointercancel', () => {
+        if (!lifting) return;
+        const { item } = lifting;
+        lifting = null;
+        over?.classList.remove('marble-drop');
+        over = null;
+        ghost.removeAttribute('data-open');
+        item.classList.remove('marble-lifting');
       });
 
       addEventListener('pointerup', async () => {
@@ -4111,6 +4428,9 @@ __ICON__
 
       items.addEventListener('pointerdown', (event) => {
         if (event.button) return;
+        // A finger cannot see the band under its own hand, and a drag on the
+        // background is the list scrolling.
+        if (event.pointerType !== 'mouse') return;
         // A press on a control is not a press on empty space — the materials
         // header is a button that happens to live inside the listing.
         if (event.target.closest('.item, .more, .mats-head')) return;
@@ -4293,6 +4613,19 @@ __ICON__
         clearDrop();
         receive(entries, files, into);
       }, capture);
+
+      // The drop's stand-in where there is nothing to drop from: the system's
+      // file picker (the camera roll, Files), into the folder you are in.
+      const picker = $('#add-files-pick');
+      $('#add-files').addEventListener('click', () => {
+        sheet.removeAttribute('data-open');
+        picker.click();
+      });
+      picker.addEventListener('change', () => {
+        const files = [...picker.files];
+        picker.value = '';
+        if (files.length) receive([], files, view === 'drive' ? here : '');
+      });
 
       /** A folder dropped from the desktop is a directory entry, not a file, and
        *  `dataTransfer.files` has nothing in it for one. Walking the entries is
