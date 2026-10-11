@@ -73,9 +73,6 @@ test('Claude in settings: on Bryan’s starter credit, how much is used, and the
   assert.equal(await settings.locator('.claude-key').isHidden(), true);
   assert.equal(await settings.locator('marble-agent-setup dialog[open]').count(), 0);
 
-  await line.getByRole('button', { name: 'Connect your Claude' }).click();
-  assert.equal(await page.evaluate(() => window.__connects), 1, 'the event the Connect sheet listens for');
-
   await line.getByRole('button', { name: 'Use an API key instead' }).click();
   assert.equal(await settings.locator('input[name="claude-auth"][value="api"]').isChecked(), true);
   assert.equal(await settings.locator('.claude-key').isVisible(), true);
@@ -86,6 +83,14 @@ test('Claude in settings: on Bryan’s starter credit, how much is used, and the
   await settings.locator('button.save').click();
   await page.waitForFunction(() => document.querySelector('marble-agent-settings')?.getAttribute('data-open') === 'false');
   assert.equal((await host.drive.agents.store.settings()).claudeAuth, 'credit');
+
+  // Connect your Claude fires the event the sheet listens for, and the
+  // settings make way for the sheet.
+  const again = await openSettings(page);
+  await listen(page);
+  await again.locator('.claude-credit').getByRole('button', { name: 'Connect your Claude' }).click();
+  assert.equal(await page.evaluate(() => window.__connects), 1, 'the event the Connect sheet listens for');
+  await page.waitForFunction(() => document.querySelector('marble-claude-connect')?.shadowRoot.querySelector('dialog')?.open);
   assert.deepEqual(errors, []);
   await page.context().close();
 });
@@ -117,8 +122,15 @@ test('a chat whose credit ran out says so above the box and opens the Connect sh
   assert.equal(await page.evaluate(() => window.__connects), 1, 'the sheet opens once, not every turn');
   const place = await view.evaluate((el) => el.shadowRoot.querySelector('.credit-note').getBoundingClientRect().bottom <= el.shadowRoot.querySelector('.editor').getBoundingClientRect().top);
   assert.ok(place, 'the note sits above the box');
+  // The sheet it opened is closed before the note's own button is tried.
+  await page.waitForFunction(() => document.querySelector('marble-claude-connect')?.shadowRoot.querySelector('dialog')?.open);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('marble-claude-connect').shadowRoot.querySelector('dialog').open);
   await view.locator('.credit-note .credit-connect').click();
   assert.equal(await page.evaluate(() => window.__connects), 2);
+  await page.waitForFunction(() => document.querySelector('marble-claude-connect')?.shadowRoot.querySelector('dialog')?.open);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('marble-claude-connect').shadowRoot.querySelector('dialog').open);
   await view.locator('.credit-note .credit-leave').click();
   await note.waitFor({ state: 'hidden' });
   assert.deepEqual(errors, []);
