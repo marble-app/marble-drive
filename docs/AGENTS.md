@@ -744,6 +744,73 @@ Agent text is shown, never interpreted as HTML (`renderText` in
 `runtime/agent-ui.js`). Browser tests: `npm run test:browser`; screenshots:
 `node test-browser/screens.mjs <dir>`.
 
+## Voice
+
+You can talk to any chat and hear it answer (spec:
+`docs/superpowers/specs/2026-10-10-voice-design.md`). It is speech wrapped
+around an ordinary turn, so it works the same on Claude, Codex and Cursor:
+OpenAI writes down what you said, the chat's own agent answers it with the
+same rules, marks and undo as typing, and an OpenAI voice reads the answer.
+
+- **Where.** Every `<marble-conversation>` (drawer, Agents panes, the
+  callout card, the Chat app, the phone sheet) draws Talk, a microphone left
+  of Send, when the drive has an OpenAI key and Settings › Voice has it on.
+  On a phone it stands where Send will be while the box is empty. Nothing
+  moves at rest; while it listens the box says Listening with a trace of the
+  level, and Cancel (×) or Esc throws the clip away.
+- **Turn-taking.** Push to talk. It ends after 1.2 s of quiet that follows
+  speech (a floor measured over the first 300 ms, `quietEnd` in
+  `runtime/voice.js`), or on Send. The words land in the box and are sent,
+  unless "Send when I stop" is off or the box was pressed while they were
+  being written down. Said while a turn runs, they steer it (Settings can
+  make that Queue). Saying "stop" is not a command; Stop is.
+- **What is heard.** `POST /agent/voice/transcribe?doc=<path>&seconds=<n>`
+  with the raw clip (`audio/webm` from Chrome, `audio/mp4` from Safari) →
+  `{ text }`. The host forwards it to OpenAI's `/v1/audio/transcriptions`
+  with `gpt-transcribe` and `keywords[]`: the open document's title and the
+  titles at the drive's top level, so names come back spelled the drive's
+  way. At most 4 MB (413) and 120 s (`MARBLE_DRIVE_VOICE_MAX_SECONDS`).
+- **What is said.** The prompt goes as a turn with `context.spoken: true`:
+  its `user` event carries `spoken` (the chat shows "Said aloud") and the
+  agent gets one more context line asking for one to three sentences that
+  sound right spoken (`runner.js`, `SPOKEN_NOTE`). When the turn ends the page
+  plays `GET /agent/turns/:id/speech`: the host takes the turn's last `text`,
+  cleans it with `speakable()` (`server/agent/voice/speakable.js`: no fences,
+  tables, marks, links or paths; about 60 words, then "The rest is in the
+  chat."), and streams `gpt-4o-mini-tts` mp3 back, at most 2,000
+  characters. A failed turn says its reason's first sentence; a turn waiting
+  on an OK says "It needs your OK. It's on the screen." and the OK is a press,
+  never a word. Only the last reply is spoken, and only in the tab that said
+  it. Read aloud under a reply reads any reply; with no key it uses the
+  device's `speechSynthesis`.
+- **Where audio goes.** Nowhere. A clip lives in the tab (kept for one
+  retry) and in the host's memory for one request; it is never written to the
+  drive, `.marble/`, a backup, the op log or the transcript. Spoken replies
+  are streamed through, `Cache-Control: no-store`. The microphone opens only on
+  a press, every track is stopped when listening ends, and a hidden tab stops
+  listening and drops the clip.
+- **The key.** The `openai` field of `.agent-keys.local`, the one Codex uses,
+  read only on the host (`keys.value('openai')`) and sent only as a bearer
+  token to `config.openaiBase`. It is never in a response, a log or an error:
+  OpenAI's own error text is replaced by a plain line. Settings › Voice takes
+  one (`POST /agent/voice/key`, checked with `/v1/models` first). A drive
+  whose agents run on the owner's login has no voice until it has its own key.
+- **Routes**, all behind the gate and `sameOrigin` like the rest of
+  `/agent/*`: `GET /agent/voice` (available, why, the choices, the voices,
+  this month's counts), `POST /agent/voice/transcribe`,
+  `GET /agent/turns/:id/speech`, `POST /agent/voice/sample {voice}`,
+  `POST /agent/voice/key {key}`.
+- **Settings › Voice** (`settings.voice` in the agents' `settings.json`):
+  `on`, `sendWhenStop`, `readAloud` (`spoken` | `always` | `never`),
+  `whileRunning` (`steer` | `queue`), `voice` (marin by default). The models
+  are settings too (`transcribeModel`, `speechModel`), not offered on the
+  page. Settings › Usage shows minutes heard and spoken this month
+  (`.marble/agents/voice-usage.json`, counts only).
+
+Tests: `test/agent-voice-*.test.js` against a fake OpenAI on a local port,
+and `test-browser/voice-composer.test.js`, `voice-settings.test.js` with
+Chromium's fake microphone.
+
 ## The Agents document
 
 A drive that has run `serve` at least once with this host gets an `Agents`
