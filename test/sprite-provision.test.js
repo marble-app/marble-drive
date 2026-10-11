@@ -186,7 +186,7 @@ test('a drive made by hand with --credit mints its token from the door and says 
     const token = /^MARBLE_CREDIT_TOKEN=(mdc_[0-9a-f]{48})$/m.exec(settings)?.[1];
     assert.ok(token, settings);
     assert.ok(!run.stdout.includes(token), 'not printed');
-    assert.match(run.stdout, /Agents run on starter credit to begin with/);
+    assert.match(run.stdout, /Claude is ready/);
     assert.doesNotMatch(run.stdout, /paste your Anthropic API key/);
     const listed = await (await route(new Request('https://marbledrive.app/_credit/admin/drives', { headers: { authorization: `Bearer ${env.DOOR_ADMIN_TOKEN}` } }), env)).json();
     assert.deepEqual(listed.drives.map((d) => d.name), ['t-ana']);
