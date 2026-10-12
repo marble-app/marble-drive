@@ -829,6 +829,14 @@ test('a long comment opens on its latest line, folds what was pasted, and reads 
   await page.waitForTimeout(200);
   const there = await floating.evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight);
   assert.ok(there < 4, `the thread opens on the latest line: ${there}`);
+  // Its sidebar button takes it out to the sidebar at full size, with Marks
+  // to go back to the list; the floating thread goes.
+  await page.locator('.marble-build-thread:not([hidden]) .marble-build-x[aria-label="Open in the sidebar"]').click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.marble-margin')?.dataset.view === 'thread');
+  await margin(page).locator('.full .fl .marble-build-line', { hasText: 'Question 8?' }).waitFor();
+  await page.waitForFunction(() => document.querySelector('.marble-build-thread')?.hidden === true, null, { timeout: 2000 });
+  await margin(page).locator('.mh .back', { hasText: 'Marks' }).click();
+  assert.equal(await margin(page).getAttribute('data-view'), 'marks');
   await api('DELETE', '/agent/builds/marks?path=Reviews', { ids: ['mlong'] });
 });
 const n0 = (v) => Math.max(0, Math.round(v));
