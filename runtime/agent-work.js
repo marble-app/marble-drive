@@ -270,6 +270,7 @@
       line = d;
       paintIsland();
     });
+    addEventListener('marble-gen:change', () => paintIsland());
     // The drawer opening or closing shows or hides it.
     new MutationObserver(() => paintIsland()).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-open-state'] });
     const drawer = () => document.querySelector('marble-agent-drawer');
@@ -279,7 +280,11 @@
     let clock = 0;
     function paintIsland() {
       const d = line;
-      const active = d && (d.state === 'running' || d.state === 'asking' || (d.state === 'completed' && !d.seen));
+      // While it runs, the line at the foot of the page (gen-progress.js)
+      // says a turn it is drawing; the island is back to ask, and to offer
+      // the changes once it is done.
+      const lined = d && d.state === 'running' && window.marbleGen?.speaks?.(d.conversation);
+      const active = d && !lined && (d.state === 'running' || d.state === 'asking' || (d.state === 'completed' && !d.seen));
       island.hidden = !active || drawerOpen();
       clearInterval(clock);
       if (island.hidden) return;

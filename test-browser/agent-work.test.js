@@ -69,15 +69,18 @@ test('each part an agent changed keeps a dot and a tick on the rail, shown only 
   await page.context().close();
 });
 
-test('while the chat is closed, the island carries the turn’s line', async () => {
+test('while the chat is closed, the line at the foot of the page says the turn’s steps, and the island opens once it is done', async () => {
   const { page, send, work } = await mount();
   await send('script:slow');
-  await page.waitForFunction(() => {
-    const island = document.querySelector('marble-work').shadowRoot.querySelector('.island');
-    return !island.hidden && island.dataset.state === 'running';
-  });
-  const say = await page.evaluate(() => document.querySelector('marble-work').shadowRoot.querySelector('.isl-say').textContent);
-  assert.match(say, /Updating garden|Putting|Writing/);
+  // Running, the step is said once: by the page taking shape
+  // (gen-progress.js), not by the island too.
+  await page.waitForFunction(() => window.marbleGen?.stats?.().up && document.querySelector('marble-work').shadowRoot.querySelector('.island').dataset.state !== 'completed');
+  const running = await page.evaluate(() => ({
+    said: window.marbleGen.stats().said,
+    island: document.querySelector('marble-work').shadowRoot.querySelector('.island').hidden,
+  }));
+  assert.ok(running.said, 'the line says a step');
+  assert.equal(running.island, true, 'the island steps aside while the line speaks');
   // Done, it opens by itself and offers to walk through the changes.
   await page.waitForFunction(() => document.querySelector('marble-work').shadowRoot.querySelector('.island').dataset.state === 'completed', null, { timeout: 15000 });
   const acts = await page.evaluate(() => [...document.querySelector('marble-work').shadowRoot.querySelectorAll('.isl-acts button')].map((b) => b.textContent));

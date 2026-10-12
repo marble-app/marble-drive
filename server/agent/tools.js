@@ -21,6 +21,7 @@ import fsp from 'node:fs/promises';
 import { collectSlices, guardOps, idsOfOps, OP, repairOps, validateOps } from '../engine.js';
 import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut, targetsOf } from '../change/fanout.js';
 import { anchorsOf, MARKS_MAX, marksOf, mergeMarks, PLACES, SHAPES, STATES } from '../change/marks.js';
+import { landOutline, OUTLINE, outlineOf } from '../change/outline.js';
 import { partsOf, parseStep } from '../change/parts.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
@@ -100,7 +101,7 @@ export const TOOL_SCHEMAS = [
       'Change a document with Marble ops (setText, setInner, setAttr, insert, move, remove) addressed by data-marble-id. ' +
       'At most 24 ops per call. If an element changed since you read it, nothing applies and you get its current source: ' +
       'rebuild your edit against that and call again. Inserted elements get ids minted for you. ' +
-      'With no ops, reach, total and marks are drawn ahead of the first edit, and nothing is written. ' +
+      'With no ops, reach, total, marks and outline are drawn ahead of the first edit, and nothing is written. ' +
       'Example op: {"type":"setText","id":"h1","text":"New title"}.',
     inputSchema: {
       type: 'object',
@@ -121,6 +122,7 @@ export const TOOL_SCHEMAS = [
           description: 'How many parts the whole change will touch, when you know it (e.g. 15 stills). The page counts toward it.',
         },
         marks: MARKS,
+        outline: OUTLINE,
       },
     },
   },
@@ -307,7 +309,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
    *  with the ids it has yet to land), how many of those are still failed
    *  (`failed`), and the fan out the page was told of last (`fanout`). */
   const tallyOf = (turn) => {
-    turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null, failed: 0, lost: [], fanout: null, marks: null };
+    turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null, failed: 0, lost: [], fanout: null, marks: null, outlines: new Map() };
     return turn.v5;
   };
 
@@ -358,7 +360,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
    * `signal`: a batch still waiting in the queue when it aborts is refused.
    * `group`: the fan out this batch is one landed group of.
    */
-  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, marks = null, signal = null, group = null }) {
+  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, marks = null, outline = null, signal = null, group = null }) {
     const client = `agent:${turn.conversationId}`;
     let steps = null;
     let introduced = [];
@@ -435,6 +437,15 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         const fresh = new Set(inserts.flatMap((entry) => entry.ids));
         v5.marks = mergeMarks(v5.marks, marksOf(marks, { has: (id) => doc.has(id) || fresh.has(id) }));
       }
+      // The sections said ahead (server/change/outline.js), one document's
+      // at a time: a new one replaces the last, and this batch's inserts
+      // into its parent count toward it.
+      if (outline) {
+        const said = outlineOf(outline, { has: (id) => doc.has(id) });
+        if (said) v5.outlines.set(docPath, said);
+      }
+      if (v5.outlines.has(docPath)) v5.outlines.set(docPath, landOutline(v5.outlines.get(docPath), inserts));
+      const sections = v5.outlines.get(docPath) ?? null;
       settleLost(v5, ops);
       if (group) v5.fanout = group;
       const before = groupsOf(v5);
@@ -455,6 +466,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         total: v5.total,
         reach: v5.reach,
         ...(v5.marks ? { marks: v5.marks } : {}),
+        ...(sections ? { outline: sections } : {}),
       };
 
       steps = inverseSteps(source, ops, { index: doc });
@@ -500,8 +512,11 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
     if (Number.isInteger(input.total) && input.total >= 1 && v5.total === null) v5.total = input.total;
     if (Array.isArray(input.reach)) v5.reach = input.reach.map(String).filter((id) => doc.has(id)).slice(0, REACH_MAX);
     if (input.marks) v5.marks = mergeMarks(v5.marks, marksOf(input.marks, { has: (id) => doc.has(id) }));
+    const said = input.outline ? outlineOf(input.outline, { has: (id) => doc.has(id) }) : null;
+    if (said) v5.outlines.set(docPath, said);
+    const sections = v5.outlines.get(docPath) ?? null;
     const note = String(input.note ?? '').trim();
-    const ids = [...new Set([...(v5.reach ?? []), ...anchorsOf(v5.marks)])];
+    const ids = [...new Set([...(v5.reach ?? []), ...anchorsOf(v5.marks), ...(sections ? [sections.parentId] : [])])];
     onLook?.(docPath, ids, `agent:${turn.conversationId}`, {
       phase: 'writing',
       stage: 'mark',
@@ -512,8 +527,9 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       total: v5.total,
       reach: v5.reach,
       ...(v5.marks ? { marks: v5.marks } : {}),
+      ...(sections ? { outline: sections } : {}),
     });
-    return { applied: 0, marked: { reach: v5.reach?.length ?? 0, draw: v5.marks?.draw?.length ?? 0 } };
+    return { applied: 0, marked: { reach: v5.reach?.length ?? 0, draw: v5.marks?.draw?.length ?? 0, ...(sections ? { outline: sections.blocks.length } : {}) } };
   }
 
   const readable = async (input) => {
@@ -570,7 +586,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       }
       // No ops: the reach, the size and the marks of what comes next, drawn
       // before anything moves. Nothing is written or recorded.
-      if (Array.isArray(input.ops) && input.ops.length === 0 && (input.marks || input.reach || input.total)) {
+      if (Array.isArray(input.ops) && input.ops.length === 0 && (input.marks || input.reach || input.total || input.outline)) {
         return markAhead(turn, docPath, input);
       }
       const ledger = ledgerFor(turn.conversationId, docPath);
@@ -582,6 +598,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         total: input.total,
         reach: input.reach,
         marks: input.marks,
+        outline: input.outline,
         refusal: (source, { stale, unread, gone, error }) => {
           // Gone since it was read: what the checks said, as before.
           if (gone.length) return { reason: error, current: [] };
