@@ -1195,7 +1195,11 @@
       if (mark.type === 'stroke') {
         Object.assign(out, { kind: mark.kind, ids: mark.ids, from: mark.from, to: mark.to, parts: mark.parts.map((part) => ({ pairs: part.pairs })) });
       }
-      if (mark.type === 'comment') { out.thread = mark.thread ?? []; out.resolved = Boolean(mark.resolved); }
+      if (mark.type === 'comment') {
+        out.thread = mark.thread ?? [];
+        out.resolved = Boolean(mark.resolved);
+        if (mark.ids?.length) out.ids = [...mark.ids];
+      }
       if (mark.type === 'piece') { out.piece = mark.piece; }
       if (mark.type === 'move') Object.assign(out, { from: mark.from, w: mark.w ?? 0, h: mark.h ?? 0, text: mark.text ?? '' });
       return out;
@@ -1755,8 +1759,8 @@
       for (const other of marks) if (other.type === 'comment') other.el.setAttribute('aria-expanded', String(other === mark));
       dispatchEvent(new CustomEvent('marble-marks:comment', { detail: { id: mark.id, fresh } }));
     };
-    const placeComment = (x, y) => {
-      const anchor = elementAt(x, y);
+    const placeComment = (x, y, { anchor: given = null, ids = null } = {}) => {
+      const anchor = given ?? elementAt(x, y);
       if (!anchor) return null;
       const box = anchor.getBoundingClientRect();
       const mark = {
@@ -1770,6 +1774,7 @@
         u: box.width ? (x - box.left) / box.width : 0,
         v: box.height ? (y - box.top) / box.height : 0,
         thread: [],
+        ...(ids?.length ? { ids: [...ids] } : {}),
       };
       marks.push(mark);
       drawComment(mark);
@@ -2174,6 +2179,7 @@
       } else if (given.type === 'comment') {
         mark.thread = given.thread ?? [];
         mark.resolved = Boolean(given.resolved);
+        if (given.ids?.length) mark.ids = given.ids;
         if (!mark.el) drawComment(mark);
         mark.relabel?.();
       } else if (given.type === 'piece') {
@@ -2868,19 +2874,16 @@
         if (!describing) setDescribing(true);
         return placePiece(piece, at)?.id ?? null;
       },
-      /** The box to write in, under what Select picked: a note on those
-       *  parts, kept or sent like any other. One at a time: an empty one left
-       *  from before goes. */
+      /** The box to write in, under what Select picked: a comment on those
+       *  parts, written in the line ⌘J opens (build-mode.js), as one put
+       *  down with Comment is. Its pin sits at the first part's top right
+       *  corner. One at a time: one left unsaid from before goes. */
       prompt: (ids, span) => {
-        // An empty one left from before goes; one with words in it stays.
-        for (const old of marks.filter((m) => m.type === 'note' && m.local && m.fromSelection && !hasWords(m))) removeMark(old, { undo: false });
-        if (marks.some((m) => m.type === 'note' && m.fromSelection && m.body && m.body === document.activeElement)) return null;
+        for (const old of marks.filter((m) => m.type === 'comment' && m.local && m.fromSelection && !m.thread?.length)) dropMark(old);
         const anchor = ids?.[0] ? document.querySelector(`[data-marble-id="${CSS.escape(ids[0])}"]`) : null;
         if (!anchor || !span) return null;
-        const floor = (bar.hidden ? innerHeight : bar.getBoundingClientRect().top) - 10;
-        const below = span.top + span.height + 10;
-        const y = below + 96 > floor ? Math.max(8, span.top - 106) : below;
-        const mark = placeNote(Math.max(8, span.left), y, { anchor, ids });
+        const box = anchor.getBoundingClientRect();
+        const mark = placeComment(box.right, box.top, { anchor, ids });
         if (mark) mark.fromSelection = true;
         return mark?.id ?? null;
       },
