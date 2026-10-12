@@ -147,7 +147,8 @@ test('⌘J on a selected phrase hangs one line under its paragraph, flush with i
   assert.equal(await page.locator('.marble-callout').count(), 0, 'no card');
   const [para, box] = await Promise.all([boxOf(page, 'p'), line(page).boundingBox()]);
   assert.ok(Math.abs(box.x - para.x) <= 1, `left edges: ${box.x} vs ${para.x}`);
-  assert.ok(Math.abs(box.x + box.width - (para.x + para.width)) <= 1, 'right edges');
+  // Short: flush with a narrow thing, at most 440px under a wide one.
+  assert.ok(Math.abs(box.width - Math.min(para.width, 440)) <= 1, `as wide as its thing, to 440px: ${box.width}`);
   assert.ok(Math.abs(box.y - (para.y + para.height + 10)) <= 1, 'it hangs 10px under the paragraph');
   assert.equal(await input(page).getAttribute('data-placeholder'), 'Change these words');
   assert.equal(await page.evaluate(() => CSS.highlights.get('marble-line-words')?.size ?? 0), 1, 'the words are tinted');
@@ -170,7 +171,7 @@ test('⌘J with nothing under the pointer or caret is about the page: one line a
   const box = await line(page).boundingBox();
   assert.ok(Math.abs(box.x + box.width / 2 - 640) <= 1, 'centred');
   assert.ok(Math.abs(box.y + box.height - (800 - 16)) <= 1, '16px from the bottom');
-  assert.ok(Math.abs(box.width - 560) <= 1, 'min(560px, 100vw − 32px)');
+  assert.ok(Math.abs(box.width - 440) <= 1, 'min(440px, 100vw − 32px)');
   assert.equal(await page.locator('.marble-line-scope:not([hidden])').count(), 0, 'the page is not tinted');
   await page.waitForTimeout(200);
   assert.equal(await drawerOpen(page), false);

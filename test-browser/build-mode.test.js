@@ -163,9 +163,10 @@ test('an app left in build mode opens in it: the toolbar is up, no ring, no noti
   assert.equal(await page.evaluate(() => window.marbleMarks.describing), true);
   await bar(page).waitFor();
   // The tools, then the build's own controls in place of Explore.
-  // One thing to write with: a note, kept or sent. No Comment tool, and the
-  // bar holds the build alone: no Builds, no Pieces (they are on the shell's).
-  assert.equal(await tool(page, 'comment').count(), 0, 'no Comment tool');
+  // Two things to write with: a note, kept for the next build, and a
+  // comment, said now. The bar holds the build alone: no Builds, no Pieces
+  // (they are on the shell's).
+  assert.equal(await tool(page, 'comment').count(), 1, 'Comment is a tool');
   assert.equal(await tool(page, 'text').count(), 1, 'Note is a tool');
   assert.equal(await tool(page, 'explore').count(), 0, 'Explore is not on the bar');
   assert.equal(await page.locator('.marble-marks-tool[aria-label^="Pieces"], .marble-marks-tool[aria-label^="Builds"]').count(), 0);
@@ -226,15 +227,14 @@ test('a Build mode app opens with the drive\'s frame out and the sidebar on Mark
   assert.ok(between.length >= 5, `it slides out over several frames: ${between.length}`);
   await dock();
   await page.waitForFunction(() => window.marbleShell.layout.pinChat === true);
-  // The note's footer: a model on the left, Send on the right.
+  // A note is a text box: no Send, no model, and nothing else under it.
   await page.evaluate(() => window.marbleBuild.setSide('none'));
   await tool(page, 'text').click();
   const r = await box(page, 's2');
   await page.mouse.click(r.x + 60, r.y + 30);
   await page.keyboard.type('Make the week two');
-  const act = page.locator('.marble-marks-note[data-writing] .marble-marks-note-act');
-  await act.locator('.model').waitFor();
-  await act.locator('.send').waitFor();
+  await page.locator('.marble-marks-note[data-writing]').waitFor();
+  assert.equal(await page.locator('.marble-marks-note[data-writing] :is(.marble-marks-note-act, .send, .model)').count(), 0);
   assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
 });
 
@@ -368,31 +368,49 @@ test('Select picks marks to build, archive or delete; on a part of the app it op
   await page.keyboard.press('Enter');
   await page.keyboard.type('and bolder');
   assert.equal(await page.locator('.marble-marks-note[data-writing] .marble-marks-note-body').evaluate((n) => n.innerText.trim()), 'Bigger\nand bolder', 'Enter is a new line');
-  await page.locator('.marble-marks-note[data-writing] .piece').click();
+  await page.locator('.marble-marks-note[data-writing] .marble-marks-note-piece').click();
   await page.waitForFunction(() => fetch('/agent/pieces?path=Reviews').then((r) => r.json()).then((p) => p.saved.length >= 1));
   // Left, it is a note on that part.
   await page.mouse.click(10, 10);
   await hostSays(page, (marks) => marks.some((m) => m.text === 'Bigger\nand bolder' && m.ids?.some((id) => id.startsWith('s2'))), 'kept as a note on the part');
 });
 
-test('a note sent with ⌘↵ becomes a comment; a change is made at once, and the comment says so', async () => {
+test('a comment (C) is written in the ⌘J line at its pin; ⏎ sends it, and a change it asks for is made at once', async () => {
   const { page } = await open();
-  await tool(page, 'text').click();
+  await tool(page, 'comment').click();
   const r = await box(page, 's2');
   await page.mouse.click(r.x + 60, r.y + 30);
-  await page.locator('.marble-marks-note-body:focus').waitFor();
-  await page.locator('.marble-marks-note[data-writing] .send[aria-disabled="true"]').waitFor();
-  await page.keyboard.type('script:build Can this show two weeks?');
-  await page.keyboard.press('ControlOrMeta+Enter');
-  // The note goes; its comment's thread opens where it was.
-  await page.locator('.marble-build-line[data-who="you"]', { hasText: 'Can this show two weeks?' }).waitFor();
-  // No model on a test host to tell a question from a change: it is made.
+  // The same line ⌘J opens, short, at the pin, with the caret in it.
+  const line = page.locator('.marble-line:not([hidden])');
+  await line.waitFor();
+  const w = (await line.boundingBox()).width;
+  assert.ok(w <= 441, `the line is short: ${w}`);
+  await page.keyboard.type('script:build Can this show');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('two weeks?');
+  await page.keyboard.press('Enter');
+  // Sent, it is a thread at its pin.
+  await page.locator('.marble-build-thread:not([hidden]) .marble-build-line[data-who="you"]', { hasText: 'two weeks?' }).waitFor();
+  // No model on a test host to tell a question from a change: it is made,
+  // with nothing to take or press first.
   const marks = await hostSays(page, (list) => list.some((m) => m.type === 'comment' && m.thread.some((l) => l.text === 'Making this now.')), 'answered: making it');
+  assert.equal(marks.find((m) => m.type === 'comment').thread[0].text, 'script:build Can this show\ntwo weeks?');
   const sent = marks.find((m) => m.type === 'note');
-  assert.equal(sent.archived, true, 'the note is out of sight, kept as the build\'s brief');
+  assert.equal(sent.archived, true, 'its note is out of sight, kept as the build\'s brief');
   await page.locator('.marble-build-status[data-run="done"]').waitFor({ timeout: 15_000 });
   const done = await hostSays(page, (list) => list.find((m) => m.type === 'comment')?.resolved === true, 'the comment is settled');
-  assert.match(done.find((m) => m.type === 'comment').thread.at(-1).text, /^Done in Build \d+\.$/);
+  assert.match(done.find((m) => m.type === 'comment').thread.at(-1).text, /^Done in Build \d+\.$|^Built/);
+});
+
+test('a comment put away unsaid leaves no pin', async () => {
+  const { page } = await open();
+  await tool(page, 'comment').click();
+  const r = await box(page, 's1');
+  await page.mouse.click(r.x + 40, r.y + 10);
+  await page.locator('.marble-line:not([hidden])').waitFor();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  assert.equal(await page.evaluate(() => window.marbleMarks.list().filter((m) => m.type === 'comment').length), 0);
 });
 
 test('a note is one press: the app is the app again after it, its × deletes it, and Undo puts it back', async () => {
@@ -737,23 +755,23 @@ test('in the margin a comment is a card: the app answers in its own name, and a 
   await openMargin(page);
   const card = page.locator('.marble-margin-card', { hasText: 'Can this show two weeks?' });
   await card.click();
-  // The same box as a note's: words, pasted pictures, and Send (⌘↵).
+  // Words, pasted pictures, and Send: ⏎ sends, ⇧⏎ breaks the line.
   await card.locator('.reply .field').click();
   await page.keyboard.type('And next month?');
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('Or the one after.');
-  await page.keyboard.press('ControlOrMeta+Enter');
-  // No model on a test host: the thread says so rather than hanging.
-  await card.locator('.marble-build-line[data-who="agent"] p').waitFor();
+  await page.keyboard.press('Enter');
+  // No model on a test host: it is made, and the thread says so.
+  await card.locator('.marble-build-line[data-who="agent"] p', { hasText: 'Making this now.' }).waitFor();
   // Q and A, not a chat: the question slanted and faded, no faces, no names.
   assert.equal(await card.locator('.marble-build-line[data-who="you"] p').first().evaluate((n) => getComputedStyle(n).fontStyle), 'italic');
   assert.equal(await card.locator('.av, .who').count(), 0);
   assert.doesNotMatch(await margin(page).textContent(), /\bAgent\b/);
   await hostSays(page, (marks) => marks.find((m) => m.type === 'comment')?.thread.some((l) => l.text === 'And next month?\nOr the one after.'), 'the reply is kept, its lines with it');
-  // Resolved, it is put away under Archived; Put back there opens it again.
-  await card.locator('.sb', { hasText: 'Resolve' }).click();
-  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.marble-margin-card'));
-  await page.locator('.marble-marks-undo:not([hidden])', { hasText: 'Comment resolved' }).waitFor();
+  // Its build answers it and puts it away under Archived; Put back there
+  // opens it again.
+  await hostSays(page, (marks) => marks.find((m) => m.type === 'comment')?.resolved === true, 'settled by its build');
+  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.marble-margin-card[data-id="mq"]'));
   await page.locator('.marble-margin .tray').click();
   await page.locator('.marble-margin-old', { hasText: 'Resolved' }).locator('.sb', { hasText: 'Put back' }).click();
   await hostSays(page, (marks) => marks.find((m) => m.type === 'comment')?.resolved === false, 'opened again');

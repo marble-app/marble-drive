@@ -666,9 +666,10 @@
       select: button('select', 'Select', GLYPHS.select, { pressed: false, key: 'A' }),
       sketch: button('sketch', 'Sketch', GLYPHS.sketch, { pressed: false, key: 'P' }),
       text: button('text', 'Note', GLYPHS.text, { pressed: false, key: 'T' }),
+      // Build mode: a note is kept for the next build; a comment is said now,
+      // in the same box ⌘J opens, and is answered, or made at once.
+      ...(building ? { comment: button('comment', 'Comment', GLYPHS.comment, { pressed: false, key: 'C' }) } : {}),
     };
-    // Build mode has no Comment tool: a note is the one thing to write, and
-    // it is kept as a note or sent (⌘↵) to be answered or made now.
     el('span', 'marble-marks-sep', bar);
     // Build mode drops Explore from the bar: Build is what the marks are for.
     const exploreButton = button('explore', 'Explore variations', GLYPHS.explore, { key: 'E' });
@@ -1320,46 +1321,22 @@
       body.dataset.placeholder = building ? 'Say what you want here, or paste a picture…' : 'Say what you want here…';
       body.textContent = mark.text ?? '';
       const att = el('div', 'marble-marks-note-att', node);
-      // Build mode: keep it (leave it, the default) or send it now (⌘↵), and,
-      // written on a selection, keep that part as a piece.
+      // A note is a note: words kept on the app for the next build, with no
+      // Send and no model (a comment, C, is what is asked or made now).
+      // Written on a selection, it can keep that part as a piece. Its classes
+      // are the layer's own, so an app's .sp or .piece cannot style them.
       let sendButton = null;
-      if (building) {
+      if (building && mark.ids?.length) {
         const act = el('div', 'marble-marks-note-act', node);
-        const model = document.createElement('button');
-        model.type = 'button';
-        model.className = 'model';
-        model.setAttribute(TRANSIENT, '');
-        model.setAttribute('aria-haspopup', 'menu');
-        model.innerHTML = `<span ${TRANSIENT}>Model</span><svg ${TRANSIENT} viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6.5 8 9.5l3-3"/></svg>`;
-        model.title = 'The model it is answered or made with';
-        model.addEventListener('pointerdown', (event) => event.preventDefault());
-        model.addEventListener('click', () => pickModel(mark, model));
-        act.append(model);
-        mark.paintModel = () => paintModel(mark, model);
-        mark.paintModel();
-        if (mark.ids?.length) {
-          const piece = document.createElement('button');
-          piece.type = 'button';
-          piece.className = 'piece';
-          piece.setAttribute(TRANSIENT, '');
-          piece.textContent = 'Save as piece';
-          piece.title = 'Keep this part to put on other apps';
-          piece.addEventListener('pointerdown', (event) => event.preventDefault());
-          piece.addEventListener('click', () => dispatchEvent(new CustomEvent('marble-marks:save-piece', { detail: { ids: [...mark.ids] } })));
-          act.append(piece);
-        }
-        el('span', 'sp', act);
-        sendButton = document.createElement('button');
-        sendButton.type = 'button';
-        sendButton.className = 'send';
-        sendButton.setAttribute(TRANSIENT, '');
-        sendButton.innerHTML = `${GLYPHS.send}<kbd ${TRANSIENT}>${MOD}↵</kbd>`;
-        sendButton.title = 'Ask it, or have it changed now';
-        sendButton.setAttribute('aria-label', 'Send: ask it, or have it changed now');
-        // A press here is not a blur that keeps the note.
-        sendButton.addEventListener('pointerdown', (event) => event.preventDefault());
-        sendButton.addEventListener('click', () => sendNote(mark));
-        act.append(sendButton);
+        const piece = document.createElement('button');
+        piece.type = 'button';
+        piece.className = 'marble-marks-note-piece';
+        piece.setAttribute(TRANSIENT, '');
+        piece.textContent = 'Save as piece';
+        piece.title = 'Keep this part to put on other apps';
+        piece.addEventListener('pointerdown', (event) => event.preventDefault());
+        piece.addEventListener('click', () => dispatchEvent(new CustomEvent('marble-marks:save-piece', { detail: { ids: [...mark.ids] } })));
+        act.append(piece);
       }
       mark.paintSend = () => sendButton?.setAttribute('aria-disabled', String(!hasWords(mark)));
       const foot = el('div', 'marble-marks-note-foot', node);
@@ -1384,8 +1361,7 @@
       });
       body.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') { event.stopPropagation(); body.blur(); }
-        // Enter is a new line; ⌘↵ sends it.
-        if (building && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); sendNote(mark); }
+        // Enter is a new line; a note waits for Build.
       });
       body.addEventListener('paste', (event) => pasteInto(mark, event));
       body.addEventListener('input', () => mark.paintSend?.());

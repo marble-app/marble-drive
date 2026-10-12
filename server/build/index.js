@@ -722,15 +722,30 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
         thread: mark.thread.filter((line) => !line.pending),
       });
     }
+    // A change asked for in a comment is made at once, as a note sent with
+    // ⌘↵ is: no offer to take first, no note to build after. Without a model
+    // to tell a question from a change, it is made, and the build answers.
+    const making = !said || said.change;
+    let noteId = null;
     await change(docPath, (s) => {
       const m = s.marks.find((x) => x.id === mark.id);
       if (!m) return null;
       m.thread = (m.thread ?? []).filter((line) => !line.pending);
-      m.thread.push(said
-        ? { who: 'agent', text: said.answer, at: Date.now(), ...(said.offer ? { offer: { text: said.offer, taken: null } } : {}) }
-        : { who: 'agent', text: 'I could not answer just now. It is kept for the next build.', at: Date.now() });
+      if (!making) {
+        m.thread.push({ who: 'agent', text: said.answer, at: Date.now() });
+        return null;
+      }
+      const last = [...m.thread].reverse().find((line) => line.who !== 'agent');
+      const note = cleanMark({ id: newId('m'), type: 'note', anchorId: m.anchorId ?? null, u: m.u ?? 0, v: m.v ?? 0, text: last?.text ?? '', images: last?.images ?? [] });
+      // Off the app: the comment is where it shows. Its build answers it.
+      note.sent = m.id;
+      note.archived = true;
+      s.marks.push(note);
+      noteId = note.id;
+      m.thread.push({ who: 'agent', text: 'Making this now.', at: Date.now() });
       return null;
     });
+    if (noteId) await startOrJoin(docPath, { marks: [noteId] }).catch((err) => log.error(`[builds] ${err.message}`));
   }
 
   /** Build, pressed while a build runs: no queue. What is marked joins

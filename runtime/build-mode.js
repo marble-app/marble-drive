@@ -218,7 +218,7 @@
     /* As wide as what is being written, from 300px to 440px, and as tall:
        the whole prompt is always in view. Put away, it folds into its pin. */
     .marble-build-thread {
-      position: fixed; pointer-events: auto; box-sizing: border-box; width: var(--thread-w, 340px); max-width: calc(100vw - 24px);
+      position: fixed; pointer-events: auto; box-sizing: border-box; width: var(--thread-w, 300px); max-width: calc(100vw - 24px);
       border-radius: 12px; padding: 4px 0 8px; transform-origin: var(--thread-from, 0 0);
       transition: width 200ms ${EASE}, opacity 180ms ${EASE}, scale 220ms ${EASE};
       background: color-mix(in srgb, var(--b-card) 92%, transparent);
@@ -1099,7 +1099,7 @@
     const takeOffer = (id, take) => settled(ask('POST', route('/offer'), { id, take }));
     /** The box a reply is written in, as a note is: words, pictures pasted
      *  in, and Send (⌘↵). `onSend({ text, images })`. */
-    const composer = ({ placeholder = 'Reply', label = 'Reply', onSend, onEscape = null } = {}) => {
+    const composer = ({ placeholder = 'Reply', label = 'Reply', onSend, onEscape = null, enterSends = false } = {}) => {
       const node = h('div', 'marble-build-write');
       const field = h('div', 'field');
       field.contentEditable = 'plaintext-only';
@@ -1116,7 +1116,9 @@
       act.append(h('span', 'sp'));
       const send = h('button', 'marble-build-send');
       send.type = 'button';
-      send.innerHTML = `${M.sendGlyph ?? ICON.send}<kbd>${M.MOD ?? '⌘'}↵</kbd>`;
+      // A comment's reply goes on ⏎, as a chat's does (⇧⏎ breaks the line);
+      // anything else written here is sent with ⌘↵.
+      send.innerHTML = `${M.sendGlyph ?? ICON.send}<kbd>${enterSends ? '' : (M.MOD ?? '⌘')}↵</kbd>`;
       send.setAttribute('aria-label', 'Send');
       send.title = 'Send';
       act.append(send);
@@ -1171,7 +1173,7 @@
       };
       field.addEventListener('input', paint);
       field.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); go(); }
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey || (enterSends && !event.shiftKey && !event.altKey && !event.isComposing))) { event.preventDefault(); event.stopPropagation(); go(); }
         if (event.key === 'Escape' && onEscape) { event.preventDefault(); event.stopPropagation(); onEscape(); }
       });
       send.addEventListener('pointerdown', (event) => event.preventDefault());
@@ -1298,6 +1300,7 @@
         threadWrite = composer({
           placeholder: lines.length ? 'Ask more, or say what to change' : 'Ask, or say what to change',
           label: 'Reply',
+          enterSends: true,
           onEscape: () => closeThread(),
           onSend: async ({ text, images }) => {
             if (!threadFor) return;
@@ -1324,9 +1327,50 @@
         setTimeout(put, 120);
       }
     };
+    // A new comment is written in the line ⌘J opens (change-line.js), lent
+    // and hung at its pin, narrow: ⏎ sends, ⇧⏎ breaks the line, Esc or a
+    // press away drops the pin. Sent, it is a thread at the pin, as in Figma.
+    let lineFor = null;
+    const writeComment = (id) => {
+      const line = window.marbleLine;
+      const pin = M.elementOf(id);
+      if (!line?.lend || !pin) return false;
+      let lent = null;
+      const hang = () => {
+        const r = M.elementOf(id)?.getBoundingClientRect();
+        if (lent && r?.width) lent.hang({ left: r.left, top: r.top, width: r.width, height: r.height });
+      };
+      const done = () => { removeEventListener('scroll', hang, true); removeEventListener('resize', hang); if (lineFor === id) lineFor = null; };
+      lent = line.lend({
+        ids: () => [],
+        label: 'Comment, or ask for a change',
+        take: async (text) => {
+          done();
+          if (!text.trim()) { M.dropDraft(id); return; }
+          await postComment(id, text);
+          threadFor = id;
+          drawThread();
+        },
+        onClose: () => {
+          done();
+          // Put away unsaid: the pin was a slip of the hand.
+          if (!(state?.marks ?? []).some((m) => m.id === id)) M.dropDraft(id);
+          M.closeComments();
+        },
+      });
+      lineFor = id;
+      addEventListener('scroll', hang, { capture: true, passive: true });
+      addEventListener('resize', hang);
+      hang();
+      lent.focus();
+      return true;
+    };
     addEventListener('marble-marks:comment', (event) => {
       const id = event.detail?.id;
       if (!id) return;
+      if (lineFor === id) return;
+      const kept = (state?.marks ?? []).find((m) => m.id === id);
+      if (!kept?.thread?.length && writeComment(id)) { if (threadFor) closeThread(); return; }
       if (threadFor && threadFor !== id) closeThread();
       clearTimeout(leaving);
       thread.removeAttribute('data-leaving');
