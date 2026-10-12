@@ -377,6 +377,7 @@
 
     function placeholderOf(s) {
       if (s.lent) return s.lent.label || 'Describe the change';
+      if (s.label) return s.label;
       if (s.page) return 'Change this page';
       if (s.words) return 'Change these words';
       const els = elementsOf(s.ids);
@@ -1046,9 +1047,12 @@
      *  them itself (`'press'`). */
     function put(s, { keep = true, restore = true } = {}) {
       if (!s) return;
+      // A borrowed line's words are not ⌘J's draft for the next time.
+      if (s.take) keep = false;
       const was = s.state;
       // Put away before it sent: the mode that lent it hangs a fresh one.
       if (s.lent && was !== 'sent') { const closed = s.lent.onClose; s.lent = null; closed?.(); }
+      if (s.onClose) { const closed = s.onClose; s.onClose = null; s.take = null; closed(); }
       const had = holdsKeys(s);
       const to = s.returnTo;
       // Words typed in any of its inputs (an ask, more to an answer, a draft)
@@ -1249,9 +1253,11 @@
     }
 
     async function send(s, text, { brief = null, keepWords = false } = {}) {
-      if (s.lent?.take) {
-        const take = s.lent.take;
+      const take = s.take ?? s.lent?.take;
+      if (take) {
         s.lent = null;
+        s.take = null;
+        s.onClose = null;
         put(s, { keep: false });
         take(text);
         return;
@@ -1614,7 +1620,10 @@
      * @param {string} [o.action]         one of the offer's actions, drafted for this thing
      * @param {boolean} [o.send]          send the draft at once, with `o.brief` beside it
      */
-    function open({ ids = [], scope = null, from = null, draft = null, conversation = null, action = null, send: now = false, brief = null } = {}) {
+    // `take` and `onClose`: the line is borrowed whole, as ⌘J opens it (its
+    // suggestions, its actions, its tint), but its words are the borrower's
+    // to send (Build mode's comment), and a line put away unsent is told.
+    function open({ ids = [], scope = null, from = null, draft = null, conversation = null, action = null, send: now = false, brief = null, take = null, onClose = null, label = null } = {}) {
       const asked = scope === 'page' ? [] : (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
       const present = asked.filter((id) => byId(id));
       if (asked.length && !present.length) return false;
@@ -1628,8 +1637,9 @@
       // with it: they are not kept under the old thing as well.
       const carried = Boolean(shown?.input) && draft != null && said(shown.input) === String(draft).trim();
       if (shown) put(shown, { keep: !carried, restore: false });
+      if (take) Object.assign(s, { take, onClose, label });
       sessions.add(s);
-      let text = draft ?? drafts()[keyOf(s)] ?? '';
+      let text = draft ?? (take ? '' : drafts()[keyOf(s)]) ?? '';
       let idea = null;
       // An action drafted for this thing (an offer after an edit): its words,
       // with the idea after the lead selected so typing replaces it, and its

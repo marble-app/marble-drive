@@ -2641,7 +2641,7 @@
     const typing = (node) => node?.isContentEditable || ['INPUT', 'TEXTAREA'].includes(node?.tagName);
     // One key per tool while describing, and ⌘⇧D in and out from anywhere —
     // a chord, so it is heard even mid-sentence in a composer.
-    const KEYS = building ? { v: null, a: 'select', p: 'sketch', t: 'text', n: 'text' } : { v: null, a: 'select', p: 'sketch', t: 'text' };
+    const KEYS = building ? { v: null, a: 'select', p: 'sketch', t: 'text', n: 'text', c: 'comment' } : { v: null, a: 'select', p: 'sketch', t: 'text' };
     addEventListener('keydown', (event) => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
         event.preventDefault();
