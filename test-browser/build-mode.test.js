@@ -612,7 +612,9 @@ test('while a build runs, Build starts another alongside it, or joins it when th
   const live = side.locator('.marble-bst[data-status="running"]').first();
   await live.locator('.bst-talk .field').click();
   await page.keyboard.type('Make the weeks start on Monday');
-  await page.keyboard.press('ControlOrMeta+Enter');
+  // Enter sends; the send is the arrow alone, with no key printed on it.
+  assert.equal(await live.locator('.bst-talk .marble-build-send kbd').count(), 0);
+  await page.keyboard.press('Enter');
   await live.locator('.marble-build-line[data-who="you"]', { hasText: 'Make the weeks start on Monday' }).waitFor();
   await live.locator('.marble-build-line[data-who="agent"]', { hasText: /Working it into build \d+ now\./ }).waitFor({ timeout: 15_000 });
   for (const b of await running()) await api('POST', `/agent/builds/${b.id}/stop?path=Reviews`, {});
