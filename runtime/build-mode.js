@@ -1327,43 +1327,41 @@
         setTimeout(put, 120);
       }
     };
-    // A new comment is written in the line ⌘J opens (change-line.js), lent
-    // and hung at its pin, narrow: ⏎ sends, ⇧⏎ breaks the line, Esc or a
-    // press away drops the pin. Sent, it is a thread at the pin, as in Figma.
+    // A new comment is written in the line ⌘J opens (change-line.js), the
+    // whole of it: under the part the pin is on, with that part's
+    // suggestions and the actions (make it visual, interactive, …). Its words
+    // are the comment's: ⏎ sends them to the thread, ⇧⏎ breaks the line, and
+    // Esc or a press away drops the pin. Sent, it is a thread at the pin, as
+    // in Figma.
     let lineFor = null;
     const writeComment = (id) => {
       const line = window.marbleLine;
-      const pin = M.elementOf(id);
-      if (!line?.lend || !pin) return false;
-      let lent = null;
-      const hang = () => {
-        const r = M.elementOf(id)?.getBoundingClientRect();
-        if (lent && r?.width) lent.hang({ left: r.left, top: r.top, width: r.width, height: r.height });
-      };
-      const done = () => { removeEventListener('scroll', hang, true); removeEventListener('resize', hang); if (lineFor === id) lineFor = null; };
-      lent = line.lend({
-        ids: () => [],
+      const mark = M.get(id);
+      if (!line?.open || !mark) return false;
+      const part = mark.anchorId && document.querySelector(`[data-marble-id="${CSS.escape(mark.anchorId)}"]`);
+      const whole = !part || part === document.body || part === document.documentElement;
+      lineFor = id;
+      const opened = line.open({
+        ids: whole ? [] : [mark.anchorId],
+        scope: whole ? 'page' : null,
+        from: 'comment',
         label: 'Comment, or ask for a change',
         take: async (text) => {
-          done();
+          if (lineFor === id) lineFor = null;
           if (!text.trim()) { M.dropDraft(id); return; }
           await postComment(id, text);
           threadFor = id;
           drawThread();
         },
         onClose: () => {
-          done();
+          if (lineFor === id) lineFor = null;
           // Put away unsaid: the pin was a slip of the hand.
           if (!(state?.marks ?? []).some((m) => m.id === id)) M.dropDraft(id);
           M.closeComments();
         },
       });
-      lineFor = id;
-      addEventListener('scroll', hang, { capture: true, passive: true });
-      addEventListener('resize', hang);
-      hang();
-      lent.focus();
-      return true;
+      if (!opened) lineFor = null;
+      return Boolean(opened);
     };
     addEventListener('marble-marks:comment', (event) => {
       const id = event.detail?.id;

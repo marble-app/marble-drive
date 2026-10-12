@@ -375,16 +375,22 @@ test('Select picks marks to build, archive or delete; on a part of the app it op
   await hostSays(page, (marks) => marks.some((m) => m.text === 'Bigger\nand bolder' && m.ids?.some((id) => id.startsWith('s2'))), 'kept as a note on the part');
 });
 
-test('a comment (C) is written in the ⌘J line at its pin; ⏎ sends it, and a change it asks for is made at once', async () => {
+test('a comment (C) is written in the ⌘J line itself; ⏎ sends it, and a change it asks for is made at once', async () => {
   const { page } = await open();
-  await tool(page, 'comment').click();
+  // C picks the tool, as the other tools' letters do.
+  await page.keyboard.press('c');
+  assert.equal(await tool(page, 'comment').getAttribute('aria-pressed'), 'true');
   const r = await box(page, 's2');
   await page.mouse.click(r.x + 60, r.y + 30);
-  // The same line ⌘J opens, short, at the pin, with the caret in it.
+  // The line ⌘J opens, the whole of it: under the part, short, with the
+  // caret in it and the actions under the words.
   const line = page.locator('.marble-line:not([hidden])');
   await line.waitFor();
   const w = (await line.boundingBox()).width;
   assert.ok(w <= 441, `the line is short: ${w}`);
+  assert.equal(await line.locator('.marble-line-input').getAttribute('data-placeholder'), 'Comment, or ask for a change');
+  await line.locator('.marble-line-chip[data-act]').first().waitFor();
+  assert.ok(await line.locator('.marble-line-chip[data-act]').count() >= 4, 'the same actions as ⌘J');
   await page.keyboard.type('script:build Can this show');
   await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('two weeks?');
@@ -404,7 +410,7 @@ test('a comment (C) is written in the ⌘J line at its pin; ⏎ sends it, and a 
 
 test('a comment put away unsaid leaves no pin', async () => {
   const { page } = await open();
-  await tool(page, 'comment').click();
+  await page.keyboard.press('c');
   const r = await box(page, 's1');
   await page.mouse.click(r.x + 40, r.y + 10);
   await page.locator('.marble-line:not([hidden])').waitFor();
