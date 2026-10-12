@@ -63,7 +63,9 @@ export function phraseOf(mark, { index = null, piece = null, imagePath = null } 
   }
   if (mark.type === 'comment') {
     const lines = (mark.thread ?? []).filter((line) => line.text || line.images?.length).map((line) => `${line.who === 'agent' ? 'Agent' : 'Person'}: ${line.text}${line.images?.length && imagePath ? ` (with ${line.images.map((image) => imagePath(image.name)).filter(Boolean).join(', ')})` : ''}`);
-    return `A comment thread pinned to ${on}:\n${lines.map((line) => `   ${line}`).join('\n')}`;
+    const also = (mark.ids ?? []).filter((id) => id !== mark.anchorId);
+    const where = also.length ? `${on} (with ${also.map((id) => `#${id}`).join(', ')})` : on;
+    return `A comment thread pinned to ${where}:\n${lines.map((line) => `   ${line}`).join('\n')}`;
   }
   if (mark.type === 'piece') {
     const p = mark.piece ?? {};

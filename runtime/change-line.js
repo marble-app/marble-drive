@@ -761,6 +761,16 @@
         b.addEventListener('click', () => pick(s, id));
         acts.append(b);
       }
+      // What the one who opened it adds after the actions (a comment written
+      // on a selection: Save as piece), each its own press.
+      for (const { name, icon = null, tip = name, run } of s.more ?? []) {
+        const b = chip(name, icon);
+        b.dataset.more = '';
+        b.dataset.tip = tip;
+        b.setAttribute('aria-label', name);
+        b.addEventListener('click', () => run?.());
+        acts.append(b);
+      }
       s.chips = row;
       paintSugs(s);
       paintActs(s);
@@ -1623,7 +1633,7 @@
     // `take` and `onClose`: the line is borrowed whole, as ⌘J opens it (its
     // suggestions, its actions, its tint), but its words are the borrower's
     // to send (Build mode's comment), and a line put away unsent is told.
-    function open({ ids = [], scope = null, from = null, draft = null, conversation = null, action = null, send: now = false, brief = null, take = null, onClose = null, label = null } = {}) {
+    function open({ ids = [], scope = null, from = null, draft = null, conversation = null, action = null, send: now = false, brief = null, take = null, onClose = null, label = null, more = null } = {}) {
       const asked = scope === 'page' ? [] : (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
       const present = asked.filter((id) => byId(id));
       if (asked.length && !present.length) return false;
@@ -1637,7 +1647,7 @@
       // with it: they are not kept under the old thing as well.
       const carried = Boolean(shown?.input) && draft != null && said(shown.input) === String(draft).trim();
       if (shown) put(shown, { keep: !carried, restore: false });
-      if (take) Object.assign(s, { take, onClose, label });
+      if (take) Object.assign(s, { take, onClose, label, more: Array.isArray(more) ? more : null });
       sessions.add(s);
       let text = draft ?? (take ? '' : drafts()[keyOf(s)]) ?? '';
       let idea = null;

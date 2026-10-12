@@ -337,7 +337,22 @@ test('pause holds the build where it got to; stop goes back and keeps it in Buil
   assert.equal(s.marks.find((m) => m.text === 'script:slow Make it').state, 'waiting', 'its marks wait again');
 });
 
-test('Select picks marks to build, archive or delete; on a part of the app it opens the box to write in', async () => {
+/** Send is the arrow alone, in the card's colour on the accent: the layer's
+ *  and the sidebar's own button rule does not turn it to the ink. */
+const sendIsTheArrow = async (send) => {
+  assert.equal(await send.locator('kbd').count(), 0, 'no key drawn on Send');
+  const [arrow, card] = await send.evaluate((b) => {
+    const probe = document.createElement('i');
+    probe.style.color = getComputedStyle(b).getPropertyValue('--b-card');
+    b.append(probe);
+    const want = getComputedStyle(probe).color;
+    probe.remove();
+    return [getComputedStyle(b).color, want];
+  });
+  assert.equal(arrow, card, 'the arrow is the card colour');
+};
+
+test('Select picks marks to build, archive or delete; on a part of the app it opens the comment line', async () => {
   const { page } = await open();
   await noteOn(page, 's1', 'One');
   await noteOn(page, 's2', 'Two');
@@ -357,22 +372,26 @@ test('Select picks marks to build, archive or delete; on a part of the app it op
   await page.locator('.marble-marks-note', { hasText: 'One' }).locator('.marble-marks-note-body').click();
   await page.locator('.marble-build-sel button', { hasText: 'Delete' }).click();
   await hostSays(page, (marks) => marks.length === 1, 'deleted from the bar');
-  // A click on a part of the app picks the part, and the box to write in
-  // comes up under it, with Save as piece.
+  // A click on a part of the app picks the part, and the line a comment is
+  // written in (the one ⌘J opens) comes up under it, not a note.
   await tool(page, 'select').click();
   const r = await box(page, 's2');
   await page.mouse.click(r.x + 300, r.y + 60);
-  await page.locator('.marble-marks-note[data-writing] .marble-marks-note-body:focus').waitFor();
+  const line = page.locator('.marble-line:not([hidden])');
+  await line.waitFor();
+  assert.equal(await line.locator('.marble-line-input').getAttribute('data-placeholder'), 'Comment, or ask for a change');
+  assert.equal(await page.locator('.marble-marks-note[data-writing]').count(), 0, 'no note');
   assert.equal(await page.locator('.marble-build-sel').isVisible(), false, 'no bar of its own');
-  await page.keyboard.type('Bigger');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('and bolder');
-  assert.equal(await page.locator('.marble-marks-note[data-writing] .marble-marks-note-body').evaluate((n) => n.innerText.trim()), 'Bigger\nand bolder', 'Enter is a new line');
-  await page.locator('.marble-marks-note[data-writing] .marble-marks-note-piece').click();
+  // With Save as piece among its actions.
+  await line.locator('.marble-line-chip[data-more]', { hasText: 'Save as piece' }).click();
   await page.waitForFunction(() => fetch('/agent/pieces?path=Reviews').then((r) => r.json()).then((p) => p.saved.length >= 1));
-  // Left, it is a note on that part.
-  await page.mouse.click(10, 10);
-  await hostSays(page, (marks) => marks.some((m) => m.text === 'Bigger\nand bolder' && m.ids?.some((id) => id.startsWith('s2'))), 'kept as a note on the part');
+  await page.keyboard.type('Bigger');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('and bolder');
+  await page.keyboard.press('Enter');
+  // Sent, it is a comment on what was picked.
+  await hostSays(page, (marks) => marks.some((m) => m.type === 'comment' && m.anchorId?.startsWith('s2') && m.ids?.some((id) => id.startsWith('s2'))
+    && m.thread?.[0]?.text === 'Bigger\nand bolder'), 'kept as a comment on the part');
 });
 
 test('a comment (C) is written in the ⌘J line itself; ⏎ sends it, and a change it asks for is made at once', async () => {
@@ -397,6 +416,7 @@ test('a comment (C) is written in the ⌘J line itself; ⏎ sends it, and a chan
   await page.keyboard.press('Enter');
   // Sent, it is a thread at its pin.
   await page.locator('.marble-build-thread:not([hidden]) .marble-build-line[data-who="you"]', { hasText: 'two weeks?' }).waitFor();
+  await sendIsTheArrow(page.locator('.marble-build-thread .marble-build-send'));
   // No model on a test host to tell a question from a change: it is made,
   // with nothing to take or press first.
   const marks = await hostSays(page, (list) => list.some((m) => m.type === 'comment' && m.thread.some((l) => l.text === 'Making this now.')), 'answered: making it');
@@ -763,6 +783,7 @@ test('in the margin a comment is a card: the app answers in its own name, and a 
   await card.click();
   // Words, pasted pictures, and Send: ⏎ sends, ⇧⏎ breaks the line.
   await card.locator('.reply .field').click();
+  await sendIsTheArrow(card.locator('.reply .marble-build-send'));
   await page.keyboard.type('And next month?');
   await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('Or the one after.');

@@ -147,6 +147,9 @@ export function cleanMark(raw) {
     mark.resolved = raw.resolved === true;
     // A comment a sent note became, and the note a build makes it from.
     if (raw.forNote) mark.forNote = idOf(raw.forNote);
+    // The parts it was written about, when it was written on a selection.
+    const about = ids(raw.ids);
+    if (about.length) mark.ids = about;
   }
   if (raw.type === 'move') {
     mark.from = idOf(raw.from);
