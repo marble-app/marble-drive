@@ -249,8 +249,8 @@
     .marble-build-dots i:nth-child(3) { animation-delay: .3s; }
     @keyframes marble-build-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
     /* The box a reply is written in: the note's own (agent-marks.js), the
-       words, what was pasted, and Send, the up arrow on the accent with its
-       key. Enter is a new line; ⌘↵ sends. */
+       words, what was pasted, and Send, the up arrow on the accent. Enter
+       sends; Shift+Enter is a new line. */
     .marble-build-write { margin: 8px 8px 0; border-radius: 10px; background: var(--b-card); box-shadow: 0 0 0 1px var(--b-line); }
     .marble-build-write:focus-within { box-shadow: 0 0 0 1px var(--b-accent), 0 0 0 4px var(--b-accent-soft); }
     .marble-build-write .field { display: block; min-height: 1.45em; max-height: 40vh; overflow-y: auto; padding: 8px 10px 4px; outline: none;
@@ -265,13 +265,12 @@
       background: var(--b-card); box-shadow: 0 0 0 1px var(--b-line); color: var(--b-muted); font-size: 12px; cursor: pointer; }
     .marble-build-write .act { display: flex; align-items: center; gap: 6px; padding: 4px 6px 6px 10px; }
     .marble-build-write .act .sp { flex: 1; }
-    .marble-build-send { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px 0 6px; border-radius: 999px; cursor: pointer;
+    .marble-build-send { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 999px; cursor: pointer;
       background: var(--b-mark); color: var(--b-card); font: 500 11px/1 var(--b-ui); }
     .marble-build-send:hover { background: color-mix(in srgb, var(--b-mark) 86%, var(--b-ink)); }
     .marble-build-send:focus-visible { outline: 2px solid var(--b-mark); outline-offset: 2px; }
     .marble-build-send[aria-disabled="true"] { opacity: .35; cursor: default; }
     .marble-build-send svg { width: 14px; height: 14px; }
-    .marble-build-send kbd { font: inherit; opacity: .78; }
     .marble-build-compose { display: flex; align-items: flex-end; gap: 6px; margin: 8px 8px 0; padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--b-card); box-shadow: 0 0 0 1px var(--b-line); }
     .marble-build-compose:focus-within { box-shadow: 0 0 0 1px var(--b-accent), 0 0 0 4px var(--b-accent-soft); }
     .marble-build-compose textarea { flex: 1; min-width: 0; border: 0; background: none; font: 13.5px/1.45 var(--b-ui); color: var(--b-ink); padding: 4px 0; margin: 0; caret-color: var(--b-mark);
@@ -471,7 +470,6 @@
     }
     /* A key shown on a button says what a keyboard would press; a phone's has
        no ⌘, so the button says it alone. */
-    @media (hover: none) { .marble-build-send kbd { display: none; } }
     /* In a hand a thread is a task with a field to write in: it is a sheet
        standing on the keyboard, edge to edge, not a card by its pin that the
        keys would come up over (placeThread sets data-dock). */
@@ -1098,8 +1096,8 @@
     }
     const takeOffer = (id, take) => settled(ask('POST', route('/offer'), { id, take }));
     /** The box a reply is written in, as a note is: words, pictures pasted
-     *  in, and Send (⌘↵). `onSend({ text, images })`. */
-    const composer = ({ placeholder = 'Reply', label = 'Reply', onSend, onEscape = null, enterSends = false } = {}) => {
+     *  in, and Send (Enter). `onSend({ text, images })`. */
+    const composer = ({ placeholder = 'Reply', label = 'Reply', onSend, onEscape = null } = {}) => {
       const node = h('div', 'marble-build-write');
       const field = h('div', 'field');
       field.contentEditable = 'plaintext-only';
@@ -1108,17 +1106,16 @@
       field.setAttribute('aria-multiline', 'true');
       field.setAttribute('aria-label', label);
       field.dataset.placeholder = placeholder;
-      // Return is a new line here (⌘↵ sends), and a reply is a sentence.
-      field.setAttribute('enterkeyhint', 'enter');
+      // Return sends, as a chat's does (⇧⏎ breaks the line), and a reply is
+      // a sentence.
+      field.setAttribute('enterkeyhint', 'send');
       field.setAttribute('autocapitalize', 'sentences');
       const pics = h('div', 'pics');
       const act = h('div', 'act');
       act.append(h('span', 'sp'));
       const send = h('button', 'marble-build-send');
       send.type = 'button';
-      // A comment's reply goes on ⏎, as a chat's does (⇧⏎ breaks the line);
-      // anything else written here is sent with ⌘↵.
-      send.innerHTML = `${M.sendGlyph ?? ICON.send}<kbd>${enterSends ? '' : (M.MOD ?? '⌘')}↵</kbd>`;
+      send.innerHTML = M.sendGlyph ?? ICON.send;
       send.setAttribute('aria-label', 'Send');
       send.title = 'Send';
       act.append(send);
@@ -1173,7 +1170,7 @@
       };
       field.addEventListener('input', paint);
       field.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey || (enterSends && !event.shiftKey && !event.altKey && !event.isComposing))) { event.preventDefault(); event.stopPropagation(); go(); }
+        if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.isComposing) { event.preventDefault(); event.stopPropagation(); go(); }
         if (event.key === 'Escape' && onEscape) { event.preventDefault(); event.stopPropagation(); onEscape(); }
       });
       send.addEventListener('pointerdown', (event) => event.preventDefault());
@@ -1300,7 +1297,6 @@
         threadWrite = composer({
           placeholder: lines.length ? 'Ask more, or say what to change' : 'Ask, or say what to change',
           label: 'Reply',
-          enterSends: true,
           onEscape: () => closeThread(),
           onSend: async ({ text, images }) => {
             if (!threadFor) return;
