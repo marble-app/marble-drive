@@ -833,6 +833,36 @@ test('a long comment opens on its latest line, folds what was pasted, and reads 
 });
 const n0 = (v) => Math.max(0, Math.round(v));
 
+test('a long build summary is folded to its first lines with Show all, and its rows keep their width', async () => {
+  const { page } = await open();
+  const got = await page.evaluate(async () => {
+    const card = window.marbleBuild.statusCard();
+    document.querySelector('.marble-build-layer').append(card.node);
+    Object.assign(card.node.style, { position: 'fixed', left: '20px', top: '20px', width: '360px', zIndex: 9, pointerEvents: 'auto' });
+    const rows = Array.from({ length: 14 }, (_, i) => `<div class="pw-rw"><span>Row ${i + 1} of what changed</span></div>`).join('');
+    // An Asked row drawn the old way: the answer a second child, no rule
+    // for it in the drawing's own style.
+    const asked = '<div class="pw-rw ask" id="asked"><span class="q">Will it upload?</span><span>Yes, every report has the bar pinned at the bottom.</span></div>';
+    const html = `<style>.pw-rw { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 8px; } .pw-rw::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }</style>${asked}${rows}`;
+    card.update({ id: 'bx', n: 9, status: 'finished', title: 'A long one', startedAt: Date.now() - 60_000, endedAt: Date.now(), plan: { parts: [] }, summary: { html, at: 1 }, thread: [] }, []);
+    return true;
+  });
+  assert.equal(got, true);
+  const card = page.locator('.marble-bst[data-summary]');
+  const more = card.locator('.bst-more');
+  await more.waitFor();
+  const folded = (await card.locator('.bst-pic').boundingBox()).height;
+  assert.ok(folded <= 221, `folded: ${folded}`);
+  // The answer runs across the row, not a word to a line.
+  const answer = await page.frameLocator('.marble-bst[data-summary] .bst-pic iframe').locator('#asked span').nth(1).boundingBox();
+  assert.ok(answer.width > 150 && answer.height < 60, JSON.stringify(answer));
+  await more.click();
+  assert.equal(await more.textContent(), 'Show less');
+  await page.waitForTimeout(100);
+  const whole = (await card.locator('.bst-pic').boundingBox()).height;
+  assert.ok(whole > folded + 40, `opened: ${whole}`);
+});
+
 test('on a phone Marks is in the sidebar\'s sheet from the foot, in page order, and docks nothing', async () => {
   const { page } = await open({ width: 390, height: 800 });
   await noteOn(page, 's1', 'On a phone');

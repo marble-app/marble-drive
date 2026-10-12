@@ -189,7 +189,13 @@ Copy the parts you use into your `<style>`; change sizes, never the meanings.
 .pw-rw::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-ink); }
 .pw-rw.chg::before { background: none; box-shadow: inset 0 0 0 1.5px var(--accent-ink); }
 .pw-rw.know::before { background: var(--caution); }
-.pw-rw .q { display: block; color: var(--muted); }
+/* Everything in a row goes in the words' column, however many children it
+   has: a second child left to the grid lands in the dot's 7px column and
+   reads one word to a line. */
+.pw-rw > * { grid-column: 2; min-width: 0; }
+.pw-rw .q, .pw-rw .a { display: block; }
+.pw-rw .q { color: var(--muted); }
+.pw-rw.ask::before { background: var(--faint); }
 
 /* a note: the one thing that needs a look, set apart by its fill and a dot, never a stripe */
 .pw-note { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border-radius: 8px; background: var(--paper-2); font-size: 12px; color: var(--ink); }
@@ -266,13 +272,18 @@ only here, the words may run longer, up to about 520 px tall:
      them, anything they should check. Never invent one.
    - **Asked**: each question asked on the app while it ran, with the answer
      it got, in a line or two: the question in `--muted`, the answer in
-     `--ink`. Only questions: a change asked for in a comment is New or
-     Changed.
+     `--ink`, as one row, the answer under the question:
+     `<div class="pw-rw ask"><span class="q">…</span><span class="a">…</span></div>`.
+     Only questions: a change asked for in a comment is New or Changed.
 3. A stops track at the foot, inked as far as it got (Planned, Built, On the
    app, Checked).
 
 Rows are `div`s (`.pw-rw`, in the parts below), never `ul` or `li`, and a
-row's words are one `<span>`, with any `<del>`/`<ins>` inside it. Every word
+row's words are one `<span>` (an Asked row's are two, the question then the
+answer), with any `<del>`/`<ins>` inside it. Keep it short: a person reads
+it in a sidebar a third of the screen wide, and it is folded to its first
+few lines there until they open it, so the result picture and New come
+first. Every word
 is in the person's terms, taken from what you are given; nothing animates.
 The result picture names its parts inside it (the bar, the card, the pin), so
 it reads without the groups under it.
