@@ -1104,6 +1104,12 @@
       get open() { return open; },
       get picked() { return picked; },
       pick,
+      /** A comment at the sidebar's full size, Marks put out for it. */
+      full(id) {
+        if (!id) return;
+        if (!open) B.setSide('comments');
+        requestAnimationFrame(() => { if (open) setView('thread', id); });
+      },
       /** The status mark's press: the margin out, or put away. */
       toggle() {
         if (open) { B.setSide('none'); return; }

@@ -1280,6 +1280,15 @@
       thread.replaceChildren();
       const top = h('div', 'top');
       if (kept) {
+        // Out to the sidebar: this thread at its full size, read as a chat,
+        // with Marks at its top to go back to the list (build-margin.js).
+        const side = h('button', 'marble-build-x');
+        side.type = 'button';
+        side.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></svg>';
+        side.setAttribute('aria-label', 'Open in the sidebar');
+        side.title = 'Open in the sidebar, at full size';
+        side.addEventListener('click', () => { const id = threadFor; closeThread({ posting: true }); window.marbleMargin?.full?.(id); });
+        top.append(side);
         const del = h('button', 'marble-build-x');
         del.type = 'button';
         del.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>';
