@@ -304,6 +304,11 @@
     .marble-bst[data-status="paused"] .bst-sub, .marble-bst[data-status="failed"] .bst-sub { color: var(--b-caution); }
     .marble-bst .bst-pic { margin: 8px -4px 0; border-radius: 8px; overflow: hidden; pointer-events: none; }
     .marble-bst .bst-pic:empty { display: none; }
+    .marble-bst[data-summary]:not([data-whole]) .bst-pic { max-height: 220px; }
+    .marble-bst .bst-more { all: unset; display: none; cursor: pointer; margin: 0 12px 8px; font-size: 12px; font-weight: 500; color: var(--b-muted); border-radius: 4px; }
+    .marble-bst[data-summary][data-long] .bst-more { display: inline-block; }
+    .marble-bst .bst-more:hover { color: var(--b-ink); }
+    .marble-bst .bst-more:focus-visible { outline: 2px solid var(--b-mark); outline-offset: 2px; }
     .marble-bst .bst-pic iframe { display: block; width: 100%; border: 0; }
     /* Its stages. */
     .marble-bst .bst-stages { list-style: none; margin: 0; padding: 2px 6px 8px; border-top: 1px solid var(--b-line); }
@@ -1487,6 +1492,11 @@
     };
     /** The status of one build: `card.update(build, log)` as it changes. What
      *  is open stays open between updates. */
+    const FOLDED = 220; // px of a summary shown before Show all
+    // A summary's rows are a dot and its words (the drawing-progress skill's
+    // .pw-rw); one drawn before the skill said so put an answer in the dot's
+    // column, a word to a line. Every child goes in the words' column.
+    const ROW_GUARD = '<style>.pw-rw > * { grid-column: 2; min-width: 0; }</style>';
     const statusCard = () => {
       const node = h('section', 'marble-bst');
       const top = h('button', 'bst-top');
@@ -1503,6 +1513,18 @@
       const pic = h('div', 'bst-pic');
       pic.setAttribute('aria-hidden', 'true');
       top.append(head, sub, pic);
+      // A summary is folded to its first lines, as Docs folds a long comment:
+      // Show all opens it in place, and the cards under it make room.
+      const more = h('button', 'bst-more', 'Show all');
+      more.type = 'button';
+      more.setAttribute('aria-expanded', 'false');
+      more.addEventListener('click', () => {
+        const whole = !node.hasAttribute('data-whole');
+        node.toggleAttribute('data-whole', whole);
+        more.textContent = whole ? 'Show less' : 'Show all';
+        more.setAttribute('aria-expanded', String(whole));
+      });
+      new ResizeObserver(() => node.toggleAttribute('data-long', pic.scrollHeight > FOLDED + 4)).observe(pic);
       const stages = h('ol', 'bst-stages');
       stages.setAttribute('aria-label', 'Stages');
       // What is said to the build, and its answers, over a box to say more:
@@ -1510,7 +1532,7 @@
       const talk = h('div', 'bst-talk');
       const said = h('div', 'bst-lines');
       talk.append(said);
-      node.append(top, stages, talk);
+      node.append(top, more, stages, talk);
       let write = null;
       let saidKey = '';
       const openStages = new Set();
@@ -1619,7 +1641,7 @@
           const ended = next.status !== 'running' && next.status !== 'paused';
           top.title = ended && changedIds.length ? 'Light what this build changed' : '';
           if (ended && changedIds.length) top.dataset.lights = '1'; else delete top.dataset.lights;
-          if (drawing?.html && drawing.at !== picAt) { picAt = drawing.at; mountDrawn(pic, drawing.html); }
+          if (drawing?.html && drawing.at !== picAt) { picAt = drawing.at; mountDrawn(pic, next.summary ? drawing.html + ROW_GUARD : drawing.html); }
           if (!drawing?.html && changed) { pic.textContent = ''; picAt = null; }
           const lines = next.thread ?? [];
           const key = JSON.stringify(lines);
