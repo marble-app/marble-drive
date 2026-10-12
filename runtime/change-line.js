@@ -49,9 +49,9 @@
   const GAP = 10;          // px the line hangs under its thing
   const OUT = 6;           // px the thing's tint stands out past it
   const INSIDE = 8;        // px the line keeps inside the window
-  const NARROW = 320;      // px, the least a line is wide
-  const WIDE = 720;        // px, the most
-  const PAGE = 560;        // px, the page's line
+  const NARROW = 280;      // px, the least a line is wide
+  const WIDE = 440;        // px, the most: a short ask, not a banner
+  const PAGE = 440;        // px, the page's line
   const FOOT = 16;         // px from the foot of the window, for the page's line
   const FADE = 120;        // ms the words take to go on ⏎
   const ARRIVE = 180;      // ms the line and its tint take to arrive or leave, as the card did
@@ -1249,6 +1249,13 @@
     }
 
     async function send(s, text, { brief = null, keepWords = false } = {}) {
+      if (s.lent?.take) {
+        const take = s.lent.take;
+        s.lent = null;
+        put(s, { keep: false });
+        take(text);
+        return;
+      }
       // Lent to Describe mode, what is marked is read as it is sent: the
       // marks may have changed since the line was lent.
       if (s.lent?.ids) s.ids = s.lent.ids().filter((id) => byId(id));
@@ -1658,13 +1665,16 @@
      * @returns {{el: HTMLElement, label(text: string): void, show(on: boolean): void,
      *   hang(span: object|null): void, focus(): boolean, release(ids?: string[]): void, discard(): void}}
      */
-    function lend({ ids = () => [], label = '', brief = null, onSent = null, onClose = null, floor = null } = {}) {
+    function lend({ ids = () => [], label = '', brief = null, onSent = null, onClose = null, floor = null, take = null } = {}) {
       const marked = () => (typeof ids === 'function' ? ids() : ids).map(String);
       const present = marked().filter((id) => byId(id));
       if (shown) put(shown, { keep: true, restore: false });
       const s = makeSession({ ids: present, scope: null, from: 'describe', conversation: null });
-      s.lent = { label, brief, onSent, onClose, floor, span: null, ids: marked };
-      s.offer = offerOf(s);
+      // `take`: the words are the borrower's to send (Build mode's comment),
+      // not a turn of this line's conversation.
+      s.lent = { label, brief, onSent, onClose, floor, span: null, ids: marked, take };
+      // Words taken elsewhere (a comment) are said, not drafted: no chips.
+      s.offer = take ? null : offerOf(s);
       // The mode draws what is marked; the line adds no tint of its own.
       s.handed = true;
       sessions.add(s);

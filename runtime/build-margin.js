@@ -280,19 +280,6 @@
     .marble-margin-card .offer { margin: 4px 0 0; color: var(--b-ink); }
     .marble-margin-card .ask { display: flex; gap: 6px; margin-top: 6px; }
 
-    /* A waiting note's footer: its model and effort, and Send. */
-    .marble-margin-card .nfoot { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-    .marble-margin-card .nfoot .sp { flex: 1; }
-    .marble-margin-card .nfoot .model { display: inline-flex; align-items: center; gap: 3px; height: 24px; padding: 0 7px; border-radius: 7px; font-size: 12px; color: var(--b-muted); max-width: 170px; }
-    .marble-margin-card .nfoot .model span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .marble-margin-card .nfoot .model svg { width: 13px; height: 13px; flex: none; }
-    .marble-margin-card .nfoot .model:hover { background: var(--b-paper-2); color: var(--b-ink); }
-    .marble-margin-card .nfoot .send { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px 0 6px; border-radius: 999px;
-      background: var(--b-mark); color: var(--b-card); font: 500 11px/1 var(--b-ui); }
-    .marble-margin-card .nfoot .send:hover { background: color-mix(in srgb, var(--b-mark) 86%, var(--b-ink)); }
-    .marble-margin-card .nfoot .send svg { width: 14px; height: 14px; }
-    .marble-margin-card .nfoot .send kbd { font: inherit; opacity: .78; }
-    .marble-margin-card[data-show="build"] .nfoot { display: none; }
     /* Its reply box, while it is picked. */
     .marble-margin-card .reply { display: none; align-items: flex-end; gap: 6px; margin-top: 8px; padding: 4px 4px 4px 10px; border: 1px solid var(--b-line); border-radius: 10px; background: var(--b-card); }
     .marble-margin-card[aria-expanded="true"] .reply { display: block; }
@@ -312,15 +299,13 @@
       .marble-margin-card .words[contenteditable], .marble-margin-card .reply textarea { font-size: 16px; line-height: 1.4; }
       .marble-margin .add, .marble-margin .tray, .marble-margin .back, .marble-margin .gone { height: 44px; font-size: 14px; }
       .marble-margin .mh .arc, .marble-margin .mh .icon, .marble-margin .shut { width: 44px; height: 44px; }
-      .marble-margin-card .sb, .marble-margin-old .sb, .marble-margin-card .nfoot .model { height: 40px; padding: 0 12px; font-size: 13px; }
+      .marble-margin-card .sb, .marble-margin-old .sb { height: 40px; padding: 0 12px; font-size: 13px; }
       .marble-margin-card .icon, .marble-margin-old .icon { width: 40px; height: 40px; }
       .marble-margin-card .k .arc { width: 40px; height: 40px; margin: -10px -12px -10px auto; }
-      .marble-margin-card .nfoot .send, .marble-margin-card .reply button { height: 40px; min-width: 40px; padding: 0 12px; justify-content: center; }
       .marble-margin-card .row, .marble-margin-old .row { min-height: 40px; }
       .marble-margin-pin .hit { display: block; }
     }
     /* A key on a button is for a keyboard; a phone's has no ⌘. */
-    @media (hover: none) { .marble-margin-card .nfoot .send kbd { display: none; } }
     /* Each pin keeps its size on the app; in a hand it takes the 44px round
        it to land on. A child, because both of the pin's own pseudo-elements
        already draw its ring and its question. */
@@ -672,35 +657,11 @@
         if (!(view === 'thread' && threadId === mark.id)) reply.append(write.node);
         card.append(reply);
       }
-      // A note waiting for a build: the note's own footer, its model and
-      // effort, and Send (to be answered or made now, or queued behind a
-      // running build).
-      if (mark.type === 'note' && (mark.state ?? 'waiting') === 'waiting') {
-        const foot = h('div', 'nfoot');
-        const model = button('model', '');
-        model.append(h('span', '', 'Model'));
-        model.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6.5 8 9.5l3-3"/></svg>');
-        model.addEventListener('click', (event) => { event.stopPropagation(); M.pickModel?.(mark.id, model); });
-        M.paintModelOn?.(mark.id, model);
-        const send = button('send', '');
-        send.innerHTML = `${M.sendGlyph ?? KIND.send}<kbd>${M.MOD ?? '⌘'}↵</kbd>`;
-        send.setAttribute('aria-label', B.current() ? 'Queue: make it once the running build is done' : 'Send: ask it, or have it made now');
-        send.title = B.current() ? 'Queue it behind the running build' : 'Ask it, or have it made now';
-        send.addEventListener('click', (event) => { event.stopPropagation(); M.send?.(mark.id); });
-        foot.append(model, h('span', 'sp'), send);
-        card.append(foot);
-      }
-
       card.addEventListener('click', (event) => {
         if (event.target.closest('button, input, textarea, a, [contenteditable]')) return;
         pick(picked === mark.id ? null : mark.id);
       });
       card.addEventListener('keydown', (event) => {
-        if (mark.type === 'note' && event.ctrlKey && event.altKey && !event.metaKey) {
-          const step = { ArrowLeft: ['model', -1], ArrowRight: ['model', 1], ArrowUp: ['effort', 1], ArrowDown: ['effort', -1] }[event.key];
-          if (step) { event.preventDefault(); event.stopPropagation(); M.stepModel?.(mark.id, ...step); return; }
-        }
-        if (mark.type === 'note' && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); M.send?.(mark.id); return; }
         if (event.target !== card) return;
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); pick(picked === mark.id ? null : mark.id); }
       });
@@ -860,6 +821,7 @@
         write = B.composer({
           placeholder: 'Ask more, or say what to change',
           label: `Reply to comment ${n}`,
+          enterSends: true,
           onSend: ({ text, images }) => B.comment(mark.id, text, images),
         });
         writers.set(mark.id, write);

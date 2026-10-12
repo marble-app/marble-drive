@@ -387,11 +387,11 @@ test('stop puts the version before back, keeps where it got to, and the marks wa
   assert.match(await drive.store.read('Slow'), /Half built/);
 });
 
-test('a comment is answered in its thread; without a model it says so', async () => {
+test('a comment that asks for a change is made at once; without a model to tell, it is made', async () => {
   await api('PUT', '/agent/builds/marks?path=Second', { mark: { id: 'c1', type: 'comment', anchorId: 'h', u: 1, v: 0, thread: [{ who: 'agent', text: 'forged' }] } });
   let s = await state('Second');
   assert.deepEqual(s.marks.find((m) => m.id === 'c1').thread, [], 'the page cannot write the agent\'s lines');
-  const posted = await api('POST', '/agent/builds/comment?path=Second', { id: 'c1', text: 'Why is this first?' });
+  const posted = await api('POST', '/agent/builds/comment?path=Second', { id: 'c1', text: 'script:second Title it' });
   assert.equal(posted.status, 200);
   s = await until(async () => {
     const now = await state('Second');
@@ -399,10 +399,23 @@ test('a comment is answered in its thread; without a model it says so', async ()
     return thread.length === 2 && !thread[1].pending ? now : null;
   });
   const thread = s.marks.find((m) => m.id === 'c1').thread;
-  assert.equal(thread[0].text, 'Why is this first?');
-  assert.equal(thread[1].who, 'agent');
-  assert.match(thread[1].text, /could not answer/);
+  assert.equal(thread[0].text, 'script:second Title it');
+  assert.deepEqual([thread[1].who, thread[1].text], ['agent', 'Making this now.']);
+  // No offer to take, no note to build: a build has it already.
   assert.equal((await api('POST', '/agent/builds/offer?path=Second', { id: 'c1', take: true })).status, 409, 'nothing was offered');
+  const made = await until(async () => {
+    const now = await state('Second');
+    const note = now.marks.find((m) => m.sent === 'c1');
+    return note?.build ? { now, note } : null;
+  });
+  assert.equal(made.note.text, 'script:second Title it');
+  // Its build ends by answering the comment and putting it away.
+  const done = await until(async () => {
+    const now = await state('Second');
+    const c = now.marks.find((m) => m.id === 'c1');
+    return c.resolved ? c : null;
+  });
+  assert.match(done.thread.at(-1).text, /^Built the title\.|^Done in Build \d+\./);
 });
 
 test('a mark held back waits out the next build; only a waiting mark can be held', async () => {
