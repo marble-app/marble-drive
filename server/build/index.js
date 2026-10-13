@@ -82,7 +82,7 @@ function publicState(state, current = null) {
   };
 }
 
-export function createBuilds({ buildStore, store, oplog = null, undoTurns = null, runner, agentStore, hub, startConversation, defaultProvider, putDocument, moveDocument = null, freePath = null, reply = null, suggest = null, driveRegions = null, drawSummary = null, log = console }) {
+export function createBuilds({ buildStore, store, oplog = null, undoTurns = null, runner, agentStore, hub, startConversation, defaultProvider, putDocument, moveDocument = null, freePath = null, reply = null, suggest = null, driveRegions = null, drawSummary = null, shoot = null, log = console }) {
   // conversation id → document path, for the builds running or paused now.
   const byConversation = new Map();
   // turn id → resolve(), for a stop waiting on its turn to end.
@@ -267,6 +267,19 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
     return out;
   }
 
+  /** Pictures of the sketches among these marks, drawn over the app
+   *  (shots.js), kept with the notes' pictures: mark id → image name. */
+  async function shotsOf(docPath, marks) {
+    const out = new Map();
+    if (!shoot || !marks.some((m) => m.type === 'stroke')) return out;
+    const got = await shoot({ docPath, marks }).catch(() => new Map());
+    for (const [id, bytes] of got) {
+      const kept = await buildStore.putImage(bytes, 'image/png').catch(() => null);
+      if (kept) out.set(id, kept.name);
+    }
+    return out;
+  }
+
   async function start(docPath, { marks: chosen = null, words = '', anchor = null, client = null, model = null } = {}) {
     const source = await store.read(docPath);
     if (source === null) throw httpError(404, `no document "${docPath}"`);
@@ -326,6 +339,7 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
       // The comment a sent note became is that note's, not context.
       const context = state.marks.filter((m) => m.type === 'comment' && m.state === 'waiting' && !m.resolved && !m.archived && !m.forNote);
       const index = indexOf(source);
+      const shots = await shotsOf(docPath, taken);
       const prompt = buildBrief({
         path: docPath,
         n: build.n,
@@ -336,6 +350,7 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
         empty: !outlineOf(source).trim() || taken.some((m) => m.first),
         untitled: UNTITLED.test(splitPath(docPath).name),
         imagePath: buildStore.imagePath,
+        shots,
       });
       const anchors = [...new Set(taken.map((m) => m.anchorId).filter((id) => id && index.has(id)))].slice(0, 20);
       byConversation.set(conversation, docPath);
@@ -813,7 +828,10 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
     const lines = [
       `More marks for this build (build ${running.n}), made on the app while it runs. Work them into the plan you are on: add them to build_plan's parts, and keep going.`,
       '',
-      ...taken.map((mark, i) => `${i + 1}. ${phraseOf(mark, { index, imagePath: buildStore.imagePath })}`),
+      ...await (async () => {
+        const shots = await shotsOf(docPath, taken);
+        return taken.map((mark, i) => `${i + 1}. ${phraseOf(mark, { index, imagePath: buildStore.imagePath, shot: shots.get(mark.id) ?? null })}`);
+      })(),
     ];
     const anchors = [...new Set(taken.map((m) => m.anchorId).filter((id) => id && index?.has(id)))].slice(0, 20);
     const sent = await runner.send(running.conversation, {

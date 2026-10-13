@@ -498,6 +498,27 @@
       return left === Infinity ? null : { left, top, right, bottom, width: right - left, height: bottom - top };
     }
 
+    /** Beside a point (a comment's pin), as a comment's box sits by its pin
+     *  in Figma: to its right, level with its top; to its left where the
+     *  window ends, and up from the foot where it would run off. */
+    function placeAt(s, r) {
+      const el = s.el;
+      if (docks(s)) { placeLine(s, r); return; }
+      el.toggleAttribute('data-dock', false);
+      el.toggleAttribute('data-flip', false);
+      const vw = viewW();
+      const vh = viewH();
+      const width = Math.min(NARROW + 60, vw - INSIDE * 2);
+      el.style.width = `${Math.round(width)}px`;
+      fitChips(s);
+      const h = el.offsetHeight;
+      let left = r.right + GAP;
+      if (left + width > vw - INSIDE) left = r.left - GAP - width;
+      left = clamp(left, INSIDE, vw - INSIDE - width);
+      const top = clamp(r.top - 4, INSIDE, Math.max(INSIDE, vh - INSIDE - h));
+      Object.assign(el.style, { left: `${Math.round(left)}px`, top: `${Math.round(top)}px` });
+    }
+
     function placeLine(s, r) {
       const el = s.el;
       const dock = docks(s);
@@ -575,7 +596,11 @@
           }
         }
         if (s === shown && s.el) {
-          if (s.page || r || !els.length) placeLine(s, s.page ? null : r);
+          // Hung at a point of its own (a comment's pin), the line goes there;
+          // the tint stays on the thing it is about.
+          const pinned = s.at?.() ?? null;
+          if (pinned) placeAt(s, pinned);
+          else if (s.page || r || !els.length) placeLine(s, s.page ? null : r);
           watching.push(s.el);
         }
       }
@@ -597,7 +622,7 @@
       clearing = setTimeout(() => {
         const s = shown;
         if (!s?.el?.hasAttribute('data-dock') || s.page) return;
-        const r = rectOf(s.lent ? [] : elementsOf(s.ids)) ?? s.lent?.span ?? null;
+        const r = s.at?.() ?? rectOf(s.lent ? [] : elementsOf(s.ids)) ?? s.lent?.span ?? null;
         if (!r) return;
         const sheet = s.el.getBoundingClientRect().top;
         const top = window.visualViewport?.offsetTop ?? 0;
@@ -1633,7 +1658,7 @@
     // `take` and `onClose`: the line is borrowed whole, as ⌘J opens it (its
     // suggestions, its actions, its tint), but its words are the borrower's
     // to send (Build mode's comment), and a line put away unsent is told.
-    function open({ ids = [], scope = null, from = null, draft = null, conversation = null, action = null, send: now = false, brief = null, take = null, onClose = null, label = null, more = null } = {}) {
+    function open({ ids = [], scope = null, from = null, draft = null, conversation = null, action = null, send: now = false, brief = null, take = null, onClose = null, label = null, more = null, at = null } = {}) {
       const asked = scope === 'page' ? [] : (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
       const present = asked.filter((id) => byId(id));
       if (asked.length && !present.length) return false;
@@ -1647,7 +1672,8 @@
       // with it: they are not kept under the old thing as well.
       const carried = Boolean(shown?.input) && draft != null && said(shown.input) === String(draft).trim();
       if (shown) put(shown, { keep: !carried, restore: false });
-      if (take) Object.assign(s, { take, onClose, label, more: Array.isArray(more) ? more : null });
+      // `at`: where to hang it, when not under its thing (a comment's pin).
+      if (take) Object.assign(s, { take, onClose, label, more: Array.isArray(more) ? more : null, at: typeof at === 'function' ? at : null });
       sessions.add(s);
       let text = draft ?? (take ? '' : drafts()[keyOf(s)]) ?? '';
       let idea = null;
