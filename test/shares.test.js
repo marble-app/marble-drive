@@ -170,6 +170,43 @@ test('read, write & modify changes the page, never its code', async (t) => {
   assert.match(before, /Potluck, Sunday/);
 });
 
+test('add only adds to the end of a list, and never reads the page', async (t) => {
+  const { ask, make, open, ops, file } = await boot(t);
+  const { res, cookie } = await open((await make('drop')).href);
+  // The door still says which page, so a script knows where to send.
+  assert.equal(res.headers.get('location'), '/a/Potluck');
+
+  // Opening the page shows a page that says what the link is, not the page.
+  const page = await ask('/a/Potluck', { cookie, html: true });
+  assert.equal(page.status, 403);
+  const body = await page.text();
+  assert.match(body, /can’t open the page/);
+  assert.doesNotMatch(body, /Ana|Potluck/);
+  for (const p of ['/a/Potluck', '/events?app=Potluck&client=tab1', '/presence?app=Potluck', `/blob/${'a'.repeat(64)}`, '/history?app=Potluck']) {
+    assert.equal((await ask(p, { cookie })).status, 403, p);
+  }
+
+  const added = await ops(cookie, [{ type: 'insert', parentId: 'list', beforeId: null, html: '<li><span data-marble-editable>Ben</span></li>' }]);
+  assert.equal(added.status, 200);
+  assert.deepEqual(await added.json(), { ok: true, applied: 1 });
+  assert.match(await file(), /<span data-marble-id="r1n" data-marble-editable>Ana<\/span><\/li>\s*<li[^>]*><span[^>]*>Ben</);
+
+  const before = await file();
+  for (const list of [
+    [{ type: 'setText', id: 'r1n', text: 'Mallory' }],
+    [{ type: 'remove', id: 'r1' }],
+    [{ type: 'move', id: 'r1', parentId: 'list', beforeId: null }],
+    [{ type: 'insert', parentId: 'list', beforeId: 'r1', html: '<li>first</li>' }],
+    [{ type: 'insert', parentId: 'b', beforeId: null, html: '<p>Not a list</p>' }],
+    [{ type: 'insert', parentId: 'list', beforeId: null, html: '<li><style>body{display:none}</style></li>' }],
+    [{ type: 'insert', parentId: 'list', beforeId: null, html: '<li><img src=x onerror="alert(1)"></li>' }],
+  ]) {
+    const refused = await ops(cookie, list);
+    assert.equal(refused.status, 403, JSON.stringify(list));
+  }
+  assert.equal(await file(), before);
+});
+
 test('a link’s tab cannot pass for an agent', async (t) => {
   const { ask, make, open } = await boot(t);
   const { cookie } = await open((await make('modify')).href);

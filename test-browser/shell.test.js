@@ -201,7 +201,7 @@ test('Share: choose a level, copy its link in one press, see which are on, turn 
   const pop = shell.locator('.sharing');
   await pop.waitFor();
   const chosen = () => pop.locator('.level[aria-checked="true"]').getAttribute('data-role');
-  assert.deepEqual(await pop.locator('.level .lv-name').allInnerTexts(), ['Read only', 'Read & write', 'Read, write & modify']);
+  assert.deepEqual(await pop.locator('.level .lv-name').allInnerTexts(), ['Read only', 'Read & write', 'Read, write & modify', 'Add only']);
   // Read only to begin with, and nothing out yet: no address, nothing to turn off.
   assert.equal(await chosen(), 'view');
   assert.equal(await pop.locator('.url').inputValue(), '');

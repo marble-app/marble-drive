@@ -38,7 +38,8 @@ const TOKEN = /^[A-Za-z0-9_-]{38}$/;
 /** How many links one browser keeps. A cookie is 4 KB; a token is 38 bytes. */
 const KEPT = 24;
 
-export const RANK = { view: 1, edit: 2, modify: 3 };
+// `drop` reads nothing, so any other link to the same page outranks it.
+export const RANK = { drop: 0, view: 1, edit: 2, modify: 3 };
 
 export function createShares({ dir, cookieName = 'marble_share', days = 30, secureFor = () => false }) {
   const file = path.join(dir, 'shares.json');
