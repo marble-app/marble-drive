@@ -288,14 +288,23 @@
     .marble-margin-card .reply textarea { all: unset; flex: 1; min-width: 0; font-size: 12.5px; line-height: 18px; padding: 2px 0; color: var(--b-ink); white-space: pre-wrap; overflow-wrap: anywhere;
       field-sizing: content; min-height: 22px; max-height: 30vh; overflow-y: auto; }
     .marble-margin-card .reply textarea::placeholder { color: var(--b-faint); }
-    .marble-margin-card .reply button { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--b-ink); color: var(--b-card); }
-    .marble-margin-card .reply button[aria-disabled="true"] { opacity: .3; cursor: default; }
-    .marble-margin-card .reply svg { width: 13px; height: 13px; }
+    /* Send, wherever a reply is written in Marks (a card, a comment at full
+       size, a build's status): the round arrow on the accent, its own size,
+       in the box's corner. Weighted over the sidebar's own rules for its
+       buttons, which would stretch or strip it. */
+    :is(.marble-margin, .marble-history) .marble-build-write .act { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 4px 6px 6px 10px; }
+    :is(.marble-margin, .marble-history) .marble-build-write .marble-build-send { all: unset; box-sizing: border-box; flex: none; display: grid; place-items: center;
+      width: 26px; height: 26px; border-radius: 50%; cursor: pointer; background: var(--b-mark); color: var(--b-card); }
+    :is(.marble-margin, .marble-history) .marble-build-write .marble-build-send:hover { background: color-mix(in srgb, var(--b-mark) 86%, var(--b-ink)); }
+    :is(.marble-margin, .marble-history) .marble-build-write .marble-build-send:focus-visible { outline: 2px solid var(--b-mark); outline-offset: 2px; }
+    :is(.marble-margin, .marble-history) .marble-build-write .marble-build-send[aria-disabled="true"] { opacity: .35; cursor: default; }
+    :is(.marble-margin, .marble-history) .marble-build-write .marble-build-send svg { width: 14px; height: 14px; }
 
     /* A hand: words to type at 16px, under which iOS zooms the page in on
        focus and never zooms back out, and controls a fingertip can land on.
        The head has the room for 44px; in a card, 40px keeps a row a row. */
     @media (pointer: coarse) {
+      :is(.marble-margin, .marble-history) .marble-build-write .marble-build-send { width: 40px; height: 40px; }
       .marble-margin-card .words[contenteditable], .marble-margin-card .reply textarea { font-size: 16px; line-height: 1.4; }
       .marble-margin .add, .marble-margin .tray, .marble-margin .back, .marble-margin .gone { height: 44px; font-size: 14px; }
       .marble-margin .mh .arc, .marble-margin .mh .icon, .marble-margin .shut { width: 44px; height: 44px; }

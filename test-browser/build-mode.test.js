@@ -840,6 +840,9 @@ test('a long comment opens on its latest line, folds what was pasted, and reads 
   assert.equal(await margin(page).getAttribute('data-view'), 'thread');
   assert.match(await margin(page).locator('.mh .ft').textContent(), /^Comment \d+ · on /);
   await full.locator('.ff .marble-build-write').waitFor();
+  // Its Send is the small round arrow in the box's corner, not a bar.
+  const send = await full.locator('.ff .marble-build-send').boundingBox();
+  assert.ok(send.width <= 30 && send.height <= 30 && send.width >= 22, `Send: ${JSON.stringify(send)}`);
   await page.waitForTimeout(200);
   const atEnd = await full.locator('.fl').evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight);
   assert.ok(atEnd < 4, `the full view opens on the latest line: ${atEnd}`);
