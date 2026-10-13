@@ -31,7 +31,7 @@ const near = (index, id) => {
 };
 
 /** One mark, in words. */
-export function phraseOf(mark, { index = null, piece = null, imagePath = null } = {}) {
+export function phraseOf(mark, { index = null, piece = null, imagePath = null, shot = null } = {}) {
   const on = mark.anchorId ? `#${mark.anchorId}${near(index, mark.anchorId)}` : 'the page';
   if (mark.type === 'note') {
     const also = (mark.ids ?? []).filter((id) => id !== mark.anchorId);
@@ -53,9 +53,13 @@ export function phraseOf(mark, { index = null, piece = null, imagePath = null } 
     return parts.join('\n');
   }
   if (mark.type === 'stroke') {
-    if (mark.kind === 'box') return `A box sketched around ${names(mark.ids)}`;
-    if (mark.kind === 'arrow') return `An arrow sketched from ${mark.from ? `#${mark.from}` : 'nothing'} to ${mark.to ? `#${mark.to}` : 'nothing'}`;
-    return `Ink sketched over ${names(mark.ids)}`;
+    const head = mark.kind === 'box' ? `A box sketched around ${names(mark.ids)}`
+      : mark.kind === 'arrow' ? `An arrow sketched from ${mark.from ? `#${mark.from}` : 'nothing'} to ${mark.to ? `#${mark.to}` : 'nothing'}`
+      : `Ink sketched over ${names(mark.ids)}`;
+    // A photograph of it drawn over the app (shots.js): what was drawn, which
+    // words cannot say, and often an interface drawn by hand.
+    const file = shot ? imagePath?.(shot) : null;
+    return file ? `${head}\n   A picture of it, drawn in red over the app where it was made (open it with Read to see what was drawn; it may be an interface sketched by hand, to be built as drawn):\n   - ${file}` : head;
   }
   if (mark.type === 'move') {
     const what = mark.from ? `#${mark.from}${near(index, mark.from)}` : 'a part';
@@ -93,7 +97,7 @@ export function phraseOf(mark, { index = null, piece = null, imagePath = null } 
  * @param {boolean} [input.empty]   the app has nothing in it yet
  * @param {boolean} [input.untitled] the app still has its placeholder name
  */
-export function buildBrief({ path, n, marks, context = [], pieces = new Map(), index = null, empty = false, untitled = false, imagePath = null }) {
+export function buildBrief({ path, n, marks, context = [], pieces = new Map(), index = null, empty = false, untitled = false, imagePath = null, shots = new Map() }) {
   const lines = [];
   lines.push(
     empty
@@ -104,7 +108,7 @@ export function buildBrief({ path, n, marks, context = [], pieces = new Map(), i
     '',
   );
   marks.forEach((mark, i) => {
-    lines.push(`${i + 1}. ${phraseOf(mark, { index, imagePath, piece: mark.type === 'piece' ? pieces.get(mark.piece?.id) : null })}`);
+    lines.push(`${i + 1}. ${phraseOf(mark, { index, imagePath, shot: shots.get(mark.id) ?? null, piece: mark.type === 'piece' ? pieces.get(mark.piece?.id) : null })}`);
   });
   if (context.length) {
     lines.push('', 'Also on the app, waiting for a later build (do not act on these unless a mark above needs them):');

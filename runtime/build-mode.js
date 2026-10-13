@@ -1363,6 +1363,11 @@
         scope: whole ? 'page' : null,
         from: 'comment',
         label: 'Comment, or ask for a change',
+        // Beside its pin, where the hand is, not under the part it is on.
+        at: () => {
+          const r = M.elementOf(id)?.getBoundingClientRect();
+          return r?.width ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } : null;
+        },
         // On parts picked with Select, it can also keep them as a piece.
         more: mark.ids?.length ? [{
           name: 'Save as piece',

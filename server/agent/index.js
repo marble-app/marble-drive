@@ -20,6 +20,7 @@ import { createAgentRoutes } from './routes.js';
 import { createClaudeSignIn } from './claude-signin.js';
 import { nameConversation } from './namer.js';
 import { drawWithCli } from './drawer.js';
+import { shootSketches } from '../build/shots.js';
 import { writeOffer } from './offer.js';
 import { readIntent } from '../change/intent.js';
 import { createRunner } from './runner.js';
@@ -341,6 +342,8 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     reply: config.agentNaming ? (input) => writeReply({ ...input, model: /claude|opus|sonnet|haiku|fable/i.test(input.model ?? '') ? input.model : config.agentNamingModel, log }) : null,
     suggest: config.agentNaming ? (input) => suggestPieces({ ...input, model: config.agentNamingModel, log }) : null,
     driveRegions: createDriveIndex({ store }),
+    // A build's sketches, photographed over the app for its brief.
+    shoot: config.buildSketchShots ? (input) => shootSketches({ ...input, origin: origin(), cookie: browserPass?.() ?? null, log }) : null,
     // An ended build's summary is drawn once, by the drawer's skill, with a
     // larger model and longer to answer than a running drawing gets.
     drawSummary: drawSummary ?? (config.agentDrawing ? (input) => drawWithCli({ ...input, model: config.agentSummaryModel, timeout: 120_000, log }) : null),

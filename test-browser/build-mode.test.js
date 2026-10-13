@@ -405,8 +405,13 @@ test('a comment (C) is written in the ⌘J line itself; ⏎ sends it, and a chan
   // caret in it and the actions under the words.
   const line = page.locator('.marble-line:not([hidden])');
   await line.waitFor();
-  const w = (await line.boundingBox()).width;
+  const lb = await line.boundingBox();
+  const w = lb.width;
   assert.ok(w <= 441, `the line is short: ${w}`);
+  // Beside the pin that was dropped, where the hand is, not under the part.
+  const pin = await page.locator('.marble-marks-comment[aria-expanded="true"], .marble-marks-pin[aria-expanded="true"]').first().boundingBox().catch(() => null);
+  const at = { x: r.x + 60, y: r.y + 30 };
+  assert.ok(Math.abs(lb.y - (pin?.y ?? at.y)) < 40 && Math.abs(lb.x - (pin ? pin.x + pin.width : at.x)) < 60, `at the pin: ${JSON.stringify({ lb, pin, at })}`);
   assert.equal(await line.locator('.marble-line-input').getAttribute('data-placeholder'), 'Comment, or ask for a change');
   await line.locator('.marble-line-chip[data-act]').first().waitFor();
   assert.ok(await line.locator('.marble-line-chip[data-act]').count() >= 4, 'the same actions as ⌘J');

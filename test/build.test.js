@@ -12,6 +12,7 @@ import { linesOf, partNow, stepOf } from '../server/build/steps.js';
 import { timelineOf } from '../server/build/history.js';
 import { aboutBuild, questionsOf, summaryPrompt, wordsOf } from '../server/build/summary.js';
 import { askOf } from '../server/agent/drawer.js';
+import { shootSketches } from '../server/build/shots.js';
 
 const ROOT = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-build-'));
 const WORK = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-build-work-'));
@@ -607,4 +608,16 @@ test('the answer to what is said to a build reads the build, not an element', ()
   assert.match(prompt, /said about one of its builds/);
   assert.doesNotMatch(prompt, /pinned to this element/);
   assert.match(replyPrompt({ title: 'Plan', html: '<p>x</p>', thread: [] }), /pinned to this element/);
+});
+
+test('a sketch is photographed over the app for the build, and the brief hands it over to Read', async () => {
+  const stroke = { id: 'sk1', type: 'stroke', kind: 'box', anchorId: 'w', ids: ['w'], parts: [{ pairs: [[0.05, 0.1], [0.95, 0.1], [0.95, 0.9], [0.05, 0.9], [0.05, 0.1]] }] };
+  const shots = await shootSketches({ origin: base, docPath: 'Calendar', marks: [stroke, note('n1', 'words')], log: quiet });
+  assert.deepEqual([...shots.keys()], ['sk1'], 'only the sketch');
+  const png = shots.get('sk1');
+  assert.equal(png.subarray(1, 4).toString(), 'PNG');
+  assert.ok(png.length > 2_000, `a real picture: ${png.length} bytes`);
+  const said = phraseOf(stroke, { imagePath: (name) => `/images/${name}`, shot: 'abc.png' });
+  assert.match(said, /^A box sketched around #w\n   A picture of it, drawn in red over the app .*Read.*\n   - \/images\/abc\.png$/s);
+  assert.equal(phraseOf(stroke, {}), 'A box sketched around #w', 'without a picture, the words alone');
 });

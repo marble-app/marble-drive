@@ -249,6 +249,9 @@ export function loadConfig(env = process.env) {
     // Which model draws a build's summary when it ends (server/build/summary.js):
     // once per build, read in full, so a larger one than the running drawings.
     agentSummaryModel: str('MARBLE_DRIVE_AGENT_SUMMARY_MODEL', 'sonnet'),
+    // Whether a build photographs the sketches it takes over the app, in a
+    // headless Chromium, for its brief (server/build/shots.js).
+    buildSketchShots: bool('MARBLE_DRIVE_BUILD_SKETCH_SHOTS', true),
     agentStallMinutes: num('MARBLE_DRIVE_AGENT_STALL_MINUTES', 30),
     // 0 is no cap: every conversation the person has started runs at once.
     agentMaxRunning: num('MARBLE_DRIVE_AGENT_MAX_RUNNING', 0),
