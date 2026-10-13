@@ -225,8 +225,9 @@
     ['view', 'Read only', 'Sees the page and its changes as they happen'],
     ['edit', 'Read &amp; write', 'Also types, ticks and adds where the page allows'],
     ['modify', 'Read, write &amp; modify', 'Also rewrites and restyles anything but its code'],
+    ['drop', 'Add only', 'Adds where the page allows, but can’t open it or see what others added'],
   ];
-  const LEVEL_NAME = { view: 'Read only', edit: 'Read & write', modify: 'Read, write & modify' };
+  const LEVEL_NAME = { view: 'Read only', edit: 'Read & write', modify: 'Read, write & modify', drop: 'Add only' };
   /** "just now", "at 10:41 AM" today, "yesterday", "Sep 28" this year, then with the year. */
   const when = (iso) => {
     const at = new Date(iso);

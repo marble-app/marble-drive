@@ -1,18 +1,19 @@
 # Sharing a page
 
 The passphrase opens the whole drive: every page, the agents, the shell. A
-share link opens one page, at one of three levels, for someone who does not
+share link opens one page, at one of four levels, for someone who does not
 have the passphrase. The owner makes and turns off links from **Share** in the
 bar (`runtime/shell.js`, below); the host keeps them in `server/shares.js` and judges
 every change a link files in `server/share-policy.js`.
 
-## The three levels
+## The levels
 
 | Level | Can | Cannot |
 |---|---|---|
 | **Read only** (`view`) | open the page, see every change as it happens, and look around it: step, switch tabs, open notes (below) | file any change, not even an id |
 | **Read & write** (`edit`) | change what the page offers to change: anything under an element with an affordance marker (`data-marble-editable`, `-rich`, `-add`, `-sortable`, `-removable`, `-toggle`, `-choose` …; the list is `MARKERS`, and a test fails when Marble's affordances or a starter wire one it lacks), and the element a control points at with `data-marble-of` | change anything else, or add a `<style>` |
 | **Read, write & modify** (`modify`) | change any part of the page: rewrite, add or remove sections, restructure, restyle | touch the page's code |
+| **Add only** (`drop`) | add an element to the end of a part of the page made for adding to (the same `MARKERS` test as Read & write), with the same markup rules as Read & write; it hears only `{ ok, applied }` back | open the page, hear it, read its blobs, insert anywhere but the end, or change or remove anything already there. Opened in a browser, it shows a page saying what the link is. For collecting from people who must not see what others sent (a skill's reports, sign-ups) |
 
 In the page, an edit link types only where the page is written into, as the
 owner does out of build mode (`runtime/writing.js`): text marked
@@ -99,7 +100,7 @@ How it settles the questions the design left open:
 
 **Share** in the bar opens one panel for the page you are on:
 
-- Three levels as a radio group, Read only chosen to begin with. A level whose
+- Four levels as a radio group, Read only chosen to begin with. A level whose
   link is out says **Link on** on its row. Opening the panel on a page that
   already has a link out chooses the newest one, ready to copy again.
 - One **Copy link** for the chosen level. The first press makes the link and

@@ -913,6 +913,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         const grants = await shares.visitor(req);
         const asked = grants ? await visitorMay(req, url, route, grants) : null;
         if (asked?.redirect) return send(res, 302, '', { Location: asked.redirect });
+        if (asked?.addOnly && (req.headers.accept ?? '').includes('text/html')) return addOnlyPage(res);
         if (!asked?.ok) {
           // Someone whose every link has been turned off is told that, not
           // shown a passphrase form they were never given.
@@ -1118,6 +1119,8 @@ export async function createDrive(config, { log = console, agentProviders = null
         // and the agent — never for whoever filed it.
         const result = await writeOps(docPath, ops, { client, prepare });
         if (result.refused) return json(res, 403, { error: result.refused });
+        // An add-only link hears that it landed, and nothing about the page.
+        if (visit?.role === 'drop') return json(res, 200, { ok: true, applied: result.applied });
         return json(res, 200, { ok: true, ...result });
       }
 
@@ -1678,6 +1681,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     if (route.startsWith('/a/') && method === 'GET') {
       const docPath = named(decodeURIComponent(route.slice(3)));
       const grant = docPath && grantFor(docPath);
+      if (grant?.role === 'drop') return { addOnly: true, error: 'This link can only add to the page' };
       if (grant) return { ok: true, grant };
       // A page that moved after the link was opened: the link moved with it.
       const went = docPath && (await moves.resolve(docPath));
@@ -1687,6 +1691,12 @@ export async function createDrive(config, { log = console, agentProviders = null
 
     const docPath = named(url.searchParams.get('app'));
     const grant = docPath && grantFor(docPath);
+    // An add-only link files ops and nothing else: no page, no stream, no
+    // presence, no blobs. What others added stays the owner's to read.
+    if (grant?.role === 'drop') {
+      if (route === '/ops' && method === 'POST') return { ok: true, grant };
+      return { error: 'This link can only add to the page' };
+    }
     if (route === '/events' && grant && !url.searchParams.get('drive')) return { ok: true, grant };
     if (route === '/presence' && grant && (method === 'GET' || method === 'POST')) return { ok: true, grant };
     if (route === '/ops' && grant && method === 'POST') {
@@ -1697,7 +1707,8 @@ export async function createDrive(config, { log = console, agentProviders = null
     if (route.startsWith('/blob/') && method === 'GET') {
       const hash = route.slice('/blob/'.length);
       if (!/^[0-9a-f]{64}$/.test(hash)) return null;
-      for (const [path] of grants) {
+      for (const [path, { role }] of grants) {
+        if (role === 'drop') continue;
         if (((await store.read(path)) ?? '').includes(hash)) return { ok: true, grant: grantFor(path) };
       }
       return null;
@@ -1723,12 +1734,22 @@ export async function createDrive(config, { log = console, agentProviders = null
   /** The page for a link that opens nothing: it says so, and nothing about
    *  what the link was for or whose drive this is. */
   function linkIsOff(res) {
-    return html(res, 404, `<!doctype html><meta charset="utf-8">
+    return plainPage(res, 404, 'This link doesn’t open anything. Whoever shared it may have turned it off.');
+  }
+
+  /** The page for an add-only link opened in a browser: it sends things to
+   *  the page, and never shows it. */
+  function addOnlyPage(res) {
+    return plainPage(res, 403, 'This link sends things to a page. It can’t open the page or show what anyone else sent.');
+  }
+
+  function plainPage(res, status, words) {
+    return html(res, status, `<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
 <link rel="icon" href="${iconUri('drive')}">
 <style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;padding:0 24px;background:#fafaf7;color:#111111}p{color:#5a5a5a;margin:0}
 @media (prefers-color-scheme: dark){body{background:#161616;color:#ededed}p{color:#a3a3a3}}</style>
-<p>This link doesn’t open anything. Whoever shared it may have turned it off.</p>`, { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+<p>${escapeHtml(words)}</p>`, { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
   }
 
   function gateRoute(req, res, url) {

@@ -9,6 +9,13 @@
 //           element that carries an affordance marker, and nowhere else.
 //   modify  changes the page itself: any element, any structure, its look.
 //
+// And one that reads nothing, for collecting from people who should not see
+// what others sent:
+//
+//   drop    adds an element to the end of a part of the page made for adding
+//           to, and does nothing else. It cannot open the page, hear it, read
+//           its blobs, or change or take away anything already there.
+//
 // Under all three, the page's code stays its owner's. A document's scripts run
 // with whatever the person reading it can do, and the owner reads it with the
 // whole drive in hand — agents that run commands, every other page. So no op
@@ -26,7 +33,7 @@
 
 import { applyOp, indexIds, parseSource } from './engine.js';
 
-export const ROLES = ['view', 'edit', 'modify'];
+export const ROLES = ['view', 'edit', 'modify', 'drop'];
 
 /** Every marker an affordance in lib/affordances.js answers to, and the ones
  *  a starter wires itself: a note's and a doc's rich text, a paper's source.
@@ -76,6 +83,7 @@ const ID_VALUE = /^[A-Za-z0-9_-]{1,64}$/;
 // terms of the page, not of ops.
 export const SAYS = {
   read: 'This link can only read the page',
+  add: 'This link can only add to the page',
   code: 'The page’s code stays with its owner',
   region: 'This link can change only the parts of the page made for editing',
   style: 'Restyling the page needs a link that can modify it',
@@ -279,7 +287,7 @@ export function markupRefusal(html, role, ids = new Set()) {
       const why = attrRefusal(name, value);
       if (why) return why;
     }
-    if (role === 'edit' && tag.name === 'style') return SAYS.style;
+    if ((role === 'edit' || role === 'drop') && tag.name === 'style') return SAYS.style;
     if (tag.closing) {
       // An end tag closes only what this markup opened, never the elements
       // around the place it lands.
@@ -304,6 +312,10 @@ function opRefusal(tree, op, role) {
   if (op.id && !node && op.type !== 'assignId') return null;
   if (op.parentId && !parent) return null;
   const ids = new Set(byId.keys());
+  // Adding to the end and nothing else: no op that changes what is there, and
+  // no `beforeId`, which would let a link that cannot read the page ask
+  // whether an element is in it.
+  if (role === 'drop' && (op.type !== 'insert' || op.beforeId != null)) return SAYS.add;
 
   switch (op.type) {
     case 'assignId':
@@ -327,7 +339,7 @@ function opRefusal(tree, op, role) {
 
     case 'insert':
       if (BLOCKED_TAGS.has(tagOf(parent))) return SAYS.code;
-      if (role === 'edit' && !invites(parent)) return SAYS.region;
+      if ((role === 'edit' || role === 'drop') && !invites(parent)) return SAYS.region;
       return markupRefusal(op.html ?? '', role, ids);
 
     case 'remove':

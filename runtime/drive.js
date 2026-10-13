@@ -273,8 +273,8 @@
     const restore = (id, to = null) => ask('/drive/untrash', { method: 'POST', body: { id, to } });
     const weigh = (path) => ask(`/drive/weigh?path=${encodeURIComponent(path)}`);
 
-    // Share links: one document each, at a level — 'view', 'edit' or
-    // 'modify' (server/shares.js). `make` hands back the link that is on at
+    // Share links: one document each, at a level — 'view', 'edit', 'modify'
+    // or 'drop' (server/shares.js). `make` hands back the link that is on at
     // that level, or a new one; `off` stops one opening anything.
     const shares = {
       list: (path) => ask(`/drive/shares?path=${encodeURIComponent(path)}`),
