@@ -215,3 +215,76 @@ test('a held finger on a row opens its menu under the row, once, and the next pr
     .querySelector('.nav .scroll button.row[data-folder="Research"]')?.getAttribute('aria-expanded') !== before, was);
   await page.context().close();
 });
+
+test('on a touch screen the tree and the chat put away from their buttons, come back from their edge, and go at the next press', async () => {
+  const { page, shell } = await visit('garden', TABLET);
+  await shell.locator('.pill').tap();
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-open'));
+  await page.waitForTimeout(450);
+  const attrs = () => shell.evaluate((el) => ({ nav: el.dataset.nav, chat: el.dataset.chat, hideNav: el.hasAttribute('data-hide-nav'), hideChat: el.hasAttribute('data-hide-chat') }));
+  const left = () => page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).marginLeft) || 0);
+  const navShown = () => shell.evaluate((el) => getComputedStyle(el.shadowRoot.querySelector('.nav')).visibility === 'visible' && el.shadowRoot.querySelector('.nav').getBoundingClientRect().right > 0);
+  assert.equal((await attrs()).nav, 'pin');
+  assert.ok(await left() > 100, 'the pinned tree does not take a column');
+
+  // The tree's button puts it away, and the page takes its column back.
+  const navButton = shell.locator('.bar [data-act="nav"]');
+  assert.equal(await navButton.getAttribute('aria-label'), 'Hide the tree');
+  await navButton.tap();
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+  await page.waitForTimeout(450);
+  assert.equal(await navShown(), false, 'the tree is still out');
+  assert.ok(await left() < 1, 'the page did not take the tree\'s column back');
+  assert.equal(await navButton.getAttribute('aria-label'), 'Show the tree');
+
+  // The mark at the edge brings it out over the page; a press on the page sends it back.
+  await shell.locator('.hint[data-side="nav"]').tap();
+  await page.waitForTimeout(450);
+  assert.equal((await attrs()).hideNav, false);
+  assert.equal(await navShown(), true, 'the edge did not bring the tree out');
+  await page.touchscreen.tap(TABLET.width / 2, TABLET.height / 2);
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+  await navButton.tap();
+  await page.waitForFunction(() => document.querySelector('marble-shell').dataset.nav === 'pin');
+
+  // The chat's own close button puts it away too.
+  const drawer = page.locator('marble-agent-drawer');
+  await drawer.locator('.panel .close').first().tap();
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-chat'));
+  assert.equal(await shell.locator('.bar [data-act="chat"]').getAttribute('aria-label'), 'Show the chat');
+  await shell.locator('.hint[data-side="chat"]').tap();
+  await page.waitForFunction(() => !document.querySelector('marble-shell').hasAttribute('data-hide-chat'));
+  await shell.locator('.bar [data-act="chat"]').tap();
+  await page.waitForFunction(() => document.querySelector('marble-shell').dataset.chat === 'pin');
+  assert.equal(await noSideways(page), true);
+  await page.context().close();
+});
+
+test('on a tablet held upright the chat keeps its column and the tree waits at its edge, so the page keeps its room', async () => {
+  const UPRIGHT = { width: 820, height: 1180 };
+  const { page, shell } = await visit('garden', UPRIGHT);
+  await shell.locator('.pill').tap();
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-open'));
+  await page.waitForTimeout(450);
+  const room = () => page.evaluate(() => {
+    const s = getComputedStyle(document.documentElement);
+    return innerWidth - (parseFloat(s.marginLeft) || 0) - (parseFloat(s.marginRight) || 0);
+  });
+  assert.equal(await shell.evaluate((el) => el.dataset.nav), 'hover', 'the tree took a column it had no room for');
+  assert.ok(await room() >= 360, `the page is left ${await room()}px`);
+  // Opening shows it once, and the first press on the page puts it away.
+  await page.touchscreen.tap(UPRIGHT.width * 0.45, UPRIGHT.height / 2);
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+  const navButton = shell.locator('.bar [data-act="nav"]');
+  assert.equal(await navButton.getAttribute('aria-label'), 'Show the tree');
+  await navButton.tap();
+  await page.waitForFunction(() => !document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+  assert.equal(await navButton.getAttribute('aria-label'), 'Hide the tree');
+  await page.touchscreen.tap(UPRIGHT.width * 0.45, UPRIGHT.height / 2);
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+  // With the chat put away there is room again, and the tree takes its column back.
+  await shell.locator('.bar [data-act="chat"]').tap();
+  await page.waitForFunction(() => document.querySelector('marble-shell').dataset.nav === 'pin');
+  assert.ok(await room() >= 360);
+  await page.context().close();
+});

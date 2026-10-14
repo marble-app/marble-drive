@@ -121,6 +121,12 @@ __ICON__
     display: flex; align-items: center; gap: .25rem;
     height: calc(var(--bar) + env(safe-area-inset-top, 0px)); padding: env(safe-area-inset-top, 0px) .6rem 0 1rem;
   }
+  /* On a touch screen wide enough for the drive's frame, the drive keeps a
+     button in the top-left corner (--marble-shell-corner-w, published by
+     runtime/shell.js). The sidebar's head starts past it, and so does the
+     bar once the sidebar is shut and the bar is in the corner. */
+  .side-head { padding-left: max(1rem, var(--marble-shell-corner-w, 0px)); height: max(calc(var(--bar) + env(safe-area-inset-top, 0px)), var(--marble-shell-corner-h, 0px)); }
+  body[data-side="closed"] .bar { padding-left: max(.6rem, var(--marble-shell-corner-w, 0px)); }
   .side-head .name {
     flex: 1; min-width: 0; margin: 0; padding: 0 .2rem; font-size: 1.05rem; font-weight: 600;
     letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -272,6 +278,14 @@ __ICON__
   }
   .idea:hover { background: var(--paper-2); color: var(--ink); }
   .idea:active { background: var(--paper-3); }
+  /* Without hover the library leaves each suggestion's × out in the gutter
+     to its left, where in a wrapped row it reads as the chip before's. Here
+     it sits on its own chip's corner instead, a small disc on the edge. */
+  @media (hover: none) {
+    .ideas .marble-grip { left: auto; right: -.55rem; top: -.55rem; opacity: 1; z-index: 1; }
+    .ideas .marble-remove { width: 22px; height: 22px; line-height: 20px; font-size: 13px; opacity: 1; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 50%; position: relative; }
+    .ideas .marble-remove::after { content: ''; position: absolute; inset: -11px; }
+  }
   body.marble-fresh .dock { position: static; }
   body.marble-fresh .dock::before { display: none; }
 

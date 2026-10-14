@@ -114,6 +114,8 @@ __ICON__
     grid-row: 1; grid-column: 1 / -1;
     display: flex; align-items: center; gap: .75rem; flex: 0 0 auto; flex-wrap: wrap;
     padding: .55rem 1rem; border-bottom: 1px solid var(--line);
+    /* Past the drive's button, where a touch screen keeps it in the corner. */
+    padding-left: max(1rem, var(--marble-shell-corner-w, 0px));
     background: rgba(var(--paper-rgb), .78); backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     /* Above the resize seams (6) and row menus (8, 9) that would otherwise
