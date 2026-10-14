@@ -307,6 +307,9 @@ __ICON__
   /* Clear of a phone's notch and rounded corners when the page reaches under
      them (a home-screen app, a phone on its side); 14px everywhere else. */
   .head { left: max(14px, env(safe-area-inset-left)); top: max(14px, env(safe-area-inset-top)); padding: 4px 4px 4px 14px; gap: 4px; max-width: calc(100% - 28px); }
+  /* A touch screen keeps the drive's button in the top-left corner
+     (--marble-shell-corner-h, runtime/shell.js); the title card sits under it. */
+  .head { top: max(14px, env(safe-area-inset-top), calc(var(--marble-shell-corner-h, 0px) + 8px)); }
   .head .name {
     margin: 0 6px 0 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; max-width: 16rem; padding: 2px 4px; border-radius: 6px; cursor: text;

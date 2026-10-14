@@ -299,3 +299,26 @@ test('drawer: on a phone the corner button steps aside while the page has a menu
   assert.equal(await tray(), 'hidden');
   assert.deepEqual(errors, []);
 });
+
+test('Chat on a tablet: the drive\'s corner button covers nothing of the sidebar, open or shut', async () => {
+  await host.reset();
+  const { page, errors } = await host.newPage({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true });
+  await page.goto(`${host.base}/a/Chat`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent) && getComputedStyle(document.documentElement).getPropertyValue('--marble-shell-corner-w'));
+  const covered = () => page.evaluate(() => [...document.querySelectorAll('.side-head *, .bar button, .find input')]
+    .filter((el) => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
+    .filter((el) => {
+      const r = el.getBoundingClientRect();
+      return [[r.left + 2, r.top + 2], [r.left + r.width / 2, r.top + r.height / 2]].some(([x, y]) => document.elementFromPoint(x, y)?.localName === 'marble-shell');
+    })
+    .map((el) => el.getAttribute('aria-label') || el.className || el.textContent.trim()));
+  assert.deepEqual(await covered(), [], 'the corner button sits on the sidebar');
+  await page.locator('.side-toggle').tap();
+  await page.waitForFunction(() => document.body.dataset.side === 'closed');
+  await page.waitForTimeout(400);
+  assert.deepEqual(await covered(), [], 'the corner button sits on the bar with the sidebar shut');
+  await page.locator('.side-toggle').tap();
+  await page.waitForFunction(() => document.body.dataset.side !== 'closed');
+  assert.deepEqual(errors, []);
+  await page.close();
+});

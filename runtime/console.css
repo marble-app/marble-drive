@@ -90,6 +90,8 @@ html[data-marble-keyboard] .cx { top: var(--vv-top, 0px); bottom: auto; height: 
   gap: .75rem;
   padding: 0 max(1rem, env(safe-area-inset-right)) 0 max(1rem, env(safe-area-inset-left));
   padding-top: env(safe-area-inset-top);
+  /* Past the drive's button, where a touch screen keeps it in the corner (runtime/shell.js). */
+  padding-left: max(1rem, env(safe-area-inset-left), var(--marble-shell-corner-w, 0px));
   background: color-mix(in srgb, var(--paper) 78%, transparent);
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);

@@ -807,6 +807,9 @@
       .sec-h { min-height: 44px; margin-top: 4px; }
       .sec-fold { align-self: stretch; padding: 0 8px 0 4px; }
       .sec-act, .sec-grip { width: 44px; height: 44px; }
+      /* The mark at an edge where a side waits is what a finger brings it
+         back with, so it reaches well past its 4px. */
+      .hint::before { content: ''; position: absolute; inset: -10px -18px; }
 
       /* Holding a row opens its menu (bindRows); the hold must not also
          start selecting its words. Text you can type in stays selectable. */
@@ -1048,8 +1051,9 @@
       this.mePop = this.$('.mepop');
       this.newButton = this.$('.bar .new');
       this.phone = matchMedia(PHONE);
-      // A pointer that can hover is what reaching for a side is for; on a
-      // touch screen every side simply stays pinned.
+      // A pointer that can hover reaches for a side; a finger can't, so on
+      // a touch screen a side put away comes back from the mark at its edge,
+      // or its button, and goes again at the next press on the page.
       this.fine = matchMedia('(hover: hover) and (pointer: fine)');
       // No hover at all: the pill stays out at rest instead of rising.
       this.handOnly = matchMedia('(hover: none)');
@@ -1105,14 +1109,21 @@
       return this.state.open || this.home;
     }
 
-    /** A side on hover, with a pointer that can reach: it hides until wanted. */
+    /** A side on hover: it hides until wanted. */
     hovers(side) {
       const pinned = side === 'nav' ? this.state.pinNav : this.state.pinChat;
-      return this.isOpen && !pinned && this.fine.matches && !this.phone.matches;
+      return this.isOpen && !this.phone.matches && (!pinned || (side === 'nav' && this.cramped()));
     }
 
-    /** Whether a side takes a column of its own: pinned, or on a screen with
-     *  no pointer to reach for it with. */
+    /** Too narrow for the tree and the chat both to take a column and leave
+     *  the page its room (a tablet held upright): the tree waits at its
+     *  edge, as if on hover, until the chat is put away or the window widens. */
+    cramped() {
+      if (!this.state.pinChat || !this.drawer) return false;
+      return innerWidth - (this.drawer.width || 0) - NAV_MIN < PAGE_MIN;
+    }
+
+    /** Whether a side takes a column of its own. */
     docked(side) {
       return !this.hovers(side);
     }
@@ -1195,7 +1206,7 @@
 
       this.bar.addEventListener('click', (event) => {
         const act = event.target.closest('[data-act]')?.dataset.act;
-        if (act === 'nav') this.pin('nav', !this.state.pinNav);
+        if (act === 'nav') this.toggleNav();
         // In Build mode the chat is one of the sidebar's views, beside Marks,
         // Pieces and History: its button shows it there, or puts it away.
         else if (act === 'chat' && this.chatInBar && this.drawer?.toggleView) this.drawer.toggleView('chat');
@@ -1416,8 +1427,10 @@
       addEventListener('resize', this.onWindowResize);
       this.bindEdge();
       this.bindReach();
+      // A finger has no hover to keep a side out with, so one it brings out
+      // stays until the next press on the page.
       for (const hint of this.shadowRoot.querySelectorAll('.hint')) {
-        hint.addEventListener('click', () => this.reveal(hint.dataset.side, { focus: hint.dataset.side === 'chat' }));
+        hint.addEventListener('click', () => this.reveal(hint.dataset.side, { focus: hint.dataset.side === 'chat', hold: !this.fine.matches }));
       }
 
       this.setAttribute('data-still', '');
@@ -1483,6 +1496,14 @@
       this.quiet[side] = !pinned;
       if (!pinned && side === 'nav' && this.nav.contains(this.shadowRoot.activeElement)) this.shadowRoot.activeElement.blur();
       this.set({ [key]: pinned });
+    }
+
+    /** The tree's button: pin it or let it go to its edge; or, squeezed out
+     *  by the chat, bring it out over the page and put it away. */
+    toggleNav() {
+      if (!this.state.pinNav || !this.cramped()) this.pin('nav', !this.state.pinNav);
+      else if (this.shown.nav) this.conceal('nav');
+      else this.reveal('nav', { hold: true });
     }
 
     setOpen(open) {
@@ -1634,6 +1655,8 @@
     bindReach() {
       let queued = 0;
       this.onPointer = (event) => {
+        // A finger dragging the page is not a hand reaching for an edge.
+        if (event.pointerType === 'touch') return;
         this.pointer = { x: event.clientX, y: event.clientY };
         if (!queued) queued = requestAnimationFrame(() => { queued = 0; this.settle(); });
       };
@@ -1697,9 +1720,14 @@
       this.dataset.nav = this.docked('nav') ? 'pin' : 'hover';
       this.dataset.chat = this.docked('chat') ? 'pin' : 'hover';
       const navButton = this.$('[data-act="nav"]');
-      navButton.setAttribute('aria-pressed', String(pinNav));
-      navButton.setAttribute('aria-label', pinNav ? 'Unpin the tree' : 'Pin the tree');
-      navButton.title = `${pinNav ? 'Unpin the tree: it waits at the edge' : 'Pin the tree'} (⌘⇧\\)`;
+      // With no hover, unpinned is put away: the buttons say so.
+      const hand = !this.fine.matches;
+      // Squeezed out by the chat, the tree's button shows it and puts it away.
+      const squeezed = pinNav && this.cramped();
+      const navOut = squeezed ? this.shown.nav : pinNav;
+      navButton.setAttribute('aria-pressed', String(navOut));
+      navButton.setAttribute('aria-label', hand || squeezed ? (navOut ? 'Hide the tree' : 'Show the tree') : pinNav ? 'Unpin the tree' : 'Pin the tree');
+      navButton.title = `${squeezed ? (navOut ? 'Hide the tree' : 'Show the tree') : pinNav ? 'Unpin the tree: it waits at the edge' : 'Pin the tree'} (⌘⇧\\)`;
       const chatButton = this.$('[data-act="chat"]');
       chatButton.hidden = !this.drawer;
       chatButton.setAttribute('aria-pressed', String(pinChat));
@@ -1709,7 +1737,7 @@
         chatButton.setAttribute('aria-label', 'Chat');
         chatButton.title = 'Chat (⌘⇧J)';
       } else {
-        chatButton.setAttribute('aria-label', pinChat ? 'Unpin the chat' : 'Pin the chat');
+        chatButton.setAttribute('aria-label', hand ? (pinChat ? 'Hide the chat' : 'Show the chat') : pinChat ? 'Unpin the chat' : 'Pin the chat');
         chatButton.title = `${pinChat ? 'Unpin the chat: it waits at the edge' : 'Pin the chat'} (⌘⇧J)`;
       }
       // The launcher in the corner goes while the bar is up to hold the chat.
@@ -2082,7 +2110,7 @@
       } else if (mod && event.shiftKey && (event.key === '\\' || event.key === '|') && this.isOpen) {
         event.preventDefault();
         event.stopPropagation();
-        this.pin('nav', !this.state.pinNav);
+        this.toggleNav();
       } else if (event.key === 'Escape' && this.pops().some((pop) => !pop.hidden)) {
         event.stopPropagation();
         // The form under a template steps back to the list before New closes.
