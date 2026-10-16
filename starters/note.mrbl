@@ -55,6 +55,8 @@ __ICON__
        nothing else (see the rules after this block). */
     --ui: "Note arrows", "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --serif: "Note arrows", ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    /* Code is in the machine's own mono, as the Design System has it. */
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
     --rail: 15.5rem;
     --measure: 34rem;
   }
@@ -376,6 +378,26 @@ __ICON__
   }
   .note a:hover { text-decoration-color: currentColor; }
   .note[data-view] a { cursor: pointer; }
+
+  /* Code is the mono on the shelf colour. A word of it is a tag round those
+     characters; a block of it is a line of its own whose newlines are kept,
+     and it wraps rather than scrolling, so nothing typed in it is out of
+     sight. The language typed after the fence sits small over the code. */
+  .note code {
+    font-family: var(--mono); font-size: .86em;
+    background: var(--paper-2); padding: 1px 4px; border-radius: var(--r-text);
+  }
+  .note > pre {
+    position: relative; margin-top: .85em; padding: .7rem .9rem;
+    font: .86em/1.6 var(--mono); tab-size: 2; overflow-wrap: anywhere;
+    background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+  }
+  .note > pre + * { margin-top: .85em; }
+  .note > pre[data-lang] { padding-top: 1.75rem; }
+  .note > pre[data-lang]::before {
+    content: attr(data-lang); position: absolute; top: .45rem; left: .9rem;
+    font: .72rem/1.4 var(--mono); color: var(--faint); pointer-events: none; user-select: none;
+  }
 
   /* ------------------------------------------------------------- narrow
 
@@ -892,6 +914,8 @@ __ICON__
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+K</b> makes a link of whatever is selected, and an address pasted or typed becomes one by itself. Put the caret in a link to open, change or remove it.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Enter</b> starts a new note. <b>Ctrl+Alt+↑</b> and <b>↓</b> walk to the note above or below. <b>Ctrl+Shift+\</b> folds the list down to each note's initials and brings it back.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Z</b> takes back the last change, whoever made it — you, an agent, or another window.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="number"><b>`</b> round a word makes it code, as does <b>Ctrl+E</b>; <b>```</b> and Enter starts a block of code, with a language after the backticks if you like.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="number">A picture pasted, dropped on the page, or chosen with the picture button goes in under the line you are on. <b>Add caption</b> on a picture writes a numbered figure caption under it, and the × on its corner takes it out.</p>
 <p data-marble-id="__ID__" data-marble-rich>The page is one field rather than a column of boxes, so a drag highlights across paragraphs and <b>Ctrl+A</b> takes the whole note. Paste arrives as plain text, with its line breaks kept and its addresses made links.</p>
     </article>
 
@@ -1049,6 +1073,9 @@ __ICON__
         // HTML runs out of headings at six.
         { key: 'h6', tag: 'h6', mark: 'data-red' },
         { key: 'quote', tag: 'blockquote' },
+        // A block of code keeps its newlines inside one block, so a fence
+        // round twenty lines is one thing to move, copy or take back.
+        { key: 'code', tag: 'pre' },
         { key: 'body', tag: 'p' },
       ];
       const styleNamed = (key) => STYLES.find((s) => s.key === key) ?? STYLES[STYLES.length - 1];
@@ -1061,7 +1088,7 @@ __ICON__
       // A paragraph's style is its tag, so this list is also the list of tags
       // the file is allowed to hold in a note; anything else the browser leaves
       // there is turned into one.
-      const BLOCKS = new Set(['P', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'HR']);
+      const BLOCKS = new Set(['P', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'HR']);
 
       const blocks = () => (flow ? [...flow.children] : []);
       const at = (el) => blocks().indexOf(el);
@@ -1077,11 +1104,12 @@ __ICON__
       // ------------------------------------------------- the inline vocabulary
       //
       // Everything the editor is allowed to put between the tags of a block: four
-      // marks and a link. A contenteditable will happily produce far more given a
-      // paste or a stray shortcut, so what comes out is filtered down to this on
-      // the way into the file rather than trusted on the way out of the browser.
+      // marks, code and a link. A contenteditable will happily produce far more
+      // given a paste or a stray shortcut, so what comes out is filtered down to
+      // this on the way into the file rather than trusted on the way out of the
+      // browser.
 
-      const KEEP = new Set(['B', 'I', 'U', 'S', 'BR', 'A']);
+      const KEEP = new Set(['B', 'I', 'U', 'S', 'BR', 'A', 'CODE']);
       // What each may carry. A mark carries nothing; a link carries where it goes.
       const CARRY = { A: ['href'] };
 
@@ -1143,6 +1171,16 @@ __ICON__
         for (const node of [...el.querySelectorAll('*')]) {
           if (!node.isConnected) continue;
           const tag = node.tagName;
+
+          // A block of code is its characters and its newlines: nothing in it
+          // is bold, a link or code twice. A break inside it is a newline; the
+          // last one is the browser's, holding an empty last line open.
+          if (el.tagName === 'PRE') {
+            if (tag === 'BR' && !node.nextSibling) continue;
+            node.replaceWith(...(tag === 'BR' ? ['\n'] : node.childNodes));
+            changed = true;
+            continue;
+          }
 
           // The tags a browser writes for the ones this document uses.
           if (tag === 'STRONG' || tag === 'EM' || tag === 'STRIKE' || tag === 'DEL') {
@@ -1348,6 +1386,7 @@ __ICON__
         if (from) for (const a of marble.clone(from).attributes) el.setAttribute(a.name, a.value);
         el.removeAttribute('class');
         for (const m of MARKS) el.removeAttribute(m);
+        if (key !== 'code') el.removeAttribute('data-lang');
         if (styleNamed(key).mark) el.setAttribute(styleNamed(key).mark, '');
         el.setAttribute(RICH, '');
         el.setAttribute(ID, marble.newId());
@@ -1589,9 +1628,17 @@ __ICON__
 
       const restyle = (key) =>
         change(() => {
-          const mark = markRange();
-          for (const el of chosen()) {
+          let mark = markRange();
+          const els = chosen();
+          if (key === 'code') return fenceIn(els, mark);
+          // From the last line up, so a block of code coming apart into
+          // several lines leaves the places of the ones above it alone.
+          for (const el of [...els].reverse()) {
             if (styleOf(el) === key) continue;
+            if (el.tagName === 'PRE') {
+              mark = unfence(el, key, mark);
+              continue;
+            }
             const made = shape(el, key, marble.source.inner(el));
             // A heading or a quote is not a list line; a paragraph keeps
             // whatever list it was in.
@@ -1600,6 +1647,237 @@ __ICON__
           }
           return mark;
         });
+
+      // ---------------------------------------------------------------- code
+      //
+      // A block of code is a <pre> holding its lines as text, newlines and
+      // all. A browser draws no line after a last newline, so a block whose
+      // last line is empty holds one newline more than it says, to stand on;
+      // codeText() reads it back without that one.
+
+      function codeText(el) {
+        let out = '';
+        (function walk(node) {
+          for (const n of node.childNodes) {
+            if (n.nodeType === Node.TEXT_NODE) out += n.data;
+            else if (n.tagName === 'BR') out += '\n';
+            else if (n.nodeType === Node.ELEMENT_NODE && !n.hasAttribute('data-marble-transient')) walk(n);
+          }
+        })(el);
+        return out.replace(/\n$/, '');
+      }
+
+      function setCode(el, text) {
+        el.textContent = text.endsWith('\n') ? text + '\n' : text;
+      }
+
+      const inCode = (node) =>
+        Boolean((node?.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest?.('code, pre'));
+
+      // A block of code, shaped from the line it takes the place of.
+      function codeBlock(from, lang) {
+        const pre = shape(from, 'code', null);
+        for (const name of LISTY) pre.removeAttribute(name);
+        if (lang) pre.setAttribute('data-lang', lang);
+        return pre;
+      }
+
+      // The lines chosen, as one block of code: their words without their
+      // marks, one line each.
+      function fenceIn(els, mark) {
+        if (!els.length || els.every((el) => el.tagName === 'PRE')) return mark;
+        const first = els[0];
+        const index = at(first);
+        const text = els.map(codeText).join('\n');
+        const pre = codeBlock(first, first.getAttribute('data-lang'));
+        setCode(pre, text);
+        first.replaceWith(pre);
+        for (const el of els.slice(1)) el.remove();
+        if (els.length === 1) return mark;
+        return { a: { at: index, offset: 0 }, b: { at: index, offset: text.length } };
+      }
+
+      // A block of code made into any other kind of line comes apart into its
+      // lines, and the caret goes with the character it stood by.
+      function unfence(el, key, mark) {
+        const index = at(el);
+        const lines = codeText(el).split('\n');
+        const made = lines.map((line) => {
+          const one = shape(el, key, line ? document.createTextNode(line) : null);
+          for (const name of LISTY) one.removeAttribute(name);
+          return one;
+        });
+        el.replaceWith(...made);
+        const move = (p) => {
+          if (!p || p.at < index) return p;
+          if (p.at > index) return { at: p.at + lines.length - 1, offset: p.offset };
+          let left = p.offset;
+          for (let i = 0; i < lines.length; i++) {
+            if (left <= lines[i].length) return { at: index + i, offset: left };
+            left -= lines[i].length + 1;
+          }
+          return { at: index + lines.length - 1, offset: lines[lines.length - 1].length };
+        };
+        return mark && { a: move(mark.a), b: move(mark.b) };
+      }
+
+      // Backticks round a run of words make it code. A pair is a backtick on
+      // each side of something that is not all spaces, and not one of a
+      // double or a fence. `mark` is carried across the two characters each
+      // pair loses, so the caret stays by the character it was by.
+      const TICKED = /(?<!`)`([^`\n]*[^`\s][^`\n]*)`(?!`)/g;
+      const hasTicks = (el) => isText(el) && el.tagName !== 'PRE' && new RegExp(TICKED.source).test(marble.text(el));
+
+      function ticks(mark, only = null) {
+        let moved = mark;
+        let changed = false;
+        for (const el of only ? [only] : blocks()) {
+          if (!hasTicks(el)) continue;
+          const index = at(el);
+          const found = [];
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          for (let node; (node = walk.nextNode()); ) {
+            if (!node.data.includes('`') || inCode(node)) continue;
+            const lead = document.createRange();
+            lead.setStart(el, 0);
+            lead.setEnd(node, 0);
+            const base = lead.toString().length;
+            for (const m of node.data.matchAll(TICKED)) found.push({ node, m, from: base + m.index });
+          }
+          // From the right, so each pair is cut where the text still has it
+          // and the caret is moved against offsets that have not moved yet.
+          for (const { node, m, from } of found.reverse()) {
+            const range = document.createRange();
+            range.setStart(node, m.index);
+            range.setEnd(node, m.index + m[0].length);
+            range.deleteContents();
+            const code = document.createElement('code');
+            code.textContent = m[1];
+            range.insertNode(code);
+            changed = true;
+            const to = from + m[0].length;
+            const shift = (p) =>
+              p && p.at === index
+                ? { at: index, offset: p.offset >= to ? p.offset - 2 : p.offset > from ? p.offset - 1 : p.offset }
+                : p;
+            moved = moved && { a: shift(moved.a), b: shift(moved.b) };
+          }
+          if (found.length) el.normalize();
+        }
+        return { mark: moved, changed };
+      }
+
+      // The closing backtick typed, or backticks pasted: the burst that
+      // brought them in is closed first, so the code is a step of undo of
+      // its own and Ctrl+Z gives the backticks back.
+      function codeTicks() {
+        if (!flow || isView(flow) || !blocks().some(hasTicks)) return;
+        change(() => ticks(markRange()).mark);
+      }
+
+      // Enter in a block of code is a new line in it, as far in as the line it
+      // leaves, and a blank line is as much a part of code as any. Enter on a
+      // closing fence, or on the second blank line at the end, steps out below
+      // the block onto a new line; in an empty block it takes the block back
+      // to a line.
+      function codeEnter() {
+        const sel = getSelection();
+        if (!sel?.rangeCount || !flow.contains(sel.anchorNode)) return false;
+        const el = blockOf(sel.anchorNode);
+        if (!el || el.tagName !== 'PRE') return false;
+        if (!sel.isCollapsed) document.execCommand('delete');
+        const mark = markRange();
+        if (!mark || blockAt(mark.a.at) !== el) return true;
+        const text = codeText(el);
+        if (!text) {
+          restyle('body');
+          return true;
+        }
+        const offset = Math.min(mark.a.offset, text.length);
+        const head = text.slice(0, offset);
+        const tail = text.slice(offset);
+        const line = head.slice(head.lastIndexOf('\n') + 1);
+        if (!tail.trim() && (line.trim() === '```' || (!line && head.endsWith('\n\n')))) {
+          const kept = head.slice(0, head.length - line.length).replace(/\n+$/, '');
+          let made = null;
+          change(() => {
+            made = shape(el, 'body', null);
+            for (const name of LISTY) made.removeAttribute(name);
+            if (kept) {
+              setCode(el, kept);
+              el.after(made);
+            } else el.replaceWith(made);
+            return null;
+          });
+          if (made) place(made, 0);
+          return true;
+        }
+        const indent = /^[ \t]*/.exec(line)[0];
+        const to = offset + 1 + indent.length;
+        change(() => {
+          setCode(el, head + '\n' + indent + tail);
+          return { a: { at: mark.a.at, offset: to }, b: { at: mark.a.at, offset: to } };
+        });
+        return true;
+      }
+
+      // ArrowDown on the last line of a block of code with nothing under it
+      // makes the line under it, so the end of a note is never a block of code
+      // with no way out.
+      function codeOut() {
+        const sel = getSelection();
+        const el = blockOf(sel?.anchorNode);
+        if (!sel?.isCollapsed || !el || el.tagName !== 'PRE' || el.nextElementSibling) return false;
+        const mark = markRange();
+        if (!mark || codeText(el).slice(mark.a.offset).includes('\n')) return false;
+        let made = null;
+        change(() => {
+          made = shape(el, 'body', null);
+          for (const name of LISTY) made.removeAttribute(name);
+          el.after(made);
+          return null;
+        });
+        if (made) place(made, 0);
+        return true;
+      }
+
+      // Three backticks and Enter, with a language after them if you like:
+      // the line becomes a block of code with the caret in it.
+      function fence() {
+        const el = blockOf(getSelection()?.anchorNode);
+        const found = el && el.tagName !== 'PRE' ? /^```([\w#+.-]*)\s*$/.exec(marble.text(el)) : null;
+        if (!found) return false;
+        change(() => {
+          const pre = codeBlock(el, found[1]);
+          el.replaceWith(pre);
+          const spot = { at: at(pre), offset: 0 };
+          return { a: spot, b: spot };
+        });
+        return true;
+      }
+
+      // Tab in a block of code is two spaces; Shift+Tab takes up to two off
+      // the front of the line.
+      function codeTab(back) {
+        const el = blockOf(getSelection()?.anchorNode);
+        if (!el || el.tagName !== 'PRE') return false;
+        if (!back) {
+          document.execCommand('insertText', false, '  ');
+          return true;
+        }
+        const mark = markRange();
+        if (!mark) return true;
+        const text = codeText(el);
+        const start = text.lastIndexOf('\n', mark.a.offset - 1) + 1;
+        const cut = /^ {1,2}/.exec(text.slice(start))?.[0].length ?? 0;
+        if (!cut) return true;
+        change(() => {
+          setCode(el, text.slice(0, start) + text.slice(start + cut));
+          const offset = Math.max(start, mark.a.offset - cut);
+          return { a: { at: mark.a.at, offset }, b: { at: mark.a.at, offset } };
+        });
+        return true;
+      }
 
       const listOf = (el) => el?.getAttribute('data-list') ?? null;
 
@@ -1705,10 +1983,12 @@ __ICON__
       // its name; anything else is a different tag and so a different element.
       const clearAll = () =>
         change(() => {
-          const mark = markRange();
-          for (const el of chosen()) {
+          let mark = markRange();
+          for (const el of [...chosen()].reverse()) {
             const text = marble.text(el);
-            if (el.tagName === 'P') {
+            if (el.tagName === 'PRE') {
+              mark = unfence(el, 'body', mark);
+            } else if (el.tagName === 'P') {
               el.textContent = text;
               for (const name of LISTY) el.removeAttribute(name);
             } else {
@@ -1773,6 +2053,7 @@ __ICON__
         ['#####', () => restyle('h5')],
         ['######', () => restyle('h6')],
         ['>', () => restyle('quote')],
+        ['```', () => restyle('code')],
         ['-', () => listOn('bullet')],
         ['*', () => listOn('bullet')],
         ['1.', () => listOn('number')],
@@ -1786,7 +2067,7 @@ __ICON__
         if (!sel?.isCollapsed || !flow.contains(sel.anchorNode)) return false;
         const el = blockOf(sel.anchorNode);
         const mark = markRange();
-        if (!el || !mark) return false;
+        if (!el || !mark || el.tagName === 'PRE') return false;
         const head = marble.text(el).slice(0, mark.a.offset);
         const found = MARKERS.find(([marked]) => marked === head);
         if (!found) return false;
@@ -1827,7 +2108,7 @@ __ICON__
       // edges. It is legacy and it has no replacement, so it is kept for that —
       // and for nothing else, least of all for deciding which way a toggle goes.
       const MARK = { bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikeThrough' };
-      const TAG = { bold: 'b', italic: 'i', underline: 'u', strike: 's' };
+      const TAG = { bold: 'b', italic: 'i', underline: 'u', strike: 's', code: 'code' };
 
       // Whether what is selected is already marked, asked of the markup the file
       // holds rather than of the weight on the screen. A heading is heavy because
@@ -1874,6 +2155,7 @@ __ICON__
       function markUp(name) {
         const sel = getSelection();
         if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+        if (name === 'code') return codeUp(sel);
 
         // Nothing selected: the mark opens at the caret and the next thing typed
         // comes out inside it. The browser has owned that pending state since
@@ -1907,6 +2189,60 @@ __ICON__
         });
       }
 
+      // Code has no command in any browser, so it is put on and taken off
+      // here, whole. A run selected becomes code, or stops being code if it
+      // all is; with nothing selected, the code the caret is in stops being
+      // code, or the word it stands in becomes some.
+      function codeUp(sel) {
+        const range = sel.getRangeAt(0);
+        const node = sel.anchorNode;
+        if (sel.isCollapsed) {
+          const code = (node.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest('code');
+          if (code && flow.contains(code)) {
+            change(() => {
+              const mark = markRange();
+              code.replaceWith(...code.childNodes);
+              return mark;
+            });
+            return;
+          }
+          if (node.nodeType !== Node.TEXT_NODE || inCode(node)) return;
+          let from = sel.anchorOffset;
+          let to = from;
+          while (from > 0 && /\S/.test(node.data[from - 1])) from--;
+          while (to < node.length && /\S/.test(node.data[to])) to++;
+          if (from === to) return;
+          change(() => {
+            const mark = markRange();
+            const word = document.createRange();
+            word.setStart(node, from);
+            word.setEnd(node, to);
+            const held = document.createElement('code');
+            held.append(word.extractContents());
+            word.insertNode(held);
+            return mark;
+          });
+          return;
+        }
+        change(() => {
+          const mark = markRange();
+          if (marked('code')) {
+            for (const code of [...flow.querySelectorAll('code')]) {
+              if (range.intersectsNode(code)) code.replaceWith(...code.childNodes);
+            }
+          } else {
+            for (const { el, from, to } of runs()) {
+              if (el.tagName === 'PRE') continue;
+              const part = rangeIn(el, from, to);
+              const held = document.createElement('code');
+              held.append(part.extractContents());
+              part.insertNode(held);
+            }
+          }
+          return mark;
+        });
+      }
+
       // --------------------------------------------------------- the clipboard
       //
       // A contenteditable will take whole documents if you let it. Plain text is
@@ -1920,6 +2256,10 @@ __ICON__
         const sel = getSelection();
         if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
         if (!sel.isCollapsed) document.execCommand('delete');
+        // Into a block of code it goes as it is, newlines and all; text with a
+        // fence in it brings its blocks of code with it.
+        if (blockOf(getSelection().anchorNode)?.tagName === 'PRE') return pasteCode(lines.join('\n'));
+        if (lines.some((line) => /^\s*```/.test(line))) return pasteFenced(lines);
         if (lines.length === 1 && !text.match(URLS)) {
           document.execCommand('insertText', false, lines[0]);
           return;
@@ -1957,6 +2297,64 @@ __ICON__
         tidyUp();
         file(false);
         place(rest, ending.length);
+      }
+
+      function pasteCode(text) {
+        if (!text.includes('\n')) {
+          document.execCommand('insertText', false, text);
+          return;
+        }
+        settle();
+        const el = blockOf(getSelection().anchorNode);
+        const mark = markRange();
+        if (!el || !mark) return;
+        const all = codeText(el);
+        const offset = Math.min(mark.a.offset, all.length);
+        setCode(el, all.slice(0, offset) + text + all.slice(offset));
+        tidyUp();
+        file(false);
+        place(el, offset + text.length);
+      }
+
+      // The lines between a fence and the next are one block of code, in the
+      // language the first one names; the rest are lines, as any paste is.
+      // They go in after the line the caret is in, and what came after the
+      // caret follows them.
+      function pasteFenced(lines) {
+        settle();
+        const range = getSelection().getRangeAt(0);
+        const el = blockOf(range.startContainer);
+        if (!el) return;
+        const tail = range.cloneRange();
+        tail.setEnd(el, el.childNodes.length);
+        const rest = tail.extractContents();
+        const made = [];
+        let code = null;
+        for (const line of lines) {
+          const edge = /^\s*```\s*([\w#+.-]*)\s*$/.exec(line);
+          if (code) {
+            if (edge && !edge[1]) {
+              setCode(code.pre, code.lines.join('\n'));
+              code = null;
+            } else code.lines.push(line);
+            continue;
+          }
+          if (edge) {
+            code = { pre: codeBlock(el, edge[1]), lines: [] };
+            made.push(code.pre);
+            continue;
+          }
+          made.push(shape(el, 'body', linked(line)));
+        }
+        if (code) setCode(code.pre, code.lines.join('\n'));
+        if (rest.textContent) made.push(shape(el, 'body', rest));
+        const last = made[made.length - 1];
+        if (!last) return;
+        el.after(...made);
+        if (!marble.text(el) && el !== flow.firstElementChild) el.remove();
+        tidyUp();
+        file(false);
+        place(last, last.tagName === 'PRE' ? codeText(last).length : marble.text(last).length);
       }
 
       // ------------------------------------------------------------- links
@@ -2038,7 +2436,7 @@ __ICON__
       // way it would in a message.
       function autolink() {
         const sel = getSelection();
-        if (!sel?.isCollapsed || !flow.contains(sel.anchorNode) || linkOf(sel.anchorNode)) return false;
+        if (!sel?.isCollapsed || !flow.contains(sel.anchorNode) || linkOf(sel.anchorNode) || inCode(sel.anchorNode)) return false;
         const el = blockOf(sel.anchorNode);
         const mark = markRange();
         if (!el || !mark) return false;
@@ -2061,12 +2459,14 @@ __ICON__
         return true;
       }
 
-      // The link whose last character the caret stands after. Typing there goes
-      // on after the link rather than into it, as it does in any editor: the
-      // address you pasted is not lengthened by the sentence that follows it.
+      // The link or the code whose last character the caret stands after.
+      // Typing there goes on after it rather than into it, as it does in any
+      // editor: the address you pasted is not lengthened by the sentence that
+      // follows it, and neither is the word you made code.
       function endOf(node, offset) {
-        const a = linkOf(node);
-        if (!a) return null;
+        let a = (node?.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest?.('a, code');
+        if (!a || !flow?.contains(a)) return null;
+        for (let up = a.parentElement?.closest('a, code'); up && flow.contains(up); up = up.parentElement?.closest('a, code')) a = up;
         const rest = document.createRange();
         try {
           rest.setStart(node, offset);
@@ -2087,6 +2487,7 @@ __ICON__
         const el = current();
         const TYPING = ['contenteditable', 'spellcheck', 'autocapitalize', 'autocorrect'];
         if (flow && flow !== el) for (const name of TYPING) flow.removeAttribute(name);
+        const fresh = !flow || !el || marble.id(flow) !== marble.id(el);
         flow = el;
         here = null;
         if (!flow) return;
@@ -2103,7 +2504,20 @@ __ICON__
         flow.setAttribute('autocapitalize', 'sentences');
         flow.setAttribute('autocorrect', 'on');
         shadow = readFlow();
-        if (normalise()) file(false);
+        let fixed = normalise();
+        // A note opened with backticks round some words already, written
+        // before it knew them or by hand, shows them as code. Only when a note
+        // opens: an agent's write landing in the open note is left as written,
+        // so the note never answers an agent's edit with one of its own.
+        if (fresh) {
+          const mark = markRange();
+          const ticked = ticks(mark);
+          if (ticked.changed) {
+            fixed = true;
+            if (mark) putRange(ticked.mark);
+          }
+        }
+        if (fixed) file(false);
         derive();
       }
 
@@ -2288,6 +2702,11 @@ __ICON__
 
       function derive() {
         notes.classList.add('marble-derived');
+        for (const pre of flow && !isView(flow) ? flow.querySelectorAll(':scope > pre') : []) {
+          pre.setAttribute('spellcheck', 'false');
+          pre.setAttribute('autocapitalize', 'off');
+          pre.setAttribute('autocorrect', 'off');
+        }
         for (const el of noteEls()) el.classList.toggle('marble-open', el === flow);
         drawRows();
         if (!said) count();
@@ -2577,6 +2996,8 @@ __ICON__
         indent: '<path d="M11 6.5h9M11 12h9M11 17.5h9"/><path d="M4.5 9l3 3-3 3"/>',
         clear: '<path d="M5 5.5h10M10 5.5v12"/><path d="M14.5 14l5 5M19.5 14l-5 5"/>',
         link: '<path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l3.2-3.2a3.6 3.6 0 0 0-5.1-5.1l-1.1 1.1"/><path d="M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-3.2 3.2a3.6 3.6 0 0 0 5.1 5.1l1.1-1.1"/>',
+        code: '<path d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5"/>',
+        block: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M10 9.5 7.5 12l2.5 2.5M14 9.5l2.5 2.5-2.5 2.5"/>',
       };
       const svg = (name) =>
         '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ICON[name] + '</svg>';
@@ -2594,6 +3015,7 @@ __ICON__
         ['mark', 'italic', '<i>I</i>', 'Italic', KEY('Mod', 'I')],
         ['mark', 'underline', '<u>U</u>', 'Underline', KEY('Mod', 'U')],
         ['mark', 'strike', '<s>S</s>', 'Strikethrough', KEY('Mod', 'Shift', 'X')],
+        ['mark', 'code', svg('code'), 'Code', KEY('Mod', 'E') + '  or  `code`'],
         ['link', 'link', svg('link'), 'Link', KEY('Mod', 'K') + '  or paste an address'],
         null,
         ['list', 'bullet', svg('bullet'), 'Bulleted list', KEY('Mod', 'Shift', '8') + '  or  - space'],
@@ -2603,6 +3025,7 @@ __ICON__
         ['cmd', 'indent', svg('indent'), 'More indent', 'Tab'],
         null,
         ['style', 'quote', svg('quote'), 'Quote', '> space'],
+        ['style', 'code', svg('block'), 'Code block', '``` Enter'],
         ['cmd', 'rule', svg('rule'), 'Divider', '--- Enter'],
         ['cmd', 'clear', svg('clear'), 'Clear formatting', KEY('Mod', '\\')],
       ];
@@ -2974,7 +3397,15 @@ __ICON__
         arrowed = null;
         tidyUp();
         file(true);
-        if (event.inputType === 'insertText' && !event.isComposing) arrow();
+        if (event.isComposing) return;
+        if (event.inputType === 'insertText' && event.data?.includes('`')) codeTicks();
+        else if (event.inputType === 'insertText') arrow();
+        else if (event.inputType === 'insertFromPaste') codeTicks();
+      });
+
+      // A backtick that is a dead key arrives at the end of a composition.
+      notes.addEventListener('compositionend', (event) => {
+        if (event.data?.includes('`') && !inEmbed(event.target)) setTimeout(codeTicks);
       });
 
       // Arrows, from the characters you would type to sketch one: -> is →,
@@ -3000,7 +3431,7 @@ __ICON__
       function arrow() {
         const sel = getSelection();
         const node = sel?.anchorNode;
-        if (!sel?.isCollapsed || node?.nodeType !== Node.TEXT_NODE || !flow?.contains(node)) return;
+        if (!sel?.isCollapsed || node?.nodeType !== Node.TEXT_NODE || !flow?.contains(node) || inCode(node)) return;
         const end = sel.anchorOffset;
         const found = ARROWS.find(({ from }) => node.data.slice(0, end).endsWith(from));
         const el = blockOf(node);
@@ -3060,12 +3491,37 @@ __ICON__
         marble.flush();
       });
 
+      // Code is this editor's to paste, ahead of the reader of pasted
+      // documents further down the page: anything pasted into a block of
+      // code, text with a fence in it, and a clipboard that is nothing but a
+      // block of code off a web page.
+      notes.addEventListener('paste', (event) => {
+        if (inEmbed(event.target) || !flow || isView(flow)) return;
+        const data = event.clipboardData;
+        const text = (data?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
+        if (!text) return;
+        const inPre = blockOf(getSelection()?.anchorNode)?.tagName === 'PRE';
+        const fenced = /^\s*```/m.test(text);
+        let whole = false;
+        const html = data.getData('text/html');
+        if (!inPre && !fenced && html) {
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const pres = doc.body.querySelectorAll('pre');
+          const words = pres[0]?.textContent.trim() ?? '';
+          whole = pres.length === 1 && words.includes('\n') && words === doc.body.textContent.trim();
+        }
+        if (!inPre && !fenced && !whole) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        pasteText(whole ? '```\n' + text.replace(/\n+$/, '') + '\n```' : text);
+      }, true);
+
       notes.addEventListener('paste', (event) => {
         if (inEmbed(event.target)) return;
         event.preventDefault();
         const text = event.clipboardData?.getData('text/plain') ?? '';
         const href = soleUrl(text);
-        if (href) return pasteLink(href, text.trim());
+        if (href && !inCode(getSelection()?.anchorNode)) return pasteLink(href, text.trim());
         pasteText(text);
       });
 
@@ -3178,6 +3634,7 @@ __ICON__
 
         if (event.key === 'Enter' && !event.shiftKey && !mod) {
           event.preventDefault();
+          if (codeEnter() || fence()) return;
           if (rule()) return;
           autolink();
           return split();
@@ -3219,6 +3676,11 @@ __ICON__
           return clearAll();
         }
 
+        if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'e') {
+          event.preventDefault();
+          return markUp('code');
+        }
+
         if (mod && !event.altKey && !event.shiftKey) {
           const key = event.key.toLowerCase();
           if (!'biu'.includes(key)) return;
@@ -3227,7 +3689,12 @@ __ICON__
         }
 
         if (event.key === 'Tab' && !mod && !event.altKey) {
-          if (indent(event.shiftKey ? -1 : 1)) event.preventDefault();
+          if (codeTab(event.shiftKey) || indent(event.shiftKey ? -1 : 1)) event.preventDefault();
+          return;
+        }
+
+        if (event.key === 'ArrowDown' && !mod && !event.altKey && !event.shiftKey && codeOut()) {
+          event.preventDefault();
           return;
         }
 
@@ -4609,5 +5076,666 @@ __SCRIPT__
   }
   .foldtip[hidden] { display: none; }
 </style>
+  <style data-marble-id="__ID__">
+  /* ---------------------------------------------------------------- pictures
+
+     A picture is a line of the note: as wide as it is, never wider than the
+     measure, on the same curve as everything else on the page. What is drawn
+     around it — the button that takes it out, the outline while a file is
+     dragged over the page — is the page's. */
+  .note > figure.ni { position: relative; width: fit-content; max-width: 100%; margin: .85em 0 0; white-space: normal; }
+  .note > figure.ni + * { margin-top: .85em; }
+  .note > figure.ni img { display: block; max-width: 100%; height: auto; border-radius: var(--r-sm); -webkit-user-drag: none; user-select: none; }
+  .ni-x {
+    position: absolute; top: .45rem; right: .45rem; width: 1.75rem; height: 1.75rem; padding: 0;
+    display: grid; place-items: center; border: 0; border-radius: var(--pill); cursor: pointer;
+    background: color-mix(in srgb, var(--card) 90%, transparent); color: var(--muted); box-shadow: var(--shadow);
+    opacity: 0; transition: opacity var(--t) var(--ease), color var(--t-fast) var(--ease);
+  }
+  .ni-x svg { width: 1rem; height: 1rem; fill: currentColor; }
+  .note > figure.ni:hover .ni-x, .ni-x:focus-visible { opacity: 1; }
+  .ni-x:hover, .ni-x:focus-visible { color: var(--danger); }
+  @media (hover: none) { .ni-x { opacity: 1; } }
+  .sheet.marble-pic-over .note.marble-open { outline: 2px dashed var(--accent-ink); outline-offset: .5rem; border-radius: var(--r-text); }
+  .sheet.marble-pic-busy, .sheet.marble-pic-busy * { cursor: progress; }
+  @media print { .ni-x { display: none; } }
+</style>
+  <script data-marble-id="__ID__">
+
+  // Pictures in a note — pasted, dropped on the page, or chosen from the
+  // toolbar.
+  //
+  // A picture is a block the editor does not write, so it is marked data-embed
+  // the way a table is: <figure class="ni" data-embed><img></figure>, a line of
+  // the note that moves and deletes like one. Its bytes go to the drive's blob
+  // store and the file keeps their hash and a placeholder (data-marble-blob,
+  // which the carrier resolves on the page and a download puts back inline), so
+  // a note full of screenshots stays a small file. With no drive behind the
+  // page the picture goes into the file whole, as a data URL.
+  //
+  // Everything drawn around a picture — the button that takes it out, the
+  // outline while something is dragged over the page — is the page's and
+  // transient. The one thing this files is the figure, through the same
+  // `marble-embed` door a table uses, so the editor takes it as written down
+  // and never files it a second time.
+  (() => {
+    const ID = 'data-marble-id';
+    const T = 'data-marble-transient';
+    const ROOT = 'figure.ni[data-embed]';
+    const PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    // A photo straight off a phone is twelve megapixels. Past this many pixels
+    // on its longest side, or this many bytes, it is drawn again smaller.
+    const MAX_SIDE = 2400;
+    const HEAVY = 1.5 * 1024 * 1024;
+    const esc = (s) =>
+      String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const isPicture = (file) => Boolean(file) && /^image\//.test(file.type);
+    const within = (root, selector) => [
+      ...(root.matches?.(selector) ? [root] : []),
+      ...(root.querySelectorAll?.(selector) ?? []),
+    ];
+    const ICON =
+      '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="9" cy="10" r="1.6"/><path d="m4.5 17.5 4.8-4.6 3.4 3.1 2.6-2.3 4.2 3.8"/></svg>';
+
+    const begin = (marble) => {
+      const notes = document.getElementById('notes');
+      const sheet = document.getElementById('sheet');
+      if (!notes || !sheet) return;
+      const hosted = /^https?:$/.test(location.protocol);
+
+      // ------------------------------------------------------------ where
+
+      const openFlow = () => {
+        const el = notes.querySelector(':scope > .note.marble-open');
+        return el && !el.hasAttribute('data-view') ? el : null;
+      };
+      const blockIn = (flow, node) => {
+        let el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        if (!el || el === flow || !flow.contains(el)) return null;
+        while (el.parentElement !== flow) el = el.parentElement;
+        return el;
+      };
+      const inPicture = (node) =>
+        Boolean((node?.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest?.('[data-embed]'));
+
+      // Where a picture goes is remembered by name, not by element: reading a
+      // file or making a smaller copy takes long enough for the line it was
+      // meant for to have been split, restyled or typed into.
+      function caret() {
+        const flow = openFlow();
+        if (!flow) return null;
+        const sel = getSelection();
+        const block = sel?.rangeCount && flow.contains(sel.focusNode) ? blockIn(flow, sel.focusNode) : null;
+        return { flow, id: block ? marble.id(block) : null, before: false };
+      }
+      function pointAt(x, y) {
+        const flow = openFlow();
+        if (!flow) return null;
+        const range = document.caretRangeFromPoint?.(x, y);
+        const node = range?.startContainer ?? document.caretPositionFromPoint?.(x, y)?.offsetNode ?? document.elementFromPoint(x, y);
+        const block = blockIn(flow, node);
+        if (!block) {
+          // Above the first line or past the last one.
+          const first = flow.firstElementChild;
+          const above = first && y < first.getBoundingClientRect().top;
+          const end = above ? first : flow.lastElementChild;
+          return { flow, id: end ? marble.id(end) : null, before: Boolean(above) };
+        }
+        const box = block.getBoundingClientRect();
+        return { flow, id: marble.id(block), before: y < box.top + box.height / 2 };
+      }
+
+      // --------------------------------------------------------- the bytes
+
+      const load = (file) =>
+        new Promise((resolve, reject) => {
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.onload = () => resolve({ img, url });
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('unreadable'));
+          };
+          img.src = url;
+        });
+
+      const encode = (canvas, type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+
+      // A screenshot stays a PNG, so its edges stay sharp and its transparency
+      // stays transparent; anything else that has to shrink becomes a JPEG. An
+      // animation or a drawing is kept exactly as it came.
+      async function prepare(file) {
+        const { img, url } = await load(file);
+        try {
+          let w = img.naturalWidth;
+          let h = img.naturalHeight;
+          let blob = file;
+          let type = file.type;
+          const scale = w && h ? Math.min(1, MAX_SIDE / Math.max(w, h)) : 1;
+          if (!/gif|svg/.test(type) && (scale < 1 || file.size > HEAVY || !/png|jpe?g|webp|gif|avif/.test(type))) {
+            const cw = Math.round(w * scale);
+            const ch = Math.round(h * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = cw;
+            canvas.height = ch;
+            canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+            const as = type === 'image/png' ? 'image/png' : 'image/jpeg';
+            const made = await encode(canvas, as, 0.86);
+            if (made && (made.size < file.size || !/png|jpe?g|webp|gif|avif/.test(type))) {
+              blob = made;
+              type = as;
+              w = cw;
+              h = ch;
+            }
+          }
+          const alt = (file.name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim();
+          return { blob, type, w, h, alt: /^image$/i.test(alt) ? '' : alt };
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      }
+
+      const dataUrl = (blob) =>
+        new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+
+      async function store(pic) {
+        if (hosted) {
+          try {
+            const res = await fetch('/blob', { method: 'POST', headers: { 'Content-Type': pic.type }, body: pic.blob });
+            const out = res.ok ? await res.json() : null;
+            if (out?.hash) return { ...pic, hash: out.hash };
+          } catch {
+            // No store to put it in; the file will carry it instead.
+          }
+        }
+        return { ...pic, data: await dataUrl(pic.blob) };
+      }
+
+      // ---------------------------------------------------- writing it down
+
+      const figureHtml = (id, imgId, pic) =>
+        `<figure class="ni" data-embed ${ID}="${id}"><img ${ID}="${imgId}" ` +
+        (pic.hash
+          ? `data-marble-blob="${pic.hash}" data-marble-type="${esc(pic.type)}" src="${PLACEHOLDER}"`
+          : `src="${pic.data}"`) +
+        ` alt="${esc(pic.alt)}"` +
+        (pic.w && pic.h ? ` width="${pic.w}" height="${pic.h}"` : '') +
+        '></figure>';
+
+      const isBlank = (el) => el?.tagName === 'P' && !el.textContent.trim() && !el.querySelector(':not(br)');
+
+      // One step of undo for however many pictures arrived together. They go
+      // under the line the caret was on; on an empty line they go above it, so
+      // the caret is still where the next words will be typed.
+      function put(where, pics) {
+        const flow = where.flow;
+        const block = where.id ? marble.byId(where.id) : null;
+        const here = block && block.parentElement === flow ? block : null;
+        let anchor =
+          here && (where.before || isBlank(here)) ? here :
+          here ? here.nextElementSibling :
+          null;
+        const parentId = marble.id(flow);
+        const redo = [];
+        const undo = [];
+        const ids = [];
+        for (const pic of pics) {
+          const id = marble.newId();
+          ids.push(id);
+          redo.push({ type: 'insert', html: figureHtml(id, marble.newId(), pic), parentId, beforeId: anchor ? marble.id(anchor) : null });
+          undo.unshift({ type: 'remove', id });
+        }
+        let after = anchor;
+        if (!after) {
+          const id = marble.newId();
+          redo.push({ type: 'insert', html: `<p ${ID}="${id}" data-marble-rich></p>`, parentId, beforeId: null });
+          undo.unshift({ type: 'remove', id });
+          after = { id };
+        }
+        for (const op of redo) marble.apply(op);
+        for (const id of ids) wire(marble.byId(id));
+        const run = () => {
+          marble.record({ redo, undo });
+          for (const op of redo) marble.op(op);
+        };
+        const ask = new CustomEvent('marble-embed', { bubbles: true, detail: { run, handled: false } });
+        marble.byId(ids[0]).dispatchEvent(ask);
+        if (!ask.detail.handled) run();
+        for (const id of ids) seen.set(marble.byId(id), srcOf(marble.byId(id)));
+
+        const next = after instanceof Element ? after : marble.byId(after.id);
+        if (next) {
+          flow.focus({ preventScroll: true });
+          const sel = getSelection();
+          sel.removeAllRanges();
+          const range = document.createRange();
+          range.setStart(next, 0);
+          sel.addRange(range);
+        }
+        marble.byId(ids.at(-1))?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+
+      const meta = document.querySelector('.meta');
+      function say(text) {
+        if (!meta) return;
+        meta.textContent = text;
+      }
+
+      let working = 0;
+      async function take(files, where) {
+        const list = [...files].filter(isPicture);
+        if (!list.length || !where) return;
+        working++;
+        sheet.classList.add('marble-pic-busy');
+        const pics = [];
+        let missed = 0;
+        try {
+          for (const file of list) {
+            try {
+              pics.push(await store(await prepare(file)));
+            } catch {
+              missed++;
+            }
+          }
+        } finally {
+          if (!--working) sheet.classList.remove('marble-pic-busy');
+        }
+        if (missed) say(missed === list.length && list.length === 1 ? 'That picture could not be read' : `${missed} of ${list.length} pictures could not be read`);
+        if (!pics.length || !where.flow.isConnected || openFlow() !== where.flow) return;
+        put(where, pics);
+      }
+
+      // -------------------------------------------------------- on the page
+      //
+      // A picture is not text to type into: the caret goes round it, not in
+      // it. That is a fact about this page, and contenteditable is already the
+      // page's alone, so it is never filed.
+      //
+      // The carrier resolves a picture's src to the store on the page only.
+      // The editor reads a block's source off the page, so once it has, the
+      // figure is handed back through `marble-embed` with nothing to run: the
+      // resolved page is taken as what is written down, and the next keystroke
+      // does not file the store's address into the note.
+
+      const seen = new WeakMap();
+      const srcOf = (fig) => fig?.querySelector('img')?.getAttribute('src') ?? '';
+
+      function wire(fig) {
+        if (!fig) return;
+        fig.setAttribute('contenteditable', 'false');
+        const img = fig.querySelector('img[data-marble-blob]');
+        if (img && hosted) {
+          const href = '/blob/' + img.getAttribute('data-marble-blob');
+          if (img.getAttribute('src') !== href) img.setAttribute('src', href);
+        }
+        if (!fig.querySelector(':scope > .ni-x')) {
+          const x = document.createElement('button');
+          x.type = 'button';
+          x.className = 'ni-x';
+          x.setAttribute(T, '');
+          x.title = 'Remove picture';
+          x.setAttribute('aria-label', 'Remove picture');
+          x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x"/></svg>';
+          fig.append(x);
+        }
+      }
+
+      marble.register((root) => {
+        for (const fig of within(root, ROOT)) {
+          wire(fig);
+          const src = srcOf(fig);
+          if (seen.get(fig) === src) continue;
+          seen.set(fig, src);
+          const ask = new CustomEvent('marble-embed', { bubbles: true, detail: { run: () => {}, handled: false } });
+          fig.dispatchEvent(ask);
+        }
+      });
+
+      // Taking one out is a deletion like Backspace's, so it goes the way
+      // typing goes: off the page, and the editor files what changed.
+      notes.addEventListener('mousedown', (event) => {
+        if (event.target.closest('.ni-x')) event.preventDefault();
+      });
+      notes.addEventListener('click', (event) => {
+        const x = event.target.closest('.ni-x');
+        const fig = x?.closest(ROOT);
+        const flow = openFlow();
+        if (!fig || !flow || fig.parentElement !== flow) return;
+        event.preventDefault();
+        const next = fig.nextElementSibling ?? fig.previousElementSibling;
+        fig.remove();
+        flow.dispatchEvent(new Event('input', { bubbles: true }));
+        if (next) {
+          flow.focus({ preventScroll: true });
+          const range = document.createRange();
+          range.setStart(next, 0);
+          getSelection().removeAllRanges();
+          getSelection().addRange(range);
+        }
+      });
+      notes.addEventListener('dragstart', (event) => {
+        if (event.target.closest?.(ROOT)) event.preventDefault();
+      });
+
+      // ------------------------------------------------------ paste and drop
+      //
+      // A picture on the clipboard with no words beside it. Word and the
+      // spreadsheets put a picture of what was copied next to the words
+      // themselves, and then it is the words that were meant.
+
+      function picturesOn(data) {
+        if (!data) return [];
+        const files = [...(data.files ?? [])].filter(isPicture);
+        if (files.length) return files;
+        return [...(data.items ?? [])]
+          .filter((item) => item.kind === 'file' && /^image\//.test(item.type))
+          .map((item) => item.getAsFile())
+          .filter(Boolean);
+      }
+
+      notes.addEventListener('paste', (event) => {
+        if (inPicture(event.target) || !openFlow()) return;
+        if ((event.clipboardData?.getData('text/plain') ?? '').trim()) return;
+        const files = picturesOn(event.clipboardData);
+        if (!files.length) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        take(files, caret());
+      }, true);
+
+      const carriesFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
+      let over = 0;
+      const lift = () => {
+        over = 0;
+        sheet.classList.remove('marble-pic-over');
+      };
+
+      sheet.addEventListener('dragenter', (event) => {
+        if (!carriesFiles(event) || !openFlow()) return;
+        over++;
+        sheet.classList.add('marble-pic-over');
+      });
+      sheet.addEventListener('dragleave', () => {
+        if (over && !--over) sheet.classList.remove('marble-pic-over');
+      });
+      sheet.addEventListener('dragover', (event) => {
+        if (!carriesFiles(event) || !openFlow()) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      });
+      sheet.addEventListener('drop', (event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        lift();
+        take(event.dataTransfer.files, pointAt(event.clientX, event.clientY));
+      }, true);
+      // A file let go anywhere else is not a reason to leave the note for it.
+      addEventListener('dragover', (event) => { if (carriesFiles(event)) event.preventDefault(); });
+      addEventListener('drop', (event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        lift();
+      });
+
+      // ----------------------------------------------------------- the button
+      //
+      // One more key on the toolbar, drawn after the divider. The toolbar is
+      // the editor's; this only adds to it, and the caret it will act on is
+      // taken on the press, before the file chooser takes the focus away.
+
+      const chooser = document.createElement('input');
+      chooser.type = 'file';
+      chooser.accept = 'image/*';
+      chooser.multiple = true;
+      chooser.hidden = true;
+      chooser.setAttribute(T, '');
+      chooser.setAttribute('aria-hidden', 'true');
+      chooser.tabIndex = -1;
+      let aim = null;
+      chooser.addEventListener('change', () => {
+        const files = [...chooser.files];
+        chooser.value = '';
+        take(files, aim ?? caret());
+        aim = null;
+      });
+
+      function addTool() {
+        const tools = sheet.querySelector(':scope > .tools');
+        if (!tools) return false;
+        if (tools.querySelector('.tool[data-kind="picture"]')) return true;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'tool';
+        b.dataset.kind = 'picture';
+        b.dataset.name = 'picture';
+        b.innerHTML = ICON;
+        b.title = 'Picture  (or paste or drop one)';
+        b.setAttribute('aria-label', 'Insert picture');
+        b.tabIndex = -1;
+        const rule = tools.querySelector('.tool[data-name="rule"]');
+        if (rule) rule.after(b);
+        else tools.append(b);
+        tools.append(chooser);
+        b.addEventListener('mousedown', () => { aim = caret(); });
+        b.addEventListener('click', () => {
+          if (!openFlow()) return;
+          aim = aim ?? caret();
+          chooser.click();
+        });
+        return true;
+      }
+      if (!addTool()) {
+        let tries = 0;
+        const again = () => { if (!addTool() && ++tries < 20) requestAnimationFrame(again); };
+        requestAnimationFrame(again);
+      }
+    };
+
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
+  <style data-marble-id="__ID__">
+  /* ---------------------------------------------------------- captions
+
+     A picture can carry a caption the way a figure in a paper does: under
+     it, smaller and quieter than the note, led by its number. Pictures are
+     numbered within their note, captioned or not, so Figure 3 is the third
+     picture you scroll past. The caption is as wide as the picture and never
+     widens it. */
+  .notes > .note { counter-reset: nifig; }
+  .note > figure.ni { counter-increment: nifig; }
+  .note > figure.ni > .ni-cap {
+    width: 0; min-width: 100%; margin: .5rem 0 0; padding: 0 .1rem;
+    font: 13px/1.45 var(--ui); color: var(--muted); text-wrap: pretty;
+    white-space: pre-wrap; overflow-wrap: break-word; outline: none; cursor: text;
+  }
+  .note > figure.ni > .ni-cap::before { content: "Figure " counter(nifig) ".\a0\a0"; font-weight: 600; color: var(--ink); }
+  .note > figure.ni > .ni-cap:empty::after { content: attr(data-ph); color: var(--faint); }
+  .note > figure.ni > .ni-cap:focus { color: var(--ink); }
+  .note > figure.ni > .ni-cap:focus-visible { border-radius: var(--r-text); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 45%, transparent); }
+  .ni-cap-add {
+    position: absolute; left: .45rem; bottom: .45rem; height: 1.75rem; padding: 0 .7rem;
+    display: inline-flex; align-items: center; border: 0; border-radius: var(--pill); cursor: pointer;
+    font: 500 12.5px/1 var(--ui); background: color-mix(in srgb, var(--card) 90%, transparent); color: var(--muted); box-shadow: var(--shadow);
+    opacity: 0; transition: opacity var(--t) var(--ease), color var(--t-fast) var(--ease);
+  }
+  .note > figure.ni:hover .ni-cap-add, .ni-cap-add:focus-visible { opacity: 1; }
+  .ni-cap-add:hover, .ni-cap-add:focus-visible { color: var(--ink); }
+  .note > figure.ni:has(> .ni-cap) .ni-cap-add { display: none; }
+  @media (hover: none) { .ni-cap-add { opacity: 1; } }
+  @media print { .ni-cap-add { display: none; } .note > figure.ni > .ni-cap:empty { display: none; } }
+</style>
+  <script data-marble-id="__ID__">
+  // Captions under pictures, the way a figure in a paper has one.
+  //
+  // A caption is a <figcaption class="ni-cap"> inside the picture's figure,
+  // and it is written into the file only once it has words. The Add caption
+  // button on a picture is the page's: it opens an empty caption to type
+  // into, and leaving it empty takes it away again without a trace. Every
+  // change that lasts goes through the same `marble-embed` door the picture
+  // itself uses, so the note's editor takes it as written down and Mod+Z
+  // takes it back. Keys typed in a caption are the caption's, so the note's
+  // editor never sees them.
+  (() => {
+    const ID = 'data-marble-id';
+    const T = 'data-marble-transient';
+    const FIG = 'figure.ni[data-embed]';
+    const CAP = ':scope > .ni-cap';
+    const PH = 'Write a caption';
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const within = (root, sel) => [...(root.matches?.(sel) ? [root] : []), ...(root.querySelectorAll?.(sel) ?? [])];
+    const capHtml = (id, text) => `<figcaption class="ni-cap" data-ph="${PH}" ${ID}="${id}">${esc(text)}</figcaption>`;
+
+    const begin = (marble) => {
+      const notes = document.getElementById('notes');
+      if (!notes) return;
+
+      function commit(fig, redo, undo, { applied = false } = {}) {
+        const run = () => {
+          if (!applied) for (const op of redo) marble.apply(op);
+          marble.record({ redo, undo });
+          for (const op of redo) marble.op(op);
+        };
+        const ask = new CustomEvent('marble-embed', { bubbles: true, detail: { run, handled: false } });
+        fig.dispatchEvent(ask);
+        if (!ask.detail.handled) run();
+      }
+
+      const capOf = (t) => {
+        const el = t instanceof Element ? t : t?.parentElement;
+        const cap = el?.closest?.('.ni-cap');
+        return cap && cap.parentElement?.matches(FIG) ? cap : null;
+      };
+
+      function wire(fig) {
+        const cap = fig.querySelector(CAP);
+        if (cap && cap.getAttribute('contenteditable') !== 'plaintext-only') {
+          cap.setAttribute('contenteditable', 'plaintext-only');
+          cap.setAttribute('spellcheck', 'true');
+        }
+        if (!fig.querySelector(':scope > .ni-cap-add')) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ni-cap-add';
+          b.setAttribute(T, '');
+          b.textContent = 'Add caption';
+          fig.append(b);
+        }
+      }
+      marble.register((root) => { for (const fig of within(root, FIG)) wire(fig); });
+      for (const fig of document.querySelectorAll(FIG)) wire(fig);
+
+      // ------------------------------------------------------ writing one
+
+      const before = new WeakMap();
+      const fresh = new WeakSet();
+
+      function start(fig) {
+        let cap = fig.querySelector(CAP);
+        if (!cap) {
+          const id = marble.newId();
+          marble.apply({ type: 'insert', parentId: marble.id(fig), beforeId: null, html: capHtml(id, '') });
+          cap = marble.byId(id);
+          if (!cap) return;
+          fresh.add(cap);
+          wire(fig);
+        }
+        cap.focus();
+        const range = document.createRange();
+        range.selectNodeContents(cap);
+        range.collapse(false);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+
+      function finish(cap) {
+        if (!before.has(cap)) return;
+        const was = before.get(cap);
+        before.delete(cap);
+        const fig = cap.parentElement;
+        const id = marble.id(cap);
+        const figId = marble.id(fig);
+        if (!id || !figId) return;
+        const now = cap.textContent.replace(/\s+$/, '');
+        if (now !== cap.textContent) cap.textContent = now;
+        if (fresh.has(cap)) {
+          fresh.delete(cap);
+          if (!now.trim()) {
+            marble.apply({ type: 'remove', id });
+            return;
+          }
+          commit(fig, [{ type: 'insert', parentId: figId, beforeId: null, html: capHtml(id, now) }], [{ type: 'remove', id }], { applied: true });
+          return;
+        }
+        if (now === was) return;
+        if (!now.trim()) {
+          commit(fig, [{ type: 'remove', id }], [{ type: 'insert', parentId: figId, beforeId: null, html: capHtml(id, was) }]);
+          return;
+        }
+        commit(fig, [{ type: 'setText', id, text: now }], [{ type: 'setText', id, text: was }], { applied: true });
+      }
+
+      document.addEventListener('focusin', (event) => {
+        const cap = capOf(event.target);
+        if (cap && !before.has(cap)) before.set(cap, fresh.has(cap) ? '' : cap.textContent);
+      });
+      document.addEventListener('focusout', (event) => {
+        const cap = capOf(event.target);
+        if (cap) finish(cap);
+      });
+
+      // What is typed in a caption is the caption's. Enter keeps it, Shift+Enter
+      // breaks a line, Escape puts back what was there.
+      for (const type of ['keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'paste', 'cut', 'drop', 'compositionstart', 'compositionend']) {
+        notes.addEventListener(type, (event) => {
+          const cap = capOf(event.target);
+          if (!cap) return;
+          event.stopPropagation();
+          if (type !== 'keydown') return;
+          // Select All in a caption is the caption: the browser would take the
+          // whole note, and the next Backspace the picture with it.
+          if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a') {
+            event.preventDefault();
+            const range = document.createRange();
+            range.selectNodeContents(cap);
+            const sel = getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          } else if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            cap.blur();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            if (before.has(cap)) cap.textContent = before.get(cap);
+            cap.blur();
+          }
+        }, true);
+      }
+
+      notes.addEventListener('mousedown', (event) => {
+        if (event.target.closest?.('.ni-cap-add')) event.preventDefault();
+      });
+      notes.addEventListener('click', (event) => {
+        const b = event.target.closest?.('.ni-cap-add');
+        const fig = b?.closest(FIG);
+        if (!fig) return;
+        event.preventDefault();
+        event.stopPropagation();
+        start(fig);
+      });
+    };
+
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
 </body>
 </html>

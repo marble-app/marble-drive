@@ -1150,3 +1150,61 @@ test('folded, the rail keeps a square for each note, and the name comes up besid
   assert.ok(await page.evaluate(() => document.querySelector('.rail').getBoundingClientRect().width > 200));
   assert.deepEqual(errors, []);
 });
+
+test('backticks make a word code, and a fence and Enter make a block of code that keeps its lines', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('run `npm test` first');
+  await page.waitForTimeout(200);
+  assert.match(await filed(page), /<code[^>]*>npm test<\/code>/, 'the closing backtick made the word code');
+
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('```js');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  const made = (await blocks(page))[3];
+  assert.equal(made.tag, 'PRE', 'the fence became a block of code');
+  await page.keyboard.type('const a = 1;');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('const b = 2;');
+  await page.waitForTimeout(200);
+  const source = await filed(page);
+  assert.match(source, /<pre[^>]*data-lang="js"[^>]*>const a = 1;\nconst b = 2;<\/pre>/, 'one block, its newline kept, its language named');
+  assert.deepEqual(errors, []);
+});
+
+test('a picture takes a figure caption: numbered, filed once it has words, and gone when emptied', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.evaluate(async () => {
+    const canvas = Object.assign(document.createElement('canvas'), { width: 40, height: 20 });
+    canvas.getContext('2d').fillRect(0, 0, 40, 20);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const data = new DataTransfer();
+    data.items.add(new File([blob], 'chart.png', { type: 'image/png' }));
+    document.querySelector('.note.marble-open').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  const fig = page.locator('.note.marble-open > figure.ni');
+  await fig.waitFor();
+  await page.waitForTimeout(300);
+  assert.doesNotMatch(await filed(page), /data-ph="Write a caption"/, 'a picture has no caption until one is written');
+
+  await fig.hover();
+  await fig.locator('.ni-cap-add').click();
+  await page.keyboard.type('Runs by week');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  assert.match(await filed(page), /<figcaption[^>]*class="ni-cap"[^>]*>Runs by week<\/figcaption>/);
+  const label = await fig.locator('.ni-cap').evaluate((el) => getComputedStyle(el, '::before').content);
+  assert.match(label, /Figure/, 'the caption is led by its figure number');
+
+  await fig.locator('.ni-cap').click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  assert.doesNotMatch(await filed(page), /data-ph="Write a caption"/, 'an emptied caption is taken out');
+  assert.match(await filed(page), /<figure class="ni" data-embed(="")? data-marble-id="/, 'and the picture stays');
+  assert.deepEqual(errors, []);
+});
