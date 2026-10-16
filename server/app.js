@@ -24,7 +24,7 @@ import { agentsAllowed, createAgents } from './agent/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
 import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
-import { blobsIn, extract, flatten } from './flatten.js';
+import { blobsIn, extract, flatten, PLACEHOLDER } from './flatten.js';
 import { createTouched } from './touched.js';
 import { createDoor } from './door.js';
 import { createGate, isLocal, overHttps, returnPath } from './gate.js';
@@ -52,6 +52,7 @@ import { createGit, gitAllowed } from './git.js';
 import { sameOrigin } from './sessions.js';
 import { createStems } from './stems/index.js';
 import { cleanFileName, createUploads } from './uploads.js';
+import { POWERPOINT, pptxToDeck } from './pptx.js';
 import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
 import { createGenuiHandler } from './genui/routes.js';
@@ -1322,6 +1323,43 @@ export async function createDrive(config, { log = console, agentProviders = null
         });
       }
 
+      // A PowerPoint in the drive, made into a deck of the drive's own beside it
+      // (server/pptx.js). The Drive sends a dropped .pptx here once it has
+      // landed as a file, so a big deck goes up the way any big file does, and
+      // one that cannot be read is left as the file it came in as. Its pictures
+      // and clips go to the blob store rather than into the document, the way
+      // `extract` would move them, except for the small ones a fetch costs more
+      // than. Once the deck is written the PowerPoint goes to the Trash, where
+      // it can be got back; `keep` leaves it where it was.
+      if (route === '/drive/slides-from' && req.method === 'POST') {
+        const body = await readJson(req, config.maxBodyBytes);
+        const file = await store.readRaw(body.path ?? '');
+        if (!file) return json(res, 404, { error: `no file "${body.path}"` });
+        if (!POWERPOINT.test(file.name)) return json(res, 400, { error: `"${file.name}" is not a PowerPoint file` });
+        const { parent } = splitPath(file.path);
+        const docPath = await freePath(joinPath(parent, safeSegment(file.name.replace(/\.[^.]+$/, ''))));
+        const putBlob = async (bytes, type) => {
+          if (bytes.length < 16 * 1024) return `src="data:${type};base64,${bytes.toString('base64')}"`;
+          const { hash } = await store.blobs.put(bytes, { type });
+          return `data-marble-blob="${hash}" data-marble-type="${type}" src="${PLACEHOLDER}"`;
+        };
+        const deck = await pptxToDeck(file.at, {
+          starter: await buildStarter('slides', { name: splitPath(docPath).name }),
+          fileName: file.name,
+          putBlob,
+        });
+        await putDocument(docPath, deck.source, { label: 'imported', client: body.client ?? null });
+        if (!body.keep) channels.toDrive('trashed', await store.trash(file.path), { except: body.client ?? null });
+        return json(res, 200, {
+          ok: true,
+          path: docPath,
+          href: `/a/${encodeURIComponent(docPath)}`,
+          slides: deck.slides,
+          missing: deck.missing,
+          hidden: deck.hidden,
+        });
+      }
+
       if (route === '/drive/mkdir' && req.method === 'POST') {
         const body = await readJson(req, config.maxBodyBytes);
         const made = await store.mkdir(body.path);
@@ -1460,13 +1498,24 @@ export async function createDrive(config, { log = console, agentProviders = null
         // Content-addressed, so the bytes behind a hash never change and this is
         // the one thing in the whole host that is safe to cache forever; private,
         // as it sits behind the gate and no shared cache may keep it.
-        return send(res, 200, blob.data, {
+        const headers = {
           'Content-Type': blob.type,
           'Cache-Control': 'private, max-age=31536000, immutable',
           // A blob is whatever type its uploader said. Never let a browser
           // decide it is a page instead.
           'X-Content-Type-Options': 'nosniff',
-        });
+          'Accept-Ranges': 'bytes',
+        };
+        // A clip brought in with a deck is played by seeking into it.
+        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+        if (range && (range[1] || range[2])) {
+          const size = blob.data.length;
+          const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+          const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+          if (start >= size || start > end) return send(res, 416, '', { ...headers, 'Content-Range': `bytes */${size}` });
+          return send(res, 206, blob.data.subarray(start, end + 1), { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}` });
+        }
+        return send(res, 200, blob.data, headers);
       }
 
       if (route === '/blob' && req.method === 'POST') {

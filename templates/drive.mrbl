@@ -4522,6 +4522,8 @@ __ICON__
       // A .mrbl is an HTML file, so a document somebody's browser saved under
       // the other extension is not a different document.
       const DOCUMENT = /\.(mrbl|html?)$/i;
+      // A PowerPoint is the deck inside it, so the host makes it into one.
+      const POWERPOINT = /\.(pptx|pptm|ppsx|ppsm|potx|potm)$/i;
 
       let landing = null;
 
@@ -4762,6 +4764,9 @@ __ICON__
         const brought = new Set();
         const refused = [];
         const retry = [];
+        // PowerPoints that went up but could not be read into a deck: they are
+        // in the folder as the file they came in as.
+        const unread = [];
         let cancelled = false;
         for (const [i, { file, folder }] of wanted.entries()) {
           if (controller.signal.aborted) {
@@ -4773,7 +4778,7 @@ __ICON__
           mark(i, 'going', '0%');
           rows[i].scrollIntoView({ block: 'nearest' });
           try {
-            added.push(
+            let put =
               DOCUMENT.test(file.name)
                 ? await drive.upload({ folder: to, name: file.name, source: await file.text() })
                 : await drive.uploadFile({
@@ -4790,11 +4795,25 @@ __ICON__
                     onState: (state) => {
                       if (state === 'reconnecting') mark(i, 'going', 'reconnecting…');
                     },
-                  }),
-            );
+                  });
             sent[i] = file.size;
-            mark(i, 'done', 'added');
-            if (!DOCUMENT.test(file.name)) {
+            paint();
+            // Once a PowerPoint is up, the host reads it into a deck beside it
+            // and puts the file in the Trash. Reading takes a moment, so the row
+            // says what it is waiting for.
+            let deck = null;
+            if (POWERPOINT.test(file.name) && typeof drive.slidesFrom === 'function') {
+              mark(i, 'going', 'making slides…');
+              try {
+                deck = await drive.slidesFrom({ path: put.path });
+                put = deck;
+              } catch (err) {
+                unread.push(file.name + ' stayed a file — ' + (err?.message ?? err));
+              }
+            }
+            added.push(put);
+            mark(i, 'done', deck ? deck.slides + (deck.slides === 1 ? ' slide' : ' slides') : 'added');
+            if (!deck && !DOCUMENT.test(file.name)) {
               const top = folder ? [into, folder.split('/')[0]].filter(Boolean).join('/') : added[added.length - 1]?.path;
               if (top) brought.add(top);
             }
@@ -4820,17 +4839,18 @@ __ICON__
         if (cancelled) tally.push('the rest cancelled');
         if (unheld) tally.push(unheld + (unheld === 1 ? ' other file' : ' other files') + ' left alone');
         if (refused.length) tally.push(refused.length === 1 ? refused[0] : refused.length + ' refused — ' + refused[0]);
+        if (unread.length) tally.push(unread.length === 1 ? unread[0] : unread.length + ' PowerPoints stayed files — ' + unread[0]);
 
         // The card becomes the receipt. A clean drop closes itself; one that
         // lost something stays until it is dismissed, because a failure that
         // disappears on its own is one you find out about later.
         title.textContent = tally[0] ?? 'Nothing added';
         sum.textContent = tally.slice(1).join(' · ') || bytes(total);
-        tray.setAttribute('data-state', refused.length || cancelled ? 'failed' : 'done');
+        tray.setAttribute('data-state', refused.length || unread.length || cancelled ? 'failed' : 'done');
         tray.retry = retry.length ? Object.assign(retry, { into }) : null;
         button.textContent = retry.length ? 'Retry' : 'Close';
         say(tally.join(' · '));
-        if (!refused.length && !cancelled) tray.timer = setTimeout(() => tray.removeAttribute('data-open'), 2600);
+        if (!refused.length && !unread.length && !cancelled) tray.timer = setTimeout(() => tray.removeAttribute('data-open'), 2600);
       }
 
       // ---------------------------------------------------------- the toggles

@@ -97,7 +97,7 @@ __ICON__
      The face is its own container, so the type on a slide is a proportion of
      the slide and not of the window: the same composition at 390px, at 1280px
      and blown up on a projector. Nothing on a slide is sized by the window. */
-  .frame { grid-column: 1 / -1; position: relative; aspect-ratio: 16 / 9; }
+  .frame { grid-column: 1 / -1; position: relative; aspect-ratio: var(--ratio, 16 / 9); }
   .face {
     position: absolute; inset: 0; overflow: hidden; padding: 6.2% 7%; container: face / inline-size; --fit: 1;
     display: flex; flex-direction: column; justify-content: center; justify-content: safe center;
@@ -127,13 +127,44 @@ __ICON__
     border: 1px solid var(--caution); border-radius: var(--pill); background: var(--card); color: var(--caution); font: 600 .66rem/1.6 var(--ui);
   }
 
+  /* ------------------------------------------------------ a slide brought in
+
+     A slide made from a PowerPoint (server/pptx.js) keeps the places its author
+     put things: every box is absolute, at a percentage of the slide, and its
+     type is in cqi of the face, so the composition scales as one picture. Its
+     colours are the deck's own and stay put in the dark, because they are
+     content and not this interface. A deck that was 4:3 says so in --ratio on
+     the list. Its boxes keep their bold words and colours when typed into,
+     which is why they are data-marble-rich rather than editable. */
+  .face.placed { padding: 0; display: block; background: #fff; color: #000; }
+  .placed .bx { position: absolute; margin: 0; box-sizing: border-box; }
+  .placed .tx { display: flex; flex-direction: column; justify-content: flex-start; line-height: 1.2; white-space: pre-wrap; overflow-wrap: break-word; outline: none; border-radius: 0; }
+  .placed .tx[data-anchor="ctr"] { justify-content: center; }
+  .placed .tx[data-anchor="b"] { justify-content: flex-end; }
+  .face.placed p, .placed td > p { margin: 0; max-width: none; color: inherit; font-size: inherit; line-height: inherit; }
+  .placed p[data-bu]::before { content: attr(data-bu); display: inline-block; min-width: var(--bu-w, auto); padding-right: .35em; box-sizing: border-box; text-indent: 0; color: var(--bu-color, currentColor); font-size: var(--bu-size, 1em); }
+  .placed a { color: inherit; }
+  .placed img.bx, .placed .crop > img { display: block; object-fit: fill; }
+  .placed .crop { overflow: hidden; }
+  .placed .crop > img { position: absolute; max-width: none; }
+  .placed .bg { z-index: 0; }
+  .placed svg.bx { overflow: visible; }
+  .placed table.bx { border-collapse: collapse; table-layout: fixed; }
+  .placed td { white-space: pre-wrap; overflow-wrap: break-word; line-height: 1.2; outline: none; }
+  .placed [data-marble-rich]:hover, .placed [data-marble-rich]:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+  .slide:has(> .frame > .placed) > .kind { display: none; }
+  /* A sound sits on its speaker icon and plays when it is pressed. */
+  .placed .media { cursor: pointer; border-radius: var(--r-sm); }
+  .placed .media.marble-playing { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+  .placed .media > audio { display: none; }
+
   /* --------------------------------------------------------------- the notes
 
      Speaker notes belong to the slide and are content like anything else — in
      the file, addressable, undoable, and the first thing anybody wants from a
      deck. They are also the one part of it the room must never see, so
      presenting hides them along with the rest of the chrome. */
-  .notes { grid-column: 1; margin: .5rem 0 0; padding-left: .65rem; border-left: 2px solid var(--line); color: var(--muted); font-size: .84rem; line-height: 1.5; }
+  .notes { grid-column: 1; margin: .5rem 0 0; padding-left: .65rem; border-left: 2px solid var(--line); color: var(--muted); font-size: .84rem; line-height: 1.5; white-space: pre-line; }
   /* Never at nought: this pill is the only evidence a slide can be the title
      slide, and a control you must hover to find is one nobody on a tablet
      ever finds. */
@@ -197,6 +228,12 @@ __ICON__
   [data-present] .stage { opacity: 1; visibility: visible; }
   [data-present] .slide.marble-at > .frame > .face,
   [data-present] .slide.marble-out > .frame > .face { position: fixed; inset: 0; z-index: 60; border: 0; border-radius: 0; box-shadow: none; pointer-events: none; }
+  /* A placed slide is a picture with a shape, so it keeps that shape on the
+     screen, as large as fits and centred, with the well around it. */
+  [data-present] .slide.marble-at > .frame > .face.placed,
+  [data-present] .slide.marble-out > .frame > .face.placed { margin: auto; width: min(100vw, calc(100vh * var(--ratio, 16 / 9))); height: min(100vh, calc(100vw / (var(--ratio, 16 / 9)))); }
+  [data-present] .placed [data-marble-rich] { box-shadow: none; }
+  [data-present] .placed .media, [data-present] .placed video { pointer-events: auto; }
   /* Everything that is not the slide: the bar, the adder, the name of the deck,
      the grips, the seams and — the one that matters — the notes. The number goes
      too, because the corner of the screen is saying it already. */
@@ -347,7 +384,8 @@ __ICON__
     // change the box, so this never feeds itself.
     function fit(face) {
       const slide = face.closest('.slide');
-      if (!slide) return;
+      // A placed slide is drawn to scale; stepping its type down would move it.
+      if (!slide || face.classList.contains('placed')) return;
       slide.classList.remove('marble-fit-2', 'marble-fit-3', 'marble-over');
       if (!face.clientHeight) return;
       const over = () => face.scrollHeight > face.clientHeight + 1;
@@ -412,6 +450,7 @@ __ICON__
     }
     function leave() {
       if (!presenting()) return;
+      hush();
       const here = at() ?? slides()[0];
       if (here) turn(false, here);
       else document.body.removeAttribute('data-present');
@@ -427,6 +466,7 @@ __ICON__
     function show(next, dir, fromX = 0) {
       const prev = at();
       if (!next || next === prev) return;
+      hush();
       const width = stage.clientWidth || 1;
       next.classList.remove('marble-out');
       next.classList.add('marble-at');
@@ -442,6 +482,26 @@ __ICON__
       if (reduced.matches) fade(coming, 0, 1);
       else swipe(coming, dir * width, 'none');
       mark();
+    }
+
+    // ------------------------------------------------------- sound and video
+    //
+    // A speaker icon brought in from PowerPoint plays its clip when pressed,
+    // presenting or not, and moving to another slide stops it, as PowerPoint
+    // does. Which clip is playing is the page's to know, never the file's.
+    function hush() {
+      for (const clip of list.querySelectorAll('audio, video')) if (!clip.paused) clip.pause();
+    }
+    list.addEventListener('click', (event) => {
+      const clip = event.target.closest?.('.media')?.querySelector('audio');
+      if (!clip) return;
+      if (clip.paused) {
+        hush();
+        clip.play().catch(() => {});
+      } else clip.pause();
+    });
+    for (const type of ['play', 'pause', 'ended']) {
+      list.addEventListener(type, ({ target }) => target.closest?.('.media')?.classList.toggle('marble-playing', type === 'play'), true);
     }
 
     // The deck has ends. Pushing past one gives and comes back: a hard stop
@@ -555,8 +615,52 @@ __ICON__
       marble.register((root) => {
         for (const slide of [...(root.matches?.('.slide') ? [root] : []), ...(root.querySelectorAll?.('.slide') ?? [])]) {
           if (!slide.querySelector(':scope > .seam')) slide.prepend(chrome('seam', '<i aria-hidden="true">+</i>', { 'aria-label': add, title: add }));
-          if (!slide.querySelector(':scope > .kind')) slide.append(chrome('kind', 'Title', { 'data-marble-toggle': 'data-kind:title|point', 'data-marble-of': '.slide', 'data-marble-instruction': 'Make this the title slide, or an ordinary one.' }));
+          if (!slide.querySelector(':scope > .kind') && !slide.querySelector(':scope > .frame > .placed')) slide.append(chrome('kind', 'Title', { 'data-marble-toggle': 'data-kind:title|point', 'data-marble-of': '.slide', 'data-marble-instruction': 'Make this the title slide, or an ordinary one.' }));
         }
+      });
+
+      // ------------------------------------------------------- rich text boxes
+      //
+      // The library's editable is plain text, filed with setText, which would
+      // flatten a PowerPoint box's bold word and second colour the first time
+      // anybody typed in it. A data-marble-rich box is filed with setInner, so
+      // its runs survive. Enter makes a new paragraph, which takes the look of
+      // the one it was split from; a paste comes in as plain text in that look.
+      const RICH = '[data-marble-rich]';
+      const wired = new WeakSet();
+      const rich = (el) => {
+        el.setAttribute('contenteditable', 'true');
+        el.spellcheck = false;
+        if (wired.has(el)) return;
+        wired.add(el);
+        let prior = null;
+        el.addEventListener('focus', () => { prior = marble.source.inner(el); });
+        el.addEventListener('input', (event) => {
+          const id = marble.id(el);
+          if (!id) return;
+          const html = marble.source.inner(el);
+          const op = { type: 'setInner', id, html };
+          if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+            prior = html;
+            marble.op(op);
+            return;
+          }
+          if (prior !== null && html !== prior) marble.record({ redo: [op], undo: [{ type: 'setInner', id, html: prior }] }, { coalesce: true });
+          marble.op(op);
+        });
+        el.addEventListener('blur', () => { prior = null; marble.flush(); });
+        el.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') { event.preventDefault(); el.blur(); }
+        });
+        el.addEventListener('paste', (event) => {
+          const text = event.clipboardData?.getData('text/plain');
+          if (text == null) return;
+          event.preventDefault();
+          document.execCommand('insertText', false, text);
+        });
+      };
+      marble.register((root) => {
+        for (const el of [...(root.matches?.(RICH) ? [root] : []), ...(root.querySelectorAll?.(RICH) ?? [])]) rich(el);
       });
 
       list.addEventListener('click', (event) => {
