@@ -3591,6 +3591,9 @@
     .ichip-mark { width: 14px; height: 14px; border-radius: 4px; flex: none; margin-left: -2px; background: var(--paper-3); display: grid; place-items: center; color: var(--faint); }
     .ichip-mark svg { width: 9px; height: 9px; }
     .ichip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* A deck still being made: the chip is there, and says so in fainter words. */
+    .ichip[data-busy] { cursor: default; }
+    .ichip[data-busy] .ichip-name { color: var(--faint); }
     .ichip-clear { font: inherit; font-size: 12px; border: 0; background: none; color: var(--faint); width: 15px; height: 15px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; flex: none; display: grid; place-items: center; }
     .ichip-clear:hover { background: var(--line); color: var(--ink); }
     /* The one thing the document pill said that the pane's bar does not: that
@@ -4056,10 +4059,13 @@
   // An attachment travels inside the prompt, tagged, so the agent reads it as
   // a named block rather than as the person's own sentence — and so the sent
   // message can be shown back as the same cards the composer had.
-  const PASTED = /<pasted-(text|image)\b([^>]*)>([\s\S]*?)<\/pasted-\1>\n?/g;
+  const PASTED = /<pasted-(text|image|slides)\b([^>]*)>([\s\S]*?)<\/pasted-\1>\n?/g;
   // The token a chip leaves in the text, so the person can point at it and the
   // agent can match it to the block above.
-  const TOKEN = /\[(image|pasted text) (\d+)\]/g;
+  const TOKEN = /\[(image|pasted text|slides) (\d+)\]/g;
+  // A PowerPoint is the deck inside it: the drive makes it into one.
+  const POWERPOINT = /\.(pptx|pptm|ppsx|ppsm|potx|potm)$/i;
+  const slideCount = (n) => `${n} ${n === 1 ? 'slide' : 'slides'}`;
 
   function splitPasted(text) {
     const blocks = [];
@@ -4089,6 +4095,12 @@
   const imageMark = () => {
     const mark = h('span', 'ichip-mark');
     mark.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.4" y="2.6" width="13.2" height="10.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M1.6 11.2 5.4 7.8l3.1 2.6 2.3-1.9 3.6 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return mark;
+  };
+  /** A slide on a stand, for a chip that carries a deck. */
+  const slidesMark = () => {
+    const mark = h('span', 'ichip-mark');
+    mark.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.4" y="2.2" width="13.2" height="8.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 11v3M5.4 14.2h5.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
     return mark;
   };
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
@@ -4160,6 +4172,7 @@
           const kind = child.dataset.kind;
           if (kind === 'image') out.push(`[image ${(chips += 1)}]`);
           else if (kind === 'text') out.push(`[pasted text ${(chips += 1)}]`);
+          else if (kind === 'slides') out.push(`[slides ${(chips += 1)}]`);
           continue;
         }
         if (tag === 'UL' || tag === 'OL') {
@@ -4755,22 +4768,25 @@
       // A screenshot and a page of pasted log are the two things that arrive
       // through the clipboard and do not belong in a one-line box.
       this.input.addEventListener('paste', (event) => this.takePaste(event));
-      this.form.addEventListener('dragover', (event) => {
+      // A file let go anywhere over the conversation is meant for the box it
+      // is typed in. The browser's own answer to a drop is to leave the page
+      // and show the file, which is never what a hand over a chat meant.
+      this.addEventListener('dragover', (event) => {
         if (![...(event.dataTransfer?.types ?? [])].includes('Files')) return;
         event.preventDefault();
         this.form.classList.add('is-dropping');
       });
-      this.form.addEventListener('dragleave', (event) => {
-        if (event.target === this.form || !this.form.contains(event.relatedTarget)) {
+      this.addEventListener('dragleave', (event) => {
+        if (!this.contains(event.relatedTarget) && !this.shadowRoot.contains(event.relatedTarget)) {
           this.form.classList.remove('is-dropping');
         }
       });
-      this.form.addEventListener('drop', (event) => {
-        const files = [...(event.dataTransfer?.files ?? [])].filter((file) => file.type.startsWith('image/'));
+      this.addEventListener('drop', (event) => {
+        const files = [...(event.dataTransfer?.files ?? [])];
         this.form.classList.remove('is-dropping');
         if (!files.length) return;
         event.preventDefault();
-        for (const file of files) this.attachImage(file);
+        this.takeFiles(files);
       });
       this.peekClose.addEventListener('click', () => this.closePeek());
       this.shadowRoot.addEventListener('keydown', (event) => {
@@ -6684,10 +6700,10 @@
     takePaste(event) {
       const data = event.clipboardData;
       if (!data) return;
-      const images = [...(data.files ?? [])].filter((file) => file.type.startsWith('image/'));
-      if (images.length) {
+      const files = [...(data.files ?? [])].filter((file) => file.type.startsWith('image/') || POWERPOINT.test(file.name));
+      if (files.length) {
         event.preventDefault();
-        for (const file of images) this.attachImage(file);
+        this.takeFiles(files);
         return;
       }
       const text = data.getData('text/plain') ?? '';
@@ -6707,6 +6723,61 @@
         bytes: new Blob([text]).size,
         peek: lines.slice(0, 4).join('\n'),
       };
+      this.attachments.push(item);
+      this.insertChip(this.attachChip(item));
+      this.focusInput();
+    }
+
+    /** Pictures ride along with the message; a PowerPoint becomes a deck.
+     *  Anything else is said no to in one line, by name. */
+    takeFiles(files) {
+      const refused = [];
+      for (const file of files) {
+        if (POWERPOINT.test(file.name)) this.attachSlides(file);
+        else if (file.type.startsWith('image/')) this.attachImage(file);
+        else refused.push(file.name || 'That file');
+      }
+      if (refused.length) {
+        const names = refused.length === 1 ? refused[0] : `${refused.slice(0, -1).join(', ')} and ${refused.at(-1)}`;
+        this.system(`${names} can’t go in a message. Pictures and PowerPoint decks can.`, true);
+      }
+    }
+
+    /** A PowerPoint is made into a deck of the drive's own the moment it
+     *  lands, beside the page this conversation is on, the way a drop on the
+     *  Drive does it (server/pptx.js). Its chip says so while the deck is
+     *  being made, then names it; the agent is sent where the deck is. */
+    attachSlides(file) {
+      const drive = window.marble?.drive;
+      if (typeof drive?.slidesFrom !== 'function' || typeof drive.uploadFile !== 'function') {
+        this.system(`${file.name} can’t be made into slides here.`, true);
+        return;
+      }
+      const item = {
+        key: `a${(this.attachSeq += 1)}`,
+        kind: 'slides',
+        name: file.name.replace(/\.[^.]+$/, ''),
+        from: file.name,
+        bytes: file.size,
+        busy: true,
+      };
+      const folder = String(window.marble?.app ?? '').split('/').slice(0, -1).join('/');
+      let landed = null;
+      item.pending = (async () => {
+        landed = await drive.uploadFile({ folder, name: file.name, file });
+        const deck = await drive.slidesFrom({ path: landed.path });
+        Object.assign(item, { busy: false, name: deck.path.split('/').pop(), path: deck.path, href: deck.href, slides: deck.slides });
+        return item;
+      })();
+      item.pending.then(
+        () => this.input.querySelector(`.ichip[data-key="${CSS.escape(item.key)}"]`)?.replaceWith(this.attachChip(item)),
+        (err) => {
+          this.input.querySelector(`.ichip[data-key="${CSS.escape(item.key)}"]`)?.remove();
+          this.onEdited();
+          const kept = landed?.path ? ` It is in the drive as ${landed.path}.` : '';
+          this.system(`Couldn’t make slides from ${file.name}: ${err?.message ?? err}.${kept}`, true);
+        },
+      );
       this.attachments.push(item);
       this.insertChip(this.attachChip(item));
       this.focusInput();
@@ -6773,6 +6844,11 @@
         }
         chip.append(h('span', 'ichip-name', item.name));
         chip.setAttribute('aria-label', `${item.name}, ${sizeOf(item.bytes ?? 0)} — open`);
+      } else if (item.kind === 'slides') {
+        chip.append(slidesMark());
+        chip.append(h('span', 'ichip-name', item.busy ? `${item.name} · making slides…` : `${item.name} · ${slideCount(item.slides ?? 0)}`));
+        chip.toggleAttribute('data-busy', Boolean(item.busy));
+        chip.setAttribute('aria-label', item.busy ? `Making slides from ${item.from}` : `${item.name}, ${slideCount(item.slides ?? 0)} — open`);
       } else {
         chip.append(h('span', 'ichip-name', `Pasted text · ${item.lines} lines`));
         chip.setAttribute('aria-label', `Pasted text, ${item.lines} lines — open`);
@@ -6859,15 +6935,23 @@
       }
       const head = h('div', 'attach-head');
       head.append(h('span', 'attach-name', item.name));
-      head.append(h('span', 'attach-meta', item.kind === 'image' ? sizeOf(item.bytes ?? 0) : `${item.lines} lines`));
+      const meta = item.kind === 'image' ? sizeOf(item.bytes ?? 0) : item.kind === 'slides' ? slideCount(item.slides ?? 0) : `${item.lines} lines`;
+      head.append(h('span', 'attach-meta', meta));
       card.append(head);
       if (item.kind === 'text') card.append(h('pre', 'attach-peek', item.peek ?? item.text.split('\n').slice(0, 4).join('\n')));
-      card.setAttribute('aria-label', `${item.name}, ${item.kind === 'image' ? sizeOf(item.bytes ?? 0) : `${item.lines} lines`} — open`);
+      card.setAttribute('aria-label', `${item.name}, ${meta} — open`);
       card.addEventListener('click', () => this.openPeek(item));
       return card;
     }
 
     openPeek(item) {
+      // A deck is a page of its own; it opens beside this one, so a message
+      // half typed is still here.
+      if (item.kind === 'slides') {
+        const href = item.href ?? item.url;
+        if (href && !item.busy) window.open(href, '_blank', 'noopener');
+        return;
+      }
       this.peekItem = item;
       this.peekTitle.textContent = item.kind === 'image'
         ? `${item.name} · ${sizeOf(item.bytes ?? 0)}`
@@ -6900,6 +6984,15 @@
         const at = index + 1;
         if (item.kind === 'text') {
           blocks.push(`<pasted-text index="${at}" lines="${item.lines}" chars="${item.text.length}">\n${item.text}\n</pasted-text>`);
+          continue;
+        }
+        // A deck still being made is waited for; one that could not be made
+        // has already taken its chip out of the message.
+        if (item.kind === 'slides') {
+          await item.pending;
+          blocks.push(
+            `<pasted-slides index="${at}" name="${escAttr(item.name)}" path="${escAttr(item.path)}" slides="${item.slides}" from="${escAttr(item.from)}" url="${escAttr(item.href)}"></pasted-slides>`,
+          );
           continue;
         }
         if (!item.saved) {
@@ -6946,8 +7039,11 @@
       }
       const items = blocks.map((block) => ({
         kind: block.kind,
-        name: block.name || (block.kind === 'image' ? 'Pasted image' : 'Pasted text'),
+        name: block.name || (block.kind === 'image' ? 'Pasted image' : block.kind === 'slides' ? 'Slides' : 'Pasted text'),
         url: block.url,
+        path: block.path,
+        from: block.from,
+        slides: Number(block.slides) || 0,
         text: block.text,
         lines: Number(block.lines) || (block.text ? block.text.split('\n').length : 0),
         bytes: Number(block.bytes ?? block.chars) || 0,

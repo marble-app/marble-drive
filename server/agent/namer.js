@@ -33,6 +33,8 @@ const unwrapAttachments = (text) =>
   String(text ?? '')
     .replace(/<pasted-image\b[^>]*>[\s\S]*?<\/pasted-image>/g, ' ')
     .replace(/<pasted-image\b[^>]*\/?>/g, ' ')
+    // A deck made from a PowerPoint is named by its deck's name.
+    .replace(/<pasted-slides\b[^>]*?\bname="([^"]*)"[^>]*>[\s\S]*?<\/pasted-slides>/g, ' $1 ')
     .replace(/<\/?pasted-text\b[^>]*>/g, ' ');
 
 /** The name a chat wears until the model has read it: the first line of the
