@@ -87,6 +87,10 @@
         { method: 'POST', raw: source },
       );
 
+    // A PowerPoint already in the drive, made into a deck beside it. The
+    // PowerPoint goes to the Trash unless `keep` says to leave it.
+    const slidesFrom = ({ path, keep = false }) => ask('/drive/slides-from', { method: 'POST', body: { path, keep } });
+
     // A file that is not a document — a song, a picture, a PDF — as its own
     // bytes. `file` is a Blob (what a drop hands you), sent as the body with
     // no encoding at all, because a 40 MB WAV base64-quoted is 53 MB of string.
@@ -539,6 +543,7 @@
       mkdir,
       upload,
       uploadFile,
+      slidesFrom,
       pendingUploads,
       move,
       remove,
