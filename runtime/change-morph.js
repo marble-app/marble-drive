@@ -13,7 +13,8 @@
 //     numbers in a style (corners, padding, gaps, type) run from the old
 //     value to the new; colours run through OKLCH; what moved or changed size
 //     is drawn where it was and slides to where it is (FLIP); what was put in
-//     rises 3px from .98; what was taken out is drawn where it stood and
+//     rises 3px from .98 (or, on a page being built, the way gen-progress.js
+//     brings it in); what was taken out is drawn where it stood and
 //     fades while its neighbours close the gap; new words are written in at
 //     reading pace once the old ones have faded; anything else crossfades;
 //   - the parts move in loose batches of two to six, each batch drawn far
@@ -1251,6 +1252,15 @@
     }
     for (const a of coming) {
       const { delay } = when(a.lead);
+      // A page being built (gen-progress.js) brings in what arrives its
+      // own way, on this engine's turn and through its motion.
+      let built = null;
+      try { built = window.marbleGen?.reveal?.(a.el, { delay, client: snap.client, motion }) ?? null; } catch { built = null; }
+      if (built) {
+        waits(a.lead).push(built.done);
+        latest = Math.max(latest, delay + built.duration);
+        continue;
+      }
       waits(a.lead).push(ended(motion(a.el, [
         { opacity: 0, transform: 'translateY(3px) scale(.98)' },
         { opacity: 1, transform: 'none' },

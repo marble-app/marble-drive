@@ -166,6 +166,7 @@ the plan's "The shared contract: a v5 presence frame":
   prompt, parts, inserts, removes, moves, kind, step, count, total, reach,
   failed,                             // a fan out's failed ids
   groups: { call, of, done, failed, seq },   // a fan out's groups, when the turn fans out
+  outline: { parentId, beforeId, blocks, landed },  // sections said ahead (server/change/outline.js)
   done: { status, changed, added, removed, failed? },  // `failed` whenever the turn fanned out
 }
 ```
@@ -234,6 +235,22 @@ repaired and validated the same way `apply_ops` is (the two share the same
 prepare/after path in `tools.js`), then landed as each worker finishes. A
 shard that fails leaves its parts as they were, says why in the turn's
 `failed` ids, and the rest still lands.
+
+### The page taking shape
+
+`runtime/gen-progress.js`, loaded right after the marks. While a followed
+turn works on the page it draws three things, all from real events: a line
+at the foot of the window saying the step the agent is on (each `tool.call`
+on the conversation's stream, `marble.agent.on`, and the presence frames
+where that stream is not heard), shimmering while it works and ending in
+Done with a check; the sections an agent said were coming (`outline` on
+apply_ops) as placeholder blocks where they will go, each giving up its room
+as the host counts its insert landed; and what arrives, rising into place.
+The engine still decides when each arrival moves: `change-morph.js` asks
+`window.marbleGen.reveal(el, { delay, client, motion })` and falls back to
+its own rise when that answers null. Every clock, curve and distance is a
+`--gen-*` custom property on `:root`. The corner island (`agent-work.js`)
+steps aside while the line speaks for a running turn.
 
 ### Load order
 

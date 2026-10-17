@@ -190,6 +190,10 @@ const RUNTIME = {
   // The marks (v5): each part a change touches is tinted as it lands, one tag
   // counts, and a rail stands for parts out of view. The zone box steps aside.
   'change-marks.js': () => path.join(REPO, 'runtime', 'change-marks.js'),
+  // The page taking shape: a line saying the step the agent is on, the
+  // sections it said are coming drawn as placeholders, and what it puts in
+  // rising into place (the engine asks it how).
+  'gen-progress.js': () => path.join(REPO, 'runtime', 'gen-progress.js'),
   // The line (v5): what ⌘J opens, one line flush under the thing, where
   // words go in and come back. The callout decides what it is about.
   'change-line.js': () => path.join(REPO, 'runtime', 'change-line.js'),
@@ -485,6 +489,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       // After the caret in the text, whose claims it defers to, and after
       // collab.js, whose zones step aside for what it marks.
       tags += `\n<script src="${runtimeUrl('change-marks.js')}" data-marble-transient></script>`;
+      // After the engine, which asks it how what arrives comes in.
+      tags += `\n<script src="${runtimeUrl('gen-progress.js')}" data-marble-transient></script>`;
       // After the marks, whose tints its own tint gives way to, and after the
       // callout, which opens it.
       tags += `\n<script src="${runtimeUrl('change-line.js')}" data-marble-transient></script>`;

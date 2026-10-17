@@ -146,8 +146,9 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     // `attending` names the chats this tab starts out following, as a tab
     // that asked for the work would: only those draw a zone on the page
     // (collab.js); any other agent is a glint.
-    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1, attending = [], detail = 'technical', shell = true, build = false } = {}) {
-      const context = await browser.newContext({ viewport, reducedMotion, colorScheme, hasTouch, isMobile, deviceScaleFactor });
+    // `video`: a folder the page is recorded into, for a demo to watch.
+    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1, attending = [], detail = 'technical', shell = true, build = false, video = null } = {}) {
+      const context = await browser.newContext({ viewport, reducedMotion, colorScheme, hasTouch, isMobile, deviceScaleFactor, ...(video ? { recordVideo: { dir: video, size: viewport } } : {}) });
       // Build mode (runtime/build-mode.js). The suites written before it test
       // Describe as a mode you turn on, so a page has Build mode off unless a
       // test asks for it. `build: true` opens each app in build mode, as if it

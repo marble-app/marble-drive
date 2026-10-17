@@ -807,6 +807,56 @@ test('apply_ops with no ops draws the reach and the marks ahead, and writes noth
   assert.equal(before.extra.marks.verb, 'Answering');
 });
 
+test('apply_ops says the sections coming ahead, and counts each one in as its insert lands', async () => {
+  const looks = [];
+  const v6Tools = marksTools(looks);
+  const turn = await freshTurn();
+  const sourceBefore = await drive.store.read(turn.target);
+  const result = await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Stage 1 of 3: the outline', ops: [],
+    outline: { parentId: 'b', beforeId: 'nope', blocks: [{ shape: 'header' }, { shape: 'cards', count: 40 }, { shape: 'sparkles' }, 'rows'] },
+  }, turn);
+  assert.deepEqual(result, { applied: 0, marked: { reach: 0, draw: 0, outline: 3 } });
+  assert.equal(await drive.store.read(turn.target), sourceBefore, 'nothing is written');
+  const [mark] = looks;
+  assert.equal(mark.extra.stage, 'mark');
+  assert.deepEqual(mark.extra.outline, {
+    parentId: 'b', beforeId: null, blocks: [{ shape: 'header' }, { shape: 'cards', count: 12 }, { shape: 'rows' }], landed: 0,
+  }, 'a before that is not there is the end; a count is capped; an unknown shape is dropped');
+  assert.deepEqual(mark.ids, ['b']);
+
+  // An insert into the outline's parent lands its first block; one into
+  // anywhere else lands none; every later batch repeats the count.
+  looks.length = 0;
+  await v6Tools.call('apply_ops', { path: turn.target, note: 'Stage 2 of 3: the header', ops: [{ type: 'insert', parentId: 'b', html: '<header><h2>Plan</h2></header>' }] }, turn);
+  assert.equal(looks.find((l) => l.extra?.stage === 'before').extra.outline.landed, 1);
+  looks.length = 0;
+  await v6Tools.call('apply_ops', { path: turn.target, note: 'A question', ops: [{ type: 'insert', parentId: 'q', html: '<li>When?</li>' }] }, turn);
+  assert.equal(looks.find((l) => l.extra?.stage === 'before').extra.outline.landed, 1);
+  looks.length = 0;
+  await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Stage 3 of 3: the rest', ops: [{ type: 'insert', parentId: 'b', html: '<div>Cards</div>' }, { type: 'insert', parentId: 'b', html: '<ul><li>Row</li></ul>' }, { type: 'insert', parentId: 'b', html: '<p>More</p>' }],
+  }, turn);
+  assert.equal(looks.find((l) => l.extra?.stage === 'before').extra.outline.landed, 3, 'never past the blocks there are');
+
+  // A new outline replaces the last, counted from nothing; one with nothing
+  // valid in it is no outline.
+  looks.length = 0;
+  await v6Tools.call('apply_ops', { path: turn.target, note: 'Next', ops: [], outline: { parentId: 'q', blocks: ['text'] } }, turn);
+  assert.deepEqual(looks[0].extra.outline, { parentId: 'q', beforeId: null, blocks: [{ shape: 'text' }], landed: 0 });
+  const other = await freshTurn();
+  looks.length = 0;
+  const none = await v6Tools.call('apply_ops', { path: other.target, note: 'x', ops: [], outline: { parentId: 'gone', blocks: ['text'] } }, other);
+  assert.deepEqual(none.marked, { reach: 0, draw: 0 });
+  assert.equal(looks[0].extra.outline, undefined);
+});
+
+test('apply_ops names outline in its schema', () => {
+  const schema = TOOL_SCHEMAS.find((t) => t.name === 'apply_ops').inputSchema;
+  assert.equal(schema.properties.outline.type, 'object');
+  assert.deepEqual(schema.properties.outline.properties.blocks.items.properties.shape.enum, ['header', 'text', 'cards', 'rows', 'media', 'form']);
+});
+
 test('apply_ops with no ops and nothing to draw is a batch that changes nothing', async () => {
   const looks = [];
   const v6Tools = marksTools(looks);
