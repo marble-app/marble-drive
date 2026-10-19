@@ -18,6 +18,8 @@
     if (document.documentElement.classList.contains('marble-collab-host')) return;
     document.documentElement.classList.add('marble-collab-host');
     marble.pageOnly('data-marble-choice');
+    // Keeps the zones on their elements between events (sight.js); set below.
+    let keepWatching = null;
 
     const style = document.createElement('style');
     style.setAttribute(TRANSIENT, '');
@@ -642,6 +644,7 @@
     const zoneLayer = document.createElement('div');
     zoneLayer.className = 'marble-zone-layer';
     zoneLayer.setAttribute(TRANSIENT, '');
+    zoneLayer.setAttribute('data-marble-overlay', '');
     zoneLayer.setAttribute('aria-live', 'polite');
     document.documentElement.append(zoneLayer);
 
@@ -710,16 +713,30 @@
     }
 
     let placed = [];
+    /** A frame is seen only where its element is (sight.js): not on a
+     *  slide switched away, under the page's own header, or past the edge
+     *  of the box it scrolls in. Returns the rect it was placed by. */
+    function seeOnly(frame, el, box) {
+      const sight = window.marbleSight?.look().of(el);
+      const hide = Boolean(sight) && !sight.shown;
+      if ((frame.style.display === 'none') !== hide) frame.style.display = hide ? 'none' : '';
+      if (sight?.shown) window.marbleSight.clip(frame, sight, box);
+      return sight?.rect ?? el.getBoundingClientRect();
+    }
+
     function place(frame, el) {
       const r = el.getBoundingClientRect();
       const pad = 10;
+      const box = { left: r.left - pad, top: r.top - pad };
       Object.assign(frame.style, {
-        top: `${r.top - pad}px`,
-        left: `${r.left - pad}px`,
+        top: `${box.top}px`,
+        left: `${box.left}px`,
         width: `${Math.max(24, r.width + pad * 2)}px`,
         height: `${Math.max(24, r.height + pad * 2)}px`,
       });
       frame.classList.toggle('marble-zone-tight', r.bottom > innerHeight - 40);
+      frame.marbleRect = seeOnly(frame, el, box);
+      keepWatching?.();
     }
 
     // A zone points: it says the work is *here*. Work with nothing to point at —
@@ -922,14 +939,17 @@
     function placeAct(act) {
       const r = act.target.getBoundingClientRect();
       const pad = 3;
+      const box = { left: r.left - pad, top: r.top - pad };
       Object.assign(act.frame.style, {
-        top: `${r.top - pad}px`,
-        left: `${r.left - pad}px`,
+        top: `${box.top}px`,
+        left: `${box.left}px`,
         width: `${Math.max(12, r.width + pad * 2)}px`,
         height: `${Math.max(12, r.height + pad * 2)}px`,
         borderRadius: ringRadius(act.target, pad),
       });
       act.frame.classList.toggle('marble-act-above', r.top > 40);
+      act.rect = seeOnly(act.frame, act.target, box);
+      keepWatching?.();
     }
 
     function actText(act) {
@@ -1149,8 +1169,21 @@
     }
     function scheduleRelayout() {
       if ((!placed.length && !placedActs.length) || relayout) return;
-      relayout = requestAnimationFrame(relayoutZones);
+      relayout = requestAnimationFrame(() => {
+        relayoutZones();
+      });
     }
+    // Movement no event tells of: a slide sliding, a sheet rising.
+    keepWatching = window.marbleSight?.watch({
+      paint: scheduleRelayout,
+      parts: () => {
+        const out = [
+          ...placed.filter(({ target }) => target.isConnected).map(({ frame, target }) => [target, frame.marbleRect]),
+          ...placedActs.filter((act) => act.target?.isConnected).map((act) => [act.target, act.rect]),
+        ];
+        return out.length ? out : null;
+      },
+    });
     addEventListener('scroll', scheduleRelayout, true);
     addEventListener('resize', scheduleRelayout);
     new MutationObserver((records) => {

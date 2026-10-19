@@ -102,6 +102,7 @@
     const layer = document.createElement('div');
     layer.className = 'marble-text-layer';
     layer.setAttribute(TRANSIENT, '');
+    layer.setAttribute('data-marble-overlay', '');
     layer.setAttribute('aria-live', 'polite');
     document.documentElement.append(layer);
 
@@ -248,6 +249,12 @@
       if (!a.block?.isConnected || a.away || off || personIn(a.block)) { caret.hidden = true; return; }
       const at = caretPoint(a);
       if (!at) { caret.hidden = true; return; }
+      // Only where the block is seen (sight.js): not on a slide switched
+      // away, past the edge of the box it scrolls in, or under the page's
+      // own header.
+      const sight = window.marbleSight?.look().of(a.block);
+      a.rect = sight?.rect ?? null;
+      if (sight && !seenAt(sight, at)) { caret.hidden = true; return; }
       caret.hidden = false;
       caret.dataset.phase = a.phase;
       const said = caption(a);
@@ -256,6 +263,16 @@
       Object.assign(caret.style, { left: `${Math.round(at.x)}px`, top: `${Math.round(at.top)}px`, height: `${Math.max(12, Math.round(at.height))}px` });
       caret.classList.toggle('is-flip', at.x > innerWidth - 150);
       caret.classList.toggle('is-low', at.top < 30);
+    }
+
+    /** Whether the caret's line is in what is seen of its block. */
+    function seenAt(sight, at) {
+      if (!sight.shown) return false;
+      const v = sight.visible;
+      const x = at.x;
+      const y = at.top + at.height / 2;
+      if (x < v.left - 3 || x > v.right + 3 || y < v.top || y > v.bottom) return false;
+      return !sight.holes.some((h) => x >= h.left && x <= h.right && y >= h.top && y <= h.bottom);
     }
 
     /** Where the caret stands: the end of what is being typed, the end of the
@@ -564,8 +581,20 @@
       if (pendingWords.length > 4) pendingWords.shift();
     });
     let raf = 0;
-    const relayout = () => { raf = 0; for (const a of agents.values()) paintCaret(a); };
+    const relayout = () => {
+      raf = 0;
+      for (const a of agents.values()) paintCaret(a);
+      if (agents.size) keepWatching?.();
+    };
     const schedule = () => { if (!raf) raf = requestAnimationFrame(relayout); };
+    // Movement no event tells of: a slide sliding under the caret.
+    const keepWatching = window.marbleSight?.watch({
+      paint: schedule,
+      parts: () => {
+        const out = [...agents.values()].filter((a) => a.block?.isConnected && !a.away).map((a) => [a.block, a.rect]);
+        return out.length ? out : null;
+      },
+    });
     addEventListener('scroll', schedule, true);
     addEventListener('resize', schedule);
     document.addEventListener('focusin', schedule);

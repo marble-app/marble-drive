@@ -47,6 +47,13 @@
 // allow-list of shapes and attributes; nothing an agent sends is ever set as
 // markup.
 //
+// Every mark is drawn only where its part is seen (sight.js): a part on a
+// slide switched away, faded out, scrolled out of the box it sits in or
+// under the page's own header has none, and one half under it is cut along
+// that edge. A part that moves with no event to say so (a slide sliding, a
+// sheet rising) is followed frame by frame while anything is drawn. The
+// tag's clock shows only in build mode.
+//
 // A change the page makes itself (a rule from Reshape or from a few words,
 // change-rules.js) is drawn with the same tints and tag through `begin`: no
 // presence frames, no conversation behind the tag, and a part can be left
@@ -151,6 +158,9 @@
     .marble-change-steps > i[data-state="now"]::after { content: ""; position: absolute; inset: 0 50% 0 0; background: var(--change-ink); }
     .marble-change-meter[hidden], .marble-change-steps[hidden] { display: none; }
     .marble-change-time { font-weight: 400; font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--change-ink) 52%, var(--change-text)); }
+    /* The clock is for building: out of build mode the tag says what is
+       happening and where, not for how long. (Its status still says.) */
+    .marble-change-layer:not([data-building]) .marble-change-time { display: none; }
 
     /* Resting on the tag opens the change's status under it, in the page's
        ink: what was asked, whole; how long it has run; its steps so far. */
@@ -417,7 +427,13 @@
     const layer = document.createElement('div');
     layer.className = 'marble-change-layer';
     layer.setAttribute(TRANSIENT, '');
+    layer.setAttribute('data-marble-overlay', '');
     document.documentElement.append(layer);
+    // Build mode on (agent-marks.js): the tag keeps its clock.
+    const building = (on) => layer.toggleAttribute('data-building', Boolean(on));
+    building(window.marbleMarks?.describing);
+    addEventListener('marble-marks:describing', (event) => building(event.detail?.on));
+    addEventListener('marble-marks:ready', () => building(window.marbleMarks?.describing));
     const aloud = document.createElement('div');
     aloud.className = 'marble-change-said-aloud';
     aloud.setAttribute(TRANSIENT, '');
@@ -1079,8 +1095,44 @@
       const el = resolve(holder);
       holder.rectAt = paint;
       holder.rect = drawable(el) ? rectOf(el) : null;
+      holder.sightAt = 0;
       return holder.rect;
     }
+
+    // Where a part is seen in this paint (sight.js): not at all on a slide
+    // switched away or under the page's own header, cut where it scrolls
+    // out of its box. Asked once per part per paint, and only of a part
+    // with something to draw.
+    let looking = null;
+    const unseen = { shown: false, why: 'hidden' };
+    function seen(holder) {
+      const r = measure(holder);
+      if (holder.sightAt === paint) return holder.sight;
+      holder.sightAt = paint;
+      if (!r) holder.sight = unseen;
+      else if (!looking) holder.sight = { shown: true, whole: true, rect: r };
+      else {
+        holder.sight = looking.of(holder.node, { rect: r });
+        // Out of the window is not out of sight: the mark is drawn where the
+        // part is, past the edge, ready for when it is scrolled to.
+        if (holder.sight.why === 'outside') {
+          holder.sight = { shown: true, whole: true, rect: r, side: holder.sight.side, holes: [],
+            visible: { left: r.left, top: r.top, right: r.right, bottom: r.bottom } };
+        }
+      }
+      return holder.sight;
+    }
+    const shown = (holder) => Boolean(measure(holder)) && seen(holder).shown;
+    /** Which way a part in the window is out of the box it scrolls in, if
+     *  it is: only its clip is asked, never what covers it. */
+    function sideOf(holder, r) {
+      if (holder.sightAt === paint) return holder.sight.side ?? null;
+      return looking?.of(holder.node, { rect: r, cover: false }).side ?? null;
+    }
+    /** A part that has left the page, as against one that is only out of
+     *  sight: a gone part's tint stays where it last stood while it lifts;
+     *  a hidden one's waits, hidden, for the part to be seen again. */
+    const left = (holder) => !holder.node || !drawable(holder.node);
 
     /** What a part looks like to its tint and its tag. */
     function shapeOf(holder, el) {
@@ -1166,6 +1218,10 @@
       const leaving = state === 'lift' || state === 'gone';
       if (!state || (leaving && !existing)) return existing ? { holder, key, remove: true } : null;
       const r = measure(holder);
+      const sight = seen(holder);
+      if (!sight.shown && (r || !left(holder))) {
+        return existing ? { holder, key, kind, state, box: null, hide: true } : null;
+      }
       let box = null;
       if (r) {
         const shape = shapeOf(holder, holder.node);
@@ -1177,7 +1233,7 @@
         box = { ...view(holder.box), radius: holder.box.radius };
       }
       if (!box) return existing ? { holder, key, remove: true } : null;
-      return { holder, key, kind, state, box, held: Boolean(r) && inHand(holder.node, hand) };
+      return { holder, key, kind, state, box, sight: r ? sight : null, held: Boolean(r) && inHand(holder.node, hand) };
     }
 
     function planDot(part, state, hand) {
@@ -1185,11 +1241,13 @@
       if (!state || (state === 'gone' && !existing)) return existing ? { holder: part, key: 'dot', remove: true } : null;
       const r = measure(part);
       if (!r && !existing) return null;
-      return {
-        holder: part, key: 'dot', kind: 'dot', state,
-        at: r ? { left: Math.max(6, r.left - 10), top: r.top + Math.min(r.height / 2, 11) } : null,
-        held: Boolean(r) && inHand(part.node, hand),
-      };
+      const at = r ? { left: Math.max(6, r.left - 10), top: r.top + Math.min(r.height / 2, 11) } : null;
+      // A dot stands in the margin, beside its row: it is seen while the
+      // row's line is.
+      const sight = seen(part);
+      const hide = r || !left(part) ? !sight.shown || at.top < sight.visible.top || at.top > sight.visible.bottom : false;
+      if (hide && !existing) return null;
+      return { holder: part, key: 'dot', kind: 'dot', state, at: hide ? null : at, hide, held: Boolean(r) && inHand(part.node, hand) };
     }
 
     function fadeIn(el, delay = 0) {
@@ -1238,8 +1296,10 @@
       }
       if (el.dataset.state !== plan.state) el.dataset.state = plan.state;
       if (box) place(el, box);
-      if (el.hidden !== plan.held) el.hidden = plan.held;
-      return true;
+      if (plan.kind !== 'dot' && box) window.marbleSight?.clip(el, plan.sight, box);
+      const hidden = Boolean(plan.held || plan.hide);
+      if (el.hidden !== hidden) el.hidden = hidden;
+      return !hidden;
     }
 
     // ------------------------------------------------------------ its own tools
@@ -1249,11 +1309,12 @@
      *  the change ends, its tools go. */
     function planTool(run, holder, hand) {
       const r = measure(holder);
-      if (!r) return { holder, hide: true };
+      if (!r || !seen(holder).shown) return { holder, hide: true };
       const radius = String(shapeOf(holder, holder.node).radius || '0px').split(' ')[0];
       return {
         holder,
         box: { left: r.left, top: r.top, width: r.width, height: r.height, radius: '' },
+        sight: holder.sight,
         radius,
         held: inHand(holder.node, hand),
         gone: run.gone || run.ending,
@@ -1321,6 +1382,7 @@
       }
       if (el.style.getPropertyValue('--r') !== plan.radius) el.style.setProperty('--r', plan.radius);
       place(el, plan.box);
+      window.marbleSight?.clip(el, plan.sight, plan.box);
       const state = plan.gone ? 'gone' : '';
       if ((el.dataset.state ?? '') !== state) {
         if (state) el.dataset.state = state;
@@ -1578,23 +1640,32 @@
      *  newest part that has changed, else any still to come; else the last
      *  place it hung. */
     function hangOf(run, plans) {
-      let holder = holderOf(run, run.hang);
-      let r = holder ? measure(holder) : null;
+      const first = holderOf(run, run.hang);
+      let holder = first;
+      let r = holder && shown(holder) ? holder.rect : null;
       if (!r) {
         const parts = [...run.parts.values()].reverse();
-        holder = parts.find((part) => part.state !== 'soon' && measure(part)) ?? parts.find((part) => measure(part)) ?? null;
+        holder = parts.find((part) => part.state !== 'soon' && shown(part)) ?? parts.find((part) => shown(part)) ?? null;
         r = holder?.rect ?? null;
         if (holder) run.hang = holder.id;
       }
       if (r) {
         const shape = shapeOf(holder, holder.node);
         const tint = plans.find((plan) => plan && !plan.remove && plan.holder === holder && plan.kind !== 'dot'
-          && plan.state !== 'gone' && !plan.held && plan.box);
-        run.hangBox = { ...page(r), edged: shape.edged, tint: tint ? page(tint.box) : null };
+          && plan.state !== 'gone' && !plan.held && !plan.hide && plan.box);
+        // Its top under the page's own header, or scrolled out of its box:
+        // the tag hangs just inside what is seen of it instead.
+        const cut = holder.sight?.cut?.top ? holder.sight.visible.top : null;
+        run.hangBox = { ...page(r), edged: shape.edged && cut === null, tint: tint && cut === null ? page(tint.box) : null, inside: cut === null ? null : cut + scrollY };
+      } else if (run.hangBox && first && !left(first)) {
+        // Only out of sight (a slide switched away, under a sheet): the tag
+        // goes with it, and comes back with it. A part that has left the
+        // page keeps its tag where it stood.
+        return null;
       }
       if (!run.hangBox) return null;
       const b = run.hangBox;
-      return { ...view(b), edged: b.edged, tint: b.tint ? view(b.tint) : null };
+      return { ...view(b), edged: b.edged, tint: b.tint ? view(b.tint) : null, inside: b.inside === null || b.inside === undefined ? null : b.inside - scrollY };
     }
 
     function placeTag(run, tag, at, [w, h]) {
@@ -1613,6 +1684,7 @@
         x = at.left;
         y = at.top - 2 - h;
       }
+      if (at.inside !== null && at.inside !== undefined) y = at.inside + 4;
       x = Math.max(INSIDE, Math.min(x, innerWidth - INSIDE - w));
       y = Math.max(INSIDE, Math.min(y, innerHeight - INSIDE - h));
       if (tag.root.hasAttribute('data-edge') !== at.edged) tag.root.toggleAttribute('data-edge', at.edged);
@@ -1640,8 +1712,11 @@
         if (holder.rectAt === paint) r = holder.rect;
         else if (budget > 0) { budget -= 1; r = measure(holder); } else continue;
         if (!r) continue;
-        if (r.top >= innerHeight) below.push({ holder, r });
-        else if (r.bottom <= 0) above.push({ holder, r });
+        // Out of the window, or out of the box it scrolls in, which says
+        // which way: a part on a slide switched away is in neither.
+        const way = r.top >= innerHeight ? 'below' : r.bottom <= 0 ? 'above' : sideOf(holder, r);
+        if (way === 'below') below.push({ holder, r });
+        else if (way === 'above') above.push({ holder, r });
       }
       if (!below.length && !above.length) return null;
       return {
@@ -1697,6 +1772,7 @@
       frame = 0;
       paint += 1;
       stats.renders += 1;
+      looking = window.marbleSight?.look() ?? null;
       // An undo has no end frame of its own to wait for: it is over once
       // everything it marked has lifted.
       for (const run of [...runs.values()]) {
@@ -1749,6 +1825,8 @@
       // The tags, once their words are written: their sizes, then their places.
       const sizes = placing.map(({ run }) => [run.tag.press.offsetWidth, run.tag.press.offsetHeight]);
       placing.forEach(({ run, at }, i) => placeTag(run, run.tag, at, sizes[i]));
+      looking = null;
+      if (layer.childElementCount) keepWatching?.();
 
       const tagged = [...runs.values()].some((run) => run.tag);
       if (tagged && !ticking) ticking = setInterval(tick, 1000);
@@ -1766,6 +1844,23 @@
 
     addEventListener('scroll', nudge, true);
     addEventListener('resize', nudge);
+    // Movement no event tells of (a slide sliding, a sheet rising, a part
+    // growing as its picture loads): the drawn parts' rects, each frame.
+    const keepWatching = window.marbleSight?.watch({
+      paint: schedule,
+      parts: () => {
+        if (!layer.childElementCount) return null;
+        const out = [];
+        for (const run of runs.values()) {
+          for (const holder of [...run.scope.values(), ...run.parts.values(), ...run.tools.values()]) {
+            if ((holder.tint || holder.dot || holder.el) && holder.node) out.push([holder.node, holder.rect]);
+          }
+          const hang = holderOf(run, run.hang);
+          if (run.tag && hang?.node) out.push([hang.node, hang.rect]);
+        }
+        return out;
+      },
+    });
     document.addEventListener('focusin', nudge);
     document.addEventListener('focusout', nudge);
     document.addEventListener('selectionchange', nudge);

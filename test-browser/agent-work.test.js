@@ -4,8 +4,8 @@ import test from 'node:test';
 import { GARDEN, startDrive } from './harness.js';
 
 // The work, on the page: a dot on each part an agent changed (kept until you
-// clear them), a rail with a tick for each, the island while the chat is
-// closed, and a walk through the changes only when asked for.
+// clear them), a rail with a tick for each, and a walk through the changes
+// only when asked for. No pill at the corner while the chat is closed.
 const LIST = '<section><h2>Shopping list</h2><ul><li>Tomatoes</li></ul></section>';
 const SCRIPTS = {
   building: [
@@ -69,20 +69,12 @@ test('each part an agent changed keeps a dot and a tick on the rail, shown only 
   await page.context().close();
 });
 
-test('while the chat is closed, the island carries the turn’s line', async () => {
-  const { page, send, work } = await mount();
+test('while the chat is closed, no pill at the corner says what the turn is doing', async () => {
+  const { page, send } = await mount();
   await send('script:slow');
-  await page.waitForFunction(() => {
-    const island = document.querySelector('marble-work').shadowRoot.querySelector('.island');
-    return !island.hidden && island.dataset.state === 'running';
-  });
-  const say = await page.evaluate(() => document.querySelector('marble-work').shadowRoot.querySelector('.isl-say').textContent);
-  assert.match(say, /Updating garden|Putting|Writing/);
-  // Done, it opens by itself and offers to walk through the changes.
-  await page.waitForFunction(() => document.querySelector('marble-work').shadowRoot.querySelector('.island').dataset.state === 'completed', null, { timeout: 15000 });
-  const acts = await page.evaluate(() => [...document.querySelector('marble-work').shadowRoot.querySelectorAll('.isl-acts button')].map((b) => b.textContent));
-  assert.deepEqual(acts, ['Review changes', 'Open chat', 'Done']);
-  assert.equal(await work('.tour:not([hidden])'), 0, 'the walk does not start by itself');
+  await page.waitForFunction(() => document.querySelector('marble-work') !== null);
+  await page.waitForTimeout(800);
+  assert.equal(await page.evaluate(() => document.querySelector('marble-work').shadowRoot.querySelector('.island')), null);
   await page.context().close();
 });
 
