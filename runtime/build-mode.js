@@ -577,6 +577,7 @@
     // In the top layer, shown after Describe's own so it paints over it: the
     // cards here are about the marks and must never be under them.
     const layer = h('div', 'marble-build-layer');
+    layer.setAttribute('data-marble-overlay', '');
     layer.setAttribute('popover', 'manual');
     document.documentElement.append(layer);
     const raise = () => {

@@ -10,9 +10,10 @@
 //           It shows and hides with the dots.
 //   Where.  When the work you're following is out of view, a small button
 //           says which way it is. The page never scrolls by itself.
-//   Island. With the chat closed, a pill at the corner carries the turn's
-//           line (what it is doing, the time). Point at it and it shows the
-//           live view. It opens by itself only to ask, or to say it's done.
+//           (Until October 2026 a pill at the corner, the island, carried
+//           the turn's line while the chat was closed. The owner did not
+//           want it: the marks on the page and the dot on the chat's button
+//           already say an agent is working, and where.)
 //   Review. A walk through a turn's changes, part by part, only when asked.
 //
 // None of it edits the document: it is transient chrome in one shadow root.
@@ -52,29 +53,6 @@
     .where i { width: 7px; height: 7px; border-radius: 50%; background: #6d55d4; animation: breathe 1.6s ease-in-out infinite; }
     @keyframes breathe { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 
-    .island { position: fixed; right: 76px; bottom: 22px; max-width: min(360px, calc(100vw - 110px)); pointer-events: auto;
-      display: flex; flex-direction: column; gap: 8px; padding: 7px 12px 7px 10px; border-radius: 18px;
-      background: color-mix(in srgb, var(--card, #fff) 86%, transparent); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3);
-      box-shadow: 0 4px 10px rgba(74,66,52,.10), 0 14px 28px rgba(74,66,52,.12), 0 0 0 1px var(--line, #ddd9cf);
-      transition: border-radius .25s var(--settle); }
-    .island[hidden] { display: none; }
-    .island[data-open] { border-radius: 14px; padding: 10px 12px 12px; }
-    .island[data-state="asking"] { box-shadow: 0 4px 10px rgba(0,0,0,.1), 0 0 0 1.5px var(--caution, #a07a2c); }
-    .isl-line { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
-    .isl-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #6d55d4; }
-    .island[data-state="running"] .isl-dot { animation: breathe 1.6s ease-in-out infinite; }
-    .island[data-state="asking"] .isl-dot { background: var(--caution, #a07a2c); }
-    .island[data-state="completed"] .isl-dot { background: var(--ink, #111); }
-    .isl-say { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .isl-time { flex: none; font-size: 12px; color: var(--faint, #8a8a8a); font-variant-numeric: tabular-nums; }
-    .isl-view { max-height: 200px; overflow: hidden; border-top: 1px solid var(--line, #ddd9cf); padding-top: 8px; }
-    .isl-view[hidden] { display: none; }
-    .isl-acts { display: flex; flex-wrap: wrap; gap: 6px; }
-    .isl-acts[hidden] { display: none; }
-    .isl-acts button { appearance: none; border: 0; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 500; padding: 6px 10px; border-radius: 8px;
-      background: var(--paper-2, #f3f1ea); color: var(--ink, #111); box-shadow: inset 0 0 0 1px var(--line, #ddd9cf); }
-    .isl-acts button.primary { background: var(--ink, #111); color: var(--paper, #fafaf7); box-shadow: none; }
-
     .outline { position: fixed; pointer-events: none; border-radius: 6px; opacity: 0;
       box-shadow: 0 0 0 2px #6d55d4, 0 0 0 6px color-mix(in srgb, #6d55d4 16%, transparent); transition: opacity .2s ease; }
     .outline.on { opacity: 1; }
@@ -86,7 +64,7 @@
     .tour button { appearance: none; border: 0; cursor: pointer; font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 999px;
       background: var(--paper-2, #f3f1ea); color: var(--ink, #111); }
     .tour button.primary { background: var(--ink, #111); color: var(--paper, #fafaf7); }
-    @media (prefers-reduced-motion: reduce) { .dot, .where i, .island .isl-dot { animation: none !important; } .outline { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { .dot, .where i { animation: none !important; } .outline { transition: none; } }
   `;
 
   const boot = (marble) => {
@@ -95,13 +73,13 @@
     const agent = marble.agent;
     const host = document.createElement('marble-work');
     host.setAttribute('data-marble-transient', '');
+    host.setAttribute('data-marble-overlay', '');
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>${STYLE}</style><div class="layer">
       <div class="dots"></div>
       <div class="rail" hidden><button type="button" class="clear">Clear</button></div>
       <button type="button" class="where" hidden><i></i><span></span></button>
       <div class="outline"></div>
-      <div class="island" hidden><div class="isl-line"><span class="isl-dot"></span><span class="isl-say"></span><span class="isl-time"></span></div><div class="isl-view" hidden></div><div class="isl-acts" hidden></div></div>
       <div class="tour" hidden><span class="tour-where"></span><button type="button" data-a="back">Back</button><button type="button" class="primary" data-a="next">Next</button><button type="button" data-a="done">Done</button></div>
     </div>`;
     document.documentElement.append(host);
@@ -110,7 +88,6 @@
     const rail = $('.rail');
     const where = $('.where');
     const outline = $('.outline');
-    const island = $('.island');
     const tour = $('.tour');
     const byId = (id) => document.querySelector(`[data-marble-id="${CSS.escape(String(id))}"]`);
     const stillness = matchMedia('(prefers-reduced-motion: reduce)');
@@ -148,8 +125,15 @@
     // ---------------------------------------------------------- painting
     let frame = 0;
     function schedule() { if (!frame) frame = requestAnimationFrame(() => { frame = 0; paint(); }); }
-    addEventListener('scroll', schedule, { passive: true });
+    addEventListener('scroll', schedule, { passive: true, capture: true });
     addEventListener('resize', schedule);
+    // A dot is seen only where its part is (sight.js), and kept on it when
+    // the part moves with no event to say so.
+    const placedDots = new Map();
+    const keepWatching = window.marbleSight?.watch({
+      paint: schedule,
+      parts: () => (placedDots.size ? [...placedDots] : null),
+    });
 
     // The one switch for every agent dot on the page, off unless asked for
     // in Agent settings › Chat (agent-ui.js).
@@ -162,6 +146,7 @@
     function paint() {
       const live = [...dots.keys()].map((id) => [id, byId(id)]).filter(([, el]) => el && shown(el));
       if (!dotsOn()) {
+        placedDots.clear();
         dotsEl.replaceChildren();
         rail.hidden = true;
         fresh.clear();
@@ -171,8 +156,12 @@
       }
       // Dots, at the top-left corner of each part, where a glint never sits.
       const have = new Map([...dotsEl.children].map((d) => [d.dataset.id, d]));
+      const look = window.marbleSight?.look();
+      placedDots.clear();
       for (const [id, el] of live) {
-        const r = el.getBoundingClientRect();
+        const sight = look?.of(el) ?? null;
+        const r = sight?.rect ?? el.getBoundingClientRect();
+        placedDots.set(el, r);
         let d = have.get(id);
         if (!d) {
           d = document.createElement('span');
@@ -184,13 +173,16 @@
           dotsEl.append(d);
         }
         have.delete(id);
-        const inView = r.bottom > 0 && r.top < innerHeight;
+        const inView = sight
+          ? sight.shown && r.top + 8 >= sight.visible.top && r.top + 8 <= sight.visible.bottom
+          : r.bottom > 0 && r.top < innerHeight;
         d.hidden = !inView;
         d.style.left = `${Math.max(6, r.left - 8)}px`;
         d.style.top = `${r.top + 8}px`;
       }
       for (const gone of have.values()) gone.remove();
       fresh.clear();
+      if (placedDots.size) keepWatching?.();
 
       // The rail: a tick per part, placed by where it sits in the page.
       const height = Math.max(document.documentElement.scrollHeight, 1);
@@ -255,83 +247,6 @@
       else where.hidden = true;
       where.onclick = () => reveal(target[0]);
     }
-
-    // ---------------------------------------------------------- the island
-    const drawerOpen = () => document.querySelector('marble-agent-drawer')?.getAttribute('data-open-state') === 'open';
-    let line = null;
-    let pointed = false;
-    addEventListener('marble-work:line', (event) => {
-      const d = event.detail;
-      if (!d?.conversation) return;
-      if (d.target && String(d.target).replace(/\.mrbl$/, '') !== String(app).replace(/\.mrbl$/, '')) return;
-      // A Build mode build says its line in Describe's bar, with its stages
-      // (build-mode.js): no pill in the corner for it.
-      if (window.marbleBuild?.buildConversations?.().has(d.conversation)) { line = null; paintIsland(); return; }
-      line = d;
-      paintIsland();
-    });
-    // The drawer opening or closing shows or hides it.
-    new MutationObserver(() => paintIsland()).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-open-state'] });
-    const drawer = () => document.querySelector('marble-agent-drawer');
-    const watchDrawer = () => { const dr = drawer(); if (dr) new MutationObserver(() => paintIsland()).observe(dr, { attributes: true, attributeFilter: ['data-open-state'] }); };
-    watchDrawer();
-
-    let clock = 0;
-    function paintIsland() {
-      const d = line;
-      const active = d && (d.state === 'running' || d.state === 'asking' || (d.state === 'completed' && !d.seen));
-      island.hidden = !active || drawerOpen();
-      clearInterval(clock);
-      if (island.hidden) return;
-      island.dataset.state = d.state;
-      island.querySelector('.isl-say').textContent = d.say || 'Working';
-      const time = island.querySelector('.isl-time');
-      const tickTime = () => { time.textContent = d.state === 'completed' ? (d.took || '') : d.started ? fmt(Date.now() - d.started) : ''; };
-      tickTime();
-      if (d.state === 'running') clock = setInterval(tickTime, 1000);
-      // It opens by itself only to ask, or to say it's done.
-      const opens = d.state === 'asking' || d.state === 'completed';
-      const open = opens || pointed;
-      island.toggleAttribute('data-open', open);
-      const view = island.querySelector('.isl-view');
-      view.hidden = !pointed || !d.view;
-      if (!view.hidden) {
-        // The view is drawn with the chat's own kit rules and the page's tokens.
-        const ui = window.marbleAgentUI;
-        if (!root.querySelector('style[data-kit]') && ui?.WORK_VIEW_CSS) {
-          const st = document.createElement('style');
-          st.dataset.kit = '';
-          st.textContent = `${ui.TOKENS ?? ''}${ui.WORK_VIEW_CSS}`;
-          root.prepend(st);
-        }
-        view.replaceChildren(d.view.cloneNode(true));
-      }
-      const acts = island.querySelector('.isl-acts');
-      acts.hidden = !opens;
-      if (opens) {
-        const buttons = d.state === 'asking'
-          ? [['Answer', 'open', true]]
-          : [...(d.changes ? [['Review changes', 'review', true]] : []), ['Open chat', 'open', !d.changes], ['Done', 'seen', false]];
-        acts.replaceChildren(...buttons.map(([label, a, primary]) => {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.textContent = label;
-          if (primary) b.className = 'primary';
-          b.addEventListener('click', (e) => { e.stopPropagation(); islandAct(a); });
-          return b;
-        }));
-      }
-    }
-    const fmt = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-    function islandAct(a) {
-      if (!line) return;
-      if (a === 'open') dispatchEvent(new CustomEvent('marble:agent-open', { detail: { id: line.conversation } }));
-      if (a === 'review') startTour(line.conversation);
-      if (a === 'seen' || a === 'review') { line = { ...line, seen: true }; paintIsland(); }
-    }
-    island.addEventListener('pointerenter', () => { pointed = true; paintIsland(); });
-    island.addEventListener('pointerleave', () => { pointed = false; paintIsland(); });
-    island.querySelector('.isl-line').addEventListener('click', () => islandAct('open'));
 
     // ---------------------------------------------------------- the review walk
     let tourState = null;

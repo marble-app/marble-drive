@@ -577,6 +577,7 @@
 
     const layer = document.createElement('div');
     layer.className = 'marble-marks-layer';
+    layer.setAttribute('data-marble-overlay', '');
     layer.setAttribute(TRANSIENT, '');
     layer.setAttribute('popover', 'manual');
     layer.toggleAttribute('data-build', building);
@@ -619,6 +620,7 @@
     const held = document.createElement('div');
     held.className = 'marble-marks-held';
     held.setAttribute(TRANSIENT, '');
+    held.setAttribute('data-marble-overlay', '');
     held.setAttribute('popover', 'manual');
     held.inert = true;
     document.documentElement.append(held);
@@ -910,9 +912,22 @@
       return drawn.length ? `I marked up the page: ${drawn.join('; ')}. ` : '';
     };
 
+    // Where each mark's element is seen (sight.js): a mark on a slide
+    // switched away, under the page's own header or scrolled out of its box
+    // goes with it, and comes back with it.
+    const anchors = new Map();
+    let keepWatching = null;
     const repaint = () => {
+      const look = window.marbleSight?.look();
+      anchors.clear();
       for (const mark of marks) {
-        const box = boxOf(mark.anchorId);
+        const node = mark.anchorId && document.querySelector(`[data-marble-id="${CSS.escape(mark.anchorId)}"]`);
+        let sight = node ? anchors.get(node) : null;
+        if (node && !sight) {
+          sight = look ? look.of(node) : { shown: true, rect: node.getBoundingClientRect() };
+          anchors.set(node, sight);
+        }
+        const box = sight?.shown ? sight.rect : null;
         if (mark.el) {
           if (!box) { mark.el.hidden = true; continue; }
           mark.el.hidden = false;
@@ -932,9 +947,18 @@
       }
       paintHalos();
       paintFrame();
+      if (anchors.size) keepWatching?.();
     };
     let repainting = 0;
     const scheduleRepaint = () => { if (!repainting) repainting = requestAnimationFrame(() => { repainting = 0; repaint(); }); };
+    // Movement no event tells of: a slide sliding under a note.
+    keepWatching = window.marbleSight?.watch({
+      paint: scheduleRepaint,
+      // Only while any of them can be seen: in build mode, or held while
+      // an agent works from them.
+      parts: () => (anchors.size && (layer.hasAttribute('data-describing') || heldInk.childElementCount || heldNotes.childElementCount)
+        ? [...anchors].map(([node, sight]) => [node, sight.rect]) : null),
+    });
 
     const paintHalos = () => {
       const chosen = [...picked];

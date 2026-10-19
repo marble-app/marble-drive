@@ -577,7 +577,8 @@ test('the scope asked about is tinted 6px out until the first part is marked; a 
     return { left: Math.round(t.left - r.left), top: Math.round(t.top - r.top), right: Math.round(r.right - t.right), radius: el.style.borderRadius };
   });
   assert.deepEqual(fit, { left: 6, top: 6, right: 6, radius: '6px' });
-  assert.match(await page.locator('.marble-change-time').innerText(), /^0:0\d$/, 'the tag starts with the time alone');
+  assert.match(await page.locator('.marble-change-time').textContent(), /^0:0\d$/, 'the tag starts with the time alone');
+  assert.equal(await page.locator('.marble-change-time').isVisible(), false, 'out of build mode the tag keeps no clock');
   assert.equal(await page.locator('.marble-zone').count(), 0);
   await frame(page, before({ parts: ['r1'] }));
   await page.waitForFunction(() => document.querySelector('.marble-change-tint[data-id="t"]')?.dataset.state !== 'soon'

@@ -164,6 +164,7 @@ const RUNTIME = {
   // visual, never injected — most conversations never hold one.
   'chat-visual.js': () => path.join(REPO, 'runtime', 'chat-visual.js'),
   'agent-usage-charts.js': () => path.join(REPO, 'runtime', 'agent-usage-charts.js'),
+  'sight.js': () => path.join(REPO, 'runtime', 'sight.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
   // What a page opened by a share link wears instead of the shell.
   'share.js': () => path.join(REPO, 'runtime', 'share.js'),
@@ -431,6 +432,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     // drive around it: no shell, no agents, no console. share.js says what
     // their link lets them do, and keeps a read-only page read-only.
     if (visit) {
+      tags += `\n<script src="${runtimeUrl('sight.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('collab.js')}" data-marble-transient></script>`;
       // With the door on, the page ends with a quiet "Make your own" that
       // goes to Ask for access; with it off there is nowhere to send them.
@@ -456,6 +458,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="${runtimeUrl('agent-phone.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-usage-charts.js')}" data-marble-transient></script>`;
     }
+    // Where a part can be seen, for every layer drawn over the page.
+    tags += `\n<script src="${runtimeUrl('sight.js')}" data-marble-transient></script>`;
     tags += `\n<script src="${runtimeUrl('collab.js')}" data-marble-transient></script>`;
     // The Console's own look and behaviour, only on the Console, only where
     // the console is on (server/console).
