@@ -18,6 +18,7 @@ import { createAwakeClock, createProgress } from '../awake.js';
 import { createDrawer } from './drawer.js';
 import '../../runtime/agent-words.js';
 import { collectSlices, shaOf } from '../engine.js';
+import { MODELS as FANOUT_MODELS } from '../change/fanout.js';
 import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
 import { MAX_HOP, MAX_SENDS, clampSeconds, pickTarget, renderMessages, validateText } from './messages.js';
@@ -647,6 +648,11 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // a process would actually start, rather than leave it running unwanted.
       if (turn.cancelled) return safeFinish(turn, turn.cancelled);
       if (closed) return safeFinish(turn, { status: 'cancelled', error: 'host closing' });
+
+      // What fan_out's workers run on when the agent does not choose: this
+      // chat's own Claude model and effort (server/change/fanout.js).
+      turn.workerModel = FANOUT_MODELS.includes(meta.model) ? meta.model : null;
+      turn.workerEffort = turn.workerModel ? meta.effort ?? null : null;
 
       const base = { ...pickEnv(process.env), ...mcp.env };
       const spec = provider.spawn({

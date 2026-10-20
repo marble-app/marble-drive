@@ -162,6 +162,15 @@ test('the model is sonnet unless haiku is asked for', async () => {
   assert.deepEqual(models, ['sonnet', 'sonnet', 'haiku', 'haiku']);
 });
 
+test('an effort goes to the workers with their model', async () => {
+  const seen = [];
+  const { apply } = applier();
+  const exec = async (_c, args) => { seen.push([args[args.indexOf('--model') + 1], args.includes('--effort') ? args[args.indexOf('--effort') + 1] : null]); return relabel(args); };
+  await runFanOut({ source: SOURCE, docPath: 'd', plan: 'x', note: 'x', shards: pairs(2), model: 'opus', effort: 'high', exec, apply, log: quiet });
+  await runFanOut({ source: SOURCE, docPath: 'd', plan: 'x', note: 'x', shards: pairs(2), model: 'opus', effort: 'turbo', exec, apply, log: quiet });
+  assert.deepEqual(seen, [['opus', 'high'], ['opus', 'high'], ['opus', null], ['opus', null]]);
+});
+
 test('a reply is only {"ops": […]}: prose, other keys or other shapes are no reply', () => {
   assert.deepEqual(readOps('{"ops":[{"type":"setText","id":"a","text":"x"}]}'), [{ type: 'setText', id: 'a', text: 'x' }]);
   assert.deepEqual(readOps('```json\n{"ops":[]}\n```'), [], 'one fence round the whole reply is the same reply');
@@ -452,7 +461,7 @@ test('shards that are not a fan out are refused before any worker runs', async (
   assert.match((await run({ shards: [{ ids: ['p1', 'p2'] }, { ids: ['p2'] }] })).error, /"p2"/, 'one id in two shards');
   assert.match((await run({ shards: [{ ids: ['u'] }, { ids: ['p2'] }] })).error, /inside/, 'one shard inside another');
   assert.match((await run({ shards: pairs(2), plan: '  ' })).error, /plan/);
-  assert.match((await run({ shards: pairs(2), model: 'opus' })).error, /haiku or sonnet/);
+  assert.match((await run({ shards: pairs(2), model: 'gpt-6' })).error, /haiku, sonnet, opus, fable/);
   assert.equal(calls, 0);
 });
 
@@ -506,7 +515,7 @@ test('fan_out is offered to agents with the plan, the shards and the model', () 
   assert.equal(schema.inputSchema.properties.shards.minItems, 2);
   assert.equal(schema.inputSchema.properties.shards.maxItems, 8);
   assert.equal(schema.inputSchema.properties.shards.items.properties.ids.maxItems, 24);
-  assert.deepEqual(schema.inputSchema.properties.model.enum, ['haiku', 'sonnet']);
+  assert.deepEqual(schema.inputSchema.properties.model.enum, ['haiku', 'sonnet', 'opus', 'fable']);
   assert.match(schema.description, /six or more parts; for a few, use apply_ops/);
 });
 
@@ -538,6 +547,16 @@ test('each shard lands as its own batch with its own undo record, and the turn\'
   const undone = await undoTurn({ records: turn.undo, writeOps: drive.writeOps, client: `agent-undo:${turn.conversationId}` });
   assert.equal(undone.reverted, 6, 'every op of every shard');
   assert.equal(await drive.store.read(turn.target), SOURCE);
+});
+
+test('unasked, the workers run on the chat\'s own model and effort; a model the agent picks wins', async () => {
+  const seen = [];
+  const { tools } = fanTools(async (_c, args) => { seen.push([args[args.indexOf('--model') + 1], args.includes('--effort') ? args[args.indexOf('--effort') + 1] : null]); return relabel(args); });
+  const turn = await freshTurn();
+  Object.assign(turn, { workerModel: 'opus', workerEffort: 'high' });
+  await tools.call('fan_out', { path: turn.target, note: 'Relabel the papers.', plan: 'A plain label each.', shards: pairs(2) }, turn);
+  await tools.call('fan_out', { path: turn.target, note: 'Relabel the papers.', plan: 'A plain label each.', shards: pairs(2), model: 'haiku' }, turn);
+  assert.deepEqual(seen, [['opus', 'high'], ['opus', 'high'], ['haiku', null], ['haiku', null]]);
 });
 
 test('a shard whose part changed while its worker read it fails, says so on the page, and leaves the person\'s edit', async () => {
