@@ -34,7 +34,8 @@ export const TIMEOUT = 120_000;
 export const SHARDS_MIN = 2;
 export const SHARDS_MAX = 8;
 export const IDS_MAX = 24;
-export const MODELS = ['haiku', 'sonnet'];
+export const MODELS = ['haiku', 'sonnet', 'opus', 'fable'];
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // The markup one worker is shown, whole: collectSlices' budget for a read,
 // worked out from one parse of the page rather than one per id (a shard of 24
 // ids on a 700 KB page would otherwise hold the host for most of a second).
@@ -108,7 +109,7 @@ export function readOps(raw) {
 function checkInput({ plan, shards, model }) {
   if (typeof plan !== 'string' || !plan.trim()) return 'a fan out needs a plan: what every part should become';
   if (plan.length > PLAN_MAX) return `the plan is ${plan.length} characters; keep it under ${PLAN_MAX}`;
-  if (model !== undefined && model !== null && !MODELS.includes(model)) return `model is haiku or sonnet, not "${model}"`;
+  if (model !== undefined && model !== null && !MODELS.includes(model)) return `model is ${MODELS.join(', ')}, not "${model}"`;
   if (!Array.isArray(shards) || shards.length < SHARDS_MIN || shards.length > SHARDS_MAX) {
     return `a fan out takes ${SHARDS_MIN} to ${SHARDS_MAX} shards, not ${Array.isArray(shards) ? shards.length : 'none'}; for fewer parts, use apply_ops`;
   }
@@ -232,6 +233,7 @@ export async function runFanOut({
   note = '',
   shards,
   model,
+  effort = null,
   exec = launchWorker,
   env = process.env,
   signal,
@@ -287,7 +289,7 @@ export async function runFanOut({
     try {
       // No tools, and no MCP server of the login's either: a worker can only
       // answer.
-      result = await exec('claude', ['-p', '--model', model ?? 'sonnet', '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
+      result = await exec('claude', ['-p', '--model', model ?? 'sonnet', ...(EFFORTS.includes(effort) ? ['--effort', effort] : []), '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
         timeout, env: pickEnv(env), cwd, signal,
       });
     } catch (err) {

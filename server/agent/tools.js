@@ -152,7 +152,7 @@ export const TOOL_SCHEMAS = [
             },
           },
         },
-        model: { type: 'string', enum: MODELS, description: 'The workers\' model: sonnet unless the change is simple.' },
+        model: { type: 'string', enum: MODELS, description: 'The workers\' model. Leave it out and they run on this chat\'s own model and effort.' },
         marks: MARKS,
       },
     },
@@ -637,7 +637,10 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         plan: input.plan,
         note,
         shards: input.shards,
-        model: input.model,
+        // Unasked, the workers run on what this chat runs on: a drive whose
+        // agents default to Opus High gets Opus High workers too.
+        model: input.model ?? turn.workerModel ?? undefined,
+        effort: input.model ? null : turn.workerEffort ?? null,
         exec,
         signal,
         log,
