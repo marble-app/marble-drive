@@ -141,6 +141,25 @@
       pendingBrief = null;
       return held && Date.now() - held.at < 15_000 ? held.text : null;
     };
+    // And one a page keeps standing: asked at every send from this page, by
+    // whichever composer sends (the drawer, the ⌘J line), for what the page
+    // always wants the agent to know — a board's picture and outline. Given
+    // the selection the send carries; may be async, and is given a few
+    // seconds before the send goes without it.
+    let standing = null;
+    const STANDING_WAIT = 4_000;
+    const standingBrief = async (selection) => {
+      if (!standing) return null;
+      try {
+        const said = await Promise.race([
+          Promise.resolve(standing({ selection })),
+          new Promise((resolve) => setTimeout(() => resolve(null), STANDING_WAIT)),
+        ]);
+        return String(said ?? '').trim() || null;
+      } catch {
+        return null;
+      }
+    };
 
     const context = () => ({
       viewing: marble.app,
@@ -334,7 +353,7 @@
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
 
-      send(id, { prompt, target, viewing, selection, also, dispatch, surface, brief, spoken } = {}) {
+      async send(id, { prompt, target, viewing, selection, also, dispatch, surface, brief, spoken } = {}) {
         const here = context();
         const body = {
           prompt,
@@ -348,7 +367,7 @@
         // A brief the page adds without showing it: handed over for the next
         // send (agent.brief), or passed here. The agent reads it; the chat
         // shows only the prompt.
-        const hidden = brief ?? takeBrief();
+        const hidden = [brief ?? takeBrief(), await standingBrief(body.context.selection)].filter(Boolean).join('\n\n');
         if (hidden) body.context.brief = hidden;
         if (dispatch) body.dispatch = dispatch;
         // Where it was typed, when that is an app for talking rather than a
@@ -407,6 +426,11 @@
       brief(text) {
         const said = String(text ?? '').trim();
         pendingBrief = said ? { text: said, at: Date.now() } : null;
+      },
+      /** Keep `fn({ selection })` standing: its words go, unseen, with every
+       *  send from this page. `null` takes it down. */
+      standingBrief(fn) {
+        standing = typeof fn === 'function' ? fn : null;
       },
       select(ids) {
         chosen = Array.isArray(ids) && ids.length ? [...ids] : null;
