@@ -161,11 +161,12 @@ export const STARTERS = [
   {
     id: 'whiteboard',
     title: 'Whiteboard',
-    blurb: 'An endless board for sticky notes, sketches, pictures and documents, with Claude beside it. The board is the prompt.',
+    blurb: 'An endless board for sticky notes, sketches, pictures and documents. Every ask to Claude carries the board, and Claude can leave comments on it.',
     // The chat's sibling, for the ideas that are easier drawn than said: a
-    // canvas with no edges, and every message to Claude carries the board —
-    // a picture of it and a list of what is on it and where. Every drive is
-    // seeded with one, called Board.
+    // canvas with no edges, talked about in the drive's own chat, where every
+    // ask carries the board — a picture of it and a list of what is on it and
+    // where — and comments pinned to its things are threads either side can
+    // start. Every drive is seeded with one, called Board.
     //
     // The board binds its own gestures and files its own ops through the
     // carrier; the part it needs is `history`, for Mod+Z. `editable` rides

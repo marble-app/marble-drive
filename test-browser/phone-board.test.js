@@ -140,7 +140,8 @@ test('More holds the tools the dock has no room for, by its button, and wears th
       button: { top: b.top },
     };
   });
-  assert.deepEqual(seen.rows, ['Section', 'Highlighter', 'Image, video or file', 'From your drive', 'Link']);
+  // Pan goes under More too: the dock leaves the drive's chat button its corner.
+  assert.deepEqual(seen.rows, ['Pan', 'Section', 'Highlighter', 'Comment', 'Image, video or file', 'From your drive', 'Link']);
   assert.ok(seen.menu.bottom <= seen.button.top && seen.button.top - seen.menu.bottom < 16, `the menu ends at ${seen.menu.bottom}, not by its button at ${seen.button.top}`);
   assert.ok(seen.menu.top >= 0 && seen.menu.left >= 0 && seen.menu.right <= PHONE.width, 'and inside the screen');
   assert.deepEqual(await smallTargets(page, '#bw-more .act'), []);
@@ -158,15 +159,19 @@ test('More holds the tools the dock has no room for, by its button, and wears th
 
 test('every field a thumb types into is 16px, so iOS has nothing to zoom in on', async () => {
   const { page, errors } = await openBoard();
+  // A comment begun on the first note, so its field is there to measure.
+  const note = await centreOf(page, '.world > .note');
+  await longPress(page, note.x, note.y);
+  await page.locator('#bw-context button', { hasText: /^Comment$/ }).tap();
+  await page.locator('.world > .comment.marble-open .reply textarea').waitFor();
   const sizes = await page.evaluate(() => {
     const px = (el) => parseFloat(getComputedStyle(el).fontSize);
-    document.body.dataset.panel = 'open';
     const out = {
-      composer: px(document.querySelector('.field textarea')),
       link: px(document.querySelector('.linkin input')),
       search: px(document.querySelector('.drivepick input')),
       name: px(document.querySelector('.head .name')),
       note: px(document.querySelector('.note > .words')),
+      comment: px(document.querySelector('.comment .reply textarea')),
     };
     for (const kind of ['frame']) {
       const item = document.querySelector(`.world > .${kind}`);
@@ -237,25 +242,6 @@ test('a note typed into stands clear of the keyboard, and the dock stands on the
   assert.deepEqual(errors, []);
 });
 
-test('the conversation is a sheet that stands on the keyboard, its composer in sight', async () => {
-  const { page, errors } = await openBoard();
-  await page.locator('.ask-btn').tap();
-  await page.locator('.panel').waitFor();
-  await page.locator('.field textarea').focus();
-  await raiseKeyboard(page);
-  const seen = await page.evaluate(() => {
-    const vv = window.visualViewport;
-    const panel = document.querySelector('.panel').getBoundingClientRect();
-    const field = document.querySelector('.field').getBoundingClientRect();
-    return { top: vv.offsetTop, bottom: Math.round(vv.offsetTop + vv.height), panel: { top: Math.round(panel.top), bottom: Math.round(panel.bottom) }, field: Math.round(field.bottom) };
-  });
-  assert.equal(seen.panel.bottom, seen.bottom, `the sheet ends at ${seen.panel.bottom}, the keyboard starts at ${seen.bottom}`);
-  assert.ok(seen.panel.top >= seen.top, `the sheet starts at ${seen.panel.top}, above what can be seen`);
-  assert.ok(seen.field <= seen.bottom, `the composer ends at ${seen.field}, under the keyboard at ${seen.bottom}`);
-  assert.deepEqual(await smallTargets(page, '.panel-bar .tb, .send'), []);
-  assert.deepEqual(errors, []);
-});
-
 test('a long press on a note opens its menu by the finger; on the board, what can go there', async () => {
   const { page, errors } = await openBoard();
   const note = await centreOf(page, '.world > .note');
@@ -271,7 +257,7 @@ test('a long press on a note opens its menu by the finger; on the board, what ca
     };
   });
   assert.equal(onNote.open, true, 'no menu after a long press');
-  assert.deepEqual(onNote.rows, ['Edit text', 'Copy', 'Duplicate', 'Bring to front', 'Send to back', 'Ask Claude about this', 'Delete']);
+  assert.deepEqual(onNote.rows, ['Edit text', 'Copy', 'Duplicate', 'Bring to front', 'Send to back', 'Ask Claude about this', 'Comment', 'Delete']);
   assert.equal(onNote.selected, 1);
   assert.ok(onNote.box.left >= 0 && onNote.box.right <= PHONE.width && onNote.box.top >= 0 && onNote.box.bottom <= PHONE.height, 'the menu is inside the screen');
   assert.ok(Math.abs((onNote.box.top + onNote.box.bottom) / 2 - note.y) < 400, 'and by the finger');
