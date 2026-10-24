@@ -116,3 +116,125 @@ test('the mark comes back out of a document that has been downloaded', async () 
   const whole = await flatten(thinned.source, blobs);
   assert.ok(whole.source.includes(link('doc')), 'and it is still there after a round trip');
 });
+
+// ---------------------------------------------------------------- flat, now
+
+test('the mark is flat: shapes and colours, nothing that shades', () => {
+  for (const kind of ['doc', 'drive']) {
+    const source = svg(kind);
+    assert.doesNotMatch(source, /Gradient|clipPath|filter|url\(/, `${kind} mark draws with a gradient or a clip`);
+    // Every colour is one hex, so the family reads the same at any size.
+    for (const fill of source.match(/fill='[^']*'/g)) assert.match(fill, /fill='(#[0-9a-f]{3,6}|none)'/);
+  }
+});
+
+test('a page that still carries the glass marble is served the flat one, and only that changes', async () => {
+  const { HOST_MARKS, refreshed } = await import('../server/favicon.js');
+  // The glass marble as every document made before this carries it.
+  const glass = [...HOST_MARKS].find((uri) => uri.includes('radialGradient') && !uri.includes('%3Crect'));
+  const glassDrive = [...HOST_MARKS].find((uri) => uri.includes('radialGradient') && uri.includes('%3Crect'));
+  assert.ok(glass && glassDrive, 'the glass marks are still known');
+  const page = (href) => `<!doctype html>\n<html><head><title>Old</title>\n<link rel="icon" href="${href}">\n</head><body><p>${href}</p></body></html>`;
+
+  const served = refreshed(page(glass));
+  assert.ok(served.includes(link('doc')), 'the flat marble in the head');
+  assert.ok(served.endsWith(`<p>${glass}</p></body></html>`), 'the body is not the head');
+  assert.ok(refreshed(page(glassDrive)).includes(link('drive')), 'the Drive keeps its tile');
+
+  // A mark somebody chose, and a document already flat, go out as they are.
+  const mine = page("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E");
+  assert.equal(refreshed(mine), mine);
+  assert.equal(refreshed(page(dataUri('doc'))), page(dataUri('doc')));
+});
+
+// -------------------------------------------------------- a drive's own space
+
+const space = await import('../server/favicon-space.js');
+const { linkFor, markFor, spaceIn } = await import('../server/favicon.js');
+
+test('the space is drawn by a file that imports nothing, so a page can carry it', async () => {
+  const text = await fsp.readFile(new URL('../server/favicon-space.js', import.meta.url), 'utf8');
+  // The code, without the comments, which are free to talk about documents.
+  const source = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(source, /^\s*import\b|\brequire\(|\bimport\(/m);
+  assert.doesNotMatch(source, /\b(document|window|process|globalThis)\b/, 'touches nothing but its arguments');
+});
+
+test('one path, one mark; and every mark stays inside its space', () => {
+  const wide = {
+    hue: { lo: 300, hi: 60 }, chroma: { lo: 0.04, hi: 0.09 }, light: { lo: 0.5, hi: 0.7 },
+    angle: { lo: -60, hi: 10, steps: 4 }, bend: { lo: -0.5, hi: 0.8 }, form: ['wave', 'split'], glint: ['dot', 'arc'],
+  };
+  const tidy = space.tidy(wide);
+  const seen = new Set();
+  for (let i = 0; i < 200; i += 1) {
+    const seed = `Research/app ${i}`;
+    const genes = space.genome(wide, seed);
+    assert.deepEqual(space.genome(wide, seed), genes, 'the same path draws the same mark');
+    const around = (genes.hue - 300 + 360) % 360;
+    assert.ok(around <= 120 + 1e-9, `hue ${genes.hue} left 300°–60°`);
+    for (const key of ['chroma', 'light', 'bend']) {
+      assert.ok(genes[key] >= tidy[key].lo - 1e-9 && genes[key] <= tidy[key].hi + 1e-9, `${key} ${genes[key]}`);
+    }
+    assert.ok([-60, -36.666666666666664, -13.333333333333336, 10].some((v) => Math.abs(v - genes.angle) < 1e-9), `angle ${genes.angle} is on a step`);
+    assert.ok(['wave', 'split'].includes(genes.form));
+    seen.add(space.mark(wide, seed));
+  }
+  assert.ok(seen.size > 190, `${seen.size} different marks for 200 apps`);
+});
+
+test('widening one range moves only its own gene', () => {
+  const before = { hue: { lo: 200, hi: 220 } };
+  const after = { hue: { lo: 120, hi: 300 } };
+  for (let i = 0; i < 40; i += 1) {
+    const a = space.genome(before, `doc ${i}`);
+    const b = space.genome(after, `doc ${i}`);
+    for (const key of Object.keys(a)) if (key !== 'hue') assert.equal(b[key], a[key], key);
+  }
+});
+
+const studio = (spaces, use, { meta = true, order = 'normal' } = {}) => `<!doctype html>
+<html><head><title>Favicon Studio</title>${meta ? '\n<meta name="marble-favicons" content="spaces">' : ''}</head>
+<body data-marble-id="b">
+<section class="spaces" ${order === 'normal' ? `data-marble-id="s" data-favicon-spaces data-use="${use}"` : `data-use="${use}" data-marble-id="s" data-favicon-spaces`}>
+${Object.entries(spaces).map(([id, s]) => `<article data-marble-id="a-${id}"><h2 data-marble-id="n-${id}">${id}</h2><script ${order === 'normal' ? `type="application/json" data-marble-id="${id}"` : `data-marble-id="${id}" type="application/json"`}>${JSON.stringify(s)}</script></article>`).join('\n')}
+</section></body></html>`;
+
+test('a studio page says which space new apps are drawn from, wherever its attributes sit', () => {
+  const blue = { hue: { lo: 240, hi: 240 }, form: ['split'] };
+  const warm = { hue: { lo: 20, hi: 60 } };
+  for (const order of ['normal', 'moved']) {
+    assert.deepEqual(spaceIn(studio({ blue, warm }, 'warm', { order })), space.tidy(warm), order);
+    assert.deepEqual(spaceIn(studio({ blue, warm }, 'blue', { order })), space.tidy(blue), order);
+  }
+  assert.equal(spaceIn(studio({ blue }, 'blue', { meta: false })), null, 'a page that does not say so is not a studio');
+  assert.equal(spaceIn(studio({ blue }, 'gone')), null, 'a space that is not there');
+  assert.equal(spaceIn(studio({ blue }, '')), null, 'none in use');
+  assert.equal(spaceIn(studio({ blue }, 'blue').replace(JSON.stringify(blue), '{not json')), null);
+});
+
+test('a new document is drawn from the space its drive keeps, by its path', async () => {
+  const { createStore } = await import('../server/store/index.js');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-marks-'));
+  const store = createStore({ root });
+  await store.ready();
+
+  // No studio: the bare marble, as before.
+  assert.equal(await markFor(store, 'Notes/plan'), link('doc'));
+
+  const warm = { hue: { lo: 20, hi: 60 }, form: ['split'] };
+  await store.write('System/Favicon Studio', studio({ warm }, 'warm'));
+  const made = await markFor(store, 'Notes/plan');
+  assert.equal(made, linkFor(space.tidy(warm), 'Notes/plan'));
+  assert.notEqual(made, link('doc'));
+  assert.notEqual(await markFor(store, 'Notes/other'), made, 'another path, another mark');
+  assert.ok(Buffer.byteLength(made) < 1024);
+
+  // The one changed last is the one somebody is tuning.
+  const cool = { hue: { lo: 180, hi: 200 } };
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await store.write('Copy of studio', studio({ cool }, 'cool'));
+  assert.equal(await markFor(store, 'Notes/plan'), linkFor(space.tidy(cool), 'Notes/plan'));
+
+  await fsp.rm(root, { recursive: true, force: true });
+});

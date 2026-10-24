@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { agentsAllowed, createAgents } from './agent/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
 import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
-import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
+import { dataUri as iconUri, markFor, refreshed, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten, PLACEHOLDER } from './flatten.js';
 import { createTouched } from './touched.js';
 import { createDoor } from './door.js';
@@ -1015,7 +1015,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         // A visit, not a preview: the Drive draws live pages in iframes.
         const dest = req.headers['sec-fetch-dest'];
         if (!dest || dest === 'document') ledger.count('opens');
-        return html(res, 200, injectCarrier(source, docPath, visit));
+        return html(res, 200, injectCarrier(refreshed(source), docPath, visit));
       }
 
       // ------------------------------------------------- the carrier's surface
@@ -1261,8 +1261,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route === '/drive/new' && req.method === 'POST') {
         const body = await readJson(req, config.maxBodyBytes);
         const docPath = await freePath(parsePath(body.path, { allowRoot: false }));
+        // A new document wears its own mark from the start: one point in the
+        // drive's space, picked by the path it is about to have. A copy keeps
+        // the one it was copied with, because it is a copy.
         const source = body.from
-          ? await buildStarter(body.from, { name: splitPath(docPath).name })
+          ? await buildStarter(body.from, { name: splitPath(docPath).name, mark: await markFor(store, docPath) })
           : await copyOf(body.copy, docPath);
         await putDocument(docPath, source, { label: 'created', client: body.client ?? null });
         return json(res, 200, { ok: true, path: docPath, href: `/a/${encodeURIComponent(docPath)}` });
@@ -1348,7 +1351,7 @@ export async function createDrive(config, { log = console, agentProviders = null
           return `data-marble-blob="${hash}" data-marble-type="${type}" src="${PLACEHOLDER}"`;
         };
         const deck = await pptxToDeck(file.at, {
-          starter: await buildStarter('slides', { name: splitPath(docPath).name }),
+          starter: await buildStarter('slides', { name: splitPath(docPath).name, mark: await markFor(store, docPath) }),
           fileName: file.name,
           putBlob,
         });
@@ -1551,9 +1554,11 @@ export async function createDrive(config, { log = console, agentProviders = null
         const docPath = parsePath(url.searchParams.get('path'), { allowRoot: false });
         const source = await store.read(docPath);
         if (source === null) return text(res, 404, `no document "${docPath}"`);
+        // Whole means as it is served, glass marble swapped for the flat one
+        // included; `flatten=0` is the bytes on disk, exactly.
         const whole = url.searchParams.get('flatten') === '0'
           ? { source, inlined: 0 }
-          : await flatten(source, store.blobs);
+          : await flatten(refreshed(source), store.blobs);
         const { name } = splitPath(docPath);
         return send(res, 200, whole.source, {
           'Content-Type': 'text/html; charset=utf-8',
