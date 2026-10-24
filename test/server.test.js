@@ -677,6 +677,46 @@ test('a document made here carries its own mark, and the host has one for the re
   assert.match(taken, /<link rel="icon" href="data:image\/svg\+xml,/);
 });
 
+test('a drive with a studio draws each new app its own mark; the glass marble is served flat', async () => {
+  const { HOST_MARKS, link, linkFor } = await import('../server/favicon.js');
+  const { tidy } = await import('../server/favicon-space.js');
+  const iconOf = (source) => /<link rel="icon" href="[^"]*">/.exec(source)?.[0] ?? null;
+
+  const warm = { hue: { lo: 20, hi: 70 }, form: ['split'] };
+  await drive.store.write('Marks/Favicon Studio', `<!doctype html>
+<html><head><title>Favicon Studio</title><meta name="marble-favicons" content="spaces"></head>
+<body data-marble-id="b"><section data-marble-id="s" data-favicon-spaces data-use="warm">
+<article data-marble-id="a"><h2 data-marble-id="n">Warm</h2><script type="application/json" data-marble-id="warm">${JSON.stringify(warm)}</script></article>
+</section></body></html>`);
+
+  const { path: one } = await asJson(await post('/drive/new', { path: 'Marks/first app', from: 'doc' }));
+  const { path: two } = await asJson(await post('/drive/new', { path: 'Marks/second app', from: 'sheet' }));
+  const first = iconOf(await drive.store.read(one));
+  assert.equal(first, linkFor(tidy(warm), one), 'drawn from the space in use, at its own path');
+  assert.equal(iconOf(await drive.store.read(two)), linkFor(tidy(warm), two));
+  assert.notEqual(first, iconOf(await drive.store.read(two)), 'siblings, not twins');
+  // A copy is a copy, mark and all.
+  const { path: copied } = await asJson(await post('/drive/new', { path: 'Marks/first app again', copy: one }));
+  assert.equal(iconOf(await drive.store.read(copied)), first);
+  // And the Drive lists it as the document's own.
+  assert.ok((await drive.store.stat(one)).icon);
+
+  // With nothing in use, a new app is the bare marble again.
+  await drive.store.write('Marks/Favicon Studio', (await drive.store.read('Marks/Favicon Studio')).replace('data-use="warm"', 'data-use=""'));
+  const { path: plain } = await asJson(await post('/drive/new', { path: 'Marks/plain app', from: 'doc' }));
+  assert.equal(iconOf(await drive.store.read(plain)), link('doc'));
+
+  // A document from before keeps the glass marble in its file, and is served
+  // and downloaded with the flat one.
+  const glass = [...HOST_MARKS].find((uri) => uri.includes('radialGradient') && !uri.includes('%3Crect'));
+  await drive.store.write('Marks/old', `<!doctype html>\n<html><head><title>Old</title>\n<link rel="icon" href="${glass}">\n</head><body data-marble-id="b"><p data-marble-id="p">old</p></body></html>`);
+  const served = await (await get('/a/Marks%2Fold')).text();
+  assert.equal(iconOf(served), link('doc'));
+  const taken = await (await get('/drive/download?path=Marks%2Fold')).text();
+  assert.equal(iconOf(taken), link('doc'));
+  assert.ok((await drive.store.read('Marks/old')).includes(glass), 'the file itself is not rewritten');
+});
+
 test('the gate cookie is Secure when the secret arrived through a local HTTPS proxy', async () => {
   const closed = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_SECRET: 'hunter2' }), {
     log: quiet,

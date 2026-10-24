@@ -22,6 +22,7 @@ import { collectSlices, guardOps, idsOfOps, OP, repairOps, validateOps } from '.
 import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut, targetsOf } from '../change/fanout.js';
 import { anchorsOf, MARKS_MAX, marksOf, mergeMarks, PLACES, SHAPES, STATES } from '../change/marks.js';
 import { partsOf, parseStep } from '../change/parts.js';
+import { markFor } from '../favicon.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
 import { MAX_HOP, MAX_SENDS, MAX_TEXT, WAIT_DEFAULT, WAIT_MAX, WAIT_MIN } from './messages.js';
@@ -693,7 +694,8 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
     async create_document(input, turn) {
       const docPath = parsePath(String(input.path ?? ''), { allowRoot: false });
       if (await store.has(docPath)) return { error: `"${docPath}" already exists` };
-      const source = await buildStarter(String(input.from ?? 'doc'), { name: splitPath(docPath).name });
+      // Its own mark, from the drive's space, the same as one made with New.
+      const source = await buildStarter(String(input.from ?? 'doc'), { name: splitPath(docPath).name, mark: await markFor(store, docPath) });
       await createDocument(docPath, source, { label: `agent:${turn.conversationId}` });
       turn.writable.add(docPath);
       return { path: docPath };

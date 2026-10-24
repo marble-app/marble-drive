@@ -42,7 +42,7 @@ import {
   titleize,
 } from '../paths.js';
 import { createBlobs } from './blobs.js';
-import { dataUri as markUri } from '../favicon.js';
+import { HOST_MARKS, SPACE_META } from '../favicon.js';
 
 const HIDDEN = /^\./;
 
@@ -72,10 +72,11 @@ const dayOf = (source) =>
   )?.[1] ?? null;
 
 // The icon a document draws for itself, when it is its own: a data URI in its
-// head, because a .mrbl is one file (server/favicon.js). The marble every new
-// document starts with says nothing about which one this is, so it is left
-// out, and so is anything but a picture, or one too big to be an icon.
-const MARKS = new Set([markUri('doc'), markUri('drive')]);
+// head, because a .mrbl is one file (server/favicon.js). The marble the host
+// hands out, flat or the glass one before it, says nothing about which
+// document this is, so it is left out, and so is anything but a picture, or
+// one too big to be an icon. A mark drawn from the drive's space is the
+// document's own: no other document has it.
 const ICON_MAX = 8 * 1024;
 const iconOf = (source) => {
   const end = source.search(/<\/head>/i);
@@ -84,10 +85,17 @@ const iconOf = (source) => {
     if (!/\brel=["']?(?:shortcut )?icon\b/i.test(tag)) continue;
     const href = tag.match(/\bhref=(?:"([^"]*)"|'([^']*)')/i);
     const uri = href?.[1] ?? href?.[2] ?? '';
-    if (uri.startsWith('data:image/') && uri.length <= ICON_MAX && !MARKS.has(uri)) return uri;
+    if (uri.startsWith('data:image/') && uri.length <= ICON_MAX && !HOST_MARKS.has(uri)) return uri;
     return null;
   }
   return null;
+};
+
+// Whether this is the page a drive tunes its marks in (server/favicon.js),
+// asked of the head alone, so a document that only quotes the tag is not one.
+const isStudio = (source) => {
+  const end = source.search(/<\/head>/i);
+  return SPACE_META.test(end < 0 ? source.slice(0, 65536) : source.slice(0, end));
 };
 
 // What a .mrbl document is worth measuring in — how much of it a hand or a model
@@ -259,7 +267,7 @@ export function createFsStore({ root }) {
       facts.delete(file);
       return null;
     }
-    const next = { mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, size: info.size, title: titleOf(source, null), day: dayOf(source), nodes: nodesOf(source), icon: iconOf(source) };
+    const next = { mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, size: info.size, title: titleOf(source, null), day: dayOf(source), nodes: nodesOf(source), icon: iconOf(source), favicons: isStudio(source) };
     facts.set(file, next);
     return next;
   }
@@ -274,7 +282,7 @@ export function createFsStore({ root }) {
       return null;
     }
     const { parent, name } = splitPath(clean);
-    const { icon } = known;
+    const { icon, favicons } = known;
     return {
       kind: 'doc',
       path: clean,
@@ -287,6 +295,7 @@ export function createFsStore({ root }) {
       modified: info.mtimeMs,
       created: info.birthtimeMs || info.ctimeMs,
       ...(icon ? { icon } : {}),
+      ...(favicons ? { favicons: true } : {}),
     };
   }
 

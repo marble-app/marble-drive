@@ -450,9 +450,11 @@ async function template(id) {
 /**
  * A starter, built into a document. `name` is the last segment of the path it
  * is about to be written to — it becomes the title, because a document called
- * "Untitled" is a document nobody names.
+ * "Untitled" is a document nobody names. `mark` is the icon line it is made
+ * with: its own, drawn from the drive's space (markFor in server/favicon.js),
+ * or the bare marble when nobody passes one.
  */
-export async function build(id, { name = id } = {}) {
+export async function build(id, { name = id, mark = null } = {}) {
   const starter = byId.get(id);
   if (!starter) throw Object.assign(new Error(`no starter "${id}"`), { status: 404 });
 
@@ -466,7 +468,7 @@ export async function build(id, { name = id } = {}) {
     // The mark, inline. Spliced here rather than written into each starter
     // so there is one drawing rather than six copies of it — and inline rather
     // than a URL because a document that leaves this drive still has a tab.
-    .replace('__ICON__', () => iconLink('doc'))
+    .replace('__ICON__', () => mark ?? iconLink('doc'))
     // Each placeholder gets its own id. One pass rather than a global replace is
     // what keeps them distinct — no id may appear twice in a document.
     .replace(/__ID__/g, () => newId())

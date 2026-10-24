@@ -250,3 +250,23 @@ test('a document\'s own favicon rides along; the marble every document starts wi
   assert.equal('icon' in (await store.stat('icons/marble')), false);
   assert.equal('icon' in (await store.stat('icons/remote')), false, 'only a picture carried in the file');
 });
+
+test('the glass marble is still the host\'s; a mark drawn from a space is the document\'s own', async () => {
+  const { HOST_MARKS, linkFor } = await import('../server/favicon.js');
+  const glass = [...HOST_MARKS].find((uri) => uri.includes('radialGradient') && !uri.includes('%3Crect'));
+  await store.write('icons/glass', doc('Glass').replace('</title>', `</title><link rel="icon" href="${glass}">`));
+  assert.equal('icon' in (await store.stat('icons/glass')), false, 'made before the flat marble, and not its own');
+
+  const drawn = linkFor({ hue: { lo: 20, hi: 60 } }, 'icons/drawn');
+  await store.write('icons/drawn', doc('Drawn').replace('</title>', `</title>${drawn}`));
+  assert.equal((await store.stat('icons/drawn')).icon, /href="([^"]+)"/.exec(drawn)[1]);
+});
+
+test('the page a drive tunes its marks in says so, in its head', async () => {
+  await store.write('icons/studio', doc('Studio').replace('</title>', '</title><meta name="marble-favicons" content="spaces">'));
+  await store.write('icons/quoting', doc('Quoting').replace('</body>', '<pre>&lt;meta name="marble-favicons"&gt;</pre><code><meta name="marble-favicons"></code></body>'));
+  assert.equal((await store.stat('icons/studio')).favicons, true);
+  assert.equal('favicons' in (await store.stat('icons/quoting')), false, 'a tag in the body is not the head saying so');
+  const listed = await store.list({ folder: 'icons' });
+  assert.deepEqual(listed.filter((e) => e.favicons).map((e) => e.path), ['icons/studio']);
+});
