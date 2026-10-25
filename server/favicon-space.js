@@ -331,25 +331,25 @@ export const uri = (svgSource) => `data:image/svg+xml,${svgSource.replace(/#/g, 
 /** A seed's mark in a space: the one call a host makes for a new document. */
 export const mark = (space, seed) => draw(genome(space, seed));
 
-// The family a drive starts with, before anyone tunes it: six dusty colours
-// at one lightness, so no app's mark is louder than another's, round the
-// wheel from rose to blue and never through violet, which is the agents'
-// colour here. The one ribbon of the old glass marble, rising to the right,
-// and the light in the same corner.
+// The family a drive starts with, before anyone tunes it, and the one a drive
+// with no studio draws from: six dusty colours at one lightness, so no app's
+// mark is louder than another's, round the wheel from rose to blue and never
+// through violet, which is the agents' colour here. One wave rising to the
+// right, set in a tile with no glint, the way the owner's own studio settled it.
 export const DEFAULTS = {
   hue: { lo: 355, hi: 255, steps: 6 },
-  chroma: { lo: 0.075, hi: 0.075 },
-  light: { lo: 0.6, hi: 0.6 },
+  chroma: { lo: 0.07, hi: 0.07 },
+  light: { lo: 0.58, hi: 0.58 },
   angle: { lo: -40, hi: -20 },
   bend: { lo: 0.35, hi: 0.6 },
   width: { lo: 0.27, hi: 0.27 },
-  shift: { lo: -0.08, hi: 0.08 },
+  shift: { lo: -0.06, hi: 0.06 },
   contrast: { lo: 0.24, hi: 0.24 },
   size: { lo: 15, hi: 15 },
   form: ['wave'],
   ribbon: ['tint'],
-  glint: ['dot'],
+  glint: ['none'],
   depth: ['none'],
   rim: ['none'],
-  frame: ['none'],
+  frame: ['tile'],
 };

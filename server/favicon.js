@@ -15,8 +15,9 @@
 // A drive that keeps a Favicon Studio has a space of marks, and each document
 // made from a starter gets one point in it, drawn from its path
 // (server/favicon-space.js). Siblings rather than strangers: the space says
-// what they share and how far apart they may be. A drive without one makes
-// the bare marble, as it always has.
+// what they share and how far apart they may be. A drive without one draws
+// from the family every drive starts with (DEFAULTS); a studio with no space
+// in use makes the bare marble.
 //
 // It is drawn at 32 and lives at 16, so everything in it is one of three
 // shapes: the disc, the ribbon, the dot. The colours are written into the mark
@@ -26,7 +27,7 @@
 // have to ask a host for: a .mrbl is one file, and one file includes the thing
 // in the tab.
 
-import { draw, mark, tidy, uri } from './favicon-space.js';
+import { DEFAULTS, draw, mark, tidy, uri } from './favicon-space.js';
 
 // The marble's own point in the space: the system's dusty blue (--accent-ink
 // and the Drive's "marble" folder sit either side of it), the ribbon rising to
@@ -149,7 +150,9 @@ export const linkFor = (space, seed) => `<link rel="icon" href="${uri(mark(space
 
 /**
  * The mark a document about to be made at `docPath` starts with: its own
- * point in the drive's space when the drive keeps one, else the bare marble.
+ * point in the drive's space when the drive keeps one, else its point in the
+ * family every drive starts with. A studio that has no space in use is a
+ * choice too, and it makes the bare marble.
  *
  * The studio is found by what it says about itself, not by its name, so it can
  * be renamed or filed in a folder. If there are two, the one changed last is
@@ -160,14 +163,16 @@ export async function markFor(store, docPath) {
   try {
     entries = await store.list({ recursive: true });
   } catch {
-    return link('doc');
+    return linkFor(DEFAULTS, docPath);
   }
+  let studios = 0;
   for (const entry of entries) {
     if (entry.kind !== 'doc' || !entry.favicons) continue;
+    studios += 1;
     const space = spaceIn((await store.read(entry.path)) ?? '');
     if (space) return linkFor(space, docPath);
   }
-  return link('doc');
+  return studios ? link('doc') : linkFor(DEFAULTS, docPath);
 }
 
 // ------------------------------------------------------------ old documents
