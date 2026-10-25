@@ -600,15 +600,25 @@ export class DirectoryCore {
    *  settings off the drive at its next look; what was collected stays until
    *  its person asks for that too (askStudyDelete), a separate choice. */
   async leaveStudy({ account } = {}) {
+    return this.withdrawFrom(account, { notIn: 'You aren’t taking part in the study.' });
+  }
+
+  /** Bryan takes someone out of the study (the Console's Withdraw, behind
+   *  /_door): the same as their own Leave the study, logged as his. */
+  async withdraw(id) {
+    return this.withdrawFrom(id, { by: 'owner', notIn: 'They aren’t taking part in the study.' });
+  }
+
+  async withdrawFrom(account, { by = null, notIn }) {
     return this.exclusive(async () => {
       const acct = account ? await this.storage.get(`acct:${account}`) : null;
       if (!acct) refuse(404, 'No such account.');
       const drive = await this.studyDrive(acct);
-      if (!drive || acct.study?.consent?.choice !== 'given') refuse(409, 'You aren’t taking part in the study.');
+      if (!drive || acct.study?.consent?.choice !== 'given') refuse(409, notIn);
       if (acct.study.withdrawn) return { study: this.studyView(acct), already: true };
       const next = { ...acct, study: { ...acct.study, withdrawn: this.iso() } };
       await this.storage.put(`acct:${acct.id}`, next);
-      await this.audit('consent-withdrawn', { account: acct.id, detail: { drive: drive.name, version: acct.study.consent.version } });
+      await this.audit('consent-withdrawn', { account: acct.id, detail: { drive: drive.name, version: acct.study.consent.version, ...(by ? { by } : {}) } });
       return { study: this.studyView(next) };
     });
   }
@@ -1080,6 +1090,8 @@ export class Directory {
       }
       if ((m = /^\/accounts\/([0-9a-f]{16})\/sessions$/.exec(path)) && method === 'DELETE') return json(200, await c.revokeAll(m[1]));
       if ((m = /^\/accounts\/([0-9a-f]{16})\/revoke$/.exec(path)) && method === 'POST') return json(200, await c.revokeAccount(m[1]));
+      // Bryan's Withdraw, from the Console; the person's own is /study/leave.
+      if ((m = /^\/accounts\/([0-9a-f]{16})\/withdraw$/.exec(path)) && method === 'POST') return json(200, await c.withdraw(m[1]));
       if (method === 'POST' && path === '/session') return json(200, await c.openSession(await body(request)));
       if ((m = /^\/session\/([0-9a-f]{64})$/.exec(path))) {
         if (method === 'GET') return json(200, await c.session(m[1]));

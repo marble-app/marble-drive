@@ -189,6 +189,41 @@ test('leaving the study: only while in it, once, and deleting what was collected
   assert.equal((await d.call('POST', '/study/delete', { account: 'f'.repeat(16) })).status, 404);
 });
 
+test('withdraw: Bryan takes someone out of the study as their own Leave does, logged as his; only someone in it, once', async () => {
+  const d = dir();
+  const ana = (await invited(d, 'ana', { study: true })).account;
+  await d.call('POST', '/consent', { account: ana.id, version: 'v1', choice: 'given' });
+  assert.equal((await d.call('POST', `/accounts/${ana.id}/withdraw`)).status, 409, 'consent alone is not a drive in the study');
+  await d.call('POST', '/drive', { account: ana.id, name: 'ana', home: 'pchost' });
+  d.tick();
+  const at = d.at();
+  const out = await d.call('POST', `/accounts/${ana.id}/withdraw`);
+  assert.equal(out.status, 200, JSON.stringify(out.data));
+  assert.equal(out.data.study.withdrawn, at);
+  assert.equal(out.data.study.consent.choice, 'given', 'the answer given stays on record');
+  assert.equal(out.data.study.deleteAsked, null, 'withdrawing deletes nothing by itself');
+  const line = (await d.call('GET', '/log')).data.lines.find((l) => l.kind === 'consent-withdrawn');
+  assert.deepEqual(line.detail, { drive: 'ana', version: 'v1', by: 'owner' });
+  assert.equal(line.account, ana.id);
+  const people = (await d.call('GET', '/people')).data.people;
+  assert.equal(people.find((p) => p.account?.id === ana.id).study.withdrawn, at, 'marble-host sees her out of the study at its next look');
+  d.tick();
+  assert.equal((await d.call('POST', `/accounts/${ana.id}/withdraw`)).data.already, true);
+  assert.equal((await d.call('POST', '/study/leave', { account: ana.id })).data.already, true, 'one leaving, whoever did it');
+  assert.equal((await d.call('GET', '/log')).data.lines.filter((l) => l.kind === 'consent-withdrawn').length, 1);
+  // Asking for what was collected to be deleted is still hers to do.
+  assert.equal((await d.call('POST', '/study/delete', { account: ana.id })).status, 200);
+
+  const no = (await invited(d, 'bob', { study: true })).account;
+  await d.call('POST', '/consent', { account: no.id, version: 'v1', choice: 'declined' });
+  await d.call('POST', '/drive', { account: no.id, name: 'bob', home: 'pchost' });
+  const never = await d.call('POST', `/accounts/${no.id}/withdraw`);
+  assert.equal(never.status, 409);
+  assert.match(never.data.why, /They aren’t taking part in the study/);
+  assert.equal((await d.call('POST', `/accounts/${'f'.repeat(16)}/withdraw`)).status, 404);
+  assert.equal((await d.call('GET', `/accounts/${ana.id}/withdraw`)).status, 404, 'a POST');
+});
+
 // ------------------------------------------------------------ ending a drive
 
 /** Ana's drive on the PC host, ready, and a session of hers. */
