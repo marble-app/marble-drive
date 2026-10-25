@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# One PC drive's study logs, copied into the owner's Research folder
+# (docs/HOSTING.md, "The study on each drive"). Run by
+# marble-guest-export@<name>.service, which marble-host starts for the
+# Console's Export study data.
+#
+#   export-guest <name>
+#
+# Refuses, and copies nothing, unless /etc/marble-guests/<name>.env says
+# MARBLE_STUDY=1 and holds a MARBLE_CONSENT: a drive's full logs leave it only
+# with its person's consent on file. Then copies the drive's
+# .marble/agents/*/events.jsonl, .marble/agents/*/turns/, .marble/agents/*/raw/
+# and .marble/*.ops.jsonl, laid out as they are under the drive, into
+# <exports>/<name>/<utc>/, with export.json beside them:
+# { name, at, consent, files, bytes }. Never a document, a picture, the
+# history or the drive's home, where the person's login is. backup-tree reads
+# the drive, and never follows a link.
+#
+# It runs as the owner, never as root. What it writes is in the owner's home,
+# where a link his user put in the way could send a root writer anywhere on
+# the PC; written as the owner, a link can only lead where he could write
+# anyway, and everything it makes is his. The unit gives it the one power it
+# has beyond his, reading another user's files (CAP_DAC_READ_SEARCH), and
+# shows it nothing but this drive and the Research folder.
+#
+# <exports> is MARBLE_EXPORT_DIR, which the unit sets to
+# $OWNER_HOME/Marble Drive/Research/Probe study (install.d/30-export.sh).
+set -euo pipefail
+umask 077
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=backup-lib.sh
+. "$HERE/backup-lib.sh"
+name=${1:-}
+[[ $# -eq 1 && $name =~ $NAME_RE ]] || { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
+unit="marble-guest-export@$name.service"
+if [[ $EUID -eq 0 && -z ${MARBLE_GUESTS_DIR:-} ]]; then
+  die "it writes into the owner's home, so it runs as the owner, not root: sudo systemctl start $unit"
+fi
+exports="${MARBLE_EXPORT_DIR:-}"
+[[ -n $exports ]] || die "MARBLE_EXPORT_DIR is not set; $unit sets it"
+[[ -d $exports ]] || die "$exports is not there; sudo bash linux/pc-host/install.sh makes it"
+
+line="$(tree consent "$GUEST_ETC/$name.env")" || case "$(field refused "$line")" in
+  missing) die "$name has no settings on this PC ($GUEST_ETC/$name.env); nothing was copied" ;;
+  consent-unreadable) die "$name's MARBLE_CONSENT is not <version>@<time>; nothing was copied" ;;
+  *) die "$name's settings ($GUEST_ETC/$name.env) are not a file marble-host wrote; nothing was copied" ;;
+esac
+[[ $(field study "$line") == 1 ]] || die "$name is not in the study (its settings have no MARBLE_STUDY=1); nothing was copied"
+consent="$(field consent "$line")"
+[[ -n $consent ]] || die "$name has no consent on file (its settings have no MARBLE_CONSENT); nothing was copied"
+
+mkdir -p -- "$exports/$name"
+at="$(stamp_now)"
+# A run's stamp names its folder; two in one second would share it.
+if [[ -e $exports/$name/$(utc_of "$at") ]]; then
+  sleep 1
+  at="$(stamp_now)"
+fi
+utc="$(utc_of "$at")"
+dest="$exports/$name/$utc"
+[[ ! -e $dest ]] || die "$dest is there already; nothing was copied"
+# Made under a hidden name and renamed when whole, so the Research folder
+# never shows half an export.
+work="$exports/$name/.$utc.partial"
+trap 'rm -rf -- "$work" "$exports/$name/..$utc.partial.copying"' EXIT
+
+line="$(tree export "$GUESTS/$name/drive" "$work" "$name" "$at" "$consent")" || case "$(field refused "$line")" in
+  missing) die "there is no drive folder for $name; nothing was copied" ;;
+  not-a-folder) die "$name's drive folder is a link or a file, not a folder; nothing was copied" ;;
+  unreadable) die "$name's drive can't be read this way; start the export through $unit, which can read it" ;;
+  no-room) die "there is no room for $(size_of "$(field need "$line")") of logs in $exports; nothing was copied" ;;
+  *) die "$name's logs could not be copied; nothing was kept" ;;
+esac
+mv -T -- "$work" "$dest"
+trap - EXIT
+say "$name: copied $(field files "$line") files of study logs ($(size_of "$(field bytes "$line")")) to $dest"
