@@ -83,7 +83,7 @@ test('the rows tick themselves, and the ticks are in the file', async () => {
   assert.equal(await page.locator('[data-marble-id="sh-answer"]').textContent(), 'A class: COGS 120, the design lab');
   assert.equal(await done(page, 'ask'), null, 'choosing is not asking Claude');
 
-  // 3: an agent's op landing on the list, the way "put these three in a row" would.
+  // 3: an agent's op landing on the list, the way "put these four in a row" would.
   const before = await store.read('start-here');
   await host.drive.writeOps('start-here', [{ type: 'setAttr', id: 'sh-steps', name: 'style', value: 'display: grid; grid-template-columns: repeat(3, 1fr)' }], { client: 'agent-test' });
   await page.waitForFunction(() => document.querySelector('[data-step="ask"]').getAttribute('data-done') === 'yes');
@@ -200,6 +200,7 @@ test('with no agent that works, the first row waits, Connect opens the sheet, an
     assert.equal(await page.locator('[data-marble-id="sh-make"]').getAttribute('aria-disabled'), 'true');
     assert.equal(await page.locator('.needs').getAttribute('data-marble-transient'), '', 'drawn, never written');
 
+    if (process.env.START_HERE_SHOTS) await page.screenshot({ path: `${process.env.START_HERE_SHOTS}/start-here-no-agent.png`, fullPage: true });
     // Make it, with an answer, starts nothing.
     const chats = async () => (await (await fetch(`${bare.base}/agent/conversations`)).json()).length;
     const count = await chats();

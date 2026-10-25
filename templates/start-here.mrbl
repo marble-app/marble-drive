@@ -181,7 +181,7 @@ __ICON__
       <span class="num" aria-hidden="true"><span class="digit">1</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
       <div data-marble-id="__ID__">
         <h2 data-marble-id="__ID__">Connect Claude or ChatGPT</h2>
-        <p class="note" data-marble-id="__ID__">The agent runs on your own plan. You sign in on its own page.</p>
+        <p class="note" data-marble-id="__ID__">The agent runs on your own plan. You sign in on Anthropic’s or OpenAI’s page.</p>
         <button type="button" class="connect" data-marble-id="sh-connect-go">Connect</button>
       </div>
     </li>
@@ -199,7 +199,7 @@ __ICON__
       <span class="num" aria-hidden="true"><span class="digit">3</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
       <div data-marble-id="__ID__">
         <h2 data-marble-id="__ID__">Ask the agent to change this page</h2>
-        <p class="note" data-marble-id="__ID__">Press <kbd>⌘J</kbd> (<kbd>Ctrl J</kbd> on Windows) and try “put these three in a row”.</p>
+        <p class="note" data-marble-id="__ID__">Press <kbd>⌘J</kbd> (<kbd>Ctrl J</kbd> on Windows) and try “put these four in a row”.</p>
       </div>
     </li>
 

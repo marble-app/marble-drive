@@ -241,7 +241,7 @@ export function createClaudeSignIn({
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (err) {
-      throw new SignInError("This drive can't run Claude's sign-in.", { detail: err.message });
+      throw new SignInError("This drive can't run Claude's sign-in. Use an API key instead.", { detail: err.message });
     }
     const it = watchRun(child, {
       waitMs,
@@ -272,7 +272,7 @@ export function createClaudeSignIn({
       const tail = stripTerminal(it.output).trim().split('\n').slice(-6).join(' | ');
       it.end('no address');
       log.error?.(`[claude sign-in] no sign-in address (${it.exit ?? 'still running'}): ${tail}`);
-      if (it.exit === 'missing') throw new SignInError("This drive can't run Claude's sign-in.", { detail: 'script is not installed' });
+      if (it.exit === 'missing') throw new SignInError("This drive can't run Claude's sign-in. Use an API key instead.", { detail: 'script is not installed' });
       throw new SignInError(refused ? `Claude's sign-in didn't start: ${refused}` : "Claude's sign-in didn't start. Try again in a minute.", { detail: tail });
     }
     it.url = url;

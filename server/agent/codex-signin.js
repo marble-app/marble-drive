@@ -164,23 +164,23 @@ export function createCodexSignIn({
         }
       } else {
         it.state = 'failed';
-        it.error = "Codex finished, but isn't signed in to ChatGPT. Start again.";
+        it.error = "Codex finished, but isn't signed in to ChatGPT. Get a new code to try again.";
         log.error?.(`[codex sign-in] exited 0, but codex login status says ${status.method ?? 'signed out'}`);
       }
     } else if (it.ended === 'exited' || it.ended === 'failed') {
       const said = findDeviceError(`${it.output}\n`);
       it.state = said && /timed out|expired/i.test(said) ? 'expired' : 'failed';
       it.error = it.state === 'expired'
-        ? 'That code ran out. Start again for a new one.'
+        ? 'That code ran out. Get a new one.'
         : it.exit === 'missing'
-          ? "This drive can't run ChatGPT's sign-in."
+          ? "This drive can't run ChatGPT's sign-in. Use an API key instead."
           : said
             ? `ChatGPT's sign-in stopped: ${said.replace(/\.$/, '')}.`
-            : "ChatGPT's sign-in stopped. Start again.";
+            : "ChatGPT's sign-in stopped. Get a new code to try again.";
       if (it.exitCode !== null || said) log.error?.(`[codex sign-in] ${it.exit}: ${said ?? 'no reason given'}`);
     } else {
       it.state = it.ended === 'timed out' ? 'expired' : 'ended';
-      if (it.state === 'expired') it.error = 'That code ran out. Start again for a new one.';
+      if (it.state === 'expired') it.error = 'That code ran out. Get a new one.';
     }
     if (session === it) {
       session = null;
@@ -200,7 +200,7 @@ export function createCodexSignIn({
         detached: true,
       });
     } catch (err) {
-      throw new SignInError("This drive can't run ChatGPT's sign-in.", { detail: err.message });
+      throw new SignInError("This drive can't run ChatGPT's sign-in. Use an API key instead.", { detail: err.message });
     }
     const startedAt = now();
     const it = watchRun(child, { waitMs, kill: killGroup, onEnd: (run) => { settle(run); } });
@@ -217,7 +217,7 @@ export function createCodexSignIn({
       const tail = stripTerminal(it.output).trim().split('\n').slice(-6).join(' | ');
       it.end('no code');
       log.error?.(`[codex sign-in] no code (${it.exit ?? 'still running'}): ${tail}`);
-      if (it.exit === 'missing') throw new SignInError("This drive can't run ChatGPT's sign-in.", { detail: 'codex is not installed' });
+      if (it.exit === 'missing') throw new SignInError("This drive can't run ChatGPT's sign-in. Use an API key instead.", { detail: 'codex is not installed' });
       throw new SignInError(said ? `ChatGPT's sign-in didn't start: ${said}` : "ChatGPT's sign-in didn't start. Try again in a minute.", { detail: tail });
     }
     const minutes = found.minutes ?? waitMs / 60_000;
