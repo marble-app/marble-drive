@@ -5,6 +5,7 @@
 # Its secrets: npx wrangler@latest secret put LEASE_TOKEN
 #              npx wrangler@latest secret put SPRITES_TOKEN   (optional; without
 #              it a drive at home on Fly redirects to its sprite URL)
+#              the door's and the PC host's, below
 name = "marble-lease"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
@@ -12,17 +13,17 @@ compatibility_date = "2026-09-01"
 workers_dev = true
 
 # Explicit names, never a wildcard: mac-<name>.marbledrive.app and
-# pc-<name>.marbledrive.app are a drive's Cloudflare tunnels and must not pass
-# through this Worker.
+# pc-<name>.marbledrive.app are Cloudflare tunnels (a drive's own, or
+# pc-host.marbledrive.app, the PC host's) and must not pass through this Worker.
 routes = [
   { pattern = "marbledrive.app/*", zone_name = "marbledrive.app" },
   { pattern = "www.marbledrive.app/*", zone_name = "marbledrive.app" },
   { pattern = "bryan.marbledrive.app/*", zone_name = "marbledrive.app" },
   # The door (docs/ACCOUNTS.md, "To turn it on"): every drive name comes
   # through here, so a drive made by sign-up needs no route of its own. Turn
-  # it on only after routes with no Worker for pc-bryan.marbledrive.app/* and
-  # mac-bryan.marbledrive.app/* are added in the dashboard and proven to keep
-  # the tunnels off this Worker.
+  # it on only after routes with no Worker for pc-bryan.marbledrive.app/*,
+  # mac-bryan.marbledrive.app/* and pc-host.marbledrive.app/* are added in the
+  # dashboard and proven to keep the tunnels off this Worker.
   # { pattern = "*.marbledrive.app/*", zone_name = "marbledrive.app" },
 ]
 
@@ -47,6 +48,23 @@ MAX_DRIVES = "10"
 # The public keys a pass may be signed with: the same line as a drive's
 # MARBLE_DOOR_KEYS ("<kid>:<base64 SPKI> …"). Unset, the edge derives its own.
 # DOOR_PUBLIC_KEYS = ""
+# Other people's drives on the owner's PC (worker/src/pc-host.js; docs/HOSTING.md,
+# "Other people's drives on the PC"). The PC host's router, through its tunnel
+# marble-pc-host. Nothing reaches it until the secret PC_HOST_KEY is set: the
+# key the Worker adds to every request it sends there, HOST_KEY in the PC's
+# ~/.config/marble-drive/host.env. A second secret, ALERT_NTFY_URL
+# (https://ntfy.sh/<a private topic>), is where the check below tells you the
+# PC isn't answering; without it nothing is sent.
+PC_HOST_URL = "https://pc-host.marbledrive.app"
+# Where a drive made by sign-up lives: "fly" (the door sprite makes it, as
+# before) or "pchost" (marble-host makes it on the PC, with no starter credit).
+# Unset is fly.
+# NEW_DRIVE_HOME = "pchost"
+
+# The Worker's own look at the PC host every five minutes (pc-host.js): it does
+# nothing until PC_HOST_URL and PC_HOST_KEY are set.
+[triggers]
+crons = ["*/5 * * * *"]
 
 [[durable_objects.bindings]]
 name = "LEASE"

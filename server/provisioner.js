@@ -115,10 +115,15 @@ export function scriptRunner({ script, keysFile, org = 'marble-drive', log = con
     });
 }
 
+/** `home` is whose share of the queue this maker takes: `fly`, the door
+ *  sprite's (the default), or `pchost`, marble-host's on the PC
+ *  (worker/src/pc-host.js). A drive on the PC host has no sprite URL to
+ *  report, no spare and no starter credit. */
 export function createProvisioner({
   directoryUrl,
   adminToken,
   run,
+  home = 'fly',
   spares = 0,
   settingsFor = () => ({}),
   spareName = newSpareName,
@@ -128,6 +133,7 @@ export function createProvisioner({
 }) {
   let working = false;
   let sparing = false;
+  const onFly = home === 'fly';
 
   async function api(method, path, body) {
     const res = await fetchImpl(new URL(`/_door${path}`, directoryUrl).href, {
@@ -170,18 +176,20 @@ export function createProvisioner({
    *  someone asked for, made from nothing or handed a spare. */
   async function settingsWithCredit(job) {
     const settings = { ...settingsFor(job) };
-    const credit = await mintCredit(job.name);
+    const credit = onFly ? await mintCredit(job.name) : null;
     if (credit) Object.assign(settings, { MARBLE_CREDIT_URL: credit.url, MARBLE_CREDIT_TOKEN: credit.token });
     return settings;
   }
 
-  /** The oldest queued drive, made. A second call while one runs does nothing. */
+  /** The oldest queued drive of this maker's home, made. A second call
+   *  while one runs does nothing. A drive on the PC host is never made on
+   *  Fly, nor one on Fly on the PC, whichever the queue lists first. */
   async function once() {
     if (working) return { skipped: true };
     working = true;
     try {
-      const { drives = [] } = await api('GET', '/queue');
-      const job = drives[0];
+      const { drives = [] } = await api('GET', `/queue?home=${home}`);
+      const job = drives.find((d) => (d.home ?? 'fly') === home);
       if (!job) return { idle: true };
       if (job.spare) return await handOut(job);
       let current = 'machine';
@@ -202,8 +210,8 @@ export function createProvisioner({
       };
       log.log(`[provisioner] making ${job.name}`);
       const code = await run({ kind: 'drive', name: job.name, account: job.owner, settings: await settingsWithCredit(job) }, onLine);
-      if (code === 0 && url) {
-        await api('POST', `/drives/${job.name}/step`, { state: 'ready', url, sprite: job.sprite });
+      if (code === 0 && (url || !onFly)) {
+        await api('POST', `/drives/${job.name}/step`, onFly ? { state: 'ready', url, sprite: job.sprite } : { state: 'ready', home });
         log.log(`[provisioner] ${job.name} is ready`);
         return { made: job.name };
       }
@@ -291,7 +299,7 @@ export function createProvisioner({
    *  never waits behind a spare being made. A second call while one runs
    *  does nothing. */
   async function topUp() {
-    if (!spares) return { off: true };
+    if (!spares || !onFly) return { off: true };
     if (sparing) return { skipped: true };
     sparing = true;
     try {

@@ -163,6 +163,9 @@ through.
   (`marble_share`, up to 24 links per browser) and redirects to `/a/<path>`, so
   the address bar never keeps the token and the carrier's own requests carry
   the cookie. The owner (who passes the gate) is just redirected.
+- A link's changes, like the owner's, have to come from the drive's own pages
+  (`fromOwnPage`, `server/sessions.js`), so a page on another drive under the
+  same domain can't file ops with a visitor's cookie.
 - One link per level per page: **Copy link** hands back the one that is on, or
   makes it.
 - **Turn off** (two presses) deletes the id. The token then opens nothing, the
