@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Deletes a PC drive from the PC once marble-host has let it go (docs/HOSTING.md,
+# "Backups of PC drives"). Run as root by marble-guest-remove@<name>.service,
+# which marble-host starts.
+#
+#   remove-guest <name>
+#
+# Refuses unless the drive's service, marble-guest@<name>, is stopped and its
+# settings file, /etc/marble-guests/<name>.env, is gone: it only finishes what
+# marble-host began, so starting it by mistake deletes nothing. Then deletes
+# /var/lib/private/marble-guests/<name> (the drive, its home with the person's
+# Claude or ChatGPT login, and any drive.kept-<utc> restore-guest set aside),
+# systemd's link to it in /var/lib/marble-guests, and this PC's backup status
+# and file list for it.
+#
+# The encrypted backup in R2, guests/<name>/, stays. Deleting it is the owner's
+# call, by hand, once that person's data should go:
+# backup-guest <name> --forget --yes.
+set -euo pipefail
+umask 077
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=backup-lib.sh
+. "$HERE/backup-lib.sh"
+name=${1:-}
+[[ $# -eq 1 && $name =~ $NAME_RE ]] || { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
+need_root
+
+unit="marble-guest@$name.service"
+state="$("$SYSTEMCTL" is-active "$unit" 2>/dev/null || true)"
+case $state in
+  inactive | failed | "") ;;
+  *) die "$unit is $state; marble-host stops it before removing the drive" ;;
+esac
+if [[ -e $GUEST_ETC/$name.env || -L $GUEST_ETC/$name.env ]]; then
+  die "$GUEST_ETC/$name.env is still there; marble-host removes it before removing the drive"
+fi
+lock_drive "$name" 900 || die "a backup or restore of $name is running; start this again once it ends"
+
+gone=0
+if [[ -e $GUESTS/$name || -L $GUESTS/$name ]]; then
+  # rm walks without following links, so nothing the drive left in its folder
+  # can point it elsewhere.
+  rm -rf --one-file-system -- "${GUESTS:?}/$name"
+  gone=1
+fi
+if [[ -L $GUEST_LINKS/$name ]]; then rm -f -- "${GUEST_LINKS:?}/$name"; fi
+rm -f -- "$BACKUP_STATE/status/$name.json" "$BACKUP_STATE/manifests/$name.json"
+rm -rf -- "$BACKUP_STATE/restoring/$name".*
+
+if ((gone)); then
+  say "removed $name from the PC: its drive, its home with the person's logins, and its backup status"
+else
+  say "$name had no folder on the PC; its backup status is gone too"
+fi
+say "its encrypted backup stays in R2 under guests/$name/; to delete that too, by hand: sudo $TOOLS/backup-guest $name --forget --yes"

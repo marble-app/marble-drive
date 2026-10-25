@@ -1,0 +1,68 @@
+# One PC drive's encrypted backup to R2 (backup-guest; docs/HOSTING.md,
+# "Backups of PC drives"). Installed into /etc/systemd/system by
+# install.d/20-backup.sh. Started each hour by marble-guests-backup.service,
+# one drive at a time, and by marble-host whenever it likes: its polkit rule
+# lets it start and stop this unit, but the unit, the scripts it runs
+# (/usr/local/lib/marble-guests) and the key it reads (/etc/marble-backup) are
+# root's, so neither marble-host nor any drive can change what it does or read
+# the key.
+[Unit]
+Description=Encrypted backup of the PC drive %i
+Documentation=https://github.com/marble-app/marble-drive/blob/main/docs/HOSTING.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/marble-guests/backup-guest %i
+# The R2 keys, passphrase and salt reach the script as a file only it can
+# read, never through the environment. systemd reads the file before the
+# sandbox below hides /etc/marble-backup.
+LoadCredential=backup.env:/etc/marble-backup/backup.env
+StateDirectory=marble-backup
+# status/ in it is for anyone on the PC to read; the file lists, locks and
+# copies beside it are root's alone (700).
+StateDirectoryMode=0755
+UMask=0077
+# A first upload of a big drive takes minutes. One stuck past this is ended,
+# and the next hour tries again.
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle
+
+# Root, because a drive's files belong to its own user; but a root that sees
+# only what a backup needs. Everything is read-only but its own state. No
+# home is visible, the owner's included. Of /var/lib/private only this one
+# drive's folder is there, read-only: no other drive, and backup-tree never
+# goes into this drive's home, where its login is. The settings of every
+# drive, the backup key itself, Windows' drives and WSL's interop are hidden.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+TemporaryFileSystem=/var/lib/private:ro
+# The drive's state folder, not its drive/: the folder is systemd's, in a
+# folder of root's, while drive/ is the drive's own and could be a link.
+BindReadOnlyPaths=-/var/lib/private/marble-guests/%i
+InaccessiblePaths=-/etc/marble-backup -/etc/marble-guests -/mnt -/run/WSL -/run/tailscale -/run/docker.sock
+# Reading another user's files is all the root it needs.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# The network it needs is R2 over HTTPS and a name server. No address rules:
+# R2's addresses are Cloudflare's to change, and WSL's name server can sit on
+# a private address.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
