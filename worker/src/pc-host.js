@@ -133,6 +133,8 @@ export async function checkPcHost(env, { fetchImpl = fetch, now = Date.now(), ti
   const kept = await dir('GET', '/watch/pchost');
   const prev = kept.ok ? kept.data.watch ?? null : null;
   const { watch, say, since } = nextWatch(prev, { ok: health.ok, at: now, detail: health.detail });
+  // Well before and well now: nothing to keep.
+  if (health.ok && !prev?.down) return { ok: true, said: null };
   let said = null;
   if (say) {
     const sent = await sendAlert(env, fetchImpl, alertText(say, { at: now, since, detail: health.detail }), timeoutMs);

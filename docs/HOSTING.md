@@ -643,8 +643,9 @@ is resting. Bryan has been told, and your work is safe." The page is a 503
 with `Retry-After: 30`, and JSON for a script. It is given when the request
 gets no answer, when the tunnel answers 530 (no connector), or when the router
 answers 502, 503 or 504. The router says 503 for a drive that isn't running.
-A drive at home on the owner's own machine still gets the page with the
-owner's commands on it.
+A 503 in JSON is the drive's own answer to a script (its apps give one when
+they have no key), and goes back as it is. A drive at home on the owner's own
+machine still gets the page with the owner's commands on it.
 
 The Worker checks the PC itself every five minutes, so the owner hears before
 the people do. The cron is `[triggers]` in `worker/wrangler.toml`, and the

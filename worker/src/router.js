@@ -29,9 +29,12 @@ import { DRIVE_HEADER, KEY_HEADER, PCHOST, pcHostReady } from './pc-host.js';
 export const APEX = 'marbledrive.app';
 const RESERVED = new Set(['www', 'app', 'api', 'docs', 'status', 'admin', 'mail']);
 const UNREACHABLE = new Set([530]); // a Cloudflare tunnel with no connector (error 1033)
-// The PC host's tunnel with no connector (530), or its router with no drive
-// behind it (502, 503, 504).
+// The PC host's tunnel with no connector (530), cloudflared or the router
+// with nothing behind it (502, 504), or the router's page for a drive that
+// isn't running (503). A 503 in JSON is the drive's own answer to a script
+// (its apps say so when they have no key), and goes back as it is.
 const PC_UNREACHABLE = new Set([502, 503, 504, 530]);
+const pcUnreachable = (res) => PC_UNREACHABLE.has(res.status) && !(res.status === 503 && /json/i.test(res.headers.get('content-type') ?? ''));
 
 export const isFrontDoor = (hostname) => hostname === APEX || hostname.endsWith(`.${APEX}`);
 
@@ -273,7 +276,7 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
   } catch {
     return home === PCHOST ? resting(request) : away(home);
   }
-  if (home === PCHOST && PC_UNREACHABLE.has(res.status)) {
+  if (home === PCHOST && pcUnreachable(res)) {
     await res.body?.cancel().catch(() => {});
     return resting(request);
   }

@@ -353,6 +353,11 @@ test('the PC out of reach: “Your drive is resting”, for a page and for a scr
     assert.equal(res.status, status);
     assert.equal(await res.text(), 'the drive said so');
   }
+  // So is a 503 in JSON: the drive's apps answer that way when they have no key.
+  w.answer(() => Response.json({ error: 'Add an Anthropic key in Settings to use this' }, { status: 503 }));
+  const apps = await w.ana.go('https://ana.marbledrive.app/genui/root', { method: 'POST', headers: { accept: 'application/json', origin: 'https://ana.marbledrive.app' }, body: '{}' });
+  assert.equal(apps.status, 503);
+  assert.deepEqual(await apps.json(), { error: 'Add an Anthropic key in Settings to use this' });
 });
 
 test('a drive on the PC host whose address or key has gone from the Worker can’t be found, and nothing is sent', async () => {
@@ -444,6 +449,7 @@ test('the watch: one alert when the PC stops answering, then at most one an hour
   assert.deepEqual(await w.check(), { ok: true, said: null });
   assert.equal(w.asked[0].headers.get('x-marble-host-key'), KEY);
   assert.equal(w.alerts.length, 0);
+  assert.equal(w.kept(), undefined, 'well, and nothing written');
 
   w.health(downHealth);
   w.tick(5);
