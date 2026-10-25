@@ -593,7 +593,10 @@ test('backup-check.sh with a drive restores a copy of it, and deletes only the c
 
 test('20-backup.sh writes backup.env once, from the hub settings, and never prints a secret', needsRclone, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-backup-install-'));
-  const home = path.join(root, 'home');
+  // install.sh hands the piece the owner's real home; under a stand-in root
+  // the piece reads it from the stand-in, so a test never reads a real one.
+  const ownerHome = '/home/tester';
+  const home = path.join(root, 'fs', ownerHome);
   fs.mkdirSync(path.join(home, '.local/bin'), { recursive: true });
   fs.mkdirSync(path.join(home, '.config/marble-drive'), { recursive: true });
   fs.symlinkSync(RCLONE, path.join(home, '.local/bin/rclone'));
@@ -603,7 +606,7 @@ test('20-backup.sh writes backup.env once, from the hub settings, and never prin
   fs.writeFileSync(path.join(root, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >>"${root}/systemctl.log"\n`, { mode: 0o755 });
   const install = (args = [], env = {}) => {
     const r = spawnSync('bash', [path.join(HOST, 'install.d/20-backup.sh'), ...args], {
-      env: { ...process.env, OWNER: 'bryanmin', OWNER_HOME: home, OPT: '/opt/marble', ETC: '/etc/marble-guests', RELEASE_DIR: path.resolve(HOST, '../..'), MARBLE_INSTALL_ROOT: path.join(root, 'fs'), MARBLE_SYSTEMCTL: path.join(root, 'systemctl'), ...env },
+      env: { ...process.env, OWNER: 'tester', OWNER_HOME: ownerHome, OPT: '/opt/marble', ETC: '/etc/marble-guests', RELEASE_DIR: path.resolve(HOST, '../..'), MARBLE_INSTALL_ROOT: path.join(root, 'fs'), MARBLE_SYSTEMCTL: path.join(root, 'systemctl'), ...env },
       encoding: 'utf8',
       timeout: 60_000,
     });
@@ -662,6 +665,14 @@ test('20-backup.sh writes backup.env once, from the hub settings, and never prin
   assert.equal(lacking.status, 1);
   assert.match(lacking.out, /lacks R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; backups stay off/);
   assert.ok(!fs.existsSync(envFile));
+
+  // Handed a real home, as install.sh hands it, a stand-in root reads none of
+  // it: the piece looks for the home under the stand-in.
+  const elsewhere = path.join(root, 'elsewhere');
+  const real = install([], { OWNER_HOME: os.homedir(), MARBLE_INSTALL_ROOT: elsewhere });
+  assert.equal(real.status, 1);
+  assert.ok(real.out.includes(`no rclone at ${elsewhere}${os.homedir()}/.local/bin/rclone`), real.out);
+  assert.ok(!fs.existsSync(path.join(elsewhere, 'etc/marble-backup/backup.env')));
 
   // Uninstalling takes the units and tools away and keeps the key.
   fs.writeFileSync(envFile, text);

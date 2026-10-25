@@ -57,11 +57,15 @@ if [[ ${1:-} == --uninstall ]]; then
 fi
 [[ -z ${1:-} ]] || die "unknown option $1"
 [[ -n ${OWNER_HOME:-} ]] || die "OWNER_HOME is not set; install.sh sets it"
+# Under a stand-in root the owner's home is stood in for too, so a test never
+# reads a real one: its hub settings hold the R2 keys.
+OWNER_FILES="$OWNER_HOME"
+if [[ -n $ROOT && $OWNER_HOME != "$ROOT"/* ]]; then OWNER_FILES="$ROOT$OWNER_HOME"; fi
 
 # rclone: the owner's pinned one, copied first and checked as the copy, so the
 # file root runs is the file that was checked.
 want="$(tr -d '[:space:]' <"$REPO/tools/sprite/rclone-version")"
-from="$OWNER_HOME/.local/bin/rclone"
+from="$OWNER_FILES/.local/bin/rclone"
 [[ -f $from && -x $from ]] || die "no rclone at $from; tools/pc-setup.sh installs rclone $want there"
 install -d -m 755 "${OWN[@]}" "$TOOLS"
 install -m 755 "${OWN[@]}" "$from" "$TOOLS/.rclone.new"
@@ -83,7 +87,7 @@ install -d -m 700 "${OWN[@]}" "$CONF"
 env_file="$CONF/backup.env"
 made=0
 if [[ ! -e $env_file ]]; then
-  hub="${MARBLE_HUB_ENV_FILE:-$OWNER_HOME/.config/marble-drive/hub-bryan.env}"
+  hub="$OWNER_FILES/.config/marble-drive/hub-bryan.env"
   [[ -r $hub ]] || die "the R2 settings come from $hub, which cannot be read; backups stay off until it can, then run install.sh again"
   # KEY=value, by server/hub/settings.js's rules, and only the four R2 keys.
   declare -A r2=()
