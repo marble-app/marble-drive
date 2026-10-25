@@ -77,10 +77,10 @@ async function drive(env = {}) {
   // What is never in an export: the host's own folder, any other dot-folder
   // or dot-file, links out of the drive, and a pipe.
   await fsp.mkdir(path.join(root, '.marble', 'agents', '0123456789ab'), { recursive: true });
-  await fsp.writeFile(path.join(root, '.marble', 'agents', '0123456789ab', 'events.jsonl'), '{"type":"user","text":"a prompt"}\n');
+  await fsp.writeFile(path.join(root, '.marble', 'agents', '0123456789ab', 'events.jsonl'), '{"type":"user","text":"a-prompt-of-mine-2208"}\n');
   await fsp.mkdir(path.join(root, '.secret'));
-  await fsp.writeFile(path.join(root, '.secret', 'key.txt'), 'hidden\n');
-  await fsp.writeFile(path.join(root, 'Notes', '.DS_Store'), 'junk');
+  await fsp.writeFile(path.join(root, '.secret', 'key.txt'), 'hidden-key-5512\n');
+  await fsp.writeFile(path.join(root, 'Notes', '.DS_Store'), 'finder-junk-7731');
   await fsp.mkdir(path.join(outside, '.claude'));
   await fsp.writeFile(path.join(outside, '.claude', '.credentials.json'), 'not-a-real-login-9d2e');
   await fsp.symlink(path.join(outside, '.claude', '.credentials.json'), path.join(root, 'Notes', 'login.json'));
@@ -136,7 +136,8 @@ test('the export is every document flattened and every file as it is, under one 
     await zip.close();
   }
   // Nothing of .marble/, the dot-folder, the links or the pipe, in any form.
-  for (const word of ['a prompt', 'hidden', 'not-a-real-login-9d2e', 'junk']) assert.ok(!bytes.includes(word), `the zip holds "${word}"`);
+  // Each word has a hyphen, which no base64 picture in the zip can make.
+  for (const word of ['a-prompt-of-mine-2208', 'hidden-key-5512', 'not-a-real-login-9d2e', 'finder-junk-7731']) assert.ok(!bytes.includes(word), `the zip holds "${word}"`);
   // The drive's own copy of the picture was read, not changed.
   assert.ok((await it.store.blobs.get((await it.store.read('Notes/With a picture')).match(/data-marble-blob="([0-9a-f]{64})"/)[1])).data.equals(picture));
 });
@@ -155,6 +156,21 @@ test('a zip that unzip and Python read too, and a name from the folder when the 
     const unzip = spawnSync('unzip', ['-t', file], { encoding: 'utf8' });
     assert.equal(unzip.status, 0, unzip.stdout + unzip.stderr);
     assert.match(unzip.stdout, /No errors detected/);
+  }
+});
+
+test('a drive kept in a linked folder is exported from where the link leads', async () => {
+  const { openZip: open } = await import('../server/zip.js');
+  const { exportEntries } = await import('../server/export.js');
+  const real = await tmp('marble-export-real-');
+  await fsp.writeFile(path.join(real, 'Note.mrbl'), doc('Note', '<p data-marble-id="n">here</p>'));
+  const linked = path.join(await tmp('marble-export-linked-'), 'Drive');
+  await fsp.symlink(real, linked);
+  const zip = await open(await collect(zipStream(exportEntries({ root: linked, blobs: createBlobs({ dir: path.join(real, '.marble', 'blobs') }), top: 'Drive' }))));
+  try {
+    assert.deepEqual(zip.names(), ['Drive/', 'Drive/Note.mrbl']);
+  } finally {
+    await zip.close();
   }
 });
 

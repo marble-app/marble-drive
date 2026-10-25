@@ -96,8 +96,10 @@ async function flatSize(source, blobs) {
  * closed too.
  */
 export async function* exportEntries({ root, blobs, top }) {
+  // The root is the host's own setting, so a drive kept in a linked folder
+  // is followed there; it is the links inside the drive that are not.
   const base = path.resolve(root);
-  const info = await fsp.lstat(base);
+  const info = await fsp.stat(base);
   if (!info.isDirectory()) throw new Error(`${base} is not a folder`);
   yield { name: `${top}/`, folder: true, modified: info.mtimeMs };
 
