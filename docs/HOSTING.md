@@ -693,9 +693,12 @@ machine. That is loopback with no forwarded header, and the drive's
 passphrase as a bearer, which marble-host reads from the settings file.
 Through the router it is a 404. Its answer, kept a minute, is `{ ok, release,
 claude: { version, signedIn }, codex: { version, signedIn }, docs,
-agentConnected }`. `docs` counts the documents the person made, not the pages
-the drive was seeded with. `agentConnected` is a login to either CLI, or a key
-in the drive's own key file.
+agentConnected }`. It asks each CLI about its login as the connect sheet does,
+`claude auth status --json` and `codex login status`, under the drive's own
+home with no key in the environment. `docs` counts the documents the person
+made, not the pages the drive was seeded with. `agentConnected` is a login to
+either CLI, or a key in the drive's own key file, which on a PC drive is what
+`GET /agent/setup` calls `ready`.
 
 `HOST_MODE=user` in `host.env` runs each drive as a transient unit of the
 owner's own systemd, for a machine without the sudo step and for a trial. It
