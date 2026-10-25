@@ -103,7 +103,15 @@ The cookie is `Secure` per request: set when the request came from loopback
 with `X-Forwarded-Proto: https`, which is what Serve sends, and not set on
 `http://localhost` at the desk, where Safari would drop it. A forwarded-proto
 header from any other address is ignored. `MARBLE_DRIVE_SECURE_COOKIE=1` still
-means always.
+means always. Over https the cookie is named `__Host-marble_drive`, with
+`Path=/` and no `Domain`, so another site under the same domain can't plant
+one; at the desk, over plain http, it is `marble_drive`.
+
+Every change the host is asked for has to come from its own pages: `Origin`,
+or with no `Origin` then `Sec-Fetch-Site`, has to name the host the browser
+asked for (`X-Forwarded-Host`, else `Host`). A proxy in front has to pass the
+browser's host name on in one of those two. A script with the secret as a
+bearer, and curl with neither header, are not asked.
 
 The tailnet identity headers Serve adds (`Tailscale-User-Login`) are not used
 for sign-in: anything else running on this machine can send them to loopback.

@@ -532,10 +532,12 @@ names and taking over a drive on a request are not built.
 - **Signing in.** The drive's gate does it, as on a sprite. Its cookie is
   host-only, so `bryan.marbledrive.app` has its own sign-in, apart from
   `127.0.0.1:4401` and the sprite URL. Behind the tunnel, cloudflared connects
-  over loopback with `X-Forwarded-Proto: https`, so the cookie is `Secure`. The
-  host's same-origin checks (`server/sessions.js`, and Console's) compare
-  `Origin` with `X-Forwarded-Host`, so pages served under the public name can
-  post.
+  over loopback with `X-Forwarded-Proto: https`, so the cookie is `Secure` and
+  named `__Host-marble_drive`. Every change has to come from the drive's own
+  pages: the host compares `Origin` with `X-Forwarded-Host`
+  (`server/sessions.js`, and Console's), so pages served under the public name
+  can post and a page on another drive can't ("Other people's drives on the
+  PC", below).
 - **Share links.** The owner opens the Mac's drive at `127.0.0.1`, and a link
   written there would open only on the Mac. `mac-<name>.env` sets
   `MARBLE_DRIVE_PUBLIC_URL=https://<name>.marbledrive.app` so links are written
@@ -586,6 +588,93 @@ turn it on, every setting, and the day-to-day commands are in
   which the edge refuses within 30 seconds; a pass reaching the drive straight
   through its sprite URL lasts at most 12 hours, so for a drive that must close
   now, take `MARBLE_DOOR_*` out of its `sprite.env` and deploy.
+
+## Other people's drives on the PC
+
+The owner's PC runs drives for other people: the probe study's participants
+first, and later anyone the door lets in. marble-host runs each one in a
+sandbox of its own, behind one Cloudflare tunnel. The design is the drive page
+*Research/Marble/Marble for Publication/Running the probe study from the PC*;
+each part below says what it built.
+
+### The front door for PC drives
+
+Built 2026-10-25, not switched on: `PC_HOST_KEY` is not set and
+`NEW_DRIVE_HOME` is commented out in `worker/wrangler.toml`. Until both are,
+the Worker routes and makes drives exactly as before. Turning it on is in
+[ACCOUNTS.md](ACCOUNTS.md), "A drive on the PC host".
+
+A drive on the PC host has no tunnel, DNS record or Worker route of its own.
+The Directory records it with `home: 'pchost'`. Once the edge has checked its
+owner's pass, the router (`worker/src/router.js`) sends the request to
+`PC_HOST_URL`, `https://pc-host.marbledrive.app`, which is the tunnel
+`marble-pc-host`. The path and query go with it, joined and never resolved.
+Two headers say whose it is: `x-marble-drive: ana` and
+`x-marble-host-key: <PC_HOST_KEY>`. The Worker drops whatever the browser sent
+under those names from every request it forwards, and never sends the Sprites
+token there. It sets `X-Forwarded-Host`
+and `X-Forwarded-Proto: https` as for any home, and marble-host's router passes
+both on: the drive's origin check and its `__Host-` cookie (below) read them.
+If the wildcard route catches a request for `pc-host.marbledrive.app` itself,
+it goes on to the tunnel as it came, with no key added, and the router answers
+it 401.
+
+Sign-up makes new drives where `NEW_DRIVE_HOME` says: `pchost`, or `fly`,
+which is also what unset means. With `pchost`, and `PC_HOST_URL` and
+`PC_HOST_KEY` set, naming a drive records `{ home: 'pchost', homes: { pchost:
+true }, sprite: null, credit: 0 }` and takes no spare. The Worker then pokes
+`PC_HOST_URL/_host/poke` with the host key and nothing else. Without the
+address or the key, the name page says drives can't be made yet and makes
+nothing. A drive on the PC host gets no starter credit, whatever its invite
+says. Anthropic's terms for hosted Claude Code say a customer "may not pay for,
+resell, or intermediate Claude usage on their end users' behalf", so its
+person's agent runs on their own Claude or ChatGPT.
+
+marble-host makes the drive the way the door sprite does. It reads the door's
+queue, `GET /_door/queue`, where each entry says its `home` (`?home=pchost`
+keeps to the PC's). It reports `machine`, `install` and `check`, then `{ state:
+'ready', home: 'pchost' }`, which needs no sprite URL. The door sprite's
+provisioner takes only drives whose home is `fly`, so a PC drive is never made
+on Fly. `node tools/door.mjs drives` shows "the PC host" where a Fly drive
+names its sprite.
+
+When the PC can't be reached, the person whose drive it is reads "Your drive
+is resting. Bryan has been told, and your work is safe." The page is a 503
+with `Retry-After: 30`, and JSON for a script. It is given when the request
+gets no answer, when the tunnel answers 530 (no connector), or when the router
+answers 502, 503 or 504. The router says 503 for a drive that isn't running.
+A drive at home on the owner's own machine still gets the page with the
+owner's commands on it.
+
+The Worker checks the PC itself every five minutes, so the owner hears before
+the people do. The cron is `[triggers]` in `worker/wrangler.toml`, and the
+`scheduled` handler in `worker/src/index.js` runs `checkPcHost` from
+`worker/src/pc-host.js`. It asks `GET PC_HOST_URL/_host/health` with the key
+and waits 10 s. No answer, a status other than 200, or a body without `ok:
+true` is a failure. It is posted as one line of plain text to
+`ALERT_NTFY_URL`: once when it starts, at most once an hour while it lasts, and
+once more when the PC answers again. Without `ALERT_NTFY_URL` nothing is
+posted, and without `PC_HOST_URL` and `PC_HOST_KEY` nothing is asked. What
+was said, and when, is kept in the Directory under `meta:pchost-watch`, so
+every run agrees, and an alert that couldn't be sent is tried again at the
+next look. `npx wrangler@latest tail` shows each failed look as a
+`pc-host watch:` line.
+
+Every drive now has two of the guards that many people's pages under one
+domain need. Until `marbledrive.app` is on the Public Suffix List, every drive
+under it is same-site with every other. So SameSite=Lax still sends ana's
+cookie when a page on `bob.marbledrive.app` posts to ana's drive. A drive now
+refuses any request but GET, HEAD and OPTIONS unless its `Origin` names the
+drive (its `X-Forwarded-Host`, else `Host`) or, with no `Origin`, it says
+`Sec-Fetch-Site: same-origin`. That is `fromOwnPage` in `server/sessions.js`,
+asked in front of every route in `server/app.js`. A bearer, and a request with
+neither header (curl, scripts, the backup job), go on as before, and so do
+Claude's and ChatGPT's connector routes, which judge their own tokens. The
+second guard is the passphrase cookie: over https it is `__Host-marble_drive`,
+which no other drive can plant, and only that name counts there. Plain http
+(127.0.0.1, the agent's browser, the Mac at home) keeps `marble_drive`.
+Someone who signed in with the passphrase over https signs in once more. The
+third guard, the Public Suffix List entry, is the owner's to submit.
 
 ## The console
 
