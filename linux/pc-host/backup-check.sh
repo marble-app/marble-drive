@@ -64,6 +64,8 @@ WORK="$(mktemp -d)"
 cleanup() {
   local name left=0
   for name in "${names[@]}"; do
+    # A backup of a scratch folder the hourly sweep started ends first.
+    lock_drive "$name" 300 || true
     rm -rf -- "${GUESTS:?}/$name" "$BACKUP_STATE/restoring/$name".*
     rm -f -- "$BACKUP_STATE/status/$name.json" "$BACKUP_STATE/manifests/$name.json" "$BACKUP_STATE/locks/$name.lock"
     # The hourly sweep may have backed a scratch folder up meanwhile.
@@ -91,8 +93,11 @@ status_of() {
   "$PYTHON" -I -c 'import json,sys; s=json.load(open(sys.argv[1])); print(" ".join(f"{k}={str(v).lower() if isinstance(v,bool) else v}" for k,v in s.items() if k != "why"))' "$file" 2>/dev/null
 }
 back_up() {
-  "$SYSTEMCTL" start "marble-guest-backup@$1.service" >"$WORK/unit.out" 2>&1 ||
-    fatal "$2" "marble-guest-backup@$1 failed: $(tail -1 "$WORK/unit.out"); journalctl -u marble-guest-backup@$1 -n 30"
+  local why
+  if ! "$SYSTEMCTL" start "marble-guest-backup@$1.service" >"$WORK/unit.out" 2>&1; then
+    why="$("$PYTHON" -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("why", ""))' "$BACKUP_STATE/status/$1.json" 2>/dev/null || true)"
+    fatal "$2" "marble-guest-backup@$1 failed${why:+ ($why)}: $(tail -1 "$WORK/unit.out"); see journalctl -u marble-guest-backup@$1 -n 30"
+  fi
 }
 # Sets files to the count the status gives.
 expect_status() {
