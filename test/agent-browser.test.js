@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { BROWSER_TOOLS, createBrowserSession, playwrightEntry, toMcpResult } from '../server/agent/browser.js';
+import { BROWSER_TOOLS, createBrowserSession, passCookies, playwrightEntry, toMcpResult } from '../server/agent/browser.js';
 
 test('the shipped tools are exactly the eight names, in this order', () => {
   assert.deepEqual(BROWSER_TOOLS, [
@@ -229,6 +229,19 @@ test('a drive pass signs the browser in to its own host, by either loopback name
   await session.call('browser_navigate', { url: 'http://localhost:4400/' });
   assert.equal(chromium.cookies.length, 4);
   await session.close();
+});
+
+test('a drive the PC hosts, on a loopback address of its own, has its pass planted for that address too', async () => {
+  const chromium = fakeChromium();
+  const session = createBrowserSession({ chromium, userDataDir: '/tmp/marble-profile', pass: { origin: 'http://127.0.0.37:4527', cookie: 'marble_drive=456.sig' } });
+  await session.call('browser_navigate', { url: 'http://127.0.0.37:4527/a/Notes' });
+  assert.deepEqual(chromium.cookies.map((c) => c.domain).sort(), ['127.0.0.1', '127.0.0.37', 'localhost']);
+  assert.ok(chromium.cookies.every((c) => c.name === 'marble_drive' && c.value === '456.sig' && c.httpOnly && c.path === '/'));
+  await session.close();
+  // Any other host is planted for itself alone, as before.
+  assert.deepEqual(passCookies({ origin: 'https://ana.marbledrive.app', cookie: 'marble_drive=x' }).map((c) => c.domain), ['ana.marbledrive.app']);
+  assert.deepEqual(passCookies({ origin: 'http://10.0.0.37:4527', cookie: 'marble_drive=x' }).map((c) => c.domain), ['10.0.0.37']);
+  assert.deepEqual(passCookies({ origin: 'http://127.0.0.1:4401', cookie: 'marble_drive=x' }).map((c) => c.domain), ['127.0.0.1', 'localhost']);
 });
 
 test('a browser without a pass has no cookies', async () => {

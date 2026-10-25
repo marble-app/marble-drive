@@ -8,6 +8,11 @@
 //   the maker      the door's queue at start, when poked, and every 5 minutes
 //   the watcher    every drive's health and memory, and the disk, every 30 s
 //
+// Each drive listens on a loopback address of its own, 127.0.0.<10 + port −
+// 4500>, and marble-host asks it everything from 127.0.0.2: a guest's unit
+// keeps it off 127.0.0.1, where this machine's own services listen
+// (server/host/addresses.js).
+//
 // On start it brings back every drive the registry says is running
 // (server/host/boot.js): no drive's service is enabled, so after the PC
 // restarts this is what starts them. Stopping it leaves the drives running;
@@ -37,7 +42,7 @@ export async function startHost({ env = process.env, log = console, units = null
   const registry = await openRegistry({ dir: settings.state });
   const guestUnits = units ?? createUnits({ mode: settings.mode, opt: settings.opt, guestEnvDir: settings.guestEnvDir, guestStateDir: settings.guestStateDir, log });
   const envs = createGuestEnvs({ dir: settings.guestEnvDir });
-  const asker = probe ?? createProbe({ fetchImpl });
+  const asker = probe ?? createProbe();
   const notify = notifier({ alerts: createAlerts({ url: settings.ntfyUrl, fetchImpl, log }), registry });
   const maker = createMaker({ settings, registry, units: guestUnits, envs, probe: asker, notify, fetchImpl, log, drainEveryMs });
   // The drives' folders: /var/lib on the PC (the folder itself is root's to

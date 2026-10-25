@@ -112,6 +112,17 @@ test('user mode: the release is at /opt/marble inside the walls, wherever it rea
   assert.ok(real.includes('IPAddressAllow=100.100.100.100 fd7a:115c:a1e0::53'));
 });
 
+test('user mode writes the network walls as the system template does, 127.0.0.1 and ::1 closed among them', async () => {
+  const template = await fsp.readFile(path.join(import.meta.dirname, '..', 'linux', 'pc-host', 'marble-guest@.service'), 'utf8');
+  const props = userProperties({ name: 'ana', opt: '/opt/marble', guestEnvDir: '/etc/marble-guests', guestStateDir: '/var/lib/marble-guests' });
+  for (const key of ['IPAddressDeny', 'IPAddressAllow']) {
+    const line = template.split('\n').find((l) => l.startsWith(`${key}=`));
+    assert.ok(line, key);
+    assert.ok(props.includes(line), `${key} as in the template: ${line}`);
+  }
+  assert.ok(props.find((p) => p.startsWith('IPAddressDeny=')).split('=')[1].split(' ').slice(0, 2).join(' ') === '127.0.0.1/32 ::1/128');
+});
+
 test('user mode: a failed systemd-run is an error', async () => {
   const root = await temp.make('units-');
   const f = fakeRun({ show: { stdout: 'ActiveState=inactive\n' }, 'systemd-run': { code: 1, stderr: 'Unit marble-guest@ana.service already exists.' } });

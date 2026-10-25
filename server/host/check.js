@@ -1,33 +1,95 @@
 // Asking a drive on the PC how it is, over loopback, the way a person's
 // browser never does: marble-host's requests carry no forwarded headers, so
-// the drive answers them as local (server/gate.js, isLocal).
+// the drive answers them as local (server/gate.js, isLocal). Each goes to the
+// drive's own address from 127.0.0.2, since every guest's unit drops anything
+// to or from 127.0.0.1 (server/host/addresses.js), and an answer is read only
+// up to a size no health answer comes near: a drive's process is someone
+// else's, and marble-host is outside every sandbox.
 //
 // A drive passes its check, after it is made or moved to a release, when
 // within a minute: /health answers naming that release, its first page
 // answers below 500 (a sign-in redirect is an answer), and /health/deep shows
 // both agent CLIs' versions, so its agent can start.
 
-const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+import http from 'node:http';
 
-export function createProbe({ fetchImpl = fetch, timeoutMs = 5000 } = {}) {
-  async function get(port, route, { bearer = null, accept = 'application/json' } = {}) {
+import { guestAddress, HOST_SIDE } from './addresses.js';
+
+const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const MAX_ANSWER = 256 * 1024;
+
+export function createProbe({ timeoutMs = 5000, from = HOST_SIDE } = {}) {
+  /** One request to the drive on `port`: { status, body } with the body as
+   *  JSON (null when it is not), or null when the drive did not answer.
+   *  `statusOnly` reads no body at all, for a page. */
+  function ask(port, method, route, { bearer = null, accept = 'application/json', body = null, statusOnly = false } = {}) {
+    let host;
     try {
-      const res = await fetchImpl(`http://127.0.0.1:${port}${route}`, {
-        redirect: 'manual',
-        headers: { accept, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      const text = await res.text().catch(() => '');
-      let body = null;
-      try {
-        body = JSON.parse(text);
-      } catch {}
-      return { status: res.status, body };
+      host = guestAddress(port);
     } catch {
-      return null;
+      return Promise.resolve(null);
     }
+    const payload = body === null ? null : Buffer.from(JSON.stringify(body));
+    return new Promise((resolve) => {
+      let req = null;
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = setTimeout(() => {
+        req?.destroy();
+        finish(null);
+      }, timeoutMs);
+      req = http.request(
+        {
+          host,
+          port,
+          localAddress: from,
+          method,
+          path: route,
+          headers: {
+            accept,
+            ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+            ...(payload ? { 'content-type': 'application/json', 'content-length': payload.length } : {}),
+          },
+        },
+        (res) => {
+          if (statusOnly) {
+            res.resume();
+            req.destroy();
+            return finish({ status: res.statusCode, body: null });
+          }
+          const chunks = [];
+          let size = 0;
+          res.on('data', (chunk) => {
+            size += chunk.length;
+            if (size > MAX_ANSWER) {
+              req.destroy();
+              return finish(null);
+            }
+            chunks.push(chunk);
+          });
+          res.on('end', () => {
+            let parsed = null;
+            try {
+              parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            } catch {}
+            finish({ status: res.statusCode, body: parsed });
+          });
+          res.on('error', () => finish(null));
+          res.on('aborted', () => finish(null));
+        },
+      );
+      req.on('error', () => finish(null));
+      req.end(payload ?? undefined);
+    });
   }
+  const get = (port, route, opts = {}) => ask(port, 'GET', route, opts);
   return {
+    ask,
     get,
     /** /health's answer, or null when the drive does not give one. */
     async health(port) {
@@ -41,7 +103,7 @@ export function createProbe({ fetchImpl = fetch, timeoutMs = 5000 } = {}) {
     },
     /** The status of the drive's first page, as a browser would ask for it. */
     async page(port) {
-      return (await get(port, '/', { accept: 'text/html' }))?.status ?? null;
+      return (await get(port, '/', { accept: 'text/html', statusOnly: true }))?.status ?? null;
     },
   };
 }

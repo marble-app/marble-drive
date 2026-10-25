@@ -7,7 +7,10 @@
 # loaded and its folder in $STATE_DIRECTORY.
 #
 # It makes the drive's folder and home if they are missing, then runs the
-# host from the release the settings name. bash stays the sandbox's first
+# host from the release the settings name, listening on the drive's own
+# loopback address (HOST in its settings, 127.0.0.10 to 127.0.0.109, which
+# marble-host derives from its port): its unit denies it 127.0.0.1, where the
+# owner's drive and marble-host listen. bash stays the sandbox's first
 # process and node runs under it: in a process namespace of its own, the
 # first process is the one that reaps every orphan, and node in that place
 # left an agent's finished processes behind as zombies. A stop (TERM) is
@@ -31,13 +34,15 @@ app="$opt/releases/$release/marble-drive"
 [[ -f $app/bin/marble-drive.js ]] || die "the release $release is not in $opt/releases"
 state="${STATE_DIRECTORY:-}"
 [[ -n $state && -d $state && -w $state ]] || die "STATE_DIRECTORY is not a folder this drive can write (systemd sets it from StateDirectory=)"
+host="${HOST:-}"
+[[ $host =~ ^127\.0\.0\.(1[0-9]|[2-9][0-9]|10[0-9])$ ]] || die "HOST is not a drive's own loopback address (127.0.0.10 to 127.0.0.109), but \"$host\""
 
 home="$state/home"
 mkdir -p "$state/drive" "$home/.config/marble-drive" "$state/crash" || die "could not make the drive's folders in $state"
 
 export HOME="$home"
 export MARBLE_DRIVE_ROOT="$state/drive"
-export HOST=127.0.0.1
+export HOST="$host"
 export NODE_ENV=production
 export MARBLE_DRIVE_AGENTS=1
 export MARBLE_DRIVE_AGENT_KEYS="$home/.config/marble-drive/agent-keys"

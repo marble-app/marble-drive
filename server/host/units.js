@@ -95,8 +95,9 @@ export function userProperties({ name, opt, guestEnvDir, guestStateDir }) {
     // walls (and visible behind PrivateTmp when it lives under /tmp).
     `BindPaths=${state}`,
     // Written as on the PC, and ignored by a user manager: the network walls
-    // need `system` mode.
-    'IPAddressDeny=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10',
+    // need `system` mode. 127.0.0.1 and ::1 are where this machine's own
+    // services listen; the drive listens on an address of its own.
+    'IPAddressDeny=127.0.0.1/32 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10',
     'IPAddressAllow=100.100.100.100 fd7a:115c:a1e0::53',
     'MemoryHigh=1G',
     'MemoryMax=1536M',

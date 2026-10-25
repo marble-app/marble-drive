@@ -5,7 +5,9 @@
 // with `x-marble-drive: <name>` and `x-marble-host-key: <PC_HOST_KEY>`, after
 // checking that person's pass. Without the key, nothing is answered but a 401,
 // so nobody goes around the door: the tunnel's own name is public. Both
-// headers are taken off before the request goes on to the drive's port.
+// headers are taken off before the request goes on to the drive, at its own
+// address and port, from 127.0.0.2: every guest's unit drops anything to or
+// from 127.0.0.1 (server/host/addresses.js).
 //
 // It streams both ways and holds nothing: a live update stream (SSE) flows as
 // the drive writes it, an upload flows as the browser sends it, and when the
@@ -21,6 +23,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 
+import { guestAddress, HOST_SIDE } from './addresses.js';
 import { NAME } from './settings.js';
 
 const HOP = new Set(['connection', 'keep-alive', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
@@ -106,14 +109,21 @@ export function createRouter({ key, lookup, onPoke = () => {}, health = () => ({
       return json(res, 404, { error: 'not found' });
     }
     const drive = NAME.test(String(name)) ? lookup(String(name)) : null;
-    if (!drive || drive.state !== 'running' || !drive.port) {
+    let address = null;
+    try {
+      address = drive?.port ? guestAddress(drive.port) : null;
+    } catch (err) {
+      log.error?.(`[router] ${name}: ${err.message}`);
+    }
+    if (!drive || drive.state !== 'running' || !address) {
       req.resume();
       return resting(res);
     }
 
     const upstream = http.request({
-      host: '127.0.0.1',
+      host: address,
       port: drive.port,
+      localAddress: HOST_SIDE,
       method: req.method,
       path: req.url,
       headers: forwardHeaders(req.headers, req.socket.remoteAddress),

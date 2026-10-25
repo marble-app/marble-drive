@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { parseEnvFile } from '../hub/settings.js';
+import { GUEST_PORTS } from './addresses.js';
 
 /** A drive's name on the PC: what the unit, its folder and its env file are called. */
 export const NAME = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
@@ -79,6 +80,12 @@ export function loadHostSettings(env = process.env) {
   };
   const mode = get('HOST_MODE', 'system');
   if (!MODES.includes(mode)) throw new Error(`HOST_MODE is system or user, not "${mode}"`);
+  // A drive's loopback address comes from its port (server/host/addresses.js),
+  // and only 127.0.0.10 to 127.0.0.109 are ever a drive's.
+  const guestPorts = parseRange(get('HOST_GUEST_PORTS', `${GUEST_PORTS.from}-${GUEST_PORTS.to}`));
+  if (guestPorts.from < GUEST_PORTS.from || guestPorts.to > GUEST_PORTS.to) {
+    throw new Error(`HOST_GUEST_PORTS lies within ${GUEST_PORTS.from}-${GUEST_PORTS.to}, where each port gives a drive a loopback address of its own (not "${get('HOST_GUEST_PORTS')}")`);
+  }
   return {
     ...paths,
     settingsFile: paths.hostEnv,
@@ -87,7 +94,7 @@ export function loadHostSettings(env = process.env) {
     adminToken: get('HOST_ADMIN_TOKEN'),
     routerPort: port('HOST_ROUTER_PORT', 4460),
     adminPort: port('HOST_ADMIN_PORT', 4461),
-    guestPorts: parseRange(get('HOST_GUEST_PORTS', '4500-4599')),
+    guestPorts,
     publicSuffix: get('HOST_PUBLIC_SUFFIX', 'marbledrive.app'),
     doorUrl: get('DOOR_URL', 'https://marbledrive.app'),
     doorAdminToken: get('DOOR_ADMIN_TOKEN'),

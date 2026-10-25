@@ -13,6 +13,12 @@
 Description=Marble drive %i (hosted on this PC)
 After=network-online.target
 Wants=network-online.target
+# The drive listens on a loopback address of its own (HOST in its settings,
+# 127.0.0.10 to 127.0.0.109), and that address must be on lo: Linux sends a
+# connection to anywhere in 127/8 from 127.0.0.1 otherwise, which this unit
+# denies, and the drive could not reach itself.
+Requires=marble-guest-addresses.service
+After=marble-guest-addresses.service
 # Started again however often it fails: marble-host may start a failed unit
 # but not reset one, so a start limit would leave a drive down for good.
 StartLimitIntervalSec=0
@@ -68,8 +74,14 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 # a process could run Windows programs as the owner; Tailscale's and Docker's
 # sockets; and every drive's settings.
 InaccessiblePaths=/mnt -/run/WSL -/run/tailscale -/run/docker.sock /etc/marble-guests
-# The home network, link-local addresses and the tailnet are closed; the
-# internet is open. Tailscale's DNS (100.100.100.100, and fd7a:115c:a1e0::53
-# inside the closed fc00::/7) is how the PC resolves names, so it stays open.
-IPAddressDeny=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10
+# 127.0.0.1 and ::1 are closed: the owner's drive, marble-host's router and
+# admin API and cloudflared's metrics listen there, and the owner's drive
+# takes anything from loopback for the owner at its gate. systemd checks the
+# far end of each packet, both ways, so nothing from 127.0.0.1 reaches the
+# drive either; marble-host asks it from 127.0.0.2. Other drives' addresses
+# stay open, where their passphrases and passes stand in the way. The home
+# network, link-local addresses and the tailnet are closed; the internet is
+# open. Tailscale's DNS (100.100.100.100, and fd7a:115c:a1e0::53 inside the
+# closed fc00::/7) is how the PC resolves names, so it stays open.
+IPAddressDeny=127.0.0.1/32 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10
 IPAddressAllow=100.100.100.100 fd7a:115c:a1e0::53

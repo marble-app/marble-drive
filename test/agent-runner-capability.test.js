@@ -11,7 +11,7 @@ process.env.MARBLE_APPS = ROOT;
 process.env.MARBLE_DRIVE_BACKUP_DIR = '';
 process.env.MARBLE_DRIVE_BACKUP_CMD = '';
 
-const { createDrive } = await import('../server/app.js');
+const { callbackOrigin, createDrive } = await import('../server/app.js');
 const { loadConfig } = await import('../server/config.js');
 const { createFakeProvider } = await import('./fixtures/fake-provider.js');
 
@@ -28,7 +28,7 @@ const until = async (check, ms = 5_000) => {
 };
 
 /** A host with one fake provider, watched so the test can see how it was spawned. */
-async function hostWith({ capability, power = '', sandbox = null, secret = '' } = {}) {
+async function hostWith({ capability, power = '', sandbox = null, secret = '', host = '127.0.0.1' } = {}) {
   const root = await fsp.mkdtemp(path.join(ROOT, 'd-'));
   const seen = [];
   const prepared = [];
@@ -54,6 +54,7 @@ async function hostWith({ capability, power = '', sandbox = null, secret = '' } 
     MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
     MARBLE_DRIVE_AGENT_WORKDIR: await fsp.mkdtemp(path.join(WORK, 'w-')),
     MARBLE_DRIVE_AGENT_POWER: power,
+    HOST: host,
     ...(secret ? { MARBLE_DRIVE_SECRET: secret } : {}),
   });
   const drive = await createDrive(config, {
@@ -61,7 +62,7 @@ async function hostWith({ capability, power = '', sandbox = null, secret = '' } 
     agentProviders: new Map([['fake', provider]]),
     agentSandbox: sandbox,
   });
-  await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', resolve));
+  await new Promise((resolve) => drive.server.listen(0, host, resolve));
   await drive.createDocument('notes', SOURCE);
   return { drive, config, seen, prepared, root, scripts, provider, port: drive.server.address().port };
 }
@@ -133,6 +134,36 @@ test('on a gated drive the browser gets a pass through its own host\'s gate; on 
     assert.equal(open.prepared[0].browser.env.MARBLE_BROWSER_PASS, undefined);
   } finally {
     await open.drive.close();
+  }
+});
+
+test('the agents call a host back where it is bound: its own loopback address, or loopback for one bound to every address', () => {
+  assert.equal(callbackOrigin({ address: '127.0.0.1', family: 'IPv4', port: 4401 }), 'http://127.0.0.1:4401');
+  assert.equal(callbackOrigin({ address: '127.0.0.37', family: 'IPv4', port: 4527 }), 'http://127.0.0.37:4527');
+  assert.equal(callbackOrigin({ address: '0.0.0.0', family: 'IPv4', port: 8080 }), 'http://127.0.0.1:8080');
+  assert.equal(callbackOrigin({ address: '::', family: 'IPv6', port: 8080 }), 'http://[::1]:8080');
+  assert.equal(callbackOrigin({ address: '::1', family: 'IPv6', port: 4400 }), 'http://[::1]:4400');
+});
+
+test('a drive on a loopback address of its own, as the PC hosts one, is called back there: the bridge\'s tools work, and the browser\'s pass opens it', async () => {
+  const guest = await hostWith({ capability: 'full', secret: 'open sesame', host: '127.0.0.37' });
+  try {
+    const { conversationId } = await runTurnWithScript(guest.drive, guest.scripts, [
+      { call: 'read_document', args: { path: 'notes' } },
+      { sayEnv: 'MARBLE_DRIVE_URL' },
+    ]);
+    const origin = `http://127.0.0.37:${guest.port}`;
+    const events = await guest.drive.agents.store.events(conversationId);
+    const result = events.find((e) => e.type === 'tool.result');
+    assert.ok(result?.ok, `the bridge reached the drive at ${origin}: ${JSON.stringify(result)}`);
+    assert.ok(events.some((e) => e.type === 'text' && e.text === `MARBLE_DRIVE_URL=${origin}`));
+    const { env } = guest.prepared[0].browser;
+    assert.equal(env.MARBLE_BROWSER_ORIGIN, origin);
+    const page = `${origin}/a/notes`;
+    assert.equal((await fetch(page, { headers: { accept: 'text/html' }, redirect: 'manual' })).status, 302, 'the gate is really closed');
+    assert.equal((await fetch(page, { headers: { accept: 'text/html', cookie: env.MARBLE_BROWSER_PASS }, redirect: 'manual' })).status, 200, 'the pass gets through it');
+  } finally {
+    await guest.drive.close();
   }
 });
 

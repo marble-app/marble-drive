@@ -13,6 +13,7 @@ import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
+import { guestAddress } from './addresses.js';
 import { atomicWrite } from './registry.js';
 import { NAME, RELEASE } from './settings.js';
 
@@ -39,6 +40,8 @@ export function guestEntries({ name, release, port, secret, doorKeys, owner, pub
     ['MARBLE_GUEST_NAME', name],
     ['MARBLE_GUEST_RELEASE', release],
     ['PORT', String(port)],
+    // The drive's own loopback address, from its port: run-guest listens there.
+    ['HOST', guestAddress(port)],
     ['MARBLE_DRIVE_SECRET', secret],
     ['MARBLE_DOOR_KEYS', String(doorKeys ?? '').trim().split(/\s+/).filter(Boolean).join(' ')],
     ['MARBLE_DOOR_NAME', name],

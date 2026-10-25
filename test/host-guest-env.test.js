@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
+import { GUEST_ADDRESS, guestAddress, HOST_SIDE } from '../server/host/addresses.js';
 import { checkEntry, createGuestEnvs, guestEntries, newSecret, parseEntries, renderEnv } from '../server/host/guest-env.js';
 import { tempDirs } from './fixtures/host.js';
 
@@ -21,6 +22,7 @@ test('a drive\'s settings: its name, release, port, passphrase, the door, its ad
     MARBLE_GUEST_NAME: 'ana',
     MARBLE_GUEST_RELEASE: '20261025T161133Z-4b2103a',
     PORT: '4501',
+    HOST: '127.0.0.11',
     MARBLE_DRIVE_SECRET: 'a'.repeat(64),
     MARBLE_DOOR_KEYS: 'k1:AAAA',
     MARBLE_DOOR_NAME: 'ana',
@@ -33,6 +35,22 @@ test('a drive\'s settings: its name, release, port, passphrase, the door, its ad
     GIT_COMMITTER_EMAIL: 'ana@users.marbledrive.app',
     MARBLE_HOST_OWNER: 'Bryan',
   });
+});
+
+test('a drive\'s address comes from its port alone: 127.0.0.10 for 4500 up to 127.0.0.109 for 4599, and never 127.0.0.1', () => {
+  assert.equal(guestAddress(4500), '127.0.0.10');
+  assert.equal(guestAddress(4527), '127.0.0.37');
+  assert.equal(guestAddress('4599'), '127.0.0.109');
+  for (let port = 4500; port <= 4599; port += 1) assert.match(guestAddress(port), GUEST_ADDRESS);
+  for (const bad of [4499, 4600, 4401, 4500.5, 'x', null, undefined, -4500]) {
+    assert.throws(() => guestAddress(bad), /not a drive's/, String(bad));
+  }
+  assert.throws(() => guestEntries({ ...base, port: 4401 }), /not a drive's/, 'no settings file for a port that has no address');
+  for (const bad of ['127.0.0.1', '127.0.0.2', '127.0.0.9', '127.0.0.110', '127.0.0.010', '127.0.1.10', '10.0.0.10', '127.0.0.10 ', '']) {
+    assert.ok(!GUEST_ADDRESS.test(bad), bad);
+  }
+  assert.equal(HOST_SIDE, '127.0.0.2', 'marble-host asks from an address no drive has');
+  assert.ok(!GUEST_ADDRESS.test(HOST_SIDE));
 });
 
 test('MARBLE_STUDY only for a drive from a study invite', () => {
