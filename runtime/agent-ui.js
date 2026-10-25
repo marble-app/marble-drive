@@ -9028,10 +9028,10 @@
     .claude-credit p { margin: 0; }
     .claude-credit .credit-used { color: var(--muted); font-size: 12px; }
     .credit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; }
-    .claude-plan { grid-column: 2; display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: var(--muted); }
+    .claude-plan, .codex-plan { grid-column: 2; display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: var(--muted); }
     .claude-plan[hidden] { display: none; }
-    .claude-plan button.link { padding-left: 0; font-size: 12px; }
-    .claude-plan span + button.link { padding-left: 6px; }
+    .claude-plan button.link, .codex-plan button.link { padding-left: 0; font-size: 12px; }
+    .claude-plan span + button.link, .codex-plan span + button.link { padding-left: 6px; }
     .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
     .project { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
     .project code { font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
@@ -9308,6 +9308,8 @@
           row.append(mode);
         }
         if (provider.id.startsWith('claude')) row.append(...this.claudeSwitch(settings));
+        // A key, when set, is what Codex runs on; without one, the ChatGPT login.
+        if (provider.id === 'codex' && provider.installed && !settings.keys?.openai) row.append(this.codexPlan(settings));
         agents.append(row);
       }
       const keys = document.createElement('fieldset');
@@ -9578,34 +9580,65 @@
       return line;
     }
 
-    /** The plan Claude's login runs on when it was connected from the
-     *  browser, and the way to connect one: the sheet, by its event. */
-    claudePlan(settings) {
-      const plan = h('div', 'claude-plan');
-      if (settings.keys?.claude) {
+    /** One of the person's own plans, under its agent: "On your Claude plan"
+     *  with Disconnect (the CLI's own logout) when it is signed in, or the
+     *  way to connect it, the connect sheet. Disconnect is there only where
+     *  the host says the login is this drive's to end. */
+    planLine(className, { on, onWords, canEnd, end, connectWords, connect }) {
+      const plan = h('div', className);
+      if (on) {
+        plan.append(h('span', '', onWords));
+        if (!canEnd) return plan;
         const off = h('button', 'link', 'Disconnect');
         off.type = 'button';
         off.addEventListener('click', async () => {
+          off.disabled = true;
           try {
-            await this.api.saveSettings({ keys: { claude: '' } });
+            await end();
             dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
             await this.fill();
           } catch (err) {
+            off.disabled = false;
             this.status.textContent = err.message;
             this.status.classList.add('error');
           }
         });
-        plan.append(h('span', '', 'On your Claude plan'), off);
+        plan.append(off);
         return plan;
       }
-      const connect = h('button', 'link', 'Connect your Claude');
-      connect.type = 'button';
-      connect.addEventListener('click', () => {
+      const button = h('button', 'link', connectWords);
+      button.type = 'button';
+      button.addEventListener('click', () => {
         this.close();
-        document.dispatchEvent(new CustomEvent('marble:connect-claude'));
+        connect();
       });
-      plan.append(connect);
+      plan.append(button);
       return plan;
+    }
+
+    /** The plan Claude's login runs on: Claude Code's own login, or a token
+     *  an older Connect kept. */
+    claudePlan(settings) {
+      return this.planLine('claude-plan', {
+        on: Boolean(settings.keys?.claude || settings.logins?.claude),
+        onWords: 'On your Claude plan',
+        canEnd: Boolean(settings.signOut?.claude),
+        end: () => this.api.claudeSignOut(),
+        connectWords: 'Connect your Claude',
+        connect: () => document.dispatchEvent(new CustomEvent('marble:connect-claude', { cancelable: true })),
+      });
+    }
+
+    /** The plan Codex runs on when it has no key: the ChatGPT login. */
+    codexPlan(settings) {
+      return this.planLine('codex-plan', {
+        on: Boolean(settings.logins?.chatgpt),
+        onWords: 'On your ChatGPT plan',
+        canEnd: Boolean(settings.signOut?.codex),
+        end: () => this.api.codexSignOut(),
+        connectWords: 'Connect your ChatGPT',
+        connect: () => document.dispatchEvent(new CustomEvent('marble:connect-agent', { cancelable: true, detail: { agent: 'codex' } })),
+      });
     }
 
     keyRow(name, label, set, { field = `key-${name}` } = {}) {
@@ -9708,18 +9741,34 @@
 
   customElements.define('marble-agent-settings', MarbleAgentSettings);
 
-  // ------------------------------------------------------------ first visit
+  // ------------------------------------------------------------ connect an agent
 
-  // A drive that can run no agent — Claude with neither a login nor a key,
-  // and Codex the same — said nothing until a turn failed. On the first page
-  // of a visit this asks the host (GET /agent/setup) and, when none can run,
-  // offers a key field right away: for Claude, for Codex, or a choice of the
-  // two when the drive has both. The host checks the key with Anthropic or
-  // OpenAI before keeping it; the page never holds it past the request.
+  // A drive that can run no agent said nothing until a turn failed. On the
+  // first page of a visit this asks the host (GET /agent/setup) and, when none
+  // can run, opens the connect sheet: the person's own Claude or ChatGPT,
+  // signed in on Anthropic's or OpenAI's own page by the CLI itself
+  // (server/agent/claude-signin.js, codex-signin.js), or an API key for
+  // either. Marble never sees the password and never keeps the login; the
+  // line under the title says so, naming whoever hosts the drive.
+  //
+  //   choose   Connect an agent: Claude, ChatGPT, or Use an API key instead
+  //   claude   Connect your Claude: Claude's page opens in a new tab, and the
+  //            code it shows is pasted here and typed into the waiting CLI
+  //   codex    Connect your ChatGPT: a one-time code to enter on OpenAI's
+  //            page; the login lands in the waiting CLI, and this closes
+  //   key      Use an API key: checked with Anthropic or OpenAI, then kept
+  //
+  // Inside the drive ChatGPT's agent is Codex: the ChatGPT row says so, once,
+  // and everything else here calls the sign-in ChatGPT.
+  //
   // "Not now" is kept for the drive (POST /agent/setup/later), so a new tab or
   // another device does not ask again; the tab also remembers it, so moving
-  // between documents does not wait on the host to know.
+  // between documents does not wait on the host to know. Any page can open it:
+  // `marble:connect-agent` on the document (detail.agent: claude, codex or
+  // key), or `marble:connect-claude` (the credit line, a chat that ran out).
+  // The event is cancelled when the sheet is drawn.
   const SETUP_DISMISSED = 'marble-agent-setup-dismissed';
+  const CODEX_POLL_MS = 2_000;
   const SETUP_CSS = `
     dialog {
       width: min(420px, calc(100vw - 32px)); box-sizing: border-box; margin: auto;
@@ -9729,7 +9778,8 @@
     }
     dialog::backdrop { background: rgba(20, 18, 14, .28); }
     h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
-    .lede { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; }
+    .lede { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; text-wrap: pretty; }
+    .view[hidden] { display: none; }
     label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
     input {
       font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink);
@@ -9744,16 +9794,41 @@
     .hint a { color: var(--accent-ink); }
     .status { min-height: 1.3em; margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
     .status.error { color: var(--danger); }
-    .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+    .actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 10px; }
+    /* The way back, or the other way in, sits at the left; the one action at the right. */
+    .actions .left { margin-right: auto; }
     button { font: inherit; cursor: pointer; border-radius: 8px; padding: 6px 14px; border: 1px solid var(--line); background: var(--paper-2); color: var(--ink); }
     button.save { background: var(--ink); color: var(--paper); border-color: var(--ink); }
     button.save:disabled { opacity: .55; cursor: progress; }
     button.link { border: 0; background: none; color: var(--muted); padding: 6px 8px; }
+    button.link.left { padding-left: 0; }
+    button.link:hover { color: var(--ink); }
     button[hidden] { display: none; }
     button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
-    .alt { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); }
-    /* Which agent the key is for: a setting, so an outline, the chosen half one
-       shade back — the same control as Claude's login / API key switch. */
+    /* The two sign-ins are the rows of one list: a name, what it runs, and a
+       chevron, because a press opens the next step. Hairlines between, one
+       around, no card for each: they are choices, not things. */
+    .choices { display: flex; flex-direction: column; margin: 0 0 6px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .choice {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; align-items: center; column-gap: 10px;
+      width: 100%; min-height: 52px; margin: 0; padding: 8px 14px; border: 0; border-radius: 0; background: var(--card);
+      text-align: left; transition: background var(--t, 200ms) var(--ease, ease);
+    }
+    .choice + .choice { border-top: 1px solid var(--line); }
+    .choice:hover { background: var(--paper-2); }
+    .choice:active { background: var(--paper-3); }
+    .choice:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+    .choice .name { font-size: 14px; font-weight: 500; }
+    .choice .runs { grid-column: 1; font-size: 12px; color: var(--muted); }
+    .choice svg { grid-column: 2; grid-row: 1 / span 2; width: 16px; height: 16px; color: var(--faint); }
+    .choice[hidden] { display: none; }
+    /* The one-time code is read off this screen and typed on another, so it
+       is large, spaced, in figures that do not shift, and copyable. */
+    .device { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper-2); }
+    .code { font: 600 24px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; font-variant-numeric: tabular-nums; color: var(--ink); user-select: all; overflow-wrap: anywhere; }
+    .code[data-empty] { color: var(--faint); }
+    /* Which company the key is from: a setting, so an outline, the chosen half
+       one shade back — the same control as Claude's login / API key switch. */
     .agent-choice { display: inline-flex; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
     .agent-choice[hidden] { display: none; }
     .agent-choice label { position: relative; flex-direction: row; align-items: center; gap: 6px; padding: 6px 14px; font-size: 13px; color: var(--muted); cursor: pointer; transition: background var(--t, 200ms) var(--ease, ease), color var(--t, 200ms) var(--ease, ease); }
@@ -9761,8 +9836,10 @@
     .agent-choice input { position: absolute; opacity: 0; pointer-events: none; width: auto; }
     .agent-choice label:has(input:checked) { background: var(--paper-2); color: var(--ink); }
     .agent-choice label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
-    .agent-choice .brand { width: 13px; height: 13px; flex: none; }
-    @media (pointer: coarse) { .agent-choice label { min-height: 44px; padding: 0 18px; } }
+    @media (pointer: coarse) {
+      .agent-choice label { min-height: 44px; padding: 0 18px; }
+      .choice { min-height: 56px; }
+    }
     /* The buttons are 44pt for a thumb, and the dialog stands in the strip a
        person can see: centred on the window, the key field went under the
        keyboard the moment it was tapped. */
@@ -9770,18 +9847,19 @@
       button { min-height: 44px; }
       dialog { top: var(--vv-top, 0px); bottom: var(--kb, 0px); max-height: calc(var(--vv-h, 100dvh) - 24px); overflow: auto; overscroll-behavior: contain; }
     }
-    @media (prefers-reduced-motion: reduce) { .agent-choice label { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { .agent-choice label, .choice { transition: none; } }
   `;
 
-  // What the popup says about each agent: where its key comes from, what one
-  // looks like, and who checks it.
+  // What the key view says about each agent: whose key it takes, what one
+  // looks like, and where to make one.
   const SETUP_AGENTS = {
-    claude: { name: 'Claude', company: 'Anthropic', placeholder: 'sk-ant-…', link: 'https://console.anthropic.com/settings/keys', site: 'console.anthropic.com', account: 'a Claude account' },
-    codex: { name: 'Codex', company: 'OpenAI', placeholder: 'sk-proj-…', link: 'https://platform.openai.com/api-keys', site: 'platform.openai.com', account: 'a ChatGPT account' },
+    claude: { name: 'Claude', company: 'Anthropic', placeholder: 'sk-ant-…', link: 'https://console.anthropic.com/settings/keys', site: 'console.anthropic.com' },
+    codex: { name: 'Codex', company: 'OpenAI', placeholder: 'sk-proj-…', link: 'https://platform.openai.com/api-keys', site: 'platform.openai.com' },
   };
   /** The agent a pasted key belongs to, read off its prefix: Anthropic's keys
    *  start sk-ant-, OpenAI's sk- and something else. */
   const keyAgent = (key) => (/^sk-ant-/.test(key) ? 'claude' : /^sk-/.test(key) ? 'codex' : null);
+  const CHEVRON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   class MarbleAgentSetup extends HTMLElement {
     constructor() {
@@ -9790,38 +9868,72 @@
       root.innerHTML = `<style>${TOKENS}${SETUP_CSS}</style>
         <dialog aria-labelledby="agent-setup-title" aria-describedby="agent-setup-lede">
           <form>
-            <h2 id="agent-setup-title">Connect Claude</h2>
-            <p class="lede" id="agent-setup-lede">Agents on this drive run on Claude. Paste an Anthropic API key to turn them on.</p>
-            <div class="agent-choice" role="radiogroup" aria-label="Agent" hidden>
-              <label>${BRAND.anthropic}<input type="radio" name="agent" value="claude" checked>Claude</label>
-              <label>${BRAND.codex}<input type="radio" name="agent" value="codex">Codex</label>
+            <h2 id="agent-setup-title">Connect an agent</h2>
+            <p class="lede" id="agent-setup-lede"></p>
+            <div class="view" data-view="choose">
+              <div class="choices">
+                <button type="button" class="choice" data-agent="claude"><span class="name">Claude</span>${CHEVRON}</button>
+                <button type="button" class="choice" data-agent="codex"><span class="name">ChatGPT</span><span class="runs">Its agent is called Codex here</span>${CHEVRON}</button>
+              </div>
             </div>
-            <label>API key
-              <input name="key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="sk-ant-…">
-            </label>
-            <p class="hint">Make one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>. It stays on this drive and is never shown again.</p>
+            <div class="view" data-view="claude" hidden>
+              <label>Code from Claude
+                <input name="code" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+              </label>
+            </div>
+            <div class="view" data-view="codex" hidden>
+              <div class="device"><output class="code" data-empty aria-label="One-time code">····-·····</output><button type="button" class="link copy">Copy</button></div>
+              <p class="hint device-hint"></p>
+            </div>
+            <div class="view" data-view="key" hidden>
+              <div class="agent-choice" role="radiogroup" aria-label="Key from" hidden>
+                <label><input type="radio" name="agent" value="claude" checked>Anthropic</label>
+                <label><input type="radio" name="agent" value="codex">OpenAI</label>
+              </div>
+              <label>API key
+                <input name="key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="sk-ant-…">
+              </label>
+              <p class="hint">Make one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>. It stays on this drive and is never shown again.</p>
+            </div>
             <p class="status" role="status" aria-live="polite"></p>
             <div class="actions">
+              <button type="button" class="link left back">Back</button>
+              <button type="button" class="link left key">Use an API key instead</button>
               <button type="button" class="link later">Not now</button>
               <button type="submit" class="save">Connect</button>
             </div>
-            <p class="alt">Or ask whoever runs this drive to sign it in to a Claude account.</p>
           </form>
         </dialog>`;
-      this.dialog = root.querySelector('dialog');
-      this.form = root.querySelector('form');
-      this.input = root.querySelector('input[name="key"]');
-      this.status = root.querySelector('.status');
-      this.saveButton = root.querySelector('.save');
-      this.laterButton = root.querySelector('.later');
-      this.choice = root.querySelector('.agent-choice');
-      this.heading = root.querySelector('h2');
-      this.lede = root.querySelector('.lede');
-      this.hint = root.querySelector('.hint');
-      this.alt = root.querySelector('.alt');
-      this.offers = ['claude'];
+      const $ = (selector) => root.querySelector(selector);
+      this.dialog = $('dialog');
+      this.form = $('form');
+      this.heading = $('h2');
+      this.lede = $('.lede');
+      this.status = $('.status');
+      this.views = [...root.querySelectorAll('.view')];
+      this.codeInput = $('input[name="code"]');
+      this.keyInput = $('input[name="key"]');
+      this.choice = $('.agent-choice');
+      this.hint = $('[data-view="key"] .hint');
+      this.deviceCode = $('.code');
+      this.deviceHint = $('.device-hint');
+      this.copyButton = $('.copy');
+      this.backButton = $('.back');
+      this.keyButton = $('.key');
+      this.laterButton = $('.later');
+      this.saveButton = $('.save');
+      this.state = { offers: ['claude'], signIns: ['claude'], host: null };
+      this.view = 'choose';
       this.agent = 'claude';
+      // Opened on request, or by the first-visit check: only the second
+      // remembers Not now when it is put away.
+      this.asked = false;
+      // A Claude sign-in the host started for this sheet and has not finished.
+      this.started = false;
+      this.busy = false;
       this.done = false;
+      this.device = null;
+      this.poll = null;
     }
 
     get api() {
@@ -9832,31 +9944,59 @@
       this.unwatchTheme = watchPageTheme(this);
       this.form.addEventListener('submit', (event) => {
         event.preventDefault();
-        if (this.done) this.dialog.close();
-        else this.connect();
+        this.act();
       });
+      for (const row of this.shadowRoot.querySelectorAll('.choice')) {
+        row.addEventListener('click', () => this.show(row.dataset.agent));
+      }
+      this.backButton.addEventListener('click', () => this.show('choose'));
+      this.keyButton.addEventListener('click', () => this.show('key'));
       this.laterButton.addEventListener('click', () => this.later());
+      this.copyButton.addEventListener('click', () => this.copyCode());
       this.choice.addEventListener('change', (event) => {
         if (event.target.name !== 'agent') return;
         this.choose(event.target.value);
-        this.input.focus();
+        this.keyInput.focus();
       });
       // A pasted key says whose it is; the choice follows it.
-      this.input.addEventListener('input', () => {
-        const owner = keyAgent(this.input.value.trim());
-        if (owner && owner !== this.agent && this.offers.includes(owner)) this.choose(owner);
+      this.keyInput.addEventListener('input', () => {
+        const owner = keyAgent(this.keyInput.value.trim());
+        if (owner && owner !== this.agent && this.offers().includes(owner)) this.choose(owner);
       });
-      // Escape: the dialog's own cancel, which is the same as Not now.
+      // The Claude action follows its field: a code in it is a code to send.
+      this.codeInput.addEventListener('input', () => this.label());
+      // Escape and a press on the backdrop put it away: Not now, when it was
+      // the first visit that opened it.
       this.dialog.addEventListener('cancel', (event) => {
         event.preventDefault();
-        this.later();
+        this.putAway();
       });
+      this.dialog.addEventListener('click', (event) => {
+        if (event.target === this.dialog) this.putAway();
+      });
+      // Cancelled, so whoever fired it knows the sheet is drawn.
+      this.onAskClaude = (event) => { event.preventDefault(); this.openOn('claude'); };
+      this.onAskAgent = (event) => { event.preventDefault(); this.openOn(event.detail?.agent ?? 'choose'); };
+      document.addEventListener('marble:connect-claude', this.onAskClaude);
+      document.addEventListener('marble:connect-agent', this.onAskAgent);
       this.check();
     }
 
     disconnectedCallback() {
       this.unwatchTheme?.();
       this.unwatchTheme = null;
+      this.stopPolling();
+      document.removeEventListener('marble:connect-claude', this.onAskClaude);
+      document.removeEventListener('marble:connect-agent', this.onAskAgent);
+    }
+
+    signIns() {
+      return (Array.isArray(this.state.signIns) ? this.state.signIns : []).filter((id) => SETUP_AGENTS[id]);
+    }
+
+    offers() {
+      const offers = (Array.isArray(this.state.offers) ? this.state.offers : ['claude']).filter((id) => SETUP_AGENTS[id]);
+      return offers.length ? offers : ['claude'];
     }
 
     async check() {
@@ -9873,13 +10013,13 @@
       } catch {
         return;
       }
-      if (!state?.needed || state.later || !this.isConnected) return;
+      if (!state?.needed || state.later || !this.isConnected || this.dialog.open) return;
       this.present(state);
     }
 
     /** Opened on request (the line's Set up, change-line.js), whatever Not
-     *  now said for this tab or the drive: someone asked for it. Answers whether the host
-     *  had anything to connect. */
+     *  now said for this tab or the drive: someone asked for it. Answers
+     *  whether the host had anything to connect. */
     async offer() {
       let state = null;
       try {
@@ -9888,44 +10028,131 @@
         return false;
       }
       if (!state?.needed || !this.isConnected) return false;
-      this.present(state);
+      this.present(state, { asked: true });
       return true;
     }
 
-    present(state) {
-      // Starter credit used up: the way on is the person's own Claude, in
-      // its sheet. The key field is for when nothing draws one.
-      if (state.credit?.usedUp && connectClaude()) return;
-      const offers = (Array.isArray(state.offers) ? state.offers : ['claude']).filter((id) => SETUP_AGENTS[id]);
-      this.offers = offers.length ? offers : ['claude'];
-      this.choice.hidden = this.offers.length < 2;
-      this.choose(this.offers[0]);
-      this.open();
+    /** Opened on one view by a page's event: what the drive offers is asked
+     *  first, so the words and the choices are this drive's. */
+    async openOn(view) {
+      let state = null;
+      try {
+        state = await this.api?.setup();
+      } catch {
+        state = null;
+      }
+      this.present(state ?? this.state, { view, asked: true });
     }
 
-    /** Point the popup at one agent: its key, its link, its words. */
-    choose(agent) {
-      this.agent = SETUP_AGENTS[agent] ? agent : 'claude';
-      const it = SETUP_AGENTS[this.agent];
-      const both = this.offers.length > 1;
-      for (const radio of this.choice.querySelectorAll('input[name="agent"]')) radio.checked = radio.value === this.agent;
-      this.heading.textContent = both ? 'Connect an agent' : `Connect ${it.name}`;
-      this.lede.textContent = both
-        ? 'Agents on this drive run on Claude or Codex. Paste an API key for either to turn them on.'
-        : `Agents on this drive run on ${it.name}. Paste an ${it.company} API key to turn them on.`;
-      this.input.placeholder = it.placeholder;
-      const link = this.hint.querySelector('a');
-      link.href = it.link;
-      link.textContent = it.site;
-      this.alt.textContent = `Or ask whoever runs this drive to sign it in to ${both ? 'a Claude or ChatGPT account' : it.account}.`;
-      this.say('');
+    present(state, { view = null, asked = false } = {}) {
+      this.state = state ?? this.state;
+      this.asked = asked;
+      this.done = false;
+      const signIns = this.signIns();
+      // Starter credit used up: the way on is the person's own Claude.
+      const first = view && view !== 'choose'
+        ? view
+        : this.state.credit?.usedUp && signIns.includes('claude') && !view ? 'claude' : signIns.length ? 'choose' : 'key';
+      this.show(first);
+      this.open();
     }
 
     open() {
       if (this.dialog.open) return;
-      this.say('');
       this.dialog.showModal();
-      this.input.focus();
+      this.focusView();
+    }
+
+    /** One view of the sheet: its words, its field, its actions. */
+    show(view) {
+      const signIns = this.signIns();
+      this.stopPolling();
+      if (this.view === 'claude' && view !== 'claude') this.cancelClaude();
+      this.view = ['choose', 'claude', 'codex', 'key'].includes(view) ? view : 'choose';
+      for (const section of this.views) section.hidden = section.dataset.view !== this.view;
+      this.say('');
+      this.busy = false;
+      this.saveButton.disabled = false;
+      this.saveButton.hidden = this.view === 'choose';
+      this.keyButton.hidden = this.view !== 'choose';
+      // Back to the choice, when there was one to make.
+      this.backButton.hidden = this.view === 'choose' || !signIns.length;
+      this.laterButton.hidden = !(this.view === 'choose' || (this.view === 'key' && !signIns.length));
+      const who = this.state.host ? `so ${this.state.host} never sees your password` : 'so nobody else sees your password';
+      if (this.view === 'choose') {
+        for (const row of this.shadowRoot.querySelectorAll('.choice')) row.hidden = !signIns.includes(row.dataset.agent);
+        const both = signIns.includes('claude') && signIns.includes('codex');
+        const plan = both ? 'Claude or ChatGPT' : signIns.includes('codex') ? 'ChatGPT' : 'Claude';
+        const page = both ? 'their page' : signIns.includes('codex') ? 'OpenAI’s page' : 'Anthropic’s page';
+        this.heading.textContent = 'Connect an agent';
+        this.lede.textContent = `Agents on this drive run on your own ${plan} plan. You sign in on ${page}, ${who}.`;
+      } else if (this.view === 'claude') {
+        this.heading.textContent = 'Connect your Claude';
+        this.lede.textContent = 'Open Claude’s sign-in, then paste the code it shows here.';
+        this.codeInput.value = '';
+        this.codeInput.disabled = false;
+        this.started = false;
+        this.label();
+      } else if (this.view === 'codex') {
+        this.heading.textContent = 'Connect your ChatGPT';
+        this.lede.textContent = 'Open OpenAI’s sign-in, then enter this code there.';
+        this.startCodex();
+      } else {
+        this.heading.textContent = 'Use an API key';
+        this.keyInput.value = '';
+        this.keyInput.disabled = false;
+        for (const radio of this.choice.querySelectorAll('input')) radio.disabled = false;
+        this.choice.hidden = this.offers().length < 2;
+        this.saveButton.textContent = 'Connect';
+        this.choose(this.offers().includes(this.agent) ? this.agent : this.offers()[0]);
+      }
+      if (this.dialog.open) this.focusView();
+    }
+
+    focusView() {
+      if (this.view === 'choose') this.shadowRoot.querySelector('.choice:not([hidden])')?.focus();
+      else if (this.view === 'key') this.keyInput.focus();
+      else this.saveButton.focus();
+    }
+
+    /** Point the key view at one agent: its key, its link, its words. */
+    choose(agent) {
+      this.agent = SETUP_AGENTS[agent] ? agent : 'claude';
+      const it = SETUP_AGENTS[this.agent];
+      const offers = this.offers();
+      for (const radio of this.choice.querySelectorAll('input[name="agent"]')) radio.checked = radio.value === this.agent;
+      this.lede.textContent = offers.length > 1
+        ? 'Paste a key from Anthropic for Claude, or from OpenAI for Codex.'
+        : `Paste a key from ${it.company} for ${it.name}.`;
+      this.keyInput.placeholder = it.placeholder;
+      const link = this.hint.querySelector('a');
+      link.href = it.link;
+      link.textContent = it.site;
+      this.say('');
+    }
+
+    /** The one action of the view it is on. */
+    act() {
+      if (this.busy) return;
+      if (this.done) {
+        this.dialog.close();
+        return;
+      }
+      if (this.view === 'claude') {
+        if (this.codeInput.value.trim()) this.connectClaude();
+        else this.signInClaude();
+      } else if (this.view === 'codex') {
+        if (this.device && !this.device.over) this.openOpenAI();
+        else this.startCodex({ fresh: true });
+      } else if (this.view === 'key') {
+        this.connectKey();
+      }
+    }
+
+    /** Escape, or a press outside: put away, and on a first visit, Not now. */
+    putAway() {
+      if (this.asked || this.done) this.close();
+      else this.later();
     }
 
     later() {
@@ -9934,42 +10161,210 @@
       } catch {
         // Nothing to remember it in; the drive still keeps it.
       }
-      this.dialog.close();
+      this.close();
       // For the drive, so the next tab does not ask. A host that cannot keep
       // it leaves this tab's answer standing.
       this.api?.setupLater?.().catch(() => {});
     }
 
-    async connect() {
-      const key = this.input.value.trim();
-      if (!key) {
-        this.say('Paste the key first.', true);
-        this.input.focus();
+    close() {
+      this.stopPolling();
+      this.cancelClaude();
+      this.dialog.close();
+    }
+
+    /** A Claude sign-in left before its code came back is ended now rather
+     *  than at its timeout. A ChatGPT one is not: its code may already be
+     *  typed on OpenAI's page, and the login still lands if it is. */
+    cancelClaude() {
+      if (this.started) this.api?.claudeSignInCancel?.().catch(() => {});
+      this.started = false;
+    }
+
+    connected(text) {
+      this.done = true;
+      this.stopPolling();
+      dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+      this.say(text);
+      setTimeout(() => this.dialog.close(), 900);
+    }
+
+    // ---- Claude
+
+    label() {
+      this.saveButton.textContent = this.codeInput.value.trim() ? 'Connect' : 'Open Claude sign-in';
+    }
+
+    async signInClaude() {
+      // The tab opens on the press, before the host answers, or a browser
+      // that blocks pop-ups blocks it; it is pointed at the address once
+      // there is one, and cut off from this page.
+      const tab = window.open('', '_blank');
+      if (tab) tab.opener = null;
+      this.busy = true;
+      this.saveButton.disabled = true;
+      this.say('Starting Claude sign-in…');
+      try {
+        const { url } = await this.api.claudeSignIn();
+        this.started = true;
+        if (tab && !tab.closed) tab.location.href = url;
+        else if (!window.open(url, '_blank', 'noopener')) throw new Error('The browser blocked the new tab. Allow pop-ups for this drive and try again.');
+        this.say('Signed in? Paste the code from Claude here.');
+        this.codeInput.focus();
+      } catch (err) {
+        tab?.close();
+        this.say(err.message || 'Claude’s sign-in didn’t start. Try again.', true);
+      }
+      this.busy = false;
+      this.saveButton.disabled = false;
+    }
+
+    async connectClaude() {
+      const code = this.codeInput.value.trim();
+      this.busy = true;
+      this.saveButton.disabled = true;
+      this.codeInput.disabled = true;
+      this.say('Connecting…');
+      try {
+        await this.api.claudeSignInCode(code);
+        this.started = false;
+        this.codeInput.value = '';
+        this.connected('Connected. Agents now run on your Claude plan.');
+      } catch (err) {
+        this.codeInput.disabled = false;
+        if (err.retry) {
+          // Claude Code is still waiting: the whole code, pasted again, goes in.
+          this.codeInput.select();
+        } else if (err.status === 409 || err.status === 400) {
+          // The run that would have taken it is over: back to the sign-in.
+          this.started = false;
+          this.codeInput.value = '';
+          this.label();
+        }
+        this.say(err.message || 'Couldn’t connect. Open Claude sign-in again.', true);
+      }
+      this.busy = false;
+      this.saveButton.disabled = false;
+    }
+
+    // ---- ChatGPT
+
+    /** A code to type on OpenAI's page: the one a sign-in already waiting
+     *  has, or a new one. */
+    async startCodex({ fresh = false } = {}) {
+      this.stopPolling();
+      this.device = null;
+      this.deviceCode.textContent = '····-·····';
+      this.deviceCode.setAttribute('data-empty', '');
+      this.deviceHint.textContent = '';
+      this.copyButton.hidden = true;
+      this.saveButton.textContent = 'Open OpenAI sign-in';
+      this.saveButton.disabled = true;
+      this.busy = true;
+      this.say('Asking OpenAI for a code…');
+      let status = null;
+      try {
+        if (!fresh) status = await this.api.codexSignInStatus().catch(() => null);
+        if (status?.state !== 'waiting' || !status.code) status = await this.api.codexSignIn();
+      } catch (err) {
+        if (this.view !== 'codex') return;
+        this.busy = false;
+        this.device = { over: true };
+        this.saveButton.disabled = false;
+        this.saveButton.textContent = 'Try again';
+        this.say(err.message || 'ChatGPT’s sign-in didn’t start. Try again.', true);
         return;
       }
+      if (this.view !== 'codex') return;
+      this.busy = false;
+      this.device = { url: status.url, code: status.code, over: false };
+      this.deviceCode.textContent = status.code;
+      this.deviceCode.removeAttribute('data-empty');
+      // Where it goes and how long it lasts: what the button cannot show,
+      // for someone who signs in on another device.
+      const where = String(status.url ?? '').replace(/^https:\/\//, '');
+      const minutes = Math.max(1, Math.round((Date.parse(status.expiresAt) - Date.now()) / 60_000) || 15);
+      this.deviceHint.textContent = `Enter it at ${where}. It lasts ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
+      this.copyButton.hidden = false;
+      this.saveButton.disabled = false;
+      this.say('Waiting for the code on OpenAI’s page…');
+      this.poll = setInterval(() => this.checkCodex(), CODEX_POLL_MS);
+    }
+
+    openOpenAI() {
+      if (!window.open(this.device.url, '_blank', 'noopener')) {
+        // noopener answers null even when it opened; say nothing then.
+      }
+      this.say('Waiting for the code on OpenAI’s page…');
+    }
+
+    async copyCode() {
+      if (!this.device?.code) return;
+      try {
+        await navigator.clipboard.writeText(this.device.code);
+        this.say('Copied. Waiting for the code on OpenAI’s page…');
+      } catch {
+        // No clipboard here: the code is selectable as it is.
+        getSelection()?.selectAllChildren(this.deviceCode);
+      }
+    }
+
+    async checkCodex() {
+      if (this.view !== 'codex' || !this.dialog.open) return this.stopPolling();
+      let status = null;
+      try {
+        status = await this.api.codexSignInStatus();
+      } catch {
+        return undefined; // the next look, then
+      }
+      if (status.state === 'waiting' || status.state === 'checking' || this.view !== 'codex') return undefined;
+      this.stopPolling();
+      if (status.state === 'signed-in') return this.connected('Connected. Agents now run on your ChatGPT plan.');
+      this.device = { ...this.device, over: true };
+      this.saveButton.textContent = 'Get a new code';
+      this.say(status.error || (status.state === 'expired' ? 'That code ran out. Get a new one.' : 'ChatGPT’s sign-in stopped. Get a new code to try again.'), true);
+      return undefined;
+    }
+
+    stopPolling() {
+      clearInterval(this.poll);
+      this.poll = null;
+    }
+
+    // ---- an API key
+
+    async connectKey() {
+      const key = this.keyInput.value.trim();
+      if (!key) {
+        this.say('Paste the key first.', true);
+        this.keyInput.focus();
+        return;
+      }
+      this.busy = true;
       this.saveButton.disabled = true;
       const { company } = SETUP_AGENTS[this.agent];
       this.say(`Checking the key with ${company}…`);
       try {
         const answer = await this.api.connectAgent(this.agent, key);
-        this.input.value = '';
-        dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
-        this.done = true;
-        this.laterButton.hidden = true;
-        this.input.disabled = true;
+        this.keyInput.value = '';
+        this.keyInput.disabled = true;
         for (const radio of this.choice.querySelectorAll('input')) radio.disabled = true;
         if (answer.checked) {
-          this.say('Connected. Agents are ready.');
-          setTimeout(() => this.dialog.close(), 900);
+          this.connected('Connected. Agents are ready.');
         } else {
           // Kept, but the company could not be asked: say so, and let it be read.
+          this.done = true;
+          dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+          this.laterButton.hidden = true;
+          this.backButton.hidden = true;
           this.say(`Saved. ${company} couldn't be reached to check it, so the first chat will say if it's wrong.`);
           this.saveButton.textContent = 'Done';
         }
       } catch (err) {
         this.say(err.message || "Couldn't save the key.", true);
-        this.input.select();
+        this.keyInput.select();
       }
+      this.busy = false;
       this.saveButton.disabled = false;
     }
 
@@ -9980,179 +10375,6 @@
   }
 
   customElements.define('marble-agent-setup', MarbleAgentSetup);
-
-  // ------------------------------------------------------------ connect your Claude
-
-  // The person's own Claude plan, from the browser: the host runs `claude
-  // setup-token` (server/agent/claude-signin.js) and answers its sign-in
-  // address; this opens it in a new tab, she signs in there and is shown a
-  // code, and the code pasted here goes back to the same run. The one action
-  // is the sign-in until a code is in the field, then it is Connect.
-  //
-  // Opened from Agents › Settings › Claude, and by any page that fires
-  // `document.dispatchEvent(new CustomEvent('marble:connect-claude'))` (the
-  // credit line, Start here, a chat that ran out). "Use an API key instead"
-  // is the key popup above, opened for Claude whatever Not now said.
-  const CONNECT_CSS = `
-    .steps { margin: 0 0 16px; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 8px; }
-    .steps li { counter-increment: step; display: grid; grid-template-columns: 1.4em 1fr; font-size: 13.5px; color: var(--ink); }
-    .steps li::before { content: counter(step); color: var(--muted); font-variant-numeric: tabular-nums; }
-    .actions { justify-content: space-between; align-items: center; }
-    button.link.key { padding-left: 0; }
-    button.link.key:hover { color: var(--ink); }
-  `;
-
-  class MarbleClaudeConnect extends HTMLElement {
-    constructor() {
-      super();
-      const root = this.attachShadow({ mode: 'open' });
-      root.innerHTML = `<style>${TOKENS}${SETUP_CSS}${CONNECT_CSS}</style>
-        <dialog aria-labelledby="claude-connect-title" aria-describedby="claude-connect-lede">
-          <form>
-            <h2 id="claude-connect-title">Connect your Claude</h2>
-            <p class="lede" id="claude-connect-lede">Agents on this drive then run on your Claude plan, not on credit.</p>
-            <ol class="steps">
-              <li>Sign in to Claude in the tab this opens</li>
-              <li>Copy the code it shows you and paste it here</li>
-            </ol>
-            <label>Code from Claude
-              <input name="code" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
-            </label>
-            <p class="status" role="status" aria-live="polite"></p>
-            <div class="actions">
-              <button type="button" class="link key">Use an API key instead</button>
-              <button type="submit" class="save">Open Claude sign-in</button>
-            </div>
-          </form>
-        </dialog>`;
-      this.dialog = root.querySelector('dialog');
-      this.form = root.querySelector('form');
-      this.input = root.querySelector('input[name="code"]');
-      this.status = root.querySelector('.status');
-      this.action = root.querySelector('.save');
-      this.keyButton = root.querySelector('.key');
-      // A sign-in the host started for this sheet and has not finished.
-      this.started = false;
-      this.busy = false;
-    }
-
-    get api() {
-      return window.marble?.agent;
-    }
-
-    connectedCallback() {
-      this.unwatchTheme = watchPageTheme(this);
-      // Cancelled, so whoever fired it knows the sheet is drawn.
-      this.onAsk = (event) => { event.preventDefault(); this.open(); };
-      document.addEventListener('marble:connect-claude', this.onAsk);
-      this.form.addEventListener('submit', (event) => {
-        event.preventDefault();
-        if (this.busy) return;
-        if (this.input.value.trim()) this.connect();
-        else this.signIn();
-      });
-      // The action follows the field: a code in it is a code to send.
-      this.input.addEventListener('input', () => this.label());
-      this.keyButton.addEventListener('click', () => {
-        this.close();
-        document.querySelector('marble-agent-setup')?.present({ offers: ['claude'] });
-      });
-      this.dialog.addEventListener('cancel', (event) => {
-        event.preventDefault();
-        this.close();
-      });
-      // A press on the backdrop is outside the form: the sheet goes.
-      this.dialog.addEventListener('click', (event) => {
-        if (event.target === this.dialog) this.close();
-      });
-    }
-
-    disconnectedCallback() {
-      this.unwatchTheme?.();
-      this.unwatchTheme = null;
-      document.removeEventListener('marble:connect-claude', this.onAsk);
-    }
-
-    label() {
-      this.action.textContent = this.input.value.trim() ? 'Connect' : 'Open Claude sign-in';
-    }
-
-    open() {
-      if (this.dialog.open) return;
-      this.input.value = '';
-      this.input.disabled = false;
-      this.label();
-      this.say('');
-      this.dialog.showModal();
-      this.action.focus();
-    }
-
-    /** Closed before the code came back: the run the host is holding for it
-     *  is ended now rather than at its timeout. */
-    close() {
-      if (this.started) this.api?.claudeSignInCancel?.().catch(() => {});
-      this.started = false;
-      this.dialog.close();
-    }
-
-    async signIn() {
-      // The tab opens on the press, before the host answers, or a browser
-      // that blocks pop-ups blocks it; it is pointed at the address once
-      // there is one, and cut off from this page.
-      const tab = window.open('', '_blank');
-      if (tab) tab.opener = null;
-      this.busy = true;
-      this.action.disabled = true;
-      this.say('Starting Claude sign-in…');
-      try {
-        const { url } = await this.api.claudeSignIn();
-        this.started = true;
-        if (tab && !tab.closed) tab.location.href = url;
-        else if (!window.open(url, '_blank', 'noopener')) throw new Error('The browser blocked the new tab. Allow pop-ups for this drive and try again.');
-        this.say('Signed in? Paste the code from Claude here.');
-        this.input.focus();
-      } catch (err) {
-        tab?.close();
-        this.say(err.message || "Claude's sign-in didn't start. Try again.", true);
-      }
-      this.busy = false;
-      this.action.disabled = false;
-    }
-
-    async connect() {
-      const code = this.input.value.trim();
-      this.busy = true;
-      this.action.disabled = true;
-      this.input.disabled = true;
-      this.say('Connecting…');
-      try {
-        await this.api.claudeSignInCode(code);
-        this.started = false;
-        this.input.value = '';
-        dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
-        this.say('Connected. Agents now run on your Claude plan.');
-        setTimeout(() => this.dialog.close(), 900);
-      } catch (err) {
-        this.input.disabled = false;
-        // The run that would have taken it is over: back to the sign-in.
-        if (err.status === 409 || err.status === 400) {
-          this.started = false;
-          this.input.value = '';
-          this.label();
-        }
-        this.say(err.message || "Couldn't connect. Open Claude sign-in again.", true);
-      }
-      this.busy = false;
-      this.action.disabled = false;
-    }
-
-    say(text, error = false) {
-      this.status.textContent = text;
-      this.status.classList.toggle('error', error);
-    }
-  }
-
-  customElements.define('marble-claude-connect', MarbleClaudeConnect);
 
   // ------------------------------------------------------------ the drawer
 
@@ -11553,7 +11775,8 @@
     });
   };
 
-  // Every page, the Agents page too: a visit can begin on any of them.
+  // Every page, the Agents page too: a visit can begin on any of them, and
+  // the connect sheet waits for its events on every top-level page.
   const mountSetup = () => {
     if (window.top !== window || document.querySelector('marble-agent-setup')) return;
     const el = document.createElement('marble-agent-setup');
@@ -11561,18 +11784,9 @@
     document.body.append(el);
   };
 
-  // Connect your Claude waits for its event on every top-level page.
-  const mountConnect = () => {
-    if (window.top !== window || document.querySelector('marble-claude-connect')) return;
-    const el = document.createElement('marble-claude-connect');
-    el.setAttribute('data-marble-transient', '');
-    document.body.append(el);
-  };
-
   const mount = () => {
     mountSettings();
     mountSetup();
-    mountConnect();
     const pageUsage = document.querySelector('header.topbar > .usage');
     if (pageUsage) watchUsage(pageUsage);
     bindNewChatKey();

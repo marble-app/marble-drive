@@ -346,6 +346,7 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     claudeSignIn: createClaudeSignIn({ waitMs: (config.claudeSignInSeconds ?? 600) * 1000, log }),
     codexSignIn: (options) => createCodexSignIn({ ...options, waitMs: (config.codexSignInSeconds ?? 900) * 1000 }),
     hostOwner: config.hostOwner ?? null,
+    guest: Boolean(config.guest),
     // A sign-in, a sign-out or a key changes which CLI the side jobs run on.
     onAgentsChanged: () => side.forget(),
     log,

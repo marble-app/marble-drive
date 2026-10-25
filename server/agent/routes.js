@@ -122,7 +122,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, credit = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, codexSignIn = null, hostOwner = null, onAgentsChanged = null, log = console }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, credit = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, codexSignIn = null, hostOwner = null, guest = false, onAgentsChanged = null, log = console }) {
   let detected = null;
   // What can run changed (a key, a sign-in, a sign-out): the next look at the
   // agents asks again, and so do the side jobs (side-model.js).
@@ -195,13 +195,29 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
 
   const publicSettings = async () => {
     const settings = await store.settings();
+    const flags = keys ? await keys.flags() : NO_KEYS;
+    // Which of the person's own plans are signed in, for Settings' lines.
+    const found = await detectAll();
+    const codexFound = found.find((p) => p.id === CODEX);
     return {
       ...settings,
       defaultProvider: await runnableDefault(settings),
       claudeAuth: await claudeAuth(settings),
-      keys: keys ? await keys.flags() : NO_KEYS,
+      keys: flags,
       credit: await creditState(settings),
       voice: voiceSettings(settings.voice),
+      // Whether Disconnect is offered: it runs the CLI's own logout, so only
+      // for a login this drive made (or a token an older Connect kept), or on
+      // a drive hosted for someone else, whose CLI is only theirs. On the
+      // owner's machine the CLI's login is also the terminal's.
+      signOut: {
+        claude: Boolean(flags.claude || guest || settings.claudeLoginHere),
+        codex: Boolean(guest || settings.codexLoginHere),
+      },
+      logins: {
+        claude: Boolean(found.find((p) => p.id === CLAUDE.login)?.signedIn),
+        chatgpt: Boolean(codexFound?.signedIn && /chatgpt/i.test(String(codexFound.detail ?? ''))),
+      },
     };
   };
 
@@ -253,7 +269,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     const settings = await store.settings();
     const current = isClaude(settings.defaultProvider) ? await activeClaude(settings) : settings.defaultProvider;
     const runs = (await detectAll()).find((p) => p.id === current)?.signedIn;
-    await store.saveSettings({ setupLater: null, ...(runs ? {} : { defaultProvider: CODEX }) });
+    await store.saveSettings({ setupLater: null, codexLoginHere: new Date().toISOString(), ...(runs ? {} : { defaultProvider: CODEX }) });
   }
 
   /** POST /agent/setup for Codex: the key checked with OpenAI and kept, and
@@ -682,7 +698,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       changed();
       const current = (await store.settings()).defaultProvider;
       const claudeDefault = !current || String(current).startsWith('claude');
-      await store.saveSettings({ claudeAuth: 'login', setupLater: null, ...(claudeDefault ? { defaultProvider: CLAUDE.login } : {}) });
+      await store.saveSettings({ claudeAuth: 'login', setupLater: null, claudeLoginHere: new Date().toISOString(), ...(claudeDefault ? { defaultProvider: CLAUDE.login } : {}) });
       return json(res, 200, { ...(await setupState()), connected: true });
     }
     // Disconnect: Claude Code's own `claude auth logout`, and a token an
@@ -691,6 +707,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       if (!providers.has(CLAUDE.login)) return json(res, 400, { error: "This drive doesn't have Claude." });
       const out = await claudeSignInRun().signOut();
       if (keys) await keys.write({ claude: '' });
+      await store.saveSettings({ claudeLoginHere: null });
       changed();
       if (!out.ok && !out.missing) {
         log.error?.(`[claude sign-in] logout failed: ${out.detail}`);
@@ -722,6 +739,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     if (route === '/agent/codex/sign-out' && method === 'POST') {
       if (!providers.has(CODEX)) return json(res, 400, { error: "This drive doesn't have Codex." });
       const out = await codexSignInRun().signOut();
+      await store.saveSettings({ codexLoginHere: null });
       changed();
       if (!out.ok && !out.missing) {
         log.error?.(`[codex sign-in] logout failed: ${out.detail}`);
