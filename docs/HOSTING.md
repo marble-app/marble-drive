@@ -1128,6 +1128,65 @@ paths move under a temporary folder, rclone's local backend stands in for R2
 under the same crypt remote, and a stand-in systemctl records what it is
 asked.
 
+### The study at the door
+
+Built 2026-10-25, and off until the owner sets it up: `CONSENT_FORM` in
+`worker/src/door/pages.js` is a placeholder and `CONSENT_VERSION` is
+commented out in `worker/wrangler.toml`. Until both are set, a study invite's
+consent screen says the study isn't ready and no study drive is made. Setting
+it up, the admin routes and the shape of a people row are in
+[ACCOUNTS.md](ACCOUNTS.md), "The study".
+
+The study is a cohort, and it starts at the door. An invite made with
+`study: true` (`node tools/door.mjs invite --study`, or the Console's Invite
+someone) carries `cohort: 'study'`. After its person signs in, `/consent`
+comes before `/name`. The name page sends them back until they answer. The
+Directory also refuses to make a drive for a study invite with no answer on
+file, so no request goes round the screen. A yes makes the PC drive's record
+carry `cohort: 'study'`; a no makes the drive with none. The answer stays on
+the account as `{ version, at, choice }`.
+
+marble-host learns who is in the study from `GET /_door/people`, which it
+reads every five minutes. A row is in the study when its cohort is `study`,
+its consent was given and it hasn't withdrawn. For such a drive marble-host
+writes `MARBLE_STUDY=1` and `MARBLE_CONSENT=<version>@<at>` into the drive's
+env file, and it takes both out once the person leaves. The version goes
+into that file as it is, because the door accepts only letters, digits,
+dots, hyphens and underscores for it. marble-host reports back through
+`POST /_door/events`: `agent-connected` and `first-document` the first time
+`/health/deep` shows them, `drive-updated` after a move, and
+`drive-restarted`. Those lines and the door's own sign-in lines make each
+row's sign-up timeline. The Console's People view reads the same list and
+calls the same routes. marble-host's side and the Console's are built in
+their own PRs.
+
+A drive ends in one of two ways, and both finish the same way. The owner
+removes it (`POST /_door/drives/<name>/remove` with its name typed, or
+`door.mjs remove`), which makes it `removing` and ends every session of the
+person whose drive it is. Or that person deletes it from the account page,
+which makes it `deleting`. marble-host then signs the drive's CLIs out,
+deletes the drive from the PC and reports `{ state: 'removed' }` through
+`step`. The record stays, so the name is never given out again. The drive's
+encrypted backup in R2 stays too, as "Backups of PC drives" says. When the
+person asked for their drive to be deleted, forget its backup once it is
+removed; the delete page tells them the backup is kept until then. Nothing
+else moves an ending drive: `step`, `hold` and `unspare` refuse it with a
+409, so a maker that was half way through making it stops there.
+
+The edge answers all three states itself, with a 410: "This drive has been
+removed" or "This drive is being deleted", as a page or as JSON for a
+script. It never forwards such a request, whatever pass it carries and
+whatever `DRIVES` says. Only the sign-out walk (`/_marble/leave`) goes
+through, to clear the pass. An isolate keeps a drive's record for up to 30
+seconds, so a drive can still be reached for that long after it is removed,
+as after a hold.
+
+Revoking an account (`POST /_door/accounts/<id>/revoke`, or
+`door.mjs revoke`) ends its sessions at the door at once. The edge checks a
+pass's session only once the pass is an hour old, so a drive its person
+already has open keeps working for up to an hour. To stop a drive now, hold
+it or remove it.
+
 ## The console
 
 **Console** is a document in the owner's drive (`/a/Console`): every drive and

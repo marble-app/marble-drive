@@ -48,6 +48,12 @@ MAX_DRIVES = "10"
 # The public keys a pass may be signed with: the same line as a drive's
 # MARBLE_DOOR_KEYS ("<kid>:<base64 SPKI> …"). Unset, the edge derives its own.
 # DOOR_PUBLIC_KEYS = ""
+# The probe study's consent form (docs/ACCOUNTS.md, "The study"): the version
+# of the IRB-approved text pasted into CONSENT_FORM in worker/src/door/pages.js.
+# Letters, digits, dots, hyphens and underscores. Unset, or with the
+# placeholder still in pages.js, a study invite's consent screen says the study
+# isn't ready and no study drive is made. Change it whenever the form changes.
+# CONSENT_VERSION = "2026-11-irb-v1"
 # Other people's drives on the owner's PC (worker/src/pc-host.js; docs/HOSTING.md,
 # "Other people's drives on the PC"). The PC host's router, through its tunnel
 # marble-pc-host. Nothing reaches it until the secret PC_HOST_KEY is set: the

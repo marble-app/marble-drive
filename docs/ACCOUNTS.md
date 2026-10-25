@@ -406,14 +406,127 @@ deploy. New drives are made on Fly again; drives already on the PC stay there.
 | See which drives are on the PC | `node tools/door.mjs drives` (it says "the PC host") |
 | See the Worker's looks at the PC | `cd worker && npx wrangler@latest tail` (a failed look is a `pc-host watch:` line) |
 
+## The study
+
+A study invite puts one screen between signing in and naming a drive. It is
+"Taking part in the study", with the protocol's approved consent form and two
+choices: Take part and Don't take part. The answer is kept on the account as
+`{ version, at, choice }`. A drive made on the PC host after a yes carries
+`cohort: 'study'`, which is what marble-host turns the study's settings on
+by. After a no the drive is made all the same, with no cohort. Any other
+invite never sees the screen.
+
+The consent words are not written in this repo. The screen shows the form
+your lab's IRB protocol approved, from one constant, `CONSENT_FORM` in
+`worker/src/door/pages.js`, and the form's version comes from the Worker var
+`CONSENT_VERSION`. Until the placeholder in `CONSENT_FORM` is replaced and
+`CONSENT_VERSION` is set, the screen says "The study isn't ready yet", nobody
+can answer it, and no study drive is made. Study invites still work in the
+meantime: their people sign in, and are asked when they come back.
+
+### To turn it on
+
+1. Replace the placeholder in `CONSENT_FORM` (`worker/src/door/pages.js`)
+   with the approved consent text, word for word. Put a blank line between
+   paragraphs; a single line break is kept as one.
+2. In `worker/wrangler.toml`, uncomment `CONSENT_VERSION` and set it to the
+   version the protocol gives that text, such as `2026-11-irb-v1`. It is
+   letters, digits, dots, hyphens and underscores, because marble-host writes
+   it into the drive's settings.
+3. Deploy: `cd worker && npx wrangler@latest deploy`.
+4. Check: `node tools/door.mjs invite --study --note "Test"`, open the link in
+   a private window and sign in. The screen shows the form and its version.
+
+When the form changes, change both in the same deploy. Someone who had the
+old form open and answers is shown the new one again, and their answer to the
+old one is not kept.
+
+If someone's invite runs out before they name a drive, send them a new one.
+It replaces the old one when they sign in with it, and its consent screen
+asks again.
+
+### What its people can do
+
+The account page has Leave the study while they are in it. Leaving is logged
+as `consent-withdrawn`, and marble-host takes the study's settings off the
+drive at its next look. Deleting what was collected is a second, separate
+choice, offered once they have left, and logged as `study-delete-asked`. The
+door only records that ask and when it came; you carry it out.
+
+The page also has Download my drive, a link to the drive's own
+`/drive/export.zip`, and Delete my drive for a drive on the PC host. Delete
+asks for the drive's name, sets the drive `deleting` (`drive-delete-asked`),
+and from then on the edge answers "This drive is being deleted". marble-host
+deletes it and reports `removed`. Its encrypted backup in R2 stays, and the
+delete page says so, until you forget it once the drive is removed:
+`sudo /usr/local/lib/marble-guests/backup-guest <name> --forget --yes`
+([HOSTING.md](HOSTING.md), "Backups of PC drives"). A drive on Fly has no
+Delete my drive, because nothing there would carry it out; its person asks
+you. Each of these is a POST that must come from `marbledrive.app` itself,
+like every other change at the door.
+
+### The admin routes
+
+They are behind `DOOR_ADMIN_TOKEN` like the rest of `/_door/*`. The Console
+and marble-host call them, and `tools/door.mjs` has `people`, `remove` and
+`revoke` for the first three.
+
+| Route | Does |
+|---|---|
+| `GET /_door/people` | `{ people: [...] }`: a row per account with a drive or an open invite, then one per open invite nobody has signed in with yet |
+| `POST /_door/drives/<name>/remove` `{ confirm: <name> }` | state `removing`, so the edge says "This drive has been removed", and every session of its owner ends. Answers `{ drive, sessions }`, or `{ drive, sessions: 0, already: true }` for a drive already ending |
+| `POST /_door/accounts/<id>/revoke` | ends every session of that account: `{ ok: true, count }` |
+| `POST /_door/events` `{ drive, kind, detail? }` | marble-host's reports, into the audit log under the drive's owner |
+| `POST /_door/drives/<name>/step` `{ state: 'removed' }` | marble-host's last word on a `removing` or `deleting` drive on the PC host. The record stays, as `removed`, so the name is never given out again |
+
+A row of `people`:
+
+```js
+{
+  account: { id, name, email, created, seen } | null,       // null: an invite nobody has signed in with
+  drive: { name, state, home, created } | null,
+  invite: { id, note, made, expires, used, study } | null,  // null: an account let in from a request
+  study: { cohort, consent: { version, at, choice } | null, withdrawn: at | null, deleteAsked: at | null },
+  timeline: { invited, signedIn, consented, named, ready, agentConnected, firstDocument, updated },
+}
+```
+
+Someone is in the study when `study.cohort` is `'study'`,
+`study.consent.choice` is `'given'` and `study.withdrawn` is null. Once a
+drive is made, `cohort` is the drive's, so a no or a drive made on Fly leaves
+it null. Before that it is the invite's, unless its person said no.
+`invite.used` is when this person spent the invite by naming a drive. Each
+timeline step is the time it first happened, read from the audit log, or null
+until it does. `consented` is the time of a yes, and `updated` is the last
+time marble-host moved the drive to a release. Your own account is not a
+row; `drives` lists your drives. No row carries an invite code, a session, a
+sign-in subject, or anything from inside a drive.
+
+The kinds marble-host may report are `agent-connected`, `first-document`,
+`drive-updated` and `drive-restarted`. The first two are logged once per
+drive, and a repeat answers `{ ok: true, already: true }`. `detail` is
+optional. It holds at most eight values, each a number, true, false, null, or
+one word of up to 80 characters with no spaces, such as a release or `claude`.
+Anything else is a 400, so a document's title or a prompt can't reach the
+log. `step` refuses anything but `removed` for a drive that is ending, with a
+409, so a maker half way through making one stops there.
+
+The audit log gains `consent-given`, `consent-declined`, `consent-withdrawn`,
+`study-delete-asked`, `drive-delete-asked`, `drive-remove-asked`,
+`drive-removed` and the four kinds marble-host reports.
+
 ## Day to day
 
 | To | Run |
 |---|---|
 | Invite someone to make a drive | `node tools/door.mjs invite --note "Ana"` |
+| Invite someone into the study | `node tools/door.mjs invite --study --note "Ana"` |
+| See everyone, their drive, the study and how far each got | `node tools/door.mjs people` |
 | See who asked for access, and let them in | `node tools/door.mjs requests`, then `approve <id>`, then tell them |
 | See every drive, and where a failed one stopped | `node tools/door.mjs drives` |
 | Stop a drive at the edge, or let it go | `node tools/door.mjs hold <name>`, `hold <name> --off` |
+| Take a drive away for good | `node tools/door.mjs remove <name> --confirm <name>` (its owner is signed out; on the PC host marble-host deletes it) |
+| Sign someone out everywhere | `node tools/door.mjs revoke <account id>` (a drive they have open keeps working until its pass is an hour old; hold or remove it to stop it at once) |
 | Read what happened | `node tools/door.mjs log [--account <id>]` |
 | Finish a drive whose making failed | on the door sprite, `tools/sprite-provision.sh --resume <name> --door <name> --account <id> --keys <file>` (the id is in `drives`), then `curl -X POST -H "Authorization: Bearer $DOOR_ADMIN_TOKEN" -d '{"state":"ready","url":"<sprite URL>"}' https://marbledrive.app/_door/drives/<name>/step`. Or remove it: `--remove <name> --door <name>` |
 
@@ -434,6 +547,7 @@ deploy. New drives are made on Fly again; drives already on the PC stay there.
 | Worker var | `PC_HOST_URL` | the PC host's router, through its tunnel (`https://pc-host.marbledrive.app`) |
 | Worker secret | `PC_HOST_KEY` | the key the Worker adds to every request it sends the PC host: `HOST_KEY` in the PC's `host.env`. Without it nothing is sent there |
 | Worker secret | `ALERT_NTFY_URL` | optional: the ntfy topic the Worker's check posts to when the PC isn't answering |
+| Worker var | `CONSENT_VERSION` | the version of the consent form in `CONSENT_FORM` (`worker/src/door/pages.js`): letters, digits, dots, hyphens and underscores. Unset, or with the placeholder still in `CONSENT_FORM`, the study's consent screen says it isn't ready and no study drive is made ("The study") |
 | Worker cron | `*/5 * * * *` | that check, `[triggers]` in `wrangler.toml`; it asks nothing until `PC_HOST_URL` and `PC_HOST_KEY` are set |
 | PC `host.env` | `HOST_KEY` | the router's key, the same value as the Worker's `PC_HOST_KEY`; `node tools/pc-host.mjs init` makes it |
 | PC `host.env` | `HOST_ADMIN_TOKEN` | the bearer for marble-host's admin API, for the Console and `tools/pc-host.mjs` |

@@ -3,7 +3,9 @@
 // nothing on its own, so a test can look at every redirect.
 import { route } from '../../worker/src/router.js';
 
-export function browser(env, { fetchImpl, now = () => Date.now(), ip = '198.51.100.7', userAgent = 'Test/1.0' } = {}) {
+// `options` go to the router as they are: `consentForm`, for a study's consent
+// screen in place of the placeholder in pages.js.
+export function browser(env, { fetchImpl, now = () => Date.now(), ip = '198.51.100.7', userAgent = 'Test/1.0', options = {} } = {}) {
   const jars = new Map(); // host -> Map(name -> value)
   const jar = (host) => {
     if (!jars.has(host)) jars.set(host, new Map());
@@ -35,7 +37,7 @@ export function browser(env, { fetchImpl, now = () => Date.now(), ip = '198.51.1
       },
       body,
     });
-    const res = await route(req, env, { fetchImpl, now: now() });
+    const res = await route(req, env, { ...options, fetchImpl, now: now() });
     keep(url.hostname, res);
     return res;
   }

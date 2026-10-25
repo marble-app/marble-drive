@@ -38,6 +38,32 @@ export const SPARE_SPRITE = /^d-spare-[0-9a-f]{6,16}$/;
 // A record with no `home` is on Fly, as every drive was before.
 export const PCHOST = 'pchost';
 const HOMES = new Set(['fly', PCHOST]);
+// The probe study (docs/ACCOUNTS.md, "The study"). An invite can carry the
+// cohort `study`; its person answers the consent screen before naming a
+// drive, and a drive made on the PC host after a yes carries the cohort too,
+// which is what marble-host turns the study's settings on by. A drive on Fly
+// carries none, because the study runs only on the PC.
+export const STUDY = 'study';
+const CHOICES = new Set(['given', 'declined']);
+// A consent form's version reaches a drive's settings as
+// MARBLE_CONSENT=<version>@<at>, so it is a short token: no @, space or quote.
+export const CONSENT_VERSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+// How a drive ends: `removing` when Bryan removes it, `deleting` when its
+// owner asks, then `removed` once marble-host has taken it off the PC. The
+// record stays, so the name is never given out again and an old link never
+// opens a stranger's drive. The edge answers all three itself (router.js).
+export const GONE = new Set(['removing', 'deleting', 'removed']);
+// What marble-host tells the door about a drive (POST /_door/events), for the
+// sign-up timeline and the Console's Activity view. The first two happen
+// once, so a second report of either is not logged again.
+export const EVENTS = new Set(['agent-connected', 'first-document', 'drive-updated', 'drive-restarted']);
+const ONCE = new Set(['agent-connected', 'first-document']);
+// An event's detail is a few states and counts (a release, a provider, a
+// number), never what someone wrote: a word with no spaces, a number, or
+// true/false, so a document's title or a prompt can't ride along.
+const DETAIL_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
+const DETAIL_WORD = /^[A-Za-z0-9._:@/+-]{0,80}$/;
+const DETAIL_MAX = 8;
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -61,6 +87,25 @@ function creditDollars(value) {
   if (!Number.isFinite(n) || n < 0 || n > MAX_CREDIT_USD) refuse(400, `Credit is a number of dollars from 0 to ${MAX_CREDIT_USD}.`);
   return Math.round(n * 100) / 100;
 }
+
+/** An event's detail as it is logged, or a refusal that says what fits. */
+function eventDetail(detail) {
+  if (detail === undefined || detail === null) return {};
+  if (typeof detail !== 'object' || Array.isArray(detail)) refuse(400, 'detail is an object of a few short values.');
+  const entries = Object.entries(detail);
+  if (entries.length > DETAIL_MAX) refuse(400, `detail has at most ${DETAIL_MAX} values.`);
+  const out = {};
+  for (const [key, value] of entries) {
+    if (!DETAIL_KEY.test(key)) refuse(400, 'Each key in detail is a short name: letters, digits, - and _.');
+    const fits = value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && DETAIL_WORD.test(value));
+    if (!fits) refuse(400, `detail.${key} is a number, true or false, or one word with no spaces (a release, a provider, a state).`);
+    out[key] = value;
+  }
+  return out;
+}
+
+/** Why a drive that is ending refuses anything else. */
+const goneWhy = (d) => (d.state === 'removed' ? `${d.name} has been removed.` : d.state === 'deleting' ? `${d.name} is being deleted.` : `${d.name} is being removed.`);
 
 export class DirectoryCore {
   constructor(storage, { now = () => Date.now(), maxDrives = DEFAULT_MAX_DRIVES } = {}) {
@@ -104,9 +149,11 @@ export class DirectoryCore {
     return { ok: true, hash, invite };
   }
 
-  async makeInvite({ note = '', uses = 1, days = 14, drive = null, sprite = null, owner = false, credit = null } = {}) {
+  async makeInvite({ note = '', uses = 1, days = 14, drive = null, sprite = null, owner = false, credit = null, study = false } = {}) {
     return this.exclusive(async () => {
       if (owner && (await this.storage.get('meta:owner'))) refuse(409, 'There is already an owner.');
+      // The study asks before a drive is named, so its invite makes a new one.
+      if (study === true && (owner || drive)) refuse(400, 'A study invite makes a new drive: it can’t hand one over or make the owner.');
       if (drive) {
         const why = nameProblem(drive, { claiming: true });
         if (why) refuse(400, why);
@@ -130,9 +177,11 @@ export class DirectoryCore {
         // The starter credit a drive made with this invite gets, in dollars;
         // null is the default (DEFAULT_CREDIT_USD).
         credit: cap,
+        // `study` for the probe study's invites, null for every other.
+        cohort: study === true ? STUDY : null,
       };
       await this.storage.put(`invite:${hash}`, invite);
-      await this.audit('invite-made', { detail: { invite: invite.id, uses: invite.uses, drive: invite.drive, owner: invite.owner } });
+      await this.audit('invite-made', { detail: { invite: invite.id, uses: invite.uses, drive: invite.drive, owner: invite.owner, cohort: invite.cohort } });
       return { code, invite };
     });
   }
@@ -155,10 +204,20 @@ export class DirectoryCore {
       drives: acct.drives ?? [],
       methods: (acct.methods ?? []).map((m) => ({ provider: m.provider, email: m.email })),
       created: acct.created,
+      study: this.studyView(acct),
     };
   }
 
-  /** What this account may do next, for the apex to route on. */
+  /** The account's answer on the consent screen and what it did after:
+   *  `{ consent: { version, at, choice } | null, withdrawn, deleteAsked }`. */
+  studyView(acct) {
+    const s = acct?.study ?? {};
+    return { consent: s.consent ?? null, withdrawn: s.withdrawn ?? null, deleteAsked: s.deleteAsked ?? null };
+  }
+
+  /** What this account may do next, for the apex to route on. `studyInvite`
+   *  is a live study invite with a drive still to make, and `askConsent` that
+   *  its consent screen has not been answered: until it is, no drive. */
   async standing(acct) {
     const held = acct.held ? await this.inviteByHash(acct.held) : null;
     const claim = held?.ok && held.invite.drive ? held.invite.drive : null;
@@ -166,7 +225,8 @@ export class DirectoryCore {
       acct.state === 'active' &&
       (acct.role === 'owner' || (acct.drives ?? []).length === 0) &&
       Boolean(acct.role === 'owner' || acct.approved || (held?.ok && !held.invite.drive));
-    return { claim, mayMake };
+    const studyInvite = Boolean(mayMake && held?.ok && held.invite.cohort === STUDY);
+    return { claim, mayMake, studyInvite, askConsent: studyInvite && !acct.study?.consent };
   }
 
   async accountView(id) {
@@ -185,11 +245,20 @@ export class DirectoryCore {
         if (!acct) refuse(500, 'that sign-in names an account that is gone');
         acct.seen = this.iso();
         // A signed-in person who opens another invite keeps it for their next
-        // step: a claim invite for a drive, or a first drive.
-        if (invite && !acct.held) {
+        // step: a claim invite for a drive, or a first drive. One they held
+        // that has lapsed or been used up gives way to it, as Bryan's second
+        // invite to someone who let the first run out. An answer they gave
+        // its consent screen goes with it, since no drive was made from it:
+        // the new invite asks for itself.
+        const lapsed = acct.held ? !(await this.inviteByHash(acct.held)).ok : false;
+        if (invite && (!acct.held || lapsed)) {
           const inv = await this.inviteFor(invite);
           const hasRoom = acct.role === 'owner' || (acct.drives ?? []).length === 0;
-          if (inv.ok && !inv.invite.owner && (inv.invite.drive || hasRoom)) acct.held = inv.hash;
+          if (inv.ok && !inv.invite.owner && (inv.invite.drive || hasRoom)) {
+            if (lapsed && (acct.drives ?? []).length === 0) delete acct.study;
+            acct.held = inv.hash;
+            acct.invite = inv.invite.id;
+          }
         }
         await this.storage.put(`acct:${acct.id}`, acct);
         await this.audit('signed-in', { account: acct.id, ip, detail: { provider } });
@@ -216,6 +285,9 @@ export class DirectoryCore {
         drives: [],
         methods: [{ provider, subject, email: str(email), added: this.iso() }],
         held: inv.ok && !owner ? inv.hash : null,
+        // The invite it came in on, by its id (never its code), for the
+        // people list once the invite is spent and no longer held.
+        invite: inv.ok ? inv.invite.id : null,
         approved: !inv.ok && request?.state === 'approved',
       };
       await this.storage.put(`acct:${id}`, acct);
@@ -311,18 +383,24 @@ export class DirectoryCore {
       if (acct.role !== 'owner' && (acct.drives ?? []).length >= 1) refuse(409, 'You already have a drive.');
       const may = acct.role === 'owner' || acct.approved || held?.ok;
       if (!may) refuse(403, held ? (held.why === 'expired' ? 'Your invite has expired.' : 'Your invite has been used.') : 'You need an invite to make a drive.');
+      // A study invite's consent screen comes first, whichever way the drive
+      // is asked for, so no study drive is ever made without an answer.
+      const study = held?.ok && held.invite.cohort === STUDY;
+      if (study && !acct.study?.consent) refuse(409, 'Say whether you’ll take part in the study first.', { consent: 'ask' });
       if (await this.storage.get(`drive:${name}`)) refuse(409, `${name} is taken.`);
       if ((await this.liveDriveCount()) >= this.maxDrives) refuse(503, 'Bryan has made as many drives as he can for now. Your invite still works; try again later.');
 
       // On the PC host marble-host makes it: no sprite, no spare, and no
       // starter credit whatever the invite says, because Anthropic's terms
-      // don't let Bryan pay for the Claude his drives' people use.
+      // don't let Bryan pay for the Claude his drives' people use. It is in
+      // the study only when its person said yes; a no makes it all the same.
       if (home === PCHOST) {
-        const drive = { name, owner: acct.id, home: PCHOST, homes: { pchost: true }, sprite: null, state: 'queued', created: this.iso(), steps: {}, credit: 0 };
+        const cohort = study && acct.study.consent.choice === 'given' ? STUDY : null;
+        const drive = { name, owner: acct.id, home: PCHOST, homes: { pchost: true }, sprite: null, state: 'queued', created: this.iso(), steps: {}, credit: 0, cohort };
         await this.storage.put(`drive:${name}`, drive);
         if (held?.ok) await this.storage.put(`invite:${held.hash}`, { ...held.invite, uses: held.invite.uses - 1 });
         await this.storage.put(`acct:${acct.id}`, { ...acct, held: null, approved: false, drives: [...(acct.drives ?? []), name] });
-        await this.audit('drive-asked', { account: acct.id, detail: { drive: name, invite: held?.ok ? held.invite.id : null, spare: null, home: PCHOST } });
+        await this.audit('drive-asked', { account: acct.id, detail: { drive: name, invite: held?.ok ? held.invite.id : null, spare: null, home: PCHOST, cohort } });
         return { drive: this.driveView(drive) };
       }
 
@@ -346,7 +424,7 @@ export class DirectoryCore {
 
   driveView(d) {
     if (!d) return null;
-    return { name: d.name, owner: d.owner, home: d.home ?? 'fly', homes: d.homes ?? {}, sprite: d.sprite ?? null, spare: d.spare ?? null, state: d.state, steps: d.steps ?? {}, failed: d.failed ?? null, created: d.created };
+    return { name: d.name, owner: d.owner, home: d.home ?? 'fly', homes: d.homes ?? {}, sprite: d.sprite ?? null, spare: d.spare ?? null, state: d.state, steps: d.steps ?? {}, failed: d.failed ?? null, created: d.created, cohort: d.cohort ?? null };
   }
 
   async drive(name) {
@@ -371,6 +449,20 @@ export class DirectoryCore {
     return this.exclusive(async () => {
       const d = await this.storage.get(`drive:${name}`);
       if (!d) refuse(404, 'No such drive.');
+      // marble-host's last word on a drive that was being removed or deleted:
+      // it is off the PC. The record stays, as removed, so the name is never
+      // given out again. Said twice, the second is a no-op.
+      if (state === 'removed') {
+        if (d.home !== PCHOST) refuse(409, `${name} is not on the PC host.`);
+        if (d.state === 'removed') return { ok: true, already: true };
+        if (d.state !== 'removing' && d.state !== 'deleting') refuse(409, `${name} isn’t being removed or deleted.`);
+        await this.storage.put(`drive:${name}`, { ...d, state: 'removed', removed: this.iso() });
+        await this.audit('drive-removed', { account: d.owner, detail: { drive: name, home: PCHOST, was: d.state } });
+        return { ok: true };
+      }
+      // Nothing brings an ending drive back: a step from a maker that was
+      // half way through it is refused, and the maker stops there.
+      if (GONE.has(d.state)) refuse(409, goneWhy(d));
       // A drive on the PC host is ready when marble-host says so. It has no
       // sprite URL: the router sends it to PC_HOST_URL under its own name.
       if (state === 'ready' && (home === PCHOST || d.home === PCHOST)) {
@@ -414,6 +506,7 @@ export class DirectoryCore {
     return this.exclusive(async () => {
       const d = await this.storage.get(`drive:${name}`);
       if (!d) refuse(404, 'No such drive.');
+      if (GONE.has(d.state)) refuse(409, goneWhy(d));
       if (!d.spare) refuse(409, `${name} was not given a spare.`);
       const { spare, ...rest } = d;
       await this.storage.put(`drive:${name}`, { ...rest, sprite: `d-${name}`, homes: {}, state: 'queued', steps: {}, failed: null });
@@ -427,11 +520,223 @@ export class DirectoryCore {
     return this.exclusive(async () => {
       const d = await this.storage.get(`drive:${name}`);
       if (!d) refuse(404, 'No such drive.');
+      // A hold remembers the state to go back to, and an ending drive has none.
+      if (GONE.has(d.state)) refuse(409, goneWhy(d));
       const next = on ? { ...d, state: 'held', before: d.state === 'held' ? d.before : d.state } : { ...d, state: d.before ?? 'ready', before: undefined };
       await this.storage.put(`drive:${name}`, next);
       await this.audit(on ? 'drive-held' : 'drive-released', { account: d.owner, detail: { drive: name } });
       return { drive: this.driveView(next) };
     });
+  }
+
+  // ------------------------------------------------------------- ending a drive
+
+  /** Bryan takes a drive away, its name typed as `confirm`. From now on the
+   *  edge answers "This drive has been removed" (within the half minute a
+   *  router keeps a record), every session of its owner ends, and
+   *  marble-host takes it off the PC and says `removed` through step. A drive
+   *  on Fly stays `removing`: its sprite is removed by hand. */
+  async remove(name, { confirm } = {}) {
+    return this.exclusive(async () => {
+      const d = await this.storage.get(`drive:${name}`);
+      if (!d) refuse(404, 'No such drive.');
+      if (confirm !== name) refuse(400, `To remove ${name}, confirm is its name.`);
+      if (GONE.has(d.state)) return { drive: this.driveView(d), sessions: 0, already: true };
+      const next = { ...d, state: 'removing' };
+      await this.storage.put(`drive:${name}`, next);
+      await this.audit('drive-remove-asked', { account: d.owner ?? null, detail: { drive: name, home: d.home ?? 'fly' } });
+      const sessions = d.owner ? (await this.revokeAll(d.owner)).count : 0;
+      return { drive: this.driveView(next), sessions };
+    });
+  }
+
+  /** Its owner asks for a drive to be deleted, from the account page with its
+   *  name typed: `deleting` until marble-host has deleted it from the PC. Only
+   *  a drive on the PC host, because on Fly nothing would carry it out. */
+  async askDelete(name, { account, confirm } = {}) {
+    return this.exclusive(async () => {
+      const d = await this.storage.get(`drive:${name}`);
+      // Someone else's drive reads the same as no drive at all.
+      if (!d || !account || d.owner !== account) refuse(404, 'No such drive.');
+      if (confirm !== name) refuse(400, `Type ${name} to delete it.`);
+      if (d.home !== PCHOST) refuse(409, 'Bryan deletes this drive for you. Ask him.');
+      if (GONE.has(d.state)) return { drive: this.driveView(d), already: true };
+      const next = { ...d, state: 'deleting' };
+      await this.storage.put(`drive:${name}`, next);
+      await this.audit('drive-delete-asked', { account, detail: { drive: name } });
+      return { drive: this.driveView(next) };
+    });
+  }
+
+  // ------------------------------------------------------------- the study
+
+  /** The account's own drive in the study, or null. */
+  async studyDrive(acct) {
+    for (const name of acct.drives ?? []) {
+      const d = await this.storage.get(`drive:${name}`);
+      if (d?.cohort === STUDY && d.owner === acct.id) return d;
+    }
+    return null;
+  }
+
+  /** The consent screen's answer, `{ version, at, choice }`, kept on the
+   *  account. Only while it holds a study invite with its drive still to make;
+   *  answered twice (two tabs), the later answer is the one kept. */
+  async consent({ account, version, choice } = {}) {
+    if (typeof version !== 'string' || !CONSENT_VERSION_RE.test(version)) refuse(400, 'version is the consent form’s version.');
+    if (!CHOICES.has(choice)) refuse(400, 'choice is given or declined.');
+    return this.exclusive(async () => {
+      const acct = account ? await this.storage.get(`acct:${account}`) : null;
+      if (!acct) refuse(404, 'No such account.');
+      if (!(await this.standing(acct)).studyInvite) refuse(409, 'There’s nothing to answer: your invite isn’t for the study, or your drive is already made.');
+      const next = { ...acct, study: { consent: { version, at: this.iso(), choice }, withdrawn: null, deleteAsked: null } };
+      await this.storage.put(`acct:${acct.id}`, next);
+      await this.audit(choice === 'given' ? 'consent-given' : 'consent-declined', { account: acct.id, detail: { version, invite: acct.invite ?? null } });
+      return { study: this.studyView(next) };
+    });
+  }
+
+  /** Leaving the study, from the account page. marble-host takes the study's
+   *  settings off the drive at its next look; what was collected stays until
+   *  its person asks for that too (askStudyDelete), a separate choice. */
+  async leaveStudy({ account } = {}) {
+    return this.exclusive(async () => {
+      const acct = account ? await this.storage.get(`acct:${account}`) : null;
+      if (!acct) refuse(404, 'No such account.');
+      const drive = await this.studyDrive(acct);
+      if (!drive || acct.study?.consent?.choice !== 'given') refuse(409, 'You aren’t taking part in the study.');
+      if (acct.study.withdrawn) return { study: this.studyView(acct), already: true };
+      const next = { ...acct, study: { ...acct.study, withdrawn: this.iso() } };
+      await this.storage.put(`acct:${acct.id}`, next);
+      await this.audit('consent-withdrawn', { account: acct.id, detail: { drive: drive.name, version: acct.study.consent.version } });
+      return { study: this.studyView(next) };
+    });
+  }
+
+  /** After leaving, what was collected is to be deleted. The door keeps the
+   *  ask and when it came; Bryan carries it out. */
+  async askStudyDelete({ account } = {}) {
+    return this.exclusive(async () => {
+      const acct = account ? await this.storage.get(`acct:${account}`) : null;
+      if (!acct) refuse(404, 'No such account.');
+      if (!acct.study?.withdrawn) refuse(409, 'Leave the study first.');
+      if (acct.study.deleteAsked) return { study: this.studyView(acct), already: true };
+      const next = { ...acct, study: { ...acct.study, deleteAsked: this.iso() } };
+      await this.storage.put(`acct:${acct.id}`, next);
+      await this.audit('study-delete-asked', { account: acct.id, detail: { drive: (await this.studyDrive(acct))?.name ?? null } });
+      return { study: this.studyView(next) };
+    });
+  }
+
+  // ------------------------------------------------------------- people
+
+  /** Bryan ends every session of an account. */
+  async revokeAccount(id) {
+    return this.exclusive(async () => {
+      if (!(await this.storage.get(`acct:${id}`))) refuse(404, 'No such account.');
+      return this.revokeAll(id);
+    });
+  }
+
+  /** marble-host's report on a drive, into the audit log under the drive's
+   *  owner. `agent-connected` and `first-document` are logged the first time
+   *  only, so a report repeated after marble-host restarts adds nothing. */
+  async event({ drive, kind, detail } = {}) {
+    if (!EVENTS.has(kind)) refuse(400, `kind is one of ${[...EVENTS].join(', ')}.`);
+    if (typeof drive !== 'string' || !/^[a-z0-9-]{1,40}$/.test(drive)) refuse(400, 'drive is a drive’s name.');
+    const extra = eventDetail(detail);
+    return this.exclusive(async () => {
+      const d = await this.storage.get(`drive:${drive}`);
+      if (!d) refuse(404, 'No such drive.');
+      if (ONCE.has(kind)) {
+        if (d.once?.[kind]) return { ok: true, already: true };
+        await this.storage.put(`drive:${drive}`, { ...d, once: { ...(d.once ?? {}), [kind]: this.iso() } });
+      }
+      await this.audit(kind, { account: d.owner ?? null, detail: { ...extra, drive } });
+      return { ok: true };
+    });
+  }
+
+  /** Everyone the door hosts or has invited, for the Console's People view
+   *  and marble-host's look every five minutes: a row per account with a
+   *  drive or an open invite, then one per open invite nobody has signed in
+   *  with yet (`account: null`). Bryan's own account is not a row; his drives
+   *  are in listDrives. Never an invite code, a session, a sign-in subject,
+   *  or anything from inside a drive. */
+  async people() {
+    const now = this.now();
+    const invites = [...(await this.storage.list({ prefix: 'invite:' }))].map(([key, inv]) => ({ ...inv, hash: key.slice('invite:'.length) }));
+    const byId = new Map(invites.map((i) => [i.id, i]));
+    const byHash = new Map(invites.map((i) => [i.hash, i]));
+    const open = (i) => Boolean(i) && !i.owner && !i.off && i.uses > 0 && Date.parse(i.expires) > now;
+    // The audit log, oldest first, each account's own lines together.
+    const lines = [...(await this.storage.list({ prefix: 'audit:' })).values()].sort((a, b) => a.at.localeCompare(b.at));
+    const byAccount = new Map();
+    for (const line of lines) {
+      if (!line.account) continue;
+      if (!byAccount.has(line.account)) byAccount.set(line.account, []);
+      byAccount.get(line.account).push(line);
+    }
+
+    const rows = [];
+    const signedInWith = new Set();
+    for (const acct of (await this.storage.list({ prefix: 'acct:' })).values()) {
+      if (acct.role === 'owner') continue;
+      const log = byAccount.get(acct.id) ?? [];
+      // Older accounts kept no invite id; their account-made line has it.
+      const inviteId = acct.invite ?? log.find((l) => l.kind === 'account-made')?.detail?.invite ?? null;
+      const held = acct.held ? byHash.get(acct.held) ?? null : null;
+      const invite = held ?? (inviteId ? byId.get(inviteId) ?? null : null);
+      if (invite) signedInWith.add(invite.id);
+      // A member has one drive at most.
+      const name = (acct.drives ?? [])[0];
+      const d = name ? await this.storage.get(`drive:${name}`) : null;
+      if (!d && !open(held)) continue;
+      rows.push(this.personRow({ acct, d, invite, log }));
+    }
+    for (const invite of invites) {
+      if (open(invite) && !signedInWith.has(invite.id)) rows.push(this.personRow({ invite }));
+    }
+    const when = (r) => r.timeline.invited ?? r.timeline.signedIn ?? '';
+    return rows.sort((a, b) => when(a).localeCompare(when(b)));
+  }
+
+  /** One row of people(). Each step of the timeline is the first time it
+   *  happened, except `updated`, the last release the drive moved to. */
+  personRow({ acct = null, d = null, invite = null, log = [] }) {
+    const first = (pred) => log.find(pred)?.at ?? null;
+    const last = (pred) => log.findLast(pred)?.at ?? null;
+    const ofDrive = (...kinds) => (l) => kinds.includes(l.kind) && l.detail?.drive === d?.name;
+    const study = this.studyView(acct);
+    // Before a drive is made, an invite to the study is the cohort unless its
+    // person said no; after, the drive says.
+    const cohort = d ? d.cohort ?? null : invite?.cohort === STUDY && study.consent?.choice !== 'declined' ? STUDY : null;
+    return {
+      account: acct ? { id: acct.id, name: acct.name, email: acct.email, created: acct.created, seen: acct.seen ?? null } : null,
+      drive: d ? { name: d.name, state: d.state, home: d.home ?? 'fly', created: d.created } : null,
+      invite: invite
+        ? {
+            id: invite.id,
+            note: invite.note,
+            made: invite.made,
+            expires: invite.expires,
+            // When this person spent it, by naming a drive; null until then.
+            used: acct ? first((l) => (l.kind === 'drive-asked' || l.kind === 'drive-claimed') && l.detail?.invite === invite.id) : null,
+            study: invite.cohort === STUDY,
+          }
+        : null,
+      study: { cohort, ...study },
+      timeline: {
+        invited: invite?.made ?? null,
+        signedIn: acct ? first((l) => l.kind === 'account-made') ?? acct.created : null,
+        consented: study.consent?.choice === 'given' ? study.consent.at : null,
+        named: d ? first(ofDrive('drive-asked', 'drive-claimed')) ?? d.created : null,
+        ready: d ? first(ofDrive('drive-ready', 'drive-claimed')) : null,
+        agentConnected: d ? first(ofDrive('agent-connected')) ?? d.once?.['agent-connected'] ?? null : null,
+        firstDocument: d ? first(ofDrive('first-document')) ?? d.once?.['first-document'] ?? null : null,
+        updated: d ? last(ofDrive('drive-updated')) : null,
+      },
+    };
   }
 
   // ------------------------------------------------------------- credit
@@ -743,7 +1048,7 @@ export class Directory {
       }
       if (method === 'POST' && path === '/invite/peek') {
         const r = await c.inviteFor((await body(request)).code);
-        return json(200, { ok: r.ok, why: r.ok ? null : r.why, drive: r.invite?.drive ?? null, owner: Boolean(r.invite?.owner) });
+        return json(200, { ok: r.ok, why: r.ok ? null : r.why, drive: r.invite?.drive ?? null, owner: Boolean(r.invite?.owner), study: r.invite?.cohort === STUDY });
       }
       if (method === 'GET' && path === '/invites') return json(200, { invites: await c.listInvites() });
       if (method === 'GET' && path === '/requests') return json(200, { requests: await c.listRequests() });
@@ -757,6 +1062,15 @@ export class Directory {
       if ((m = /^\/drives\/([a-z0-9-]{1,40})\/step$/.exec(path)) && method === 'POST') return json(200, await c.step(m[1], await body(request)));
       if ((m = /^\/drives\/([a-z0-9-]{1,40})\/hold$/.exec(path)) && method === 'POST') return json(200, await c.hold(m[1], (await body(request)).on !== false));
       if ((m = /^\/drives\/([a-z0-9-]{1,40})\/unspare$/.exec(path)) && method === 'POST') return json(200, await c.unspare(m[1]));
+      if ((m = /^\/drives\/([a-z0-9-]{1,40})\/remove$/.exec(path)) && method === 'POST') return json(200, await c.remove(m[1], await body(request)));
+      // The drive's owner, from the account page; never behind /_door.
+      if ((m = /^\/drives\/([a-z0-9-]{1,40})\/delete$/.exec(path)) && method === 'POST') return json(200, await c.askDelete(m[1], await body(request)));
+      if (method === 'GET' && path === '/people') return json(200, { people: await c.people() });
+      if (method === 'POST' && path === '/events') return json(200, await c.event(await body(request)));
+      // The consent screen and the account page's study choices; never behind /_door.
+      if (method === 'POST' && path === '/consent') return json(200, await c.consent(await body(request)));
+      if (method === 'POST' && path === '/study/leave') return json(200, await c.leaveStudy(await body(request)));
+      if (method === 'POST' && path === '/study/delete') return json(200, await c.askStudyDelete(await body(request)));
       if (method === 'GET' && path === '/spares') return json(200, await c.spares());
       if (method === 'POST' && path === '/spares') return json(200, await c.spareStep(await body(request)));
       if ((m = /^\/spares\/(d-spare-[0-9a-f]{6,16})$/.exec(path)) && method === 'DELETE') return json(200, await c.forgetSpare(m[1]));
@@ -765,6 +1079,7 @@ export class Directory {
         return a ? json(200, a) : json(404, { why: 'No such account.' });
       }
       if ((m = /^\/accounts\/([0-9a-f]{16})\/sessions$/.exec(path)) && method === 'DELETE') return json(200, await c.revokeAll(m[1]));
+      if ((m = /^\/accounts\/([0-9a-f]{16})\/revoke$/.exec(path)) && method === 'POST') return json(200, await c.revokeAccount(m[1]));
       if (method === 'POST' && path === '/session') return json(200, await c.openSession(await body(request)));
       if ((m = /^\/session\/([0-9a-f]{64})$/.exec(path))) {
         if (method === 'GET') return json(200, await c.session(m[1]));
