@@ -1215,9 +1215,9 @@ and no `Origin` passes the origin check.
 logs and keeps the answer five minutes:
 
 ```json
-{"ok":true,"at":"2026-10-25T17:00:03.000Z","days":["2026-10-24","2026-10-25"],
- "prompts":9,"builds":1,"marks":5,"buttons":4,"conversations":4,
- "singlePromptConversations":1,"promptsWhileAnotherWorked":5}
+{"ok":true,"at":"2026-10-25T17:00:03.000Z","days":2,"prompts":9,"builds":1,
+ "marks":5,"buttons":4,"conversations":4,"singlePromptConversations":1,
+ "promptsWhileAnotherWorked":5}
 ```
 
 A prompt is a `user` event in `.marble/agents/*/events.jsonl` that the person
@@ -1233,11 +1233,11 @@ ran. `buttons` are presses rather than words:
 - Build mode's resume of a paused build
 - an action a selection drafts: "Try 3 variations of", "Automate", "Make … alive", the merge
 
-Every other prompt was typed. `days` are the dates, in `MARBLE_DRIVE_DAY_TZ`
-(America/Los_Angeles unless set), that hold a prompt. A turn runs from its
-`turn.started` to its end, so `promptsWhileAnotherWorked` counts prompts sent
-while a turn of another conversation ran. The answer holds numbers and dates
-only, never a word anyone wrote.
+Every other prompt was typed. `days` is how many days, in
+`MARBLE_DRIVE_DAY_TZ` (America/Los_Angeles unless set), hold a prompt. A turn
+runs from its `turn.started` to its end, so `promptsWhileAnotherWorked`
+counts prompts sent while a turn of another conversation ran. The answer
+holds numbers only, never a word anyone wrote.
 
 `POST /health/logout` (`server/health-logout.js`) runs what Settings'
 Disconnect runs, `claude auth logout` and `codex logout`, under the drive's

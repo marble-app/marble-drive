@@ -117,7 +117,7 @@ Leave cells someone typed in alone." data-marble-on="press">Fill</button></body>
 }
 
 const EXPECTED = {
-  days: ['2026-10-24', '2026-10-25'],
+  days: 2,
   prompts: 9,
   builds: 1,
   marks: 5,
@@ -138,17 +138,26 @@ test('the counts: every kind of prompt the person sent, and none they did not', 
   assert.equal(counts.at, new Date(DAY2 + 60 * MIN).toISOString());
   const { ok: _ok, at: _at, ...rest } = counts;
   assert.deepEqual(rest, EXPECTED);
-  // Numbers and days, never a word anyone wrote.
+  // Numbers only, never a word anyone wrote.
   const text = JSON.stringify(counts);
   for (const words of [...SECRETS, 'Continue', 'Shuffle', 'Authors']) assert.ok(!text.includes(words), `the counts hold "${words}"`);
-  // In UTC the second day is the 26th.
-  assert.deepEqual((await countStudy({ root, zone: 'UTC' })).days, ['2026-10-24', '2026-10-26']);
+});
+
+test('days are counted in the drive\'s own zone', async () => {
+  const root = await tmp('study-zone-');
+  // 16:00 and 20:00 on 25 October in Los Angeles: one day there, two in UTC.
+  await conversation(root, 'aaaaaaaaaaaa', [
+    { t: Date.UTC(2026, 9, 25, 23, 0, 0), type: 'user', turn: 'aaaaaaaaaaaa-t1', text: 'one' },
+    { t: Date.UTC(2026, 9, 26, 3, 0, 0), type: 'user', turn: 'aaaaaaaaaaaa-t2', text: 'two' },
+  ]);
+  assert.equal((await countStudy({ root, zone: 'America/Los_Angeles' })).days, 1);
+  assert.equal((await countStudy({ root, zone: 'UTC' })).days, 2);
 });
 
 test('a drive with no conversations counts nothing, and says so in numbers', async () => {
   const root = await tmp('study-empty-');
   assert.deepEqual({ ...(await countStudy({ root, now: () => 0 })), at: null }, {
-    ok: true, at: null, days: [], prompts: 0, builds: 0, marks: 0, buttons: 0, conversations: 0, singlePromptConversations: 0, promptsWhileAnotherWorked: 0,
+    ok: true, at: null, days: 0, prompts: 0, builds: 0, marks: 0, buttons: 0, conversations: 0, singlePromptConversations: 0, promptsWhileAnotherWorked: 0,
   });
 });
 

@@ -16,8 +16,8 @@
 //            mode's resume, and an action a selection drafts ("Try 3
 //            variations of …", "Automate …:", "Make … alive:", the merge)
 //
-// and every other prompt was typed. `days` are the days, in the drive's zone,
-// that hold a prompt. A turn runs from its `turn.started` to its end, or to
+// and every other prompt was typed. `days` is how many days, in the drive's
+// zone, hold a prompt. A turn runs from its `turn.started` to its end, or to
 // what came next in its conversation if it has none; a prompt sent while a
 // turn of another conversation ran was sent while another agent worked.
 
@@ -195,7 +195,7 @@ export async function countStudy({ root, zone = 'America/Los_Angeles', now = Dat
   return {
     ok: true,
     at: new Date(now()).toISOString(),
-    days: [...days].sort(),
+    days: days.size,
     prompts: prompts.length,
     builds,
     marks,
