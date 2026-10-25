@@ -5,7 +5,15 @@
 //   node tools/door.mjs invite [--note <who>] [--uses <n>] [--days <n>]   a link to make a drive
 //   node tools/door.mjs invite --drive <name> --sprite <sprite> [--note]   hand an existing drive over
 //   node tools/door.mjs invite --owner                                     the one bootstrap invite, for you
+//   node tools/door.mjs invite --study [--note <who>]                      a link into the probe study: its
+//                                                   person answers the consent screen before naming
 //   node tools/door.mjs invites                     what each invite is for, uses left (never the links)
+//   node tools/door.mjs people                      everyone with a drive or an open invite: their drive,
+//                                                   the study, and how far they got from invite to first document
+//   node tools/door.mjs remove <name> --confirm <name>
+//                                                   take a drive away: the edge says it was removed, its
+//                                                   owner is signed out, and marble-host deletes it from the PC
+//   node tools/door.mjs revoke <account id>         sign someone out everywhere
 //   node tools/door.mjs requests                    people who asked for access
 //   node tools/door.mjs approve <request id>        let one of them make a drive at their next sign-in
 //   node tools/door.mjs drives                      every drive, its state and owner
@@ -45,7 +53,7 @@ function parseArgs(argv) {
     }
     const at = a.indexOf('=');
     if (at > 0) flags[a.slice(2, at)] = a.slice(at + 1);
-    else if (i + 1 < argv.length && !argv[i + 1].startsWith('--') && !['owner', 'off'].includes(a.slice(2))) flags[a.slice(2)] = argv[++i];
+    else if (i + 1 < argv.length && !argv[i + 1].startsWith('--') && !['owner', 'off', 'study'].includes(a.slice(2))) flags[a.slice(2)] = argv[++i];
     else flags[a.slice(2)] = true;
   }
   return { flags, args };
@@ -69,6 +77,19 @@ export function readSettings(file) {
 }
 
 const day = (iso) => (iso ? iso.slice(0, 10) : '');
+
+/** Where someone is with the study, in a few words for a column. */
+function studyWords(p) {
+  const s = p.study ?? {};
+  if (s.withdrawn) return `left ${day(s.withdrawn)}${s.deleteAsked ? ', delete asked' : ''}`;
+  if (s.consent?.choice === 'declined') return 'said no';
+  // A yes with a drive outside the cohort: made on Fly, where the study doesn't run.
+  if (s.consent?.choice === 'given') return s.cohort === 'study' ? `in, form ${s.consent.version}` : 'said yes, drive on Fly';
+  return p.invite?.study ? 'invited' : '-';
+}
+
+/** What someone's drive is doing, or how far they got without one. */
+const stateWords = (p) => (p.drive ? (p.drive.home === 'pchost' ? p.drive.state : `${p.drive.state} on Fly`) : p.account ? 'no drive yet' : 'link not opened');
 const pad = (rows) => {
   if (!rows.length) return [];
   const widths = rows[0].map((_, i) => Math.max(...rows.map((r) => String(r[i] ?? '').length)));
@@ -79,7 +100,7 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
   const { flags, args } = parseArgs(argv);
   const [command, ...rest] = args;
   if (!command || flags.help) {
-    out('node tools/door.mjs invite | invites | requests | approve <id> | drives | hold <name> [--off] | log [--account <id>] | credit [mint|cap|reset|off <name>] | spares | forget-spare <sprite>');
+    out('node tools/door.mjs invite [--study] | invites | people | requests | approve <id> | drives | hold <name> [--off] | remove <name> --confirm <name> | revoke <account> | log [--account <id>] | credit [mint|cap|reset|off <name>] | spares | forget-spare <sprite>');
     return command ? 0 : 2;
   }
   let settings;
@@ -123,17 +144,55 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
           ...(flags.drive ? { drive: String(flags.drive), sprite: String(flags.sprite) } : {}),
           ...(flags.owner ? { owner: true } : {}),
           ...(flags.credit !== undefined ? { credit: Number(flags.credit) } : {}),
+          ...(flags.study ? { study: true } : {}),
         };
         const { link, invite } = await call('POST', '/invite', body);
         const what = invite.owner ? 'The owner’s invite' : invite.drive ? `Hands over ${invite.drive}` : `${invite.uses} use${invite.uses === 1 ? '' : 's'}`;
-        out(`${what}${invite.note ? `, for ${invite.note}` : ''}, until ${day(invite.expires)}. Send this link; it is not shown again:`);
+        out(`${what}${invite.cohort === 'study' ? ', in the study' : ''}${invite.note ? `, for ${invite.note}` : ''}, until ${day(invite.expires)}. Send this link; it is not shown again:`);
         out(link);
         return 0;
       }
       case 'invites': {
         const { invites } = await call('GET', '/invites');
         if (!invites.length) return out('No invites yet.'), 0;
-        for (const line of pad([['id', 'note', 'uses left', 'until', 'for'], ...invites.map((i) => [i.id, i.note, i.uses, day(i.expires), i.owner ? 'the owner' : i.drive ? `drive ${i.drive}` : 'a new drive'])])) out(line);
+        for (const line of pad([['id', 'note', 'uses left', 'until', 'for'], ...invites.map((i) => [i.id, i.note, i.uses, day(i.expires), i.owner ? 'the owner' : i.drive ? `drive ${i.drive}` : i.cohort === 'study' ? 'a new drive, in the study' : 'a new drive'])])) out(line);
+        return 0;
+      }
+      case 'people': {
+        const { people } = await call('GET', '/people');
+        if (!people.length) return out('Nobody yet. node tools/door.mjs invite makes a link.'), 0;
+        const header = ['who', 'account', 'drive', 'state', 'study', 'invited', 'signed in', 'ready', 'agent', 'first doc'];
+        const rows = people.map((p) => {
+          const t = p.timeline ?? {};
+          return [p.account?.name ?? (p.invite?.note || `invite ${p.invite?.id ?? ''}`), p.account?.id ?? '-', p.drive?.name ?? '-', stateWords(p), studyWords(p), ...[t.invited, t.signedIn, t.ready, t.agentConnected, t.firstDocument].map((at) => day(at) || '-')];
+        });
+        for (const line of pad([header, ...rows])) out(line);
+        return 0;
+      }
+      case 'remove': {
+        const name = rest[0];
+        if (!name) throw new Error('remove which drive? node tools/door.mjs people lists them');
+        // The name typed twice, as the Console has it typed once.
+        if (flags.confirm !== name) {
+          err(`door: removing ${name} stops it at the edge for good and signs its owner out everywhere; on the PC host, marble-host then deletes it. Its name is never given out again.`);
+          err(`To go ahead: node tools/door.mjs remove ${name} --confirm ${name}`);
+          return 1;
+        }
+        const { drive, sessions, already } = await call('POST', `/drives/${encodeURIComponent(name)}/remove`, { confirm: name });
+        if (already) {
+          out(`${name} is already ${drive.state}.`);
+          return 0;
+        }
+        out(`${name} is removed at the edge, and ${sessions} session${sessions === 1 ? '' : 's'} of its owner ended.`);
+        out(drive.home === 'pchost' ? 'marble-host deletes it from the PC and marks it removed.' : `Its sprite is still there: remove it with tools/sprite-provision.sh --remove ${name} --door ${name}`);
+        return 0;
+      }
+      case 'revoke': {
+        const id = rest[0];
+        if (!id || !/^[0-9a-f]{16}$/.test(id)) throw new Error('revoke which account? node tools/door.mjs people lists their ids (16 hex digits)');
+        const { count } = await call('POST', `/accounts/${id}/revoke`);
+        out(`Signed ${id} out everywhere: ${count} session${count === 1 ? '' : 's'} ended.`);
+        out('A drive they have open keeps working until its pass is an hour old; hold or remove the drive to stop it now.');
         return 0;
       }
       case 'requests': {
@@ -236,7 +295,7 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
         return 0;
       }
       default:
-        throw new Error(`no command "${command}": invite, invites, requests, approve, drives, hold, log, credit, spares, forget-spare`);
+        throw new Error(`no command "${command}": invite, invites, people, requests, approve, drives, hold, remove, revoke, log, credit, spares, forget-spare`);
     }
   } catch (e) {
     err(`door: ${e.message}`);

@@ -1,9 +1,11 @@
 // worker/src/door/pages.js
-// The pages at marbledrive.app: sign in, an invite, not invited, name your
-// drive, making your drive, your account, and the page for anything that went
-// wrong (docs/superpowers/specs/2026-10-10-accounts-and-sign-in-design.md,
-// "The screens"; the drive page Notes and Sketches/Drive and Sharing/Accounts
-// and sign-in has the sketches).
+// The pages at marbledrive.app: sign in, an invite, not invited, the study's
+// consent screen, name your drive, making your drive, your account and
+// deleting your drive, and the page for anything that went wrong
+// (docs/superpowers/specs/2026-10-10-accounts-and-sign-in-design.md, "The
+// screens"; the drive page Notes and Sketches/Drive and Sharing/Accounts and
+// sign-in has the sketches, and Research/Marble/Marble for Publication/Running
+// the probe study from the PC draws the consent screen).
 //
 // One HTML file each, no webfont, nothing linked in. The tokens are the Design
 // System's own (its "Starting an app" block), cut to what these pages use:
@@ -18,6 +20,22 @@
 
 export const esc = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// ---------------------------------------------------------------- the consent form
+//
+// BRYAN'S TO REPLACE. The study's consent screen shows the consent form his
+// lab's IRB protocol approved, word for word, and no words written here. Paste
+// that text over the placeholder below, with a blank line between paragraphs,
+// and set CONSENT_VERSION in worker/wrangler.toml to the version it has;
+// change the two together whenever the form changes.
+//
+// While the placeholder is here, or CONSENT_VERSION is unset, the screen says
+// the form isn't set up yet and no study drive is made, so nobody is ever
+// asked to agree to this line.
+export const CONSENT_FORM = `PLACEHOLDER: Bryan replaces this with the consent form his IRB protocol approved, word for word.`;
+
+/** Is the form above the protocol's text, not the placeholder? */
+export const consentFormReady = (form = CONSENT_FORM) => typeof form === 'string' && form.trim() !== '' && !form.trimStart().startsWith('PLACEHOLDER');
 
 const STYLE = `
 :root {
@@ -88,6 +106,9 @@ p { margin: 0 0 1rem; text-wrap: pretty; }
 .link { appearance: none; border: 0; background: none; padding: 0; color: var(--ink); text-decoration: underline;
   text-decoration-color: var(--accent); text-underline-offset: 2px; cursor: pointer; min-height: 1.5rem; }
 .link.danger { color: var(--danger); text-decoration-color: currentColor; }
+/* Danger is a colour on the same shapes, never a red box. */
+.btn.danger, a.danger { color: var(--danger); }
+a.danger { text-decoration-color: currentColor; }
 /* Keyboard focus: one 2px ring of the accent, everywhere a key can land. */
 .btn:focus-visible, .link:focus-visible, a:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent-ink); border-radius: var(--r-sm); }
 .btn.one:focus-visible { border-radius: var(--pill); }
@@ -132,6 +153,23 @@ form { margin: 0; }
 .acct .row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .15rem .75rem; }
 .acct .row > span { min-width: 0; overflow-wrap: anywhere; }
 .acct .acts { display: flex; gap: 1rem; flex-wrap: wrap; }
+/* What can be done to a drive or the study sits under what it says. */
+.acct li > .acts { margin-top: .35rem; }
+/* A form's version or a date is read whole, never broken at its hyphen. */
+.whole { white-space: nowrap; }
+
+/* The study's three lines, a dot each in the accent's ink, as the plan draws
+   them: not ticks, since "never recorded" is not a box ticked. The dot sits on
+   the middle of the first line however the line wraps. */
+.points { display: flex; flex-direction: column; gap: .35rem; margin: 0 0 1rem; padding: 0; list-style: none; }
+.points li { display: flex; gap: .55rem; }
+.points li::before { content: ""; flex: none; width: 7px; height: 7px; margin-top: calc(.75em - 3.5px); border-radius: 999px; background: var(--accent-ink); }
+/* The consent form itself: the protocol's words, set off from the summary by
+   a hairline and kept in the reading ink, because a person agrees to them. */
+.consent-form { margin: 0 0 1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+.consent-form .label { margin-bottom: .55rem; }
+.consent-form p { margin: 0 0 .75rem; }
+.consent-form p:last-child { margin-bottom: 0; }
 
 .prose h2 { margin: 1.2rem 0 .3rem; font-size: .95rem; font-weight: 600; }
 .prose ul { margin: 0 0 1rem; padding-left: 1.1rem; }
@@ -140,9 +178,10 @@ form { margin: 0; }
   .col { padding: 2.25rem 1rem 2rem; }
   .card { padding: 1.2rem 1rem 1.1rem; }
 }
-/* A finger is not a mouse. */
+/* A finger is not a mouse; and iOS zooms into a field typed at under 16px. */
 @media (pointer: coarse) {
   .link { min-height: 2.75rem; }
+  .field input { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .btn { transition: none; }
@@ -230,7 +269,7 @@ const DEAD = {
   unknown: 'This invite link doesn’t work. Check it was copied whole.',
 };
 
-export function join({ providers, invite, why = null, drive = null }) {
+export function join({ providers, invite, why = null, drive = null, study = false }) {
   if (why) {
     return page({
       title: 'Invite · Marble Drive',
@@ -243,9 +282,12 @@ ${providerButtons(providers)}
 ${foot}`,
     });
   }
+  // A study invite has the consent screen between signing in and the name.
   const lede = drive
     ? `Sign in to take over <span class="addr">${esc(drive)}.${APEX_HOST}</span>. It stays as it is; from now on you open it by signing in.`
-    : 'Sign in to make your drive. You’ll choose its name next.';
+    : study
+      ? 'Sign in to make your drive. Next you say whether you’ll take part in the study, then choose its name.'
+      : 'Sign in to make your drive. You’ll choose its name next.';
   return page({
     title: 'Bryan invited you · Marble Drive',
     body: `<section class="card">
@@ -279,6 +321,61 @@ ${foot}`,
 <p class="small"><a href="/">Sign in with another account</a></p>
 </section>
 ${foot}`,
+  });
+}
+
+/** A date for a person, "Oct 25, 2026", kept on one line. The door doesn't
+ *  know their time zone, so it is the day in UTC. */
+const dayOf = (iso) => (iso ? `<span class="whole">${new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}</span>` : '');
+
+/** The protocol's words as paragraphs: a blank line between two, and a single
+ *  line break kept where the form has one. */
+const formParagraphs = (form) =>
+  form
+    .trim()
+    .split(/\n[ \t]*\n/)
+    .map((p) => `<p>${p.trim().split('\n').map(esc).join('<br>')}</p>`)
+    .join('\n');
+
+/** Screen 2 of the plan, for a study invite only, between signing in and the
+ *  name: what the study records and doesn't, the protocol's own consent form,
+ *  and two choices of equal weight. Either one goes on to the name; the form's
+ *  version rides along, so an answer is always to the words that were read. */
+export function consent({ version, said = '', status = 200, form = CONSENT_FORM }) {
+  return page({
+    title: 'Taking part in the study · Marble Drive',
+    status,
+    body: `<section class="card">
+<h1>Taking part in the study</h1>
+<p class="lede">Bryan Min is studying how people make their own tools by asking an AI.</p>
+<ul class="points">
+<li>Recorded: the pages you open, what you ask the agent, what it makes.</li>
+<li>Never recorded: your Claude or ChatGPT password, or anything outside your drive.</li>
+<li>Leave any time from your account page.</li>
+</ul>
+<section class="consent-form" aria-labelledby="form-label">
+<h2 class="label" id="form-label">Consent form, version <span class="whole">${esc(version)}</span></h2>
+${formParagraphs(form)}
+</section>
+${said ? `<p class="said" data-ok="no" role="alert">${esc(said)}</p>\n` : ''}<form method="post" action="/consent" class="stack">
+<input type="hidden" name="version" value="${esc(version)}">
+<button class="btn" type="submit" name="choice" value="given">Take part</button>
+<button class="btn" type="submit" name="choice" value="declined">Don’t take part</button>
+</form>
+<p class="small">Either way, you name your drive next.</p>
+</section>
+${foot}`,
+  });
+}
+
+/** A study invite while the form isn't set up (no CONSENT_VERSION, or the
+ *  placeholder still in CONSENT_FORM): nothing to agree to, so no drive yet. */
+export function studyNotReady() {
+  return problem({
+    title: 'The study isn’t ready yet',
+    text: 'Bryan hasn’t finished setting up its consent form. Your invite still works; try again later.',
+    status: 503,
+    action: { href: '/account', label: 'Your account' },
   });
 }
 
@@ -421,16 +518,18 @@ const OPENING_SCRIPT = `(() => {
   setTimeout(tick, 1000);
 })();`;
 
-// Asks how far it has got every few seconds, and stops when it is done.
+// Asks how far it has got every few seconds, and stops when it is done, or
+// when the drive was removed while it waited (the page then goes to the account).
 const MAKING_SCRIPT = `(() => {
   const card = document.querySelector('.making');
   const open = document.getElementById('open');
+  const done = ['ready', 'failed', 'removing', 'deleting', 'removed'];
   const tick = () => fetch(card.dataset.src, { headers: { accept: 'application/json' } })
     .then((r) => (r.ok ? r.json() : null))
     .then((j) => {
       if (!j) return setTimeout(tick, 5000);
       for (const li of card.querySelectorAll('[data-step]')) li.dataset.state = j.steps[li.dataset.step] || 'wait';
-      if (j.state === 'ready' || j.state === 'failed') return location.reload();
+      if (done.includes(j.state)) return location.reload();
       setTimeout(tick, 3000);
     })
     .catch(() => setTimeout(tick, 5000));
@@ -440,21 +539,52 @@ const MAKING_SCRIPT = `(() => {
 
 const PROVIDER_NAMES = { google: 'Google', github: 'GitHub' };
 
+/** The drive's own download of everything on it (a route the drive serves),
+ *  reached through the edge like any page of the drive. */
+export const exportUrl = (name) => `https://${name}.${APEX_HOST}/drive/export.zip`;
+
+// What a drive's row says in place of Open when it can't be opened.
+const DRIVE_STATE_WORDS = { held: 'On hold', deleting: 'Being deleted', removing: 'Removed', removed: 'Removed' };
+// A drive its owner can delete from here: one on the PC host, where
+// marble-host carries it out, that isn't already going.
+const DELETABLE = new Set(['ready', 'failed', 'held']);
+
+function driveRow(d) {
+  const address = `${esc(d.name)}.${APEX_HOST}`;
+  const action =
+    d.state === 'ready'
+      ? `<a href="/enter?drive=${encodeURIComponent(d.name)}&amp;to=%2F">Open</a>`
+      : DRIVE_STATE_WORDS[d.state]
+        ? `<span>${DRIVE_STATE_WORDS[d.state]}</span>`
+        : `<a href="/making/${encodeURIComponent(d.name)}">${d.state === 'failed' ? 'Not finished' : 'Being made'}</a>`;
+  const acts = [];
+  if (d.state === 'ready') acts.push(`<a href="${esc(exportUrl(d.name))}">Download my drive</a>`);
+  if (d.home === 'pchost' && DELETABLE.has(d.state)) acts.push(`<a class="danger" href="/account/delete/${encodeURIComponent(d.name)}">Delete my drive</a>`);
+  return `<span class="row"><span class="addr">${address}</span>${action}</span>${acts.length ? `<span class="acts">${acts.join('')}</span>` : ''}`;
+}
+
+/** The study, for someone in it or who left it: what they agreed to, and the
+ *  one thing they can do next. Leaving deletes nothing by itself, so deleting
+ *  what was collected is a second choice, offered once they have left. */
+function studyRow(account, drives) {
+  const s = account.study ?? {};
+  if (s.consent?.choice !== 'given' || !drives.some((d) => d.cohort === 'study')) return '';
+  let text;
+  let act = '';
+  if (!s.withdrawn) {
+    text = `You’re taking part. You agreed to form <span class="whole">${esc(s.consent.version)}</span> on ${dayOf(s.consent.at)}.`;
+    act = '<form method="post" action="/account/study/leave"><button class="link" type="submit">Leave the study</button></form>';
+  } else if (!s.deleteAsked) {
+    text = `You left on ${dayOf(s.withdrawn)}. What was collected before then is kept unless you ask for it to be deleted.`;
+    act = '<form method="post" action="/account/study/delete"><button class="link danger" type="submit">Delete what was collected</button></form>';
+  } else {
+    text = `You left on ${dayOf(s.withdrawn)}, and asked on ${dayOf(s.deleteAsked)} for what was collected to be deleted.`;
+  }
+  return `<li><span class="ak">The study</span><span class="row"><span>${text}</span></span>${act ? `<span class="acts">${act}</span>` : ''}</li>`;
+}
+
 export function account({ account, drives = [] }) {
-  const driveRows = drives.length
-    ? drives
-        .map((d) => {
-          const address = `${esc(d.name)}.${APEX_HOST}`;
-          const action =
-            d.state === 'ready'
-              ? `<a href="/enter?drive=${encodeURIComponent(d.name)}&amp;to=%2F">Open</a>`
-              : d.state === 'held'
-                ? '<span>On hold</span>'
-                : `<a href="/making/${encodeURIComponent(d.name)}">${d.state === 'failed' ? 'Not finished' : 'Being made'}</a>`;
-          return `<span class="row"><span class="addr">${address}</span>${action}</span>`;
-        })
-        .join('')
-    : '<span class="row"><span>None yet</span><a href="/name">Name your drive</a></span>';
+  const driveRows = drives.length ? drives.map(driveRow).join('') : '<span class="row"><span>None yet</span><a href="/name">Name your drive</a></span>';
   const methods = (account.methods ?? []).map((m) => `${esc(PROVIDER_NAMES[m.provider] ?? m.provider)}, ${esc(m.email)}`).join('<br>');
   return page({
     title: 'Your account · Marble Drive',
@@ -462,11 +592,35 @@ export function account({ account, drives = [] }) {
 <h1>Your account</h1>
 <ul class="acct">
 <li><span class="ak">${drives.length > 1 ? 'Your drives' : 'Your drive'}</span>${driveRows}</li>
-<li><span class="ak">Signed in with</span><span class="row"><span>${methods || esc(account.email)}</span></span></li>
+${studyRow(account, drives)}<li><span class="ak">Signed in with</span><span class="row"><span>${methods || esc(account.email)}</span></span></li>
 <li><span class="ak">This browser</span><span class="row"><span class="acts"><form method="post" action="/signout"><button class="link" type="submit">Sign out</button></form><form method="post" action="/signout/everywhere"><button class="link" type="submit">Sign out everywhere</button></form></span></span></li>
 </ul>
 </section>
 ${foot}`,
+  });
+}
+
+/** Deleting a drive, from the account page: what goes and what stays, a copy
+ *  offered first, and the name typed to say it is meant. The PC's hourly
+ *  backup (docs/HOSTING.md, "Backups of PC drives") outlives the drive until
+ *  Bryan forgets it, so the page says so rather than promise more. */
+export function deleteDrive({ drive, value = '', said = '', status = 200 }) {
+  const address = `${esc(drive.name)}.${APEX_HOST}`;
+  const copy = drive.state === 'ready' ? ` <a href="${esc(exportUrl(drive.name))}">Download it</a> first to keep a copy.` : '';
+  return page({
+    title: 'Delete your drive · Marble Drive',
+    status,
+    body: `<section class="card">
+<h1>Delete <span class="addr">${address}</span></h1>
+<p class="lede">Its pages, files and history are deleted from Bryan’s PC, and it can’t be undone. Its encrypted backup is kept until Bryan deletes it.${copy}</p>
+<form method="post" action="/account/delete/${encodeURIComponent(drive.name)}">
+<label class="label" for="confirm">Type ${esc(drive.name)} to delete it</label>
+<div class="field"><input id="confirm" name="confirm" value="${esc(value)}" required autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="done" aria-describedby="said"></div>
+<p class="said" id="said" role="status" aria-live="polite"${said ? ' data-ok="no"' : ''}>${esc(said)}</p>
+<button class="btn danger" type="submit">Delete my drive</button>
+</form>
+<p class="small"><a href="/account">Keep my drive</a></p>
+</section>`,
   });
 }
 

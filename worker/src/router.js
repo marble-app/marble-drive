@@ -16,10 +16,15 @@
 // A drive the Directory says lives on the PC host (worker/src/pc-host.js) goes
 // to PC_HOST_URL, the one tunnel into the owner's PC, with its name and the
 // host key in two headers that only this Worker sets.
+//
+// A drive that is ending (Bryan removed it, or its owner asked for it to be
+// deleted) is answered here with a plain page and never reached again, and so
+// is one that has been removed: its record stays so that its name never opens
+// a stranger's drive.
 
 import { CREDIT_PATH, credit } from './credit.js';
 import { apex, clearPass, doorReady, edgeVerifyKeys, mintPass, passCookie, PASS_COOKIE } from './door/apex.js';
-import { directory } from './door/directory.js';
+import { directory, GONE } from './door/directory.js';
 import { readCookie } from './door/oauth.js';
 import { esc } from './door/pages.js';
 import { returnPath } from './door/paths.js';
@@ -61,6 +66,18 @@ const resting = (request) =>
     ? page(503, 'Your drive is resting', 'Bryan has been told, and your work is safe.', { 'retry-after': '30' })
     : new Response(JSON.stringify({ error: RESTING, resting: true }), { status: 503, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'retry-after': '30' } });
 
+// The words for a drive that is ending, to anyone who comes to it: its owner,
+// a share link's reader, or a script.
+const ENDED = {
+  removing: 'This drive has been removed',
+  removed: 'This drive has been removed',
+  deleting: 'This drive is being deleted',
+};
+const ended = (request, state) =>
+  wantsHtml(request)
+    ? page(410, ENDED[state], 'Nothing on it can be opened any more.')
+    : new Response(JSON.stringify({ error: `${ENDED[state]}.`, gone: true }), { status: 410, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+
 function drives(env) {
   const raw = env.DRIVES ?? {};
   if (typeof raw !== 'string') return raw;
@@ -93,8 +110,8 @@ async function readLease(env, name, now) {
 }
 
 // What the Directory says of a drive, kept per isolate for a few seconds like
-// the lease. Only a settled answer is kept (no drive, or one that is ready or
-// held), so a drive that has just been made is seen at once.
+// the lease. Only a settled answer is kept (no drive, or one that is ready,
+// held or ending), so a drive that has just been made is seen at once.
 export const DRIVE_TTL_MS = 30_000;
 const records = new Map(); // name -> { record, at }
 export const forgetDrives = () => records.clear();
@@ -105,7 +122,7 @@ async function readDrive(env, name, now) {
   const r = await directory(env)('GET', `/drives/${name}`);
   if (r.status !== 200 && r.status !== 404) throw new Error(`directory read: ${r.status}`);
   const record = r.status === 200 ? r.data : null;
-  if (!record || record.state === 'ready' || record.state === 'held') records.set(name, { record, at: now });
+  if (!record || record.state === 'ready' || record.state === 'held' || GONE.has(record.state)) records.set(name, { record, at: now });
   return record;
 }
 
@@ -176,7 +193,7 @@ async function guard(request, env, { name, record, url, now }) {
 
 const making = () => page(503, 'This drive is still being made', 'Try again in a few minutes.', { 'retry-after': '60' });
 
-export async function route(request, env, { fetchImpl = fetch, now = Date.now(), ctx = null } = {}) {
+export async function route(request, env, { fetchImpl = fetch, now = Date.now(), ctx = null, consentForm } = {}) {
   const url = new URL(request.url);
   const host = url.hostname;
   // Starter credit's proxy (worker/src/credit.js): on with its own key,
@@ -184,7 +201,7 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
   if (host === APEX && (url.pathname === CREDIT_PATH || url.pathname.startsWith(`${CREDIT_PATH}/`))) return credit(request, env, { fetchImpl, ctx });
   // The apex is the door once it is switched on (worker/src/door/apex.js),
   // and the placeholder until then.
-  if (host === APEX || host === `www.${APEX}`) return doorReady(env) ? apex(request, env, { fetchImpl, now, ctx }) : placeholder();
+  if (host === APEX || host === `www.${APEX}`) return doorReady(env) ? apex(request, env, { fetchImpl, now, ctx, ...(consentForm === undefined ? {} : { consentForm }) }) : placeholder();
 
   const name = host.slice(0, -(APEX.length + 1));
   // A machine's own tunnel (pc-bryan, mac-bryan, and pc-host, the PC host's)
@@ -208,7 +225,9 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
       if (!inTable) return lost();
     }
   }
-  if (record?.state === 'removed') record = null;
+  // Ending, or ended: said here, whatever DRIVES or the lease say, and never
+  // passed on. Only the sign-out walk goes through, to clear the pass.
+  if (record && GONE.has(record.state) && !(url.pathname === '/_marble/leave' && record.owner)) return ended(request, record.state);
   if (!inTable && !record) return nobody();
 
   let renew = null;

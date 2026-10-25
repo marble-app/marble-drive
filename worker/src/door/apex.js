@@ -8,11 +8,16 @@
 //   /auth/<p>/start        off to Google or GitHub
 //   /auth/<p>/callback     back, signed in (or not invited)
 //   /ask                   Ask for access
+//   /consent               a study invite's consent screen, before the name
+//                          (GET the form, POST the answer)
 //   /name                  name your drive (GET the form, POST the claim)
 //   /name/check?n=         free, taken, or what is wrong with it
 //   /making/<name>[.json]  the steps while it is made, or opened from a spare
 //   /enter?drive=&to=      a grant for the drive, if it is yours
 //   /account               your drive and how you sign in
+//   /account/study/leave   leave the study (POST)
+//   /account/study/delete  then ask for what was collected to be deleted (POST)
+//   /account/delete/<name> delete your drive on the PC host, its name typed
 //   /signout[/everywhere]  end this session, or all of them
 //   /privacy, /terms
 //   /_door/*               the owner's API (tools/door.mjs, the door sprite),
@@ -24,7 +29,7 @@
 // a drive post here.
 
 import { newDriveHome, pcHostReady, PCHOST, pokePcHost } from '../pc-host.js';
-import { directory } from './directory.js';
+import { CONSENT_VERSION_RE, directory, GONE } from './directory.js';
 import { nameProblem, nameSuggestions } from './names.js';
 import { APEX_ORIGIN, DoorError, cookie, finish, isProvider, providerReady, readCookie, start } from './oauth.js';
 import * as pages from './pages.js';
@@ -132,16 +137,49 @@ async function sessionOf(request, dir) {
 const sameOrigin = (request) => request.headers.get('origin') === APEX_ORIGIN;
 const crossSite = () => pages.problem({ title: 'That didn’t come from Marble Drive', text: 'The request came from another site, so nothing was done. Go back and try again from marbledrive.app.', status: 403 });
 
-/** Where a signed-in person goes next, from what their account holds. */
+/** Where a signed-in person goes next, from what their account holds. A
+ *  drive that is ending is shown on the account page, never as being made;
+ *  a study invite's consent screen comes before the name. */
 async function onward(session, dir) {
   const { account } = session;
   for (const name of account.drives ?? []) {
     const d = await dir('GET', `/drives/${name}`);
-    if (d.ok && d.data.state !== 'ready' && d.data.state !== 'held') return redirect(`/making/${encodeURIComponent(name)}`);
+    if (d.ok && d.data.state !== 'ready' && d.data.state !== 'held' && !GONE.has(d.data.state)) return redirect(`/making/${encodeURIComponent(name)}`);
   }
   if ((account.drives ?? []).length) return redirect('/account');
+  if (account.askConsent) return redirect('/consent');
   if (account.mayMake) return redirect('/name');
   return pages.notInvited({ name: account.name, email: account.email });
+}
+
+/** The consent form's version, when the study's screen can be answered: the
+ *  Worker var CONSENT_VERSION, and the protocol's own words in pages.js in
+ *  place of the placeholder. Otherwise null, and no study drive is made. */
+export function consentVersion(env, form = pages.CONSENT_FORM) {
+  const v = String(env?.CONSENT_VERSION ?? '').trim();
+  if (!v || !pages.consentFormReady(form)) return null;
+  if (!CONSENT_VERSION_RE.test(v)) {
+    console.log('door: CONSENT_VERSION is not letters, digits, dots, hyphens and underscores, so the study is off');
+    return null;
+  }
+  return v;
+}
+
+/** A drive that is ending, said at the door as the edge says it. */
+const ended = (state) =>
+  pages.problem({
+    title: state === 'deleting' ? 'This drive is being deleted' : 'This drive has been removed',
+    text: 'Nothing on it can be opened any more.',
+    status: 410,
+    action: { href: '/account', label: 'Your account' },
+  });
+
+async function formOf(request) {
+  try {
+    return await request.formData();
+  } catch {
+    return new FormData();
+  }
 }
 
 export const FREE_NAME = 'Free. You can’t change it later.';
@@ -188,6 +226,13 @@ const ADMIN = [
   ['GET', /^\/spares$/],
   ['POST', /^\/spares$/],
   ['DELETE', /^\/spares\/d-spare-[0-9a-f]{6,16}$/],
+  // The PC host's people (the Console, marble-host's look every five
+  // minutes, tools/door.mjs): who is where, removing a drive, ending an
+  // account's sessions, and marble-host's reports.
+  ['GET', /^\/people$/],
+  ['POST', /^\/drives\/[a-z0-9-]{1,40}\/remove$/],
+  ['POST', /^\/accounts\/[0-9a-f]{16}\/revoke$/],
+  ['POST', /^\/events$/],
 ];
 
 async function admin(request, env, path) {
@@ -211,7 +256,9 @@ async function admin(request, env, path) {
 
 // ---------------------------------------------------------------- routes
 
-export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), ctx = null } = {}) {
+// `consentForm` is the study's consent form, the constant in pages.js; a test
+// gives its own, since the constant is a placeholder until Bryan replaces it.
+export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), ctx = null, consentForm = pages.CONSENT_FORM } = {}) {
   const url = new URL(request.url);
   if (url.hostname === `www.${APEX}`) return redirect(`${APEX_ORIGIN}${url.pathname}${url.search}`, 301);
   const path = url.pathname;
@@ -238,7 +285,7 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
       const code = m[1];
       const peek = await dir('POST', '/invite/peek', { code });
       if (!peek.data.ok) return pages.join({ providers: providersOf(env), why: peek.data.why ?? 'unknown' });
-      return pages.join({ providers: providersOf(env), invite: code, drive: peek.data.drive });
+      return pages.join({ providers: providersOf(env), invite: code, drive: peek.data.drive, study: peek.data.study === true });
     }
 
     if ((m = /^\/auth\/([a-z]+)\/start$/.exec(path)) && method === 'GET' && isProvider(m[1])) {
@@ -309,6 +356,7 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
       const d = await dir('GET', `/drives/${drive}`);
       if (!d.ok || d.data.owner !== session.account.id) return pages.notYours({ email: session.account.email });
       if (d.data.state === 'held') return pages.problem({ title: 'This drive is on hold', text: 'Ask Bryan what happened.', status: 403, action: null });
+      if (GONE.has(d.data.state)) return ended(d.data.state);
       if (d.data.state !== 'ready') return redirect(`/making/${encodeURIComponent(drive)}`);
       const grant = await mintGrant(env, { drive, account: session.account.id, session: session.hash, now });
       return redirect(`https://${drive}.${APEX}/_marble/enter?${new URLSearchParams({ grant, to })}`, 302);
@@ -328,6 +376,63 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
       return pages.account({ account: session.account, drives });
     }
 
+    // Leaving the study, then (a second, separate choice) asking for what was
+    // collected to be deleted. Each is one press on the account page.
+    if ((path === '/account/study/leave' || path === '/account/study/delete') && method === 'POST') {
+      if (!sameOrigin(request)) return crossSite();
+      if (!session) return signedOut();
+      const leaving = path === '/account/study/leave';
+      const r = await dir('POST', leaving ? '/study/leave' : '/study/delete', { account: session.account.id });
+      if (!r.ok) {
+        return pages.problem({ title: leaving ? 'Couldn’t leave the study' : 'Couldn’t ask for that', text: r.data.why ?? 'Try again in a minute.', status: r.status, action: { href: '/account', label: 'Your account' } });
+      }
+      return redirect('/account');
+    }
+
+    // Deleting a drive on the PC host: a page that says what goes, and the
+    // drive's name typed. marble-host deletes it; until then it is `deleting`
+    // and the edge says so.
+    if ((m = /^\/account\/delete\/([a-z0-9-]{1,40})$/.exec(path)) && (method === 'GET' || method === 'POST')) {
+      if (method === 'POST' && !sameOrigin(request)) return crossSite();
+      if (!session) return signedOut();
+      const name = m[1];
+      const d = await dir('GET', `/drives/${name}`);
+      if (!d.ok || d.data.owner !== session.account.id) return pages.notYours({ email: session.account.email });
+      if (d.data.home !== PCHOST || GONE.has(d.data.state)) return redirect('/account');
+      if (method === 'GET') return pages.deleteDrive({ drive: d.data });
+      const confirm = String((await formOf(request)).get('confirm') ?? '').trim();
+      if (confirm !== name) return pages.deleteDrive({ drive: d.data, value: confirm, said: `That isn’t ${name}. Type its name as it is.`, status: 400 });
+      const r = await dir('POST', `/drives/${name}/delete`, { account: session.account.id, confirm });
+      if (!r.ok) return pages.problem({ title: 'Couldn’t delete it', text: r.data.why ?? 'Try again in a minute.', status: r.status, action: { href: '/account', label: 'Your account' } });
+      return redirect('/account');
+    }
+
+    // A study invite's consent screen, after signing in and before the name.
+    // It can't be gone round: /name sends a person here until it is
+    // answered, and the Directory makes no drive for a study invite without
+    // an answer. Without CONSENT_VERSION, or with the placeholder still in
+    // pages.js, it says the study isn't ready and nobody can answer.
+    if (path === '/consent' && (method === 'GET' || method === 'POST')) {
+      if (method === 'POST' && !sameOrigin(request)) return crossSite();
+      if (!session) return signedOut();
+      const { account } = session;
+      // Nothing to answer: not a study invite, or its drive already made.
+      if (!account.studyInvite) return await onward(session, dir);
+      if (method === 'GET' && !account.askConsent) return redirect('/name');
+      const version = consentVersion(env, consentForm);
+      if (!version) return pages.studyNotReady();
+      if (method === 'GET') return pages.consent({ version, form: consentForm });
+      const form = await formOf(request);
+      // The answer is to the words that were read: if the form was changed
+      // since, it is shown again rather than taken as agreed.
+      if (form.get('version') !== version) return pages.consent({ version, form: consentForm, said: 'The form changed while you were reading it. Read it again, then choose.', status: 409 });
+      const choice = form.get('choice');
+      if (choice !== 'given' && choice !== 'declined') return pages.consent({ version, form: consentForm, said: 'Choose Take part or Don’t take part.', status: 400 });
+      const r = await dir('POST', '/consent', { account: account.id, version, choice });
+      if (!r.ok) return pages.problem({ title: 'Your answer wasn’t kept', text: r.data.why ?? 'Try again in a minute.', status: r.status, action: { href: '/', label: 'Start again' } });
+      return redirect('/name');
+    }
+
     if (path === '/name/check' && method === 'GET') {
       if (!session) return json(401, { ok: false, said: 'Sign in first.' });
       const n = url.searchParams.get('n') ?? '';
@@ -340,6 +445,7 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
     if (path === '/name') {
       if (!session) return signedOut();
       if (!session.account.mayMake) return await onward(session, dir);
+      if (session.account.askConsent) return redirect('/consent');
       // Without its maker a drive would wait in the queue for ever: the door
       // sprite for a drive on Fly, marble-host for one on the PC host
       // (NEW_DRIVE_HOME, worker/src/pc-host.js).
@@ -373,6 +479,7 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
       const d = await dir('GET', `/drives/${m[1]}`);
       if (!d.ok || d.data.owner !== session.account.id) return m[2] ? json(403, { why: 'not yours' }) : pages.notYours({ email: session.account.email });
       if (m[2]) return json(200, { state: d.data.state, spare: Boolean(d.data.spare), steps: pages.stepStates(d.data), failed: d.data.failed ?? null });
+      if (GONE.has(d.data.state)) return redirect('/account');
       return pages.making({ drive: d.data });
     }
 
