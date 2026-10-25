@@ -7,7 +7,7 @@
 // records what it is asked, and runs a drive's backup when its unit starts.
 // rclone is the pinned one in ~/.local/bin, used as it is.
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -421,6 +421,29 @@ test('a drive that lost most of its files is held back until --force', needsRclo
   assert.equal(forced.status, 0, forced.out);
   assert.equal(pc.status('ana').ok, true);
   assert.equal(lines(pc.crypt('ana', ['lsf', '-R', '--files-only', 'c:drive'])).length, 2);
+});
+
+test('a run systemd stops says so in the status', needsRclone, async () => {
+  const pc = makePC();
+  seed(pc, 'ana');
+  assert.equal(pc.run('backup-guest', ['ana']).status, 0);
+  pc.put('ana', 'Notes/More.mrbl', 'more\n');
+  // An rclone that obscures, as the real one does, and hangs on R2.
+  const slow = path.join(pc.root, 'slow-rclone');
+  fs.writeFileSync(slow, `#!/usr/bin/env bash\nif [[ $1 == obscure ]]; then exec "${RCLONE}" "$@"; fi\nsleep 30\n`, { mode: 0o755 });
+  const child = spawn('bash', [path.join(HOST, 'backup-guest'), 'ana'], { env: { ...pc.env, MARBLE_RCLONE: slow }, detached: true, stdio: 'ignore' });
+  const ended = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
+  await sleep(2000);
+  // As systemd stops a unit: every process in it at once.
+  process.kill(-child.pid, 'SIGTERM');
+  assert.equal(await ended, 1);
+  const status = pc.status('ana');
+  assert.equal(status.ok, false);
+  assert.equal(status.why, 'it was stopped before it ended; the next run sends what it did not');
+  assert.notEqual(status.lastGood, null);
+  const again = pc.run('backup-guest', ['ana']);
+  assert.equal(again.status, 0, again.out);
+  assert.equal(pc.status('ana').changed, true);
 });
 
 test('a backup R2 does not take fails, says so in the status, and keeps the last good time', needsRclone, () => {

@@ -37,7 +37,7 @@ stamp_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # 2026-10-25T17:00:03Z (or 20261025T170003Z) as 20261025T170003Z: the hub's
 # trash stamps (server/hub/sync.js, stampOf), which sort as time does.
 utc_of() { local t=${1//[-:]/}; t=${t%%.*}; printf '%s' "${t%Z}Z"; }
-gb() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1073741824 }'; }
+size_of() { awk -v b="$1" 'BEGIN { if (b >= 1073741824) printf "%.1f GB", b / 1073741824; else printf "%.1f MB", b / 1048576 }'; }
 
 # The PC's own paths are root's. Moved ones (the tests) are not.
 need_root() {

@@ -221,19 +221,24 @@ def cmd_same(scan_file, manifest_file):
     return 0 if all(same_entry(want[r], have[r]) for r in want) else 1
 
 
-def copy_out(root_fd, rel, stage):
+def write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view):]
+
+
+def copy_out(root_fd, rel, stage, tmp):
     """Copies rel into the stage with its mtime, from a descriptor opened
-    without following links. Returns [size, mtimeMs] of what was copied, or
-    None when it is gone. A file that changes while it is copied is copied
-    again, up to three times, then kept as last read under the time it had
-    before that read, which the file no longer has: the next run sends it
-    again."""
+    without following links, by way of tmp, a path outside the stage. Returns
+    [size, mtimeMs] of what was copied, or None when it is gone. A file that
+    changes while it is copied is copied again, up to three times, then kept
+    as last read under the time it had before that read, which the file no
+    longer has: the next run sends it again."""
     fd = open_file(root_fd, rel)
     if fd is None:
         return None
     dest = os.path.join(stage, rel)
     os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
-    tmp = dest + '.part'
     try:
         for _ in range(3):
             before = os.fstat(fd)
@@ -244,7 +249,7 @@ def copy_out(root_fd, rel, stage):
                     chunk = os.read(fd, CHUNK)
                     if not chunk:
                         break
-                    os.write(out, chunk)
+                    write_all(out, chunk)
             finally:
                 os.close(out)
             after = os.fstat(fd)
@@ -277,6 +282,7 @@ def cmd_prepare(root, scan_file, remote_file, work, seq, at):
     remote = None if remote_file == '-' else read_json(remote_file).get('files', {})
     stage = os.path.join(work, 'stage')
     os.makedirs(stage, mode=0o700, exist_ok=True)
+    tmp = os.path.join(work, 'copying')
     mode = 'full'
     differ, extra = sorted(scan), []
     if remote is not None:
@@ -302,7 +308,7 @@ def cmd_prepare(root, scan_file, remote_file, work, seq, at):
     sent = []
     try:
         for rel in differ:
-            got = copy_out(fd, rel, stage)
+            got = copy_out(fd, rel, stage, tmp)
             if got is None:
                 # Gone since the scan: nothing to send, and if the upload
                 # holds it, it goes to the trash with the rest.

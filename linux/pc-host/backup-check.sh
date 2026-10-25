@@ -25,7 +25,7 @@ set -euo pipefail
 umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=backup-lib.sh
+# shellcheck source-path=SCRIPTDIR source=backup-lib.sh
 . "$HERE/backup-lib.sh"
 real=${1:-}
 if [[ $# -gt 1 || $real == -* ]] || { [[ -n $real ]] && [[ ! $real =~ $NAME_RE ]]; }; then

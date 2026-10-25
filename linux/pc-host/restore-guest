@@ -41,7 +41,7 @@ set -euo pipefail
 umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=backup-lib.sh
+# shellcheck source-path=SCRIPTDIR source=backup-lib.sh
 . "$HERE/backup-lib.sh"
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 
@@ -95,9 +95,10 @@ points() {
 }
 latest="$(utc_of "$(field at "$(tree counts "$WORK/latest.json")")")"
 if ((list)); then
-  points | while read -r point; do
+  points >"$WORK/points"
+  while read -r point; do
     if [[ $point == "$latest" ]]; then say "$point  latest"; else say "$point"; fi
-  done
+  done <"$WORK/points"
   exit 0
 fi
 
@@ -166,7 +167,7 @@ masked=1
 "$SYSTEMCTL" stop "$unit"
 folder="$GUESTS/$target"
 [[ -d $folder || ! -e $folder ]] || die "$folder is not a folder"
-install -d -m 755 "$folder"
+[[ -d $folder ]] || install -d -m 755 "$folder"
 if [[ -e $folder/drive || -L $folder/drive ]]; then
   [[ ! -e $folder/drive.kept-$utc && ! -L $folder/drive.kept-$utc ]] || die "$folder/drive.kept-$utc is there already; nothing was changed"
   swapped=0

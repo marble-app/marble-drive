@@ -16,7 +16,7 @@ set -euo pipefail
 umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=backup-lib.sh
+# shellcheck source-path=SCRIPTDIR source=backup-lib.sh
 . "$HERE/backup-lib.sh"
 [[ $# -eq 0 ]] || { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 need_root

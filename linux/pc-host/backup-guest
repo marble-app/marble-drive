@@ -43,7 +43,7 @@ set -euo pipefail
 umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=backup-lib.sh
+# shellcheck source-path=SCRIPTDIR source=backup-lib.sh
 . "$HERE/backup-lib.sh"
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 
@@ -80,6 +80,11 @@ if [[ $mode != backup ]]; then
   fi
   if ((!yes)); then
     say "This deletes guests/$name/ from R2, every backup of $name, for good. Add --yes to do it."
+    exit 0
+  fi
+  if [[ -z "$(rc lsf --max-depth 1 "$RAW_PREFIX" 2>/dev/null || true)" ]]; then
+    rm -f "$BACKUP_STATE/status/$name.json" "$BACKUP_STATE/manifests/$name.json"
+    say "R2 holds nothing under guests/$name/"
     exit 0
   fi
   rc purge "$RAW_PREFIX" || die "R2 did not delete guests/$name/ (rclone exit $?)"
@@ -124,6 +129,8 @@ fail() {
   say "$name: $1" >&2
   exit 1
 }
+# systemd stops a run that outlasts TimeoutStartSec, or one stopped by hand.
+trap 'fail "it was stopped before it ended; the next run sends what it did not"' TERM INT
 
 load_settings || fail "$SETTINGS_WHY"
 
@@ -143,7 +150,7 @@ if ((files == 0 && last_seq == 0)); then
   exit 0
 fi
 if ((bytes > CFG_GUEST_BACKUP_MAX_BYTES)); then
-  fail "the drive holds $(gb "$bytes") GB, over the $(gb "$CFG_GUEST_BACKUP_MAX_BYTES") GB a backup takes; nothing was sent"
+  fail "the drive holds $(size_of "$bytes"), over the $(size_of "$CFG_GUEST_BACKUP_MAX_BYTES") a backup takes; nothing was sent"
 fi
 # What server/hub/sync.js calls looking wrong. The last good copy stays as it
 # is until someone looks; --force sends this one anyway.
@@ -176,7 +183,7 @@ fi
 seq=$(((remote_seq > last_seq ? remote_seq : last_seq) + 1))
 
 line="$(tree prepare "$drive" "$WORK/scan.json" "$remote" "$WORK" "$seq" "$at")" || case "$(field refused "$line")" in
-  no-room) fail "there is no room on the PC to copy out $(gb "$(field need "$line")") GB for sending; nothing was sent" ;;
+  no-room) fail "there is no room on the PC to copy out $(size_of "$(field need "$line")") for sending; nothing was sent" ;;
   *) fail "the drive could not be copied out for sending" ;;
 esac
 how="$(field mode "$line")" sent="$(field differ "$line")" extra="$(field extra "$line")"
@@ -206,5 +213,9 @@ rc rcat -q guest:manifest.json <"$WORK/manifest.json" || fail "R2 did not take t
 cp "$WORK/manifest.json" "$local_list.tmp"
 mv -f "$local_list.tmp" "$local_list"
 last_good=$at
-finish ok "" true
-say "$name: sent $sent files, $extra to trash/$utc ($how; $files files, $(gb "$bytes") GB)"
+# A full sync may send nothing new, but this cannot tell; an incremental run
+# whose changes all vanished before they were copied sent nothing.
+changed=true
+if [[ $how != full ]] && ((sent + extra == 0)); then changed=false; fi
+finish ok "" "$changed"
+say "$name: sent $sent files, $extra to trash/$utc ($how; $files files, $(size_of "$bytes"))"
