@@ -449,7 +449,9 @@ asks again.
 
 The account page has Leave the study while they are in it. Leaving is logged
 as `consent-withdrawn`, and marble-host takes the study's settings off the
-drive at its next look. Deleting what was collected is a second, separate
+drive at its next look. You can take someone out the same way
+(`POST /_door/accounts/<id>/withdraw`, below), and the log then says it was
+you. Deleting what was collected is a second, separate
 choice, offered once they have left, and logged as `study-delete-asked`. The
 door only records that ask and when it came; you carry it out.
 
@@ -476,6 +478,7 @@ and marble-host call them, and `tools/door.mjs` has `people`, `remove` and
 | `GET /_door/people` | `{ people: [...] }`: a row per account with a drive or an open invite, then one per open invite nobody has signed in with yet |
 | `POST /_door/drives/<name>/remove` `{ confirm: <name> }` | state `removing`, so the edge says "This drive has been removed", and every session of its owner ends. Answers `{ drive, sessions }`, or `{ drive, sessions: 0, already: true }` for a drive already ending |
 | `POST /_door/accounts/<id>/revoke` | ends every session of that account: `{ ok: true, count }` |
+| `POST /_door/accounts/<id>/withdraw` | takes that person out of the study, as their own Leave the study does: `{ study }`, or `{ study, already: true }` once they have left; a 409 for someone not in it. Logged as `consent-withdrawn` with `by: 'owner'`. For the Console's Withdraw |
 | `POST /_door/events` `{ drive, kind, detail? }` | marble-host's reports, into the audit log under the drive's owner |
 | `POST /_door/drives/<name>/step` `{ state: 'removed' }` | marble-host's last word on a `removing` or `deleting` drive on the PC host. The record stays, as `removed`, so the name is never given out again |
 

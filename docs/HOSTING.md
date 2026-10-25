@@ -633,7 +633,9 @@ The maker makes the drives the door queues for the PC
 (`GET /_door/queue?home=pchost`). It looks at start, when poked, and every
 five minutes. It reports `machine`, `install` and `check` to the door, then
 `{ state: 'ready', home: 'pchost' }`. If the door didn't hear the ready
-report, the maker tells it again at the next look.
+report, the maker tells it again at the next look. A drive the door is
+ending refuses every step with a 409, and the maker stops making it there
+("marble-host and the study").
 
 The watcher reads each running drive's `/health` and its service's memory
 every 30 s. Two missed answers in a row restart the drive. Memory past 90% of
@@ -769,21 +771,24 @@ The admin API's routes, all JSON. A refusal is `{ why }` with its status.
 
 | Route | Does |
 |---|---|
-| `GET /drives` | every drive: `{ name, port, owner, channel, release, state, active, memoryBytes, health: { ok, working, release, at }, restarts, created, cohort }`, with `failed` or `removed` when they apply |
+| `GET /drives` | every drive: `{ name, port, owner, channel, release, state, active, memoryBytes, health: { ok, working, release, at }, restarts, created, cohort, agent, turnsToday, lastActive, study, backup }`, with `heldBack`, `failed`, `removing` or `removed` when they apply ("marble-host and the study") |
 | `POST /drives` `{ name, owner, cohort? }` | make one now, as the door's queue does; 201 once its check passes |
 | `POST /drives/<name>/restart` | restart it; a drive whose making failed is tried again |
 | `POST /drives/<name>/suspend`, `/resume` | stop it and mark it so boot and the watcher leave it; start it again |
-| `POST /drives/<name>/remove` `{ confirm: <name> }` | stop it, mark it removed and delete its settings file; its folder stays |
+| `POST /drives/<name>/remove` `{ confirm: <name> }` | take it off the PC for good: its CLIs signed out, stopped, its settings file and folder deleted, the door told. A drive the door made is ended at the door first; 502 and nothing changed if the door can't be reached |
+| `POST /drives/<name>/export` | 202: `marble-guest-export@<name>.service` started, not waited for; 409 unless its settings say it is in the study |
+| `POST /drives/<name>/backup` | 202: `marble-guest-backup@<name>.service` started, not waited for |
 | `POST /drives/<name>/channel` `{ channel }` | `canary` or `everyone`, for the updater to act on |
 | `GET /releases` | `{ channels: { canary, everyone }, paused, onDisk, newDrives: { release, from } }` |
 | `POST /release`, `/promote`, `/rollback`, `/pause` | 501 `{ "why": "the updater isn't built yet" }` |
-| `GET /events?limit=` | newest first: `{ at, drive, kind, detail }`, where kind is made, failed, started, restarted, unhealthy, suspended, resumed, removed, channel or alert |
+| `GET /events?limit=` | newest first: `{ at, drive, kind, detail }`, where kind is made, failed, started, restarted, unhealthy, suspended, resumed, removing, removed, remove-failed, study, export, backup, channel or alert |
 
-Removing a drive deletes nothing of its person's. The backups' root helper,
-`marble-guest-remove@<name>.service`, deletes the folder. It refuses until the
-drive is stopped and its settings file is gone, which is what `remove` does
-first. marble-host doesn't start the helper yet. The plan runs the drive's CLI
-logouts before anything is deleted, and that comes with the Console's Remove.
+Removing a drive deletes its folder, its home with its person's logins
+included. The backups' root helper, `marble-guest-remove@<name>.service`,
+does the deleting, and it refuses until the drive is stopped and its
+settings file is gone. marble-host's remover does both first, after the
+drive's CLIs sign out ("marble-host and the study"). The encrypted backup in
+R2 stays, for the owner to forget by hand.
 
 The trial ran on 2026-10-25, in `user` mode, with marble-host from this branch
 and its folders under `/var/tmp`. The release was a copy of the owner's
@@ -1193,8 +1198,8 @@ dots, hyphens and underscores for it. marble-host reports back through
 `/health/deep` shows them, `drive-updated` after a move, and
 `drive-restarted`. Those lines and the door's own sign-in lines make each
 row's sign-up timeline. The Console's People view reads the same list and
-calls the same routes. marble-host's side and the Console's are built in
-their own PRs.
+calls the same routes. marble-host's side is "marble-host and the study"
+below, and the Console's is "People in the Console".
 
 A drive ends in one of two ways, and both finish the same way. The owner
 removes it (`POST /_door/drives/<name>/remove` with its name typed, or
@@ -1366,6 +1371,97 @@ exports.
 `test/health-logout.test.js`, `test/study-page.test.js` and
 `test/host-export.test.js` try all of it without root or real CLIs.
 
+### marble-host and the study
+
+Built 2026-10-25. marble-host now does its part of the study and of drives
+that end. Every five minutes it reads the door's people, sets each drive's
+study settings, and takes a drive the door is ending off the PC. It tells the
+door the first time a drive's person connects an agent or makes a document,
+and it shows the Console what each drive's `/health/deep` and
+`/health/study` say. It restarts no drive for any of this.
+
+The reconcile (`server/host/reconcile.js`) reads `GET /_door/people` when
+marble-host starts and every five minutes after. A row speaks for a drive
+only when it names that drive, on the PC host, for the account the drive was
+made for. Someone is in the study when the row's cohort is `study`, their
+consent was given and they haven't left. Their drive's settings file then
+holds `MARBLE_STUDY=1` and `MARBLE_CONSENT=<version>@<at>`, such as
+`MARBLE_CONSENT=2026-11-irb-v1@2026-11-02T17:00:03.123Z`. A drive whose person
+left or never said yes holds neither, and so does a drive the door doesn't
+list. Nothing restarts when the file changes. The export helper reads the
+file each time it runs, and the drive takes it up the next time it starts. If
+the door can't be reached, nothing changes until the next look.
+
+The door marks a drive `removing` when its owner removes it, and `deleting`
+when its person deletes it from the account page. Either goes to the remover
+(`server/host/remover.js`), and so does the admin API's remove. The remover
+works in this order:
+
+1. The drive's CLIs sign out: `POST /health/logout`, given a minute.
+2. Its service stops.
+3. Its settings file is deleted.
+4. `marble-guest-remove@<name>.service` deletes its folder, and marble-host
+   waits for it. The helper waits in turn for a backup of the drive to end.
+5. The door hears `{ state: 'removed' }` through `step`, when the door is
+   what is ending the drive.
+6. The registry marks the drive `removed`, so its name is never given out
+   again.
+
+The registry says `removing` from the first step. So the router answers
+"resting", and the watcher and boot leave the drive alone. If a step fails,
+the removal stops there, and the reconcile's next look finishes it, whoever
+began it. A drive that wasn't running isn't asked to sign out, because its
+logins go with its folder. The `removed` event says who asked (`owner`,
+`door` or `person`), what each CLI's logout said, whether the folder went,
+and what the door said. In `user` mode there is no root helper, so the
+folder stays.
+
+The admin API's remove ends a drive the door made at the door first
+(`POST /_door/drives/<name>/remove`), so the edge stops serving it and its
+person's sessions end. If the door can't be reached, it answers 502 and
+changes nothing. A drive made by hand is removed here alone, and so is one
+whose name the door gave someone else. While the door is ending a drive, it
+refuses every step but `removed` with a 409. The maker then stops making
+that drive at the step it had reached, with no alert and no failed report,
+and the reconcile takes what was made off the PC.
+
+The looks (`server/host/looks.js`) read each running drive's `/health/deep`
+at start and every five minutes. A fresh answer runs four short CLI commands
+inside the drive, which is why marble-host asks no more often. From the
+answer, `GET /drives` gets `agent`: `claude`, `chatgpt`, `key` for an API key
+of the person's own, or null. It gets `heldBack` when the drive names the
+pages an update held back. It also gets `turnsToday` and `lastActive`
+(`createActivity` in `server/health-deep.js`). `turnsToday` counts the turns
+the drive's agents began since midnight by the PC's clock, from their own
+records. `lastActive` is the newest of its last turn and the last page
+opened, which the usage ledger counts each minute.
+
+For a drive the door made, the first look that shows an agent tells the
+door `agent-connected` (`{ agent: 'claude' }`). The first that shows a
+document tells it `first-document`. The registry keeps a note that the door
+heard each (`told`), so a restart of marble-host doesn't say either twice. A
+drive in the study, with both settings in its file, also has its
+`/health/study` read at most every ten minutes. Its counts go into `study:
+{ counts, at }` under the drive's own names. A drive outside the study is
+never asked. The watcher's restarts go to the door as `drive-restarted`
+(`{ by: 'watcher', restarts }`). `drive-updated`, after a move to a release,
+is the updater's to report.
+
+`POST /drives/<name>/export` starts `marble-guest-export@<name>.service` and
+answers 202 at once. It is a 409 unless the drive's settings say it is in
+the study, and the helper checks that again itself. `POST
+/drives/<name>/backup` starts `marble-guest-backup@<name>.service` the same
+way. Each `GET /drives` row carries `backup`, the drive's
+`/var/lib/marble-backup/status/<name>.json`, or null before its first backup.
+`HOST_BACKUP_STATUS_DIR` moves that folder for a test.
+`node tools/pc-host.mjs export <name>` and `backup <name>` ask the same.
+
+`node --test test/host-study.test.js test/host-remover.test.js
+test/host-admin.test.js` try all of it with a fake door, fake drives and a
+stand-in systemctl. The last test in `host-study.test.js` runs it against
+the door's own Directory, in memory, from a study invite to the drive's
+deletion.
+
 ### People in the Console
 
 Built 2026-10-25. The Console's Drives view shows the people on the PC under
@@ -1432,8 +1528,9 @@ canary and Roll back wait for the owner's updater: while
 `server/host/admin.js` exports `NOT_BUILT`, the pane shows its words, "the
 updater isn't built yet". Once that export goes, the two buttons call `POST
 /drives/<name>/channel` and `POST /rollback` with no other change. Withdraw
-waits for the door: it has no route for the owner to take someone out of the
-study, so the person leaves from their account page.
+waits to be wired to the door's `POST /_door/accounts/<id>/withdraw`, which
+now exists ([ACCOUNTS.md](ACCOUNTS.md), "The admin routes"); until it is, the
+person leaves from their account page.
 
 The page gets counts, times and states, never what someone wrote. No token
 reaches it, and no invite code but the one link. Nor does an email, an
@@ -1444,8 +1541,9 @@ server until `pchost.js` names it.
 marble-host's rows give the rest of the view when they carry these fields,
 each optional: `agent` (`claude`, `chatgpt`, `key` or null, from the drive's
 `/health/deep`), `turnsToday`, `lastActive`, `study: { counts, at }`,
-`heldBack` and `backup`. Export study data and Back up now need
-`POST /drives/<name>/export` and `/backup`. Without `agent`, a ready drive
+`heldBack` and `backup`. marble-host now gives all of them, and the
+`POST /drives/<name>/export` and `/backup` that Export study data and Back up
+now ask for ("marble-host and the study"). Without `agent`, a ready drive
 says "Drive ready" and Health says "Not known yet", and it is never shown as
 stalled. Without `turnsToday`, the row says "Idle" or "Working now". Without `lastActive`, the age is the
 person's last sign-in at the door or their last step. A route marble-host
