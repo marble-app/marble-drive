@@ -92,6 +92,14 @@ export function createSessions({ key, cookieName = 'marble_session', days = 30, 
   return { issue, read, identify, cookieHeader, clearHeader, cookieName };
 }
 
+/** The host the browser asked for: X-Forwarded-Host from the edge or a
+ *  proxy on this machine, else Host. A proxy that adds its own name after the
+ *  edge's leaves the browser's first. A page can't set either header on a
+ *  request to another site without a preflight this host never answers. */
+export function askedHost(req) {
+  return String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().toLowerCase();
+}
+
 /**
  * The CSRF belt to `SameSite=Lax`'s suspenders. Lax already keeps the cookie
  * off a cross-site POST; this refuses a state-changing request whose `Origin`
@@ -99,7 +107,9 @@ export function createSessions({ key, cookieName = 'marble_session', days = 30, 
  * bearer-token script — is left alone, because it carried no ambient cookie to
  * abuse.
  *
- * Read routes do not call this. `/ops` and every `/drive/*` verb do.
+ * Read routes do not call this. Every change passes `fromOwnPage`, below, in
+ * front of every route; the agent routes, the Allow page and Publish ask this
+ * again of their own.
  */
 export function sameOrigin(req) {
   const origin = req.headers.origin;
@@ -110,6 +120,27 @@ export function sameOrigin(req) {
   } catch {
     return false;
   }
-  const forwarded = req.headers['x-forwarded-host'];
-  return host === (forwarded || req.headers.host);
+  const asked = askedHost(req);
+  return Boolean(asked) && host === asked;
+}
+
+/**
+ * Did a change come from one of this drive's own pages? Until marbledrive.app
+ * is on the Public Suffix List every drive under it is same-site with every
+ * other, so Lax still sends ana's cookie with a post that a page on
+ * bob.marbledrive.app makes to ana's drive. A browser says where a request
+ * came from in `Origin` or, where it leaves that out, in `Sec-Fetch-Site`;
+ * either has to name this drive. A request with a bearer is a script (a page
+ * elsewhere can't add the header without that preflight), and one with
+ * neither header is not a browser at all (curl, the backup job), so both go
+ * on to be judged as before.
+ *
+ * server/app.js asks this of everything but GET, HEAD and OPTIONS, before any
+ * route runs.
+ */
+export function fromOwnPage(req) {
+  if (/^Bearer\s+\S/i.test(req.headers.authorization ?? '')) return true;
+  if (req.headers.origin) return sameOrigin(req);
+  const site = req.headers['sec-fetch-site'];
+  return site ? site === 'same-origin' : true;
 }
