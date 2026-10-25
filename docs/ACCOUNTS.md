@@ -457,10 +457,13 @@ The page also has Download my drive, a link to the drive's own
 `/drive/export.zip`, and Delete my drive for a drive on the PC host. Delete
 asks for the drive's name, sets the drive `deleting` (`drive-delete-asked`),
 and from then on the edge answers "This drive is being deleted". marble-host
-deletes it and reports `removed`. A drive on Fly has no Delete my drive,
-because nothing there would carry it out; its person asks you. Each of these
-is a POST that must come from `marbledrive.app` itself, like every other
-change at the door.
+deletes it and reports `removed`. Its encrypted backup in R2 stays, and the
+delete page says so, until you forget it once the drive is removed:
+`sudo /usr/local/lib/marble-guests/backup-guest <name> --forget --yes`
+([HOSTING.md](HOSTING.md), "Backups of PC drives"). A drive on Fly has no
+Delete my drive, because nothing there would carry it out; its person asks
+you. Each of these is a POST that must come from `marbledrive.app` itself,
+like every other change at the door.
 
 ### The admin routes
 

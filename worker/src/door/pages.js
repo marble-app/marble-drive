@@ -600,8 +600,10 @@ ${foot}`,
   });
 }
 
-/** Deleting a drive, from the account page: what goes, a copy offered first,
- *  and the name typed to say it is meant. */
+/** Deleting a drive, from the account page: what goes and what stays, a copy
+ *  offered first, and the name typed to say it is meant. The PC's hourly
+ *  backup (docs/HOSTING.md, "Backups of PC drives") outlives the drive until
+ *  Bryan forgets it, so the page says so rather than promise more. */
 export function deleteDrive({ drive, value = '', said = '', status = 200 }) {
   const address = `${esc(drive.name)}.${APEX_HOST}`;
   const copy = drive.state === 'ready' ? ` <a href="${esc(exportUrl(drive.name))}">Download it</a> first to keep a copy.` : '';
@@ -610,7 +612,7 @@ export function deleteDrive({ drive, value = '', said = '', status = 200 }) {
     status,
     body: `<section class="card">
 <h1>Delete <span class="addr">${address}</span></h1>
-<p class="lede">Its pages, files and history are deleted, and it can’t be undone.${copy}</p>
+<p class="lede">Its pages, files and history are deleted from Bryan’s PC, and it can’t be undone. Its encrypted backup is kept until Bryan deletes it.${copy}</p>
 <form method="post" action="/account/delete/${encodeURIComponent(drive.name)}">
 <label class="label" for="confirm">Type ${esc(drive.name)} to delete it</label>
 <div class="field"><input id="confirm" name="confirm" value="${esc(value)}" required autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="done" aria-describedby="said"></div>

@@ -868,13 +868,16 @@ their own PRs.
 
 A drive ends in one of two ways, and both finish the same way. The owner
 removes it (`POST /_door/drives/<name>/remove` with its name typed, or
-`door.mjs remove`), which makes it `removing` and ends every session of its
-owner. Or its owner deletes it from the account page, which makes it
-`deleting`. marble-host then signs the drive's CLIs out, deletes the drive
-from the PC and reports `{ state: 'removed' }` through `step`. The record
-stays, so the name is never given out again. Nothing else moves an ending
-drive: `step`, `hold` and `unspare` refuse it with a 409, so a maker that
-was half way through making it stops there.
+`door.mjs remove`), which makes it `removing` and ends every session of the
+person whose drive it is. Or that person deletes it from the account page,
+which makes it `deleting`. marble-host then signs the drive's CLIs out,
+deletes the drive from the PC and reports `{ state: 'removed' }` through
+`step`. The record stays, so the name is never given out again. The drive's
+encrypted backup in R2 stays too, as "Backups of PC drives" says. When the
+person asked for their drive to be deleted, forget its backup once it is
+removed; the delete page tells them the backup is kept until then. Nothing
+else moves an ending drive: `step`, `hold` and `unspare` refuse it with a
+409, so a maker that was half way through making it stops there.
 
 The edge answers all three states itself, with a 410: "This drive has been
 removed" or "This drive is being deleted", as a page or as JSON for a

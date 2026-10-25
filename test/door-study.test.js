@@ -291,7 +291,7 @@ test('Delete my drive: a page that says what goes, the name typed, from this sit
   assert.equal(page.status, 200);
   const body = await text(page);
   assert.match(body, /<h1>Delete <span class="addr">ana\.marbledrive\.app<\/span><\/h1>/);
-  assert.match(body, /Its pages, files and history are deleted, and it can’t be undone\. <a href="https:\/\/ana\.marbledrive\.app\/drive\/export\.zip">Download it<\/a> first to keep a copy\./);
+  assert.match(body, /Its pages, files and history are deleted from Bryan’s PC, and it can’t be undone\. Its encrypted backup is kept until Bryan deletes it\. <a href="https:\/\/ana\.marbledrive\.app\/drive\/export\.zip">Download it<\/a> first to keep a copy\./);
   assert.match(body, /<label class="label" for="confirm">Type ana to delete it<\/label>/);
   assert.match(body, /<button class="btn danger" type="submit">Delete my drive<\/button>/);
   assert.match(body, /<a href="\/account">Keep my drive<\/a>/);
