@@ -757,6 +757,25 @@ html[data-marble-keyboard] .pop[data-sheet] { padding-bottom: 0; }
 .well[data-empty] .empty { padding-top: 22vh; }
 .loading { color: var(--faint); font-size: .85rem; }
 
+/* ----------------------------------------------------- people on the PC */
+
+/* Under the People heading, in the meta line's voice: how many drives the PC
+   holds and how many are working, then anything that couldn't be read. */
+.group-line { margin: -.15rem 0 .35rem; padding: 0 1rem; font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; text-wrap: pretty; }
+.group-line.warn { color: var(--caution); }
+/* Why a button can't be pressed, said under it in words, never only in a
+   tip; muted rather than faint, because it is the thing to read. */
+.sec .why { margin: .45rem 0 0; font-size: .8rem; color: var(--muted); text-wrap: pretty; }
+/* The People list is the door's log, with no detail of its own: one pane at a
+   reading width on the well. */
+.well[data-people] { grid-template-columns: minmax(0, 44rem); justify-content: center; }
+.well[data-people] > .pane.detail { display: none; }
+/* A dot only where the owner has something to do; the rest keep its column. */
+.dot.blank { visibility: hidden; }
+/* A line about someone who no longer has a row opens nothing. */
+.row.still-line { cursor: default; }
+.row.still-line:hover, .row.still-line:active { background: none; }
+
 /* ---------------------------------------------------------------- dashboard */
 
 /* The charts' colours. The system has one blue; data needs more, so these come

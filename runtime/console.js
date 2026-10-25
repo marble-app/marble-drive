@@ -61,6 +61,15 @@
     test: ['Run the tests', 'Testing…', 'Passed'],
     publish: ['Publish', 'Publishing…', 'Published'],
     'npm-login': ['Sign in to npm', 'Waiting for npm…', 'Signed in'],
+    // People on the PC (server/console/pchost.js).
+    'pc-restart': ['Restart', 'Restarting…', 'Restarted'],
+    'pc-suspend': ['Suspend', 'Suspending…', 'Suspended'],
+    'pc-resume': ['Resume', 'Resuming…', 'Resumed'],
+    'pc-backup': ['Back up now', 'Asking…', 'Asked'],
+    'pc-export': ['Export study data', 'Exporting…', 'Exported'],
+    'pc-remove': ['Remove this drive', 'Removing…', 'Removed'],
+    'pc-canary': ['Move to canary', 'Moving…', 'Moved'],
+    'pc-rollback': ['Roll back', 'Rolling back…', 'Rolled back'],
   };
 
   // ----------------------------------------------------------------- store
@@ -124,6 +133,10 @@
     backups: [],
     openedAt: Date.now(),
     allSnapshots: false,
+    // Other people's drives on the PC (server/console/pchost.js), and which
+    // list Activity shows: the console's jobs or the door's log of people.
+    people: null,
+    activityList: store.get('activityList', 'console') === 'people' ? 'people' : 'console',
   };
 
   // ---------------------------------------------------------------- helpers
@@ -221,6 +234,61 @@
   const subjectOf = (sha) => (sha && S.workshop?.main?.commits?.find((c) => c.sha.startsWith(sha))?.subject) ?? null;
   const running = (target, kinds) => S.jobs.find((j) => j.state === 'running' && (j.target === target || (j.target === 'fleet' && j.meta?.targets?.includes(target))) && (!kinds || kinds.includes(j.kind) || (j.kind === 'ship' && kinds.includes('deploy'))));
   const failedUnseen = (d) => d.lastJob && d.lastJob.state === 'failed' && !S.seen.has(d.lastJob.id);
+  /** A date ahead, such as when an invite runs out: clock() is for the past. */
+  const dayOf = (when) => {
+    const t = new Date(typeof when === 'number' ? when : Date.parse(when));
+    return Number.isNaN(t.getTime()) ? '' : t.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+  /** How long something took, in the one unit that reads. */
+  const lapse = (ms) => {
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    if (ms < 60 * MIN) return plural(Math.max(1, Math.round(ms / MIN)), 'minute');
+    if (ms < 48 * 60 * MIN) return plural(Math.round(ms / (60 * MIN)), 'hour');
+    return plural(Math.round(ms / (24 * 60 * MIN)), 'day');
+  };
+  /** A server's words as a sentence on the page. */
+  const sentence = (text) => String(text ?? '').replace(/^./, (c) => c.toUpperCase());
+  /** The same, ending in a full stop unless it has one. */
+  const stopped = (text) => sentence(String(text ?? '').replace(/([^.!?])$/, '$1.'));
+
+  // People on the PC (server/console/pchost.js): the door's people joined with
+  // marble-host's drives. A row's key on this page is `pc:` and the drive's
+  // name, or the invite's id while there is no drive yet; its jobs run on
+  // `pc:<drive>`, so a drive on the PC never shares a queue with a sprite.
+  const pcRows = () => (S.people?.on ? S.people.rows ?? [] : []);
+  const pcRow = (key) => (String(key ?? '').startsWith('pc:') ? pcRows().find((p) => `pc:${p.key}` === key) ?? null : null);
+  const pcTarget = (p) => `pc:${p.drive}`;
+  // The Console's own dots: filled while an agent works, the caution ring for
+  // someone who has stalled, danger when it isn't answering, and the empty
+  // ring for the rest, an invite not yet opened among them.
+  const PC_DOT = { working: 'awake', stalled: 'warn', down: 'failed' };
+  const pcDot = (p) => (p.drive && running(pcTarget(p)) ? 'busy' : PC_DOT[p.status] ?? 'asleep');
+  const PC_STATUS = { working: 'working', stalled: 'stalled', down: 'not answering', waiting: 'invited', idle: 'idle' };
+  const AGENT = { claude: 'Claude', chatgpt: 'ChatGPT', key: 'API key', some: 'Connected', none: 'None yet' };
+  /** The row's agent: who answers there, or how far a joiner has got. */
+  const agentWord = (p) => (!p.drive ? 'Joining' : p.agent ? AGENT[p.agent] : null);
+  /** Where someone is today: turns once they use it, else the step they're on. */
+  function todayWords(p) {
+    switch (p.stage) {
+      case 'invited': return 'Link not opened';
+      case 'consent': return 'Signed in, consent not answered';
+      case 'naming': return 'Signed in, no drive yet';
+      case 'making': return 'Drive being made';
+      case 'failed': return p.host?.failed?.step ? `Making the drive stopped at ${p.host.failed.step}` : 'Making the drive failed';
+      case 'ready': return 'Drive ready';
+      case 'no-agent': return 'Drive ready, no agent';
+      case 'no-document': return 'Agent connected, no document yet';
+      case 'suspended': return 'Suspended';
+      case 'held': return 'On hold at the door';
+      case 'down': return 'Not answering';
+      case 'removing': return 'Being removed';
+      case 'deleting': return 'Being deleted, as they asked';
+      case 'missing': return 'Not on marble-host';
+      default:
+        if (Number.isFinite(p.turnsToday)) return p.turnsToday ? `${plural(p.turnsToday, 'turn')} today` : 'No turns today';
+        return p.working > 0 ? 'Working now' : 'Idle';
+    }
+  }
 
   async function copy(text) {
     try {
@@ -326,12 +394,14 @@
     if (pop?.matches(':popover-open')) pop.hidePopover();
   }
   /** Hung under its trigger, in the top layer, grown from the nearest corner.
-   *  A task with fields (`sheet`) is a sheet on the keyboard on a phone. */
-  function openPop(trigger, build, { sheet = false, width = null } = {}) {
+   *  A task with fields (`sheet`) is a sheet on the keyboard on a phone. One
+   *  that holds something shown only once (`manual`) closes only from inside,
+   *  so a click beside it can't lose it. */
+  function openPop(trigger, build, { sheet = false, width = null, manual = false } = {}) {
     closePop();
     pop?.remove();
     const asSheet = sheet && narrow();
-    pop = h('div.pop', { popover: 'auto', [TRANSIENT]: true, role: 'dialog', 'data-sheet': asSheet ? true : null, style: width ? { width } : null });
+    pop = h('div.pop', { popover: manual ? 'manual' : 'auto', [TRANSIENT]: true, role: 'dialog', 'data-sheet': asSheet ? true : null, style: width ? { width } : null });
     pop.append(build(closePop));
     document.body.append(pop);
     const r = trigger.getBoundingClientRect();
@@ -413,11 +483,12 @@
   drivesWell.append(h('div.pane.list', {}, listScroll), detailPane);
   views.drives.append(drivesWell);
 
-  // Activity: jobs and one job's output.
+  // Activity: jobs and one job's output, or the door's log of people.
   const jobsWell = h('div.well');
   const jobsScroll = h('div.pane-scroll', { role: 'listbox', 'aria-label': 'Jobs' });
   const jobPane = h('div.pane.detail');
-  jobsWell.append(h('div.pane.list', {}, h('div.pane-head', {}, h('h2', { text: 'What the console has done' })), jobsScroll), jobPane);
+  const jobsHead = h('div.pane-head', {}, h('h2', { text: 'What the console has done' }));
+  jobsWell.append(h('div.pane.list', {}, jobsHead, jobsScroll), jobPane);
   views.activity.append(jobsWell);
 
   const dashPage = h('div.page.dash');
@@ -520,20 +591,82 @@
     return row;
   }
 
+  /** A drive on the PC, or someone on the way to one, as a row: the same dot,
+   *  name and age, with the agent where a sprite says whose it is and the
+   *  day's turns, or the step they're on, as its meta line. */
+  function pcRowFor(p, i) {
+    const key = `pc:${p.key}`;
+    let row = rows.get(key);
+    if (!row) {
+      row = h('button.row', { type: 'button', role: 'option', 'data-name': key, style: { '--i': String(S.animateList ? i : 0) }, onclick: () => pick(key) },
+        h('span.dot'), h('span.row-title'), h('span.row-age'), h('span.row-meta'));
+      rows.set(key, row);
+      row.addEventListener('animationend', () => { row.style.animation = 'none'; }, { once: true });
+      if (!S.animateList) row.style.animation = 'none';
+    }
+    const job = p.drive ? running(pcTarget(p)) : null;
+    const dot = row.querySelector('.dot');
+    dot.dataset.state = pcDot(p);
+    dot.setAttribute('aria-label', job ? 'busy' : PC_STATUS[p.status] ?? p.status);
+    const who = agentWord(p);
+    row.querySelector('.row-title').replaceChildren(p.label, who ? h('span.who', { text: who }) : '');
+    const age = row.querySelector('.row-age');
+    age.textContent = p.status === 'working' ? 'working' : ago(p.lastActive);
+    age.toggleAttribute('data-awake', p.status === 'working');
+    const meta = row.querySelector('.row-meta');
+    meta.textContent = job ? `${job.title}…` : todayWords(p);
+    meta.toggleAttribute('data-busy', Boolean(job));
+    meta.toggleAttribute('data-failed', !job && p.status === 'down');
+    const current = key === S.drive && (S.open || !narrow());
+    row.setAttribute('aria-current', String(current));
+    row.setAttribute('aria-selected', String(current));
+    return row;
+  }
+
+  /** Under the People heading: how many drives the PC holds and how many have
+   *  an agent working, then whatever couldn't be read, once. */
+  function peopleLines() {
+    const v = S.people;
+    if (!v?.on) return [];
+    const out = [];
+    const c = v.counts ?? {};
+    if (v.door?.ok || v.host?.ok) {
+      out.push(h('p.group-line', { text: [
+        `${plural(c.drives ?? 0, 'drive')} on the PC`,
+        Number.isFinite(c.working) ? `${c.working} working now` : null,
+        c.invites ? `${plural(c.invites, 'invite')} not opened` : null,
+      ].filter(Boolean).join(' · ') }));
+    }
+    const sides = [
+      ['door', 'door.env', 'sign-up and the study are not shown'],
+      ['host', 'host.env', 'health is not shown'],
+    ];
+    for (const [side, file, without] of sides) {
+      const s = v[side];
+      if (!s) out.push(h('p.group-line.soft', { text: `No ${file} on this machine, so ${without}.` }));
+      else if (!s.ok) out.push(h('p.group-line.warn', { text: `${stopped(s.why ?? `${file} could not be read`)}${s.at ? ` Showing what it said at ${clock(s.at)}.` : ''}` }));
+    }
+    return out;
+  }
+
   function drawList() {
+    const pcs = pcRows();
     const groups = [
-      ['Yours', S.fleet.filter((d) => d.role !== 'user')],
-      ['People', S.fleet.filter((d) => d.role === 'user')],
-    ].filter(([, list]) => list.length);
+      ['Yours', S.fleet.filter((d) => d.role !== 'user').map((d) => [d, rowFor])],
+      // The PC's people beside the testers on Fly, as the plan has them.
+      ['People', [...pcs.map((p) => [p, pcRowFor]), ...S.fleet.filter((d) => d.role === 'user').map((d) => [d, rowFor])]],
+    ].filter(([label, list]) => list.length || (label === 'People' && S.people?.on));
     const kids = [];
     let i = 0;
     for (const [label, list] of groups) {
       kids.push(h('h3.group', {}, label, h('span.count', { text: String(list.length) })));
-      for (const d of list) kids.push(rowFor(d, i++));
+      if (label === 'People') kids.push(...peopleLines());
+      for (const [x, draw] of list) kids.push(draw(x, i++));
     }
-    if (!S.fleet.length) kids.push(h('p.empty', { text: S.loaded ? (S.fleetError ? `The fleet could not be read: ${S.fleetError}` : 'No drives in the org yet.') : 'Reading the fleet…' }));
+    if (!S.fleet.length && !pcs.length) kids.push(h('p.empty', { text: S.loaded ? (S.fleetError ? `The fleet could not be read: ${S.fleetError}` : 'No drives in the org yet.') : 'Reading the fleet…' }));
+    else if (!S.fleet.length && S.fleetError) kids.push(h('p.group-line.warn', { text: `The fleet on Fly could not be read: ${S.fleetError}` }));
     listScroll.replaceChildren(...kids);
-    for (const name of rows.keys()) if (!drive(name)) rows.delete(name);
+    for (const name of rows.keys()) if (!drive(name) && !pcRow(name)) rows.delete(name);
     S.animateList = false;
   }
 
@@ -544,7 +677,7 @@
     store.set('drive', name);
     const d = drive(name);
     if (d?.lastJob) markSeen(d.lastJob.id);
-    loadCheckpoints(name);
+    if (d) loadCheckpoints(name);
     if (narrow()) history.pushState({ consoleOpen: name }, '');
     paint();
   }
@@ -575,13 +708,35 @@
 
   // ----------------------------------------------------------- the detail
 
+  /** Keep what the hand is in: the focused control and its caret survive a
+   *  paint. Call before the pane is rebuilt; the answer puts them back. */
+  function keepFocus() {
+    const active = document.activeElement;
+    const focusKey = detailScroll.contains(active) ? active.dataset?.key : null;
+    const caret = focusKey && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
+    return () => {
+      if (!focusKey) return;
+      const again = detailScroll.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
+      if (again) {
+        again.focus({ preventScroll: true });
+        if (caret && again.setSelectionRange) try { again.setSelectionRange(...caret); } catch {}
+      }
+    };
+  }
+
   function drawDetail() {
-    const d = drive(S.drive) ?? S.fleet[0];
-    if (d && S.drive !== d.name) {
-      S.drive = d.name;
-      loadCheckpoints(d.name);
+    let p = pcRow(S.drive);
+    let d = p ? null : drive(S.drive);
+    if (!p && !d) {
+      d = S.fleet[0] ?? null;
+      p = d ? null : pcRows()[0] ?? null;
+      if (d && S.drive !== d.name) {
+        S.drive = d.name;
+        loadCheckpoints(d.name);
+      } else if (p) S.drive = `pc:${p.key}`;
     }
-    drivesWell.toggleAttribute('data-open', Boolean(S.open && d));
+    drivesWell.toggleAttribute('data-open', Boolean(S.open && (d || p)));
+    if (p) return drawPcDetail(p);
     if (!d) {
       detailScroll.replaceChildren(h('p.empty', { text: S.loaded ? 'Pick a drive.' : '' }));
       detailPane.querySelector('.pending')?.remove();
@@ -593,26 +748,23 @@
       return;
     }
     S.forceDetail = null;
-    // Keep what the hand is in: the focused control and its caret survive a paint.
-    const active = document.activeElement;
-    const focusKey = detailScroll.contains(active) ? active.dataset?.key : null;
-    const caret = focusKey && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
-
+    const restore = keepFocus();
     const body = h('div.detail-body', { class: S.animateDetail ? null : 'still' },
       head(d), use(d), release(d), health(d), claude(d), access(d), settings(d), checkpoints(d), d.role === 'user' ? remove(d) : null);
     if (!S.animateDetail) body.style.animation = 'none';
     S.animateDetail = false;
     detailScroll.replaceChildren(body);
     pendingBar(d);
-
-    if (focusKey) {
-      const again = detailScroll.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
-      if (again) {
-        again.focus({ preventScroll: true });
-        if (caret && again.setSelectionRange) try { again.setSelectionRange(...caret); } catch {}
-      }
-    }
+    restore();
   }
+
+  const backButton = () => h('button.back', { type: 'button', 'aria-label': 'Back to the drives', onclick: () => {
+    if (history.state?.consoleOpen) history.back();
+    else {
+      S.open = false;
+      paint();
+    }
+  } });
 
   function head(d) {
     const since = d.since ? clock(d.since) : '';
@@ -620,13 +772,7 @@
     return h('div.d-head', {},
       h('div.names', {},
         h('h2.d-name', {},
-          h('button.back', { type: 'button', 'aria-label': 'Back to the drives', onclick: () => {
-            if (history.state?.consoleOpen) history.back();
-            else {
-              S.open = false;
-              paint();
-            }
-          } }),
+          backButton(),
           h('span.dot', { 'data-state': running(d.name) ? 'busy' : d.awake ? 'awake' : 'asleep' }),
           d.name),
         h('p.d-sub', {}, `${person(d, true)} · `, d.awake ? h('span.good', { text: `awake${since ? ` since ${since}` : ''}` }) : `asleep${since ? ` since ${since}` : ''}`)),
@@ -1055,6 +1201,210 @@
         run: (confirm) => start(`remove:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/remove`, { method: 'POST', body: { confirm } })),
       }) }),
       said(`remove:${d.name}`));
+  }
+
+  // ------------------------------------------------ a person's drive on the PC
+  //
+  // The same pane, with what the door and marble-host know: how far from
+  // invite to first document, the study, health, release, and the actions.
+  // There is no Open drive: the door doesn't let the owner into someone
+  // else's drive, and that is the promise on the consent screen. Everything
+  // here is a count, a time or a state, never what the person wrote.
+
+  const ENDING = ['removing', 'deleting'];
+
+  function drawPcDetail(p) {
+    detailPane.querySelector('.pending')?.remove();
+    // Asked every half minute, its check's time would rebuild the pane each
+    // time; the minute in every key is enough for "checked 1m ago".
+    const steady = { ...p, host: p.host ? { ...p.host, checkedAt: ago(p.host.checkedAt) } : null };
+    if (!changed('detail', ['pc', steady, liveJobs(), notes(p.drive ?? p.key), S.open, S.forceDetail, S.people?.updater, S.people?.host?.ok])) return;
+    S.forceDetail = null;
+    const restore = keepFocus();
+    const body = h('div.detail-body', { class: S.animateDetail ? null : 'still' },
+      pcHead(p), signUp(p), study(p),
+      p.drive ? pcHealth(p) : null,
+      p.drive && p.host ? pcRelease(p) : null,
+      p.drive && !ENDING.includes(p.stage) ? pcRemove(p) : null);
+    if (!S.animateDetail) body.style.animation = 'none';
+    S.animateDetail = false;
+    detailScroll.replaceChildren(body);
+    restore();
+  }
+
+  function pcHead(p) {
+    const stalled = p.status === 'stalled' && p.lastStep ? `, nothing new since ${clock(p.lastStep)}` : '';
+    const sub = [p.person, p.study.inStudy ? 'in the study' : null, `${todayWords(p)}${stalled}`].filter(Boolean).join(' · ');
+    return h('div.d-head', {},
+      h('div.names', {},
+        h('h2.d-name', {}, backButton(), h('span.dot', { 'data-state': pcDot(p) }), p.label),
+        h('p.d-sub', { text: sentence(sub) })));
+  }
+
+  const STEPS = [
+    ['invited', 'Invited'],
+    ['signedIn', 'Signed in'],
+    ['consented', 'Agreed to the study'],
+    ['named', 'Named the drive'],
+    ['ready', 'Drive ready'],
+    ['agentConnected', 'Agent connected'],
+    ['firstDocument', 'First document'],
+    ['updated', 'Last moved to a release'],
+  ];
+  const studyish = (s) => s.invited || s.cohort === 'study' || Boolean(s.consent);
+
+  /** Each step from invite to first document, with the time it happened. */
+  function signUp(p) {
+    const t = p.timeline;
+    const facts = STEPS.filter(([k]) => (k !== 'consented' || studyish(p.study)) && (k !== 'updated' || t.updated)).map(([k, label]) => {
+      if (k === 'consented' && p.study.consent?.choice === 'declined') return fact('Said no to the study', clock(p.study.consent.at));
+      return fact(label, t[k] ? clock(t[k]) : '—');
+    });
+    const took = t.invited && t.firstDocument ? lapse(Date.parse(t.firstDocument) - Date.parse(t.invited)) : null;
+    return section('Sign-up', took ? `${took} from invite to first document` : null,
+      h('dl.facts', {}, facts),
+      p.stage === 'invited' && p.invite?.expires ? h('p.soft', { style: { margin: '.6rem 0 0', 'font-size': '.85rem' }, text: `The link works until ${dayOf(p.invite.expires)}, for one person.` }) : null);
+  }
+
+  const COUNTS = {
+    daysActive: 'Days active',
+    prompts: 'Prompts',
+    builds: 'Builds',
+    marks: 'Marks',
+    conversations: 'Conversations',
+    singlePrompt: 'One-prompt conversations',
+    whileWorking: 'Prompts while another worked',
+  };
+  const countWord = (k) => COUNTS[k] ?? sentence(k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase());
+
+  /** The consent form's version and date, what the study has counted, and
+   *  the two things the owner can do: export, or take them out. */
+  function study(p) {
+    const s = p.study;
+    if (!studyish(s)) return null;
+    const c = s.consent;
+    const target = pcTarget(p);
+    const facts = [
+      fact('Form', c?.version ?? '—'),
+      c?.choice === 'given' ? fact('Agreed', clock(c.at)) : c?.choice === 'declined' ? fact('Said no', clock(c.at)) : fact('Answer', 'Not yet'),
+      s.withdrawn ? fact('Left', clock(s.withdrawn)) : null,
+      s.deleteAsked ? fact('Asked to delete', clock(s.deleteAsked)) : null,
+      ...Object.entries(s.counts ?? {}).map(([k, v]) => fact(countWord(k), v)),
+    ];
+    const note = { style: { margin: '.6rem 0 0', 'font-size': '.85rem' } };
+    return section('Study', s.countsAt ? `counted ${since(s.countsAt)}` : null,
+      h('dl.facts', {}, facts),
+      s.deleteAsked ? h('p.warn', { ...note, text: 'They asked for what the study collected to be deleted. The door only records the ask; deleting it is yours to do.' }) : null,
+      c?.choice === 'given' && p.drive && s.cohort !== 'study' ? h('p.soft', { ...note, text: 'They said yes, but their drive was made outside the study, so nothing of it is collected.' }) : null,
+      s.inStudy && p.drive ? [
+        h('div.row-actions', {},
+          jobButton({ key: `pcexport:${p.drive}`, target, kind: 'pc-export', cls: 'quiet', onclick: () => start(`pcexport:${p.drive}`, () => api(`people/${encodeURIComponent(p.drive)}/export`, { method: 'POST' })) }),
+          h('button.btn.quiet', { type: 'button', disabled: true, text: 'Withdraw' })),
+        h('p.why', { text: "Withdraw is unavailable: the door can't take someone out of the study yet. They can leave from their account page." }),
+      ] : null,
+      said(`pcexport:${p.drive}`));
+  }
+
+  const HOST_STATE = { running: 'Running', suspended: 'Suspended', making: 'Being made', failed: 'Failed', removed: 'Removed' };
+  const AGENT_LONG = { claude: 'Claude', chatgpt: 'ChatGPT', key: 'An API key', some: 'Connected', none: 'None yet' };
+
+  /** What marble-host says of the drive, and its last backup. */
+  function pcHealth(p) {
+    const x = p.host;
+    const v = S.people;
+    if (!x) {
+      return section('Health', null, h('p.soft', { text: !v?.host ? 'Not known: there is no host.env on this machine.'
+        : !v.host.ok ? 'Not known: marble-host could not be read.'
+          : p.stage === 'missing' ? 'marble-host has no drive by this name, though the door says it is ready.' : 'Not on marble-host yet.' }));
+    }
+    const b = p.backup;
+    const sha = releaseSha(x.release);
+    const line = { style: { margin: '.6rem 0 0', 'font-size': '.85rem' } };
+    const target = pcTarget(p);
+    const suspended = x.state === 'suspended';
+    return section('Health', x.checkedAt ? `checked ${since(x.checkedAt)}` : null,
+      h('dl.facts', {},
+        fact('State', HOST_STATE[x.state] ?? x.state ?? '—'),
+        fact('Agent', p.agent ? AGENT_LONG[p.agent] : 'Not known yet'),
+        fact('Working', !Number.isFinite(x.working) ? '—' : x.working ? `${plural(x.working, 'turn')} now` : 'Idle'),
+        Number.isFinite(p.turnsToday) ? fact('Today', plural(p.turnsToday, 'turn')) : null,
+        fact('Memory', bytes(x.memoryBytes)),
+        fact('Release', sha ?? x.release ?? '—'),
+        fact('Restarts', x.restarts),
+        fact('Last backup', !b ? 'None yet' : b.lastGood ? since(b.lastGood) : 'None that worked'),
+        p.heldBack ? fact('Held back', p.heldBack.length ? plural(p.heldBack.length, 'page') : 'None') : null),
+      x.ok === false ? h('p.bad', { ...line, text: `It didn't answer marble-host's last check${x.checkedAt ? `, ${since(x.checkedAt)}` : ''}.` }) : null,
+      x.failed ? h('p.bad', { ...line, text: `Making it stopped at ${x.failed.step ?? 'a step'}${x.failed.why ? `: ${x.failed.why}` : ''}.` }) : null,
+      b && !b.ok ? h('p.warn', { ...line, text: `The last backup failed ${since(b.at)}${b.why ? `: ${b.why}` : ''}.${b.lastGood ? ` The last good one was ${since(b.lastGood)}.` : ''}` }) : null,
+      b?.ok && Number.isFinite(b.files) ? h('p.soft', { ...line, text: `${plural(b.files, 'file')}, ${bytes(b.bytes)}, kept encrypted in R2.` }) : null,
+      p.heldBack?.length ? h('p.soft', { ...line, text: `An update left ${p.heldBack.length === 1 ? 'this page' : 'these pages'} as they were, because they changed ${p.heldBack.length === 1 ? 'it' : 'them'}: ${p.heldBack.join(', ')}.` }) : null,
+      h('div.row-actions', {},
+        jobButton({ key: `pcrestart:${p.drive}`, target, kind: 'pc-restart', cls: 'quiet', disabled: suspended, onclick: (e) => restartPc(e.currentTarget, p) }),
+        suspended
+          ? jobButton({ key: `pcresume:${p.drive}`, target, kind: 'pc-resume', cls: 'quiet', onclick: () => start(`pcresume:${p.drive}`, () => api(`people/${encodeURIComponent(p.drive)}/resume`, { method: 'POST' })) })
+          : jobButton({ key: `pcsuspend:${p.drive}`, target, kind: 'pc-suspend', cls: 'quiet', onclick: (e) => suspendPc(e.currentTarget, p) }),
+        jobButton({ key: `pcbackup:${p.drive}`, target, kind: 'pc-backup', cls: 'quiet', onclick: () => start(`pcbackup:${p.drive}`, () => api(`people/${encodeURIComponent(p.drive)}/backup`, { method: 'POST' })) })),
+      said(`pcrestart:${p.drive}`), said(`pcresume:${p.drive}`), said(`pcsuspend:${p.drive}`), said(`pcbackup:${p.drive}`));
+  }
+
+  function restartPc(trigger, p) {
+    const go = () => start(`pcrestart:${p.drive}`, () => api(`people/${encodeURIComponent(p.drive)}/restart`, { method: 'POST' }));
+    if (!(p.working > 0)) return go();
+    openPop(trigger, (close) => h('div.pop-body', {},
+      h('h4', { text: `Restart ${p.drive} now?` }),
+      h('p.soft', { text: 'An agent is working there, and restarting stops its turn.' }),
+      h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }),
+        h('button.btn.primary', { type: 'button', text: 'Restart', onclick: () => { close(); go(); } }))));
+    return undefined;
+  }
+
+  function suspendPc(trigger, p) {
+    openPop(trigger, (close) => h('div.pop-body', {},
+      h('h4', { text: `Suspend ${p.drive}?` }),
+      h('p.soft', { text: `It stays stopped until you resume it, through restarts of the PC, and its person sees that their drive is resting.${p.working > 0 ? ' An agent is working there now, and its turn stops.' : ''}` }),
+      h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }),
+        h('button.btn.primary', { type: 'button', text: 'Suspend', onclick: () => {
+          close();
+          start(`pcsuspend:${p.drive}`, () => api(`people/${encodeURIComponent(p.drive)}/suspend`, { method: 'POST' }));
+        } }))));
+  }
+
+  /** The release it runs and the channel it follows. Moving it is the
+   *  updater's, so until that exists both buttons say why they can't. */
+  function pcRelease(p) {
+    const x = p.host;
+    const u = S.people?.updater ?? { available: false, why: null };
+    const sha = releaseSha(x.release);
+    const when = releaseAt(x.release);
+    const target = pcTarget(p);
+    const toCanary = x.channel !== 'canary';
+    return section('Release', x.channel === 'canary' ? 'canary' : 'everyone',
+      x.release ? h('p.lede', {}, h('span.sha', { text: sha ?? x.release }), when ? h('span.faint', { text: ` · made ${clock(when)}` }) : null) : h('p.soft', { text: 'Not known yet' }),
+      h('p.soft', { style: { margin: '.35rem 0 0', 'font-size': '.85rem' }, text: x.channel === 'canary' ? 'On the canary channel: it gets each release before everyone else.' : 'On the everyone channel: it gets a release after the canary drives do.' }),
+      h('div.row-actions', {},
+        jobButton({ key: `pccanary:${p.drive}`, target, kind: 'pc-canary', label: toCanary ? 'Move to canary' : 'Move to everyone', cls: 'quiet', disabled: !u.available, onclick: () => start(`pccanary:${p.drive}`, () => api(`people/${encodeURIComponent(p.drive)}/canary`, { method: 'POST', body: { channel: toCanary ? 'canary' : 'everyone' } })) }),
+        jobButton({ key: `pcrollback:${p.drive}`, target, kind: 'pc-rollback', cls: 'quiet', disabled: !u.available, onclick: () => start(`pcrollback:${p.drive}`, () => api(`people/${encodeURIComponent(p.drive)}/rollback`, { method: 'POST' })) })),
+      u.available ? null : h('p.why', { text: `Both are unavailable: ${u.why ?? 'marble-host has no updater yet'}.` }),
+      said(`pccanary:${p.drive}`), said(`pcrollback:${p.drive}`));
+  }
+
+  /** Ending a drive goes through the door, which stops serving it at once;
+   *  marble-host signs its agents out and deletes it at its next look. */
+  function pcRemove(p) {
+    const viaDoor = Boolean(p.door);
+    const who = p.person ?? 'Its person';
+    return section('Remove', null,
+      h('p.soft', { style: { margin: '0 0 .6rem', 'font-size': '.85rem' }, text: viaDoor
+        ? `Ends ${p.drive} at the door for good and signs its person out everywhere. marble-host then signs its agents out and deletes it from the PC. Its encrypted backup stays until you forget it, and the name is never given out again.`
+        : `The door doesn't know ${p.drive}, so marble-host stops it and deletes its settings. Its folder stays on the PC until the root helper deletes it.` }),
+      jobButton({ key: `pcremove:${p.drive}`, target: pcTarget(p), kind: 'pc-remove', cls: 'danger', onclick: (e) => confirmTyped(e.currentTarget, {
+        title: `Remove ${p.drive}?`,
+        body: viaDoor ? `${who} can't open it again, and marble-host deletes it from the PC.` : `${p.drive} stops for good.`,
+        word: p.drive,
+        action: `Remove ${p.drive}`,
+        run: (confirm) => start(`pcremove:${p.drive}`, () => api(`people/${encodeURIComponent(p.drive)}/remove`, { method: 'POST', body: { confirm } })),
+      }) }),
+      said(`pcremove:${p.drive}`));
   }
 
   // --------------------------------------------------------------- backups
@@ -1610,6 +1960,25 @@
   const drawnJobs = new Set();
   function drawActivity() {
     const list = S.jobs;
+    // With the door's settings here, a second list beside the console's own:
+    // what the door's log says the people on the PC did.
+    const people = S.people?.on && S.people.door ? S.people.activity ?? [] : null;
+    const showPeople = Boolean(people) && S.activityList === 'people';
+    if (changed('activity-head', [Boolean(people), showPeople])) {
+      jobsHead.replaceChildren(people
+        ? segmented([['console', 'The console'], ['people', 'People']], showPeople ? 'people' : 'console', (v) => {
+          S.activityList = v;
+          store.set('activityList', v);
+          paint();
+        }, { small: true, label: 'Whose activity' })
+        : h('h2', { text: 'What the console has done' }));
+    }
+    jobsWell.toggleAttribute('data-people', showPeople);
+    jobsScroll.setAttribute('aria-label', showPeople ? 'People' : 'Jobs');
+    if (showPeople) {
+      drawPeopleActivity(people);
+      return;
+    }
     if (!changed('activity', [list.map((j) => [j.id, j.state, j.endedAt, j.error]), S.job, S.jobOpen])) return;
     jobsWell.toggleAttribute('data-empty', !list.length);
     const fresh = (id) => {
@@ -1631,6 +2000,67 @@
     drawJob();
   }
   const stateWord = (j) => ({ running: 'Running', done: 'Done', failed: j.error ? `Failed: ${j.error}` : 'Failed', stopped: 'Stopped', interrupted: 'Cut off by a restart' }[j.state] ?? j.state);
+
+  // The door's log in words: who (the drive, or what the invite was for) and
+  // what happened, never more than the line's kind and a word or two.
+  const AGENT_SAID = { claude: 'Claude', chatgpt: 'ChatGPT', key: 'an API key' };
+  const LINES = {
+    'invite-made': (l) => `${l.who} was invited${l.study ? ' to the study' : ''}`,
+    'account-made': (l) => `${l.who} signed in for the first time`,
+    'signed-in': (l) => `${l.who} signed in`,
+    'consent-given': (l) => `${l.who} agreed to take part in the study`,
+    'consent-declined': (l) => `${l.who} chose not to take part in the study`,
+    'consent-withdrawn': (l) => `${l.who} left the study`,
+    'study-delete-asked': (l) => `${l.who} asked for what the study collected to be deleted`,
+    'drive-asked': (l) => `${l.who} named their drive`,
+    'drive-ready': (l) => `${l.who}'s drive is ready`,
+    'drive-failed': (l) => `Making ${l.who}'s drive failed`,
+    'agent-connected': (l) => `${l.who} connected ${AGENT_SAID[l.agent] ?? 'an agent'}`,
+    'first-document': (l) => `${l.who} made their first document`,
+    'drive-updated': (l) => `${l.who} moved to a new release`,
+    'drive-restarted': (l) => `${l.who} restarted`,
+    'drive-remove-asked': (l) => `${l.who} is being removed`,
+    'drive-delete-asked': (l) => `${l.who} asked for their drive to be deleted`,
+    'drive-removed': (l) => `${l.who} was removed`,
+    'sessions-revoked': (l) => `${l.who} was signed out everywhere`,
+  };
+  // Colour only where the owner has something to do.
+  const LINE_DOT = { 'drive-failed': 'failed', 'consent-withdrawn': 'warn', 'study-delete-asked': 'warn', 'drive-delete-asked': 'warn' };
+  const drawnLines = new Set();
+
+  /** The People list: one pane at a reading width, each line opening its
+   *  person in Drives while they still have a row there. */
+  function drawPeopleActivity(lines) {
+    if (!changed('activity', ['people', lines, S.people.door, pcRows().map((p) => p.key)])) return;
+    jobsWell.toggleAttribute('data-empty', false);
+    jobsWell.toggleAttribute('data-open', false);
+    const door = S.people.door;
+    const kids = door.ok ? [] : [h('p.group-line.warn', { text: stopped(door.why ?? "The door's log could not be read") })];
+    lines.forEach((l, i) => {
+      const id = `${l.at}|${l.kind}|${l.key}`;
+      const first = !drawnLines.has(id);
+      drawnLines.add(id);
+      const key = `pc:${l.key}`;
+      const open = pcRow(key) ? () => {
+        setView('drives');
+        pick(key);
+      } : null;
+      kids.push(h(open ? 'button.row' : 'div.row.still-line', {
+        type: open ? 'button' : null,
+        role: open ? 'option' : null,
+        style: first ? { '--i': String(Math.min(i, 20)) } : { animation: 'none' },
+        onclick: open,
+      }, LINE_DOT[l.kind] ? h('span.dot', { 'data-state': LINE_DOT[l.kind] }) : h('span.dot.blank', { 'aria-hidden': 'true' }),
+      h('span.row-title', { text: (LINES[l.kind] ?? ((x) => `${x.who}: ${x.kind}`))(l) }),
+      h('span.row-age', { text: ago(l.at) })));
+    });
+    if (!lines.length && door.ok) kids.push(h('p.empty', { text: 'Nothing from the door yet. Invites, sign-ins and first documents appear here.' }));
+    jobsScroll.replaceChildren(...kids);
+    // The job's pane is put away; coming back draws it again.
+    jobPane.replaceChildren();
+    logEl = null;
+    logFor = null;
+  }
 
   let logEl = null;
   let logFor = null;
@@ -1739,11 +2169,81 @@
 
     let pill = null;
     if (S.view === 'drives') {
-      pill = h('button.btn.primary', { type: 'button', text: 'New drive', onclick: (e) => newDrive(e.currentTarget) });
+      // With the door's settings here, people come in by invite, and the
+      // view's one action is that; New drive makes a tester's sprite.
+      pill = S.people?.door
+        ? h('button.btn.primary', { type: 'button', text: 'Invite someone', onclick: (e) => inviteSomeone(e.currentTarget) })
+        : h('button.btn.primary', { type: 'button', text: 'New drive', onclick: (e) => newDrive(e.currentTarget) });
     } else if (S.view === 'ship') {
       pill = jobButton({ key: 'ship', target: 'fleet', kind: 'ship', cls: 'primary', onclick: (e) => shipPlan(e.currentTarget) });
     }
     primary.replaceChildren(...(pill ? [pill] : []));
+  }
+
+  /** An invite through the door: what it's for, and whether it is into the
+   *  study. The link comes back once, in the answer, and is shown once. */
+  function inviteSomeone(trigger) {
+    openPop(trigger, (close) => {
+      const name = h('input', { type: 'text', placeholder: 'Their first name', autocomplete: 'off', autocapitalize: 'words', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go', 'aria-label': 'Name' });
+      let inStudy = false;
+      const which = h('div');
+      const note = h('p.soft', { style: { 'font-size': '.85rem' } });
+      const drawWhich = () => {
+        which.replaceChildren(segmented([['no', 'Not in it'], ['yes', 'In the study']], inStudy ? 'yes' : 'no', (v) => {
+          inStudy = v === 'yes';
+          drawWhich();
+        }, { small: true, label: 'The study' }));
+        note.textContent = inStudy
+          ? 'One link for one person, good for 14 days. They sign in, answer the consent form, then name their drive.'
+          : 'One link for one person, good for 14 days. They sign in and name their drive.';
+      };
+      drawWhich();
+      const make = h('button.btn.primary', { type: 'button', text: 'Make the link', disabled: true });
+      const error = h('p.error');
+      name.addEventListener('input', () => { make.disabled = !name.value.trim(); });
+      name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !make.disabled) make.click(); });
+      make.addEventListener('click', async () => {
+        error.textContent = '';
+        make.disabled = true;
+        make.textContent = 'Making it…';
+        try {
+          const made = await api('people/invite', { method: 'POST', body: { note: name.value.trim(), study: inStudy } });
+          if (made.job) upsertJob(made.job);
+          close();
+          showLink(trigger, made);
+        } catch (err) {
+          if (err.job) upsertJob(err.job);
+          error.textContent = stopped(err.message);
+          make.disabled = false;
+          make.textContent = 'Make the link';
+        }
+      });
+      return h('div.pop-body', {},
+        h('h4', { text: 'Invite someone' }),
+        h('div.field', {}, h('label', { text: 'Name' }), name),
+        h('div.field', {}, h('label', { text: 'Study' }), which),
+        note,
+        error,
+        h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), make));
+    }, { sheet: true });
+  }
+
+  /** The link, once. The door keeps only its hash, so nothing can show it
+   *  again: it stays up until Done, whatever is clicked beside it. */
+  function showLink(trigger, { link, invite }) {
+    openPop(trigger, (close) => {
+      const shown = codeLine(link);
+      return h('div.pop-body', {},
+        h('h4', { text: `A link for ${invite.note}` }),
+        h('p.soft', { style: { 'font-size': '.85rem' }, text: `${invite.study ? 'Into the study. ' : ''}${invite.expires ? `It works until ${dayOf(invite.expires)}, for one person. ` : ''}It isn't shown again, so copy it before you close this.` }),
+        shown,
+        // A closed popover stays in the page until the next one opens; the
+        // link goes with Done.
+        h('div.foot', {}, h('button.btn.primary', { type: 'button', text: 'Done', onclick: () => {
+          close();
+          shown.remove();
+        } })));
+    }, { sheet: true, manual: true });
   }
 
   function newDrive(trigger) {
@@ -2170,12 +2670,13 @@
       S.self = state.self;
       S.workshop = state.workshop;
       S.backups = state.backups ?? [];
+      S.people = state.people ?? null;
       const byId = new Map(S.jobs.map((j) => [j.id, j]));
       for (const j of state.jobs) byId.set(j.id, j);
       S.jobs = [...byId.values()].sort((a, b) => b.startedAt - a.startedAt);
       S.loaded = true;
-      if (!S.drive || !drive(S.drive)) S.drive = S.fleet[0]?.name ?? null;
-      if (S.drive) loadCheckpoints(S.drive);
+      if (!S.drive || !(drive(S.drive) || pcRow(S.drive))) S.drive = S.fleet[0]?.name ?? (pcRows()[0] ? `pc:${pcRows()[0].key}` : null);
+      if (S.drive && drive(S.drive)) loadCheckpoints(S.drive);
     } catch (err) {
       S.loaded = true;
       S.fleetError = err.message;
@@ -2218,6 +2719,12 @@
   });
   events.addEventListener('workshop', (e) => {
     S.workshop = JSON.parse(e.data);
+    paint();
+  });
+  // The people on the PC, read again (every 20 s while a tab is open, and
+  // after each of their jobs).
+  events.addEventListener('people', (e) => {
+    S.people = JSON.parse(e.data);
     paint();
   });
   // The board was saved (triage finished) or corrected in another tab.

@@ -1223,6 +1223,248 @@ pass's session only once the pass is an hour old, so a drive its person
 already has open keeps working for up to an hour. To stop a drive now, hold
 it or remove it.
 
+### The study on each drive
+
+Built 2026-10-25. A drive on the PC answers two questions marble-host asks
+about its person. `GET /health/study` gives the study's counts, and
+`POST /health/logout` signs both agent CLIs out before marble-host removes the
+drive. A study drive also holds a page that tells its person what the study
+records, and its full logs leave the PC drive only through
+`marble-guest-export@<name>.service`, with consent on file. Every drive, in
+the study or not, gives its person the whole drive as one zip at
+`GET /drive/export.zip`, which the door's account page links as Download my
+drive.
+
+Both `/health` routes answer only marble-host. That is a request made on this
+machine (loopback with no forwarded header, `isLocal` in `server/gate.js`)
+carrying the drive's own passphrase as a bearer, `MARBLE_DRIVE_SECRET` from
+its settings file. Every guest shares the PC's loopback, so being asked
+locally is not enough: another drive could ask, and sign this one out.
+Anything else gets `404 {"error":"not found"}`, the same as a request through
+the router, and it gets it before the gate, so to anyone else the routes are
+not there. `/health/study` answers only on a drive with `MARBLE_STUDY=1`, and
+`/health/logout` only on a guest (`MARBLE_GUEST=1`): on the owner's own
+machine a CLI's login is also his terminal's. A plain POST with the bearer
+and no `Origin` passes the origin check.
+
+`GET /health/study` (`server/health-study.js`) counts from the drive's own
+logs and keeps the answer five minutes:
+
+```json
+{"ok":true,"at":"2026-10-25T17:00:03.000Z","days":2,"prompts":9,"builds":1,
+ "marks":5,"buttons":4,"conversations":4,"singlePromptConversations":1,
+ "promptsWhileAnotherWorked":5}
+```
+
+A prompt is a `user` event in `.marble/agents/*/events.jsonl` that the person
+sent. A message another agent sent carries `from`, and is not counted. Nor is
+an automation's scheduled run, which begins "This is a scheduled run", or the
+"Continue" a chat sends itself when its plan runs out, which follows a
+`usage.continued`. `builds` are prompts that begin "Build mode, build N:",
+and `marks` are the marks in them and in marks sent into a build while it
+ran. `buttons` are presses rather than words:
+
+- the brief of a `data-marble-run` element in one of the drive's documents
+- a page's own "The person pressed"
+- Build mode's resume of a paused build
+- an action a selection drafts: "Try 3 variations of", "Automate", "Make … alive", the merge
+
+Every other prompt was typed. `days` is how many days, in
+`MARBLE_DRIVE_DAY_TZ` (America/Los_Angeles unless set), hold a prompt. A turn
+runs from its `turn.started` to its end, so `promptsWhileAnotherWorked`
+counts prompts sent while a turn of another conversation ran. The answer
+holds numbers only, never a word anyone wrote.
+
+`POST /health/logout` (`server/health-logout.js`) runs what Settings'
+Disconnect runs, `claude auth logout` and `codex logout`, under the drive's
+own home with no key in the environment. Each CLI is asked whether it is
+signed in before and after, so the answer says what is true now:
+
+```json
+{"claude":"signed-out","codex":"was-not-signed-in"}
+```
+
+Each value is `signed-out`, `was-not-signed-in` or `failed`. A CLI that isn't
+installed was not signed in, and only `failed` leaves a login behind. Each
+CLI may take 35 s at worst (two 10 s status checks and a 15 s logout), side by
+side, so marble-host should wait a minute. A sign-in left waiting on the
+connect sheet ends when marble-host stops the drive, which it does next.
+
+The Study page is a document called "Taking part in the study". It is
+written at the top of a drive the first time it starts with `MARBLE_STUDY=1`,
+by `seedStudy` in `server/seed.js` from `templates/study.mrbl`. It says what
+the drive records and never records, what the host sees, and where things are
+kept. It also says that prompts go to Anthropic or OpenAI under the person's
+own account, and how to leave from the account page at the door. The host is
+named from `MARBLE_HOST_OWNER`, and the door's domain comes from
+`MARBLE_DRIVE_PUBLIC_URL`. `.marble/apps.json` records it as `seeded.study`,
+so it is written once: a page its person changed stays changed, and one they
+deleted stays gone. It is not an app page, so no update merges into it, and
+`/health/deep` doesn't count it among the documents the person made. Its
+words are not the consent form, which is `CONSENT_FORM` at the door. If the
+approved form says something different about what is recorded, change
+`templates/study.mrbl` to match; only drives that join after that get the new
+page.
+
+`GET /drive/export.zip` (`server/export.js`) is behind the gate like every
+page of the drive. The zip is called `<name>.zip`, after `MARBLE_DOOR_NAME`
+or else the drive's folder, and holds one folder of that name. In it is
+every document flattened, its pictures and recordings back inside it as
+`/drive/download` gives one, every other file as it is, and every folder.
+Nothing whose name starts with a dot goes in, so none of `.marble/` (history,
+chats, logs, blobs, trash), and no link is followed. It is sent as it is
+made, by a zip writer of the repo's own (`server/zip-write.js`), with zip64
+when an entry or the whole may pass 4 GB. Every entry that streams is
+deflated, at level 0 for a picture or a recording. The Finder's unzip reads
+front to back, and can't find where a stored entry ends when its size comes
+after it.
+
+The study export copies a drive's full logs into the owner's Research folder.
+marble-host's `POST /drives/<name>/export` starts it, and so does this, which
+the polkit rule allows the owner:
+
+1. `systemctl start marble-guest-export@ana.service`
+2. `journalctl -u marble-guest-export@ana` says what it did, or why it
+   refused. A refusal fails the unit and copies nothing.
+
+The unit runs `/usr/local/lib/marble-guests/export-guest ana`. It refuses
+unless `/etc/marble-guests/ana.env` says `MARBLE_STUDY=1` and holds a
+`MARBLE_CONSENT` of `<version>@<time>`, read without following a link and
+only from a file of the owner's. Then it copies `.marble/agents/*/events.jsonl`,
+`.marble/agents/*/turns/`, `.marble/agents/*/raw/` and `.marble/*.ops.jsonl`
+into `~/Marble Drive/Research/Probe study/ana/<utc>/`. They are laid out as in
+the drive, so a script written for a drive's logs reads an export the same
+way. Beside them is `export.json`:
+
+```json
+{"name":"ana","at":"2026-11-09T17:00:03Z","consent":"2026-11-irb-v1@2026-11-02T17:00:03.123Z","files":214,"bytes":5813302}
+```
+
+No document, picture, history or anything of the drive's home is copied.
+`backup-tree` reads the drive (its `consent` and `export` commands), so a
+link planted anywhere in it is never followed. An export is made under a
+hidden name and renamed once whole, so the Drive never shows half of one; it
+shows `export.json` and hides the `.marble` folder beside it. The Research
+folder is part of the owner's drive, so the exports are backed up with it and
+his agents can read them.
+
+The unit runs the export as the owner with one extra power,
+`CAP_DAC_READ_SEARCH`, to read the drive's files, rather than as root. It
+writes into his home, where a link his user left in the way could send a
+root writer anywhere on the PC. As the owner, a link can only lead where he
+could write anyway, and everything it makes is his. Its sandbox is as tight
+as the backup's. Of the owner's home it sees only the Research folder, and of
+`/var/lib/private` only that drive's state folder, read-only. It has no
+network. `install.sh` runs `install.d/30-export.sh`, which installs the
+helper with the `backup-tree` and `backup-lib.sh` it shares with the backups.
+It writes the owner's name and folder into the unit, and makes the folder as
+the owner. `--uninstall` takes the helper and the unit away and keeps the
+exports.
+
+`test/drive-export.test.js`, `test/health-study.test.js`,
+`test/health-logout.test.js`, `test/study-page.test.js` and
+`test/host-export.test.js` try all of it without root or real CLIs.
+
+### People in the Console
+
+Built 2026-10-25. The Console's Drives view shows the people on the PC under
+People, beside the testers on Fly, and its one action becomes Invite
+someone. It reads two settings files on the owner's drive:
+`~/.config/marble-drive/door.env` for the door (`DOOR_URL`,
+`DOOR_ADMIN_TOKEN`) and `~/.config/marble-drive/host.env` for marble-host
+(`HOST_ADMIN_TOKEN`, `HOST_ADMIN_PORT`). With neither file, the group holds
+the testers alone, as before. With one, it shows what that one knows and
+says under its heading what the other would add. The code is
+`server/console/pchost.js` and the People parts of `runtime/console.js`.
+
+Every 20 seconds while a Console tab is open, it reads the door's
+`GET /_door/people` and `GET /_door/log` and marble-host's `GET /drives`. It
+also reads each drive's backup status,
+`/var/lib/marble-backup/status/<name>.json`, and joins the three by the
+drive's name. A row is someone the door lists whose drive is on the PC or
+not made yet. A drive marble-host has and the door doesn't list, such as one
+made with `pc-host.mjs make`, gets a row too. A drive on Fly stays in the
+fleet's own rows. A removed drive leaves the group, and the People list says
+when it went. When the door or marble-host can't be read, the line under the
+heading says why, and the last good list stays. A door whose admin API isn't
+deployed, for example, gives "The door answered 200 without JSON: is its
+admin API deployed?".
+
+A row shows four things, as the plan's figure does: the drive, its agent,
+how long ago its person was last active, and the day's turns. The agent is
+Claude, ChatGPT, API key or None yet, and Joining before there is a drive.
+Until someone uses their drive, the turns give way to the step they're on,
+such as "Drive ready, no agent" or "Link not opened". The dots are the
+Console's own. A dot is filled while an agent works, and danger for a drive
+that isn't answering. The caution ring marks someone who has stalled: they
+signed in, have no first document, and have taken no step for a day. The
+rest have the empty ring, an invite nobody has opened among them. The line
+under the heading counts the drives, those working now and the invites not
+opened: "4 drives on the PC · 2 working now".
+
+A person's pane has five sections. Sign-up has each step from invite to
+first document with its time. Study has the consent form's version and date,
+the study's counts from marble-host, Export study data and Withdraw. Health
+has memory, release, restarts, the last backup and the pages an update held
+back, with Restart, Suspend or Resume, and Back up now. Release has the
+drive's channel, Move to canary and Roll back. Remove asks for the drive's
+name. There is no Open drive, because the door doesn't let the owner into
+someone else's drive, and that is the promise on the consent screen.
+Restart asks first while an agent is working there, and Suspend always
+asks.
+
+Each action is a Console job on `pc:<name>`, one at a time per drive and
+kept in Activity. Restart, Suspend, Resume, Back up now and Export study
+data ask marble-host (`POST /drives/<name>/<verb>`). Export is offered only
+to someone in the study: cohort `study`, consent given, not withdrawn.
+Remove goes through the door (`POST /_door/drives/<name>/remove`), which
+stops serving the drive at once and signs its person out. marble-host then
+signs the drive's agents out and deletes it at its next look, so the Console
+never stops a drive before its agents are signed out. Only a drive the door
+doesn't know is removed through marble-host's own route. Invite someone
+makes a one-use invite for 14 days (`POST /_door/invite`), into the study or
+not. Its link comes back once, in the answer to the page that asked, and is
+in no job, log or stream. The popover holding it closes only with Done.
+
+Three buttons can't be pressed yet, and each says why under it. Move to
+canary and Roll back wait for the owner's updater: while
+`server/host/admin.js` exports `NOT_BUILT`, the pane shows its words, "the
+updater isn't built yet". Once that export goes, the two buttons call `POST
+/drives/<name>/channel` and `POST /rollback` with no other change. Withdraw
+waits for the door: it has no route for the owner to take someone out of the
+study, so the person leaves from their account page.
+
+The page gets counts, times and states, never what someone wrote. No token
+reaches it, and no invite code but the one link. Nor does an email, an
+address or an account id. The People list keeps only each log line's kind
+and whose it is. A field the door or marble-host add later stays on the
+server until `pchost.js` names it.
+
+marble-host's rows give the rest of the view when they carry these fields,
+each optional: `agent` (`claude`, `chatgpt`, `key` or null, from the drive's
+`/health/deep`), `turnsToday`, `lastActive`, `study: { counts, at }`,
+`heldBack` and `backup`. Export study data and Back up now need
+`POST /drives/<name>/export` and `/backup`. Without `agent`, a ready drive
+says "Drive ready" and Health says "Not known yet", and it is never shown as
+stalled. Without `turnsToday`, the row says "Idle" or "Working now". Without `lastActive`, the age is the
+person's last sign-in at the door or their last step. A route marble-host
+doesn't have yet fails its job with marble-host's answer.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MARBLE_DRIVE_CONSOLE_DOOR_ENV` | `~/.config/marble-drive/door.env` | where the door's address and admin token are |
+| `MARBLE_DRIVE_CONSOLE_HOST_ENV` | `~/.config/marble-drive/host.env` | where marble-host's admin token and port are |
+| `MARBLE_DRIVE_CONSOLE_BACKUP_STATUS` | `/var/lib/marble-backup/status` | the backups' status folder |
+
+The two defaults apply only to a drive running a release. A checkout, as in
+a test or on a dev host, reads only the files it is pointed at, so no test
+reaches the owner's door. Either file is refused when others can read it.
+`node --test test/console-pchost.test.js` runs the joining and every action
+against a fake door and a fake marble-host. `node tools/browser-tests.mjs
+test-browser/console-people.test.js` draws the group, the pane, an invite and
+the People list on the same fakes; with `SHOTS=<folder>` it saves desk and
+phone screenshots in both schemes.
+
 ## The console
 
 **Console** is a document in the owner's drive (`/a/Console`): every drive and
@@ -1238,12 +1480,12 @@ so it ships with every deploy; the document is only where it lives.
 | View | What it does |
 |---|---|
 | **Dashboard** (opens on it) | every drive's state over time (running, warm, cold), cost by drive, why each was awake, spend this month and its projection (and a budget, if set), spend per day, when drives are awake (hour × weekday), memory, CPU, agent turns and documents opened; 24 h, 7 days, 30 days or this month; any chart as a table; **Paste a bill** takes Fly's Cost Explorer page and calibrates every estimate to it |
-| **Drives** | every drive, awake or asleep and since when, without waking any; a drive's release, health, Claude (login or key, sign in or out), access (public or private, the passphrase: show, copy, new), settings (`sprite.env`, applied with a restart), checkpoints (make, restore by typing the name), and removing a tester; **New drive** provisions one |
+| **Drives** | every drive, awake or asleep and since when, without waking any; a drive's release, health, Claude (login or key, sign in or out), access (public or private, the passphrase: show, copy, new), settings (`sprite.env`, applied with a restart), checkpoints (make, restore by typing the name), and removing a tester; **New drive** provisions one. Under **People**, beside the testers, the drives on the PC and the people on their way to one, from the door and marble-host; with the door's settings on this machine the view's one action is **Invite someone** instead ("People in the Console") |
 | **Backups** | the Mac's backup of this drive, as the Mac last reported it: when it last backed up and why, whether changes are waiting and when they will be copied, when the Mac last checked in; warnings when it stops checking in, a backup fails or changes are overdue (they mark the tab); **Schedule** on/off and **Back up now**; **On the Mac**: the one copy (`~/Marble Drive`), its documents, size and matching Fly checkpoint, with **Restore…** onto this or another drive; **History on Fly**: the drive's checkpoints, each with **Restore…** (the Mac does it); names typed to confirm; the terminal command for when this drive is down. Buttons leave requests the Mac picks up within a minute (see "Back a drive up here") |
 | **Ship** | main's recent commits and which drives have them; each drive against main; **Ship** shows the plan (`sprite-deploy.sh --print-plan`) before deploying main to every user and then admin-p2; **Try the workshop on t-bryan** |
 | **Workshop** | a card per checkout that says where it stands in a sentence and offers the one next step (`next` in `server/console/workshop.js`): get GitHub's latest, publish, finish a publish, or sign in to npm; each button says what it does before it is pressed, and a running job shows its steps, npm's approval link as a button, and on failure what went wrong and the button that fixes it. **Publish** marble checks first and changes nothing if this copy has loose edits, cannot fast-forward to GitHub, or is not signed in to npm; then the next patch in package.json and both plugin manifests, committed, an annotated tag, pushed, then `npm publish` (marble's guard and unit tests). A version made but never uploaded is uploaded as it is (**Finish publishing**), never bumped again. **Sign in to npm** runs `npm login --auth-type=web` and shows its link; admin-p2 needs it once. marble-drive needs no change: it depends on `file:../marble`, and a deploy installs the version that checkout declares. Also a workshop chat in the Marble Drive or Marble project |
 | **Features** | every change the owner is making, as a line: Spec → Plan → Build → Commit → Push, then the drives in rings (Yours: the Mac and admin-p2; t-bryan; everyone). **Lines**, **Drives** (each place and what has not reached it) and **Chats** (each chat once, with the features it moved). The board is the `triage` skill's (`agent-plugin/skills/triage`), saved to `.marble/console/features.json` only when the owner asks: **Run triage** starts a chat that runs it, or the owner asks in any chat, and the agent answers with `/a/Console?view=features&feature=<id>`. Where each feature is, is the server's, from git and the releases (`server/console/features.js`); a release the Console has not seen comes from the deploys' own `done: … is live on …` lines. Name, next step, stage and hidden are the owner's corrections, kept beside the board through every triage. Spec: the drive page `Notes and Sketches/Features view` |
-| **Activity** | every job the console ran, its output streamed and kept |
+| **Activity** | every job the console ran, its output streamed and kept; with the door's settings on this machine, **People**: the door's log of the people on the PC, in words |
 
 How it knows things: the Sprites API for the list, awake or asleep
 (`status` is `running` while awake, `warm` while paused, `cold` when stopped)

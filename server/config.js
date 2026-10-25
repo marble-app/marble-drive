@@ -192,6 +192,14 @@ export function loadConfig(env = process.env) {
     consoleSrc: str('MARBLE_DRIVE_CONSOLE_SRC', '/home/sprite/src'),
     consoleSprite: str('MARBLE_DRIVE_CONSOLE_SPRITE', 'sprite'),
     consoleSelf: str('MARBLE_DRIVE_CONSOLE_SELF', ''),
+    // The Console's people on the PC (server/console/pchost.js): marble-host's
+    // and the door's settings files, and the backups' status folder. Unset, a
+    // drive running from a release reads the owner's own files in
+    // ~/.config/marble-drive; a checkout (a test, a dev host) reads only the
+    // files it is pointed at, so no test reaches the owner's door.
+    consoleHostEnv: str('MARBLE_DRIVE_CONSOLE_HOST_ENV', ''),
+    consoleDoorEnv: str('MARBLE_DRIVE_CONSOLE_DOOR_ENV', ''),
+    consoleBackupStatus: str('MARBLE_DRIVE_CONSOLE_BACKUP_STATUS', '/var/lib/marble-backup/status'),
     // What keeps a sprite awake with no tab open (server/hold.js). A question
     // nobody answers holds it this long; work that has stopped getting anywhere
     // this long; anything at all this long after anyone last used the drive.
@@ -296,6 +304,11 @@ export function loadConfig(env = process.env) {
       const name = str('MARBLE_HOST_OWNER', '').replace(/\s+/g, ' ').trim();
       return /^[\p{L}\p{M}][\p{L}\p{M}' .-]{0,39}$/u.test(name) ? name : null;
     })(),
+    // A drive whose person is taking part in the probe study, with their
+    // consent on file: marble-host writes MARBLE_STUDY=1 then, and takes it
+    // away once they leave (docs/HOSTING.md, "The study on each drive"). It
+    // seeds the Study page and answers GET /health/study.
+    study: str('MARBLE_STUDY', '') === '1',
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),
