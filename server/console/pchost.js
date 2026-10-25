@@ -278,7 +278,8 @@ function stageOf({ p, h, hostKnown, agent, timeline }) {
  *  happened, else 'some' when the door knows one connected but not which.
  *  'none' is known to have none; null is not known. */
 function agentOf(h, p, fromLog) {
-  if (h && Object.hasOwn(h, 'agent')) return agentWord(h.agent) ?? 'none';
+  // A value this page doesn't know yet is still an agent connected.
+  if (h && Object.hasOwn(h, 'agent')) return h.agent === null || h.agent === false || h.agent === '' ? 'none' : agentWord(h.agent) ?? 'some';
   if (fromLog) return fromLog;
   if (p?.timeline?.agentConnected) return 'some';
   return null;

@@ -318,6 +318,8 @@ test('joining by itself: a ready drive marble-host doesn’t have is missing, an
   assert.equal(unknown.find((r) => r.key === 'ben').stage, 'no-document', 'without marble-host, the door’s timeline says how far');
   assert.equal(unknown.find((r) => r.key === 'ben').agent, 'chatgpt', 'from the door’s log');
   assert.equal(unknown.find((r) => r.key === 'ana').agent, 'some', 'connected, but the log didn’t say which');
+  const other = drives().map((d) => (d.name === 'cho' ? { ...d, agent: 'cursor' } : d));
+  assert.equal(joinPeople({ people: ps, drives: other, now }).rows.find((r) => r.key === 'cho').agent, 'some', 'an agent this page doesn’t know is still an agent');
   const fresh = ps.map((p) => (p.drive?.name === 'cho' ? { ...p, timeline: { ...p.timeline, ready: ago(60 * 3) } } : p));
   assert.equal(joinPeople({ people: fresh, drives: ds, now }).rows.find((r) => r.key === 'cho').status, 'idle');
 });
