@@ -17,6 +17,7 @@ import { appById, currentSource, versionId } from './app-lineage.js';
 import { readManifest, writeManifest } from './app-updates.js';
 import { link as iconLink } from './favicon.js';
 import { build as buildStarter, composeScript, STARTERS } from './gallery.js';
+import { escapeHtml } from './http.js';
 import { titleize } from './paths.js';
 import { START_HERE } from './start-here.js';
 
@@ -218,4 +219,58 @@ export async function seedStartHere(store, { name = START_HERE, title = 'Start h
   manifest.seeded['start-here'] = name;
   await writeManifest(store.marbleDir, manifest);
   return { seeded: true, path: name };
+}
+
+// ------------------------------------------------------------------ the study
+
+/** Where a study drive's page about the study is written: at the top, beside
+ *  Start here, where its person sees it. */
+export const STUDY_PAGE = 'Taking part in the study';
+
+/** The domain the door is at, from the drive's own address
+ *  (https://ana.marbledrive.app); marbledrive.app when it has none. */
+const apexOf = (publicUrl) => {
+  try {
+    const labels = new URL(publicUrl).hostname.split('.');
+    return labels.length > 2 ? labels.slice(1).join('.') : 'marbledrive.app';
+  } catch {
+    return 'marbledrive.app';
+  }
+};
+
+/** The page about the study, naming who hosts the drive (MARBLE_HOST_OWNER)
+ *  where it says who sees what, and the door's account page where it says
+ *  how to leave. */
+export async function buildStudy({ title = STUDY_PAGE, host = null, publicUrl = null } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'study.mrbl'), 'utf8');
+  const apex = apexOf(publicUrl);
+  const name = host ? escapeHtml(host) : null;
+  return template
+    .replaceAll('__TITLE__', () => escapeHtml(title))
+    .replace('__ICON__', () => iconLink('doc'))
+    .replaceAll('__HOST_START__', () => name ?? 'The researcher')
+    .replaceAll('__HOST__', () => name ?? 'the researcher')
+    .replaceAll('__ACCOUNT_TEXT__', () => `${apex}/account`)
+    .replaceAll('__ACCOUNT__', () => `https://${apex}/account`)
+    .replaceAll('__APEX__', () => apex);
+}
+
+/**
+ * The page about the study, in a study drive only (MARBLE_STUDY=1), and only
+ * once: `.marble/apps.json` remembers it was written, so a page its person has
+ * changed is never written over and one they deleted stays gone. It is not an
+ * app page (server/app-lineage.js), so no update merges into it either. Its
+ * path is in the manifest's `seeded`, which also keeps it out of the count of
+ * documents the person made (server/health-deep.js).
+ */
+export async function seedStudy(store, { study = false, host = null, publicUrl = null, name = STUDY_PAGE } = {}) {
+  if (!study) return { seeded: false, path: null };
+  const manifest = await readManifest(store.marbleDir);
+  if (Object.hasOwn(manifest.seeded, 'study')) return { seeded: false, path: manifest.seeded.study };
+  // A drive whose manifest was lost: the page there is the one written before.
+  const there = await store.has(name);
+  if (!there) await store.write(name, await buildStudy({ host, publicUrl }), { label: 'seeded' });
+  manifest.seeded.study = name;
+  await writeManifest(store.marbleDir, manifest);
+  return { seeded: !there, path: name };
 }
