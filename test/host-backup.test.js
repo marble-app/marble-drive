@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 const HOST = path.resolve(import.meta.dirname, '../linux/pc-host');
 const PIN = fs.readFileSync(path.resolve(import.meta.dirname, '../tools/sprite/rclone-version'), 'utf8').trim();
@@ -28,6 +28,17 @@ function rcloneProblem() {
 }
 const needsRclone = { skip: rcloneProblem() };
 const has = (cmd) => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
+
+// Every folder a test makes, removed when the file is done.
+const made = [];
+const tmpdir = (prefix) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 const LOGIN = 'not-a-real-login-7c41';
 const SCRIPTS = ['backup-guest', 'backup-guests', 'restore-guest', 'remove-guest', 'backup-check.sh', 'backup-lib.sh', 'install.d/20-backup.sh'];
@@ -53,7 +64,7 @@ exit 0
 
 /** A PC of folders: guests, their settings, the backup's state, and a stand-in R2. */
 function makePC() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-backup-'));
+  const root = tmpdir('host-backup-');
   const pc = {
     root,
     guests: path.join(root, 'var/lib/private/marble-guests'),
@@ -194,7 +205,7 @@ test('shellcheck finds nothing', { skip: !has('shellcheck') && 'shellcheck is no
 test('the units verify', { skip: !has('systemd-analyze') && 'systemd-analyze is not installed' }, () => {
   // systemd-analyze checks that each ExecStart exists, so the copies here run
   // the scripts from this checkout; templates are checked as one instance.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'host-backup-units-'));
+  const dir = tmpdir('host-backup-units-');
   for (const unit of UNITS) {
     const text = fs.readFileSync(path.join(HOST, unit), 'utf8').replaceAll('/usr/local/lib/marble-guests/', `${HOST}/`);
     fs.writeFileSync(path.join(dir, unit.replace('@.', '@ana.')), text);
@@ -465,7 +476,7 @@ test('a backup R2 does not take fails, says so in the status, and keeps the last
 });
 
 test('backup-tree never follows a link or opens a pipe swapped in after the scan', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-backup-tree-'));
+  const root = tmpdir('host-backup-tree-');
   const drive = path.join(root, 'drive');
   const outside = path.join(root, 'outside');
   fs.mkdirSync(path.join(drive, 'x'), { recursive: true });
@@ -615,7 +626,7 @@ test('backup-check.sh with a drive restores a copy of it, and deletes only the c
 });
 
 test('20-backup.sh writes backup.env once, from the hub settings, and never prints a secret', needsRclone, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-backup-install-'));
+  const root = tmpdir('host-backup-install-');
   // install.sh hands the piece the owner's real home; under a stand-in root
   // the piece reads it from the stand-in, so a test never reads a real one.
   const ownerHome = '/home/tester';
