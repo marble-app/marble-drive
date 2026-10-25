@@ -20,6 +20,7 @@ import { createBackups } from './backups.js';
 import { createFeatures, ownRelease, ringDrives } from './features.js';
 import { createInspector } from './inspect.js';
 import { createJobs } from './jobs.js';
+import { createPcHost } from './pchost.js';
 import { createSprites } from './sprites.js';
 import { createUsage } from './usage.js';
 import { createWorkshop } from './workshop.js';
@@ -95,6 +96,16 @@ export async function createConsole({ config, store, streams = null, ledger = nu
     : process.platform === 'darwin' ? 'mac'
       : hubMachine() === 'pc' ? 'pc' : null;
   const onMac = homeMachine === 'mac';
+  // Other people's drives on the PC, from the door and marble-host
+  // (pchost.js). A drive running a release reads the owner's own settings
+  // files; a checkout reads only the ones it is pointed at.
+  const ownFile = (set, file) => set || (selfRelease ? path.join(os.homedir(), '.config', 'marble-drive', file) : null);
+  const pc = createPcHost({
+    hostEnv: ownFile(config.consoleHostEnv, 'host.env'),
+    doorEnv: ownFile(config.consoleDoorEnv, 'door.env'),
+    statusDir: config.consoleBackupStatus,
+    jobs,
+  });
 
   // ---------------------------------------------------------------- state
 
@@ -174,7 +185,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
 
   async function state() {
     if (!fleetAt) await readFleet();
-    const [list, shop] = await Promise.all([drives(), workshop.status()]);
+    const [list, shop, people] = await Promise.all([drives(), workshop.status(), pc.view()]);
     return {
       self,
       org: config.consoleOrg,
@@ -183,8 +194,14 @@ export async function createConsole({ config, store, streams = null, ledger = nu
       fleetError,
       workshop: shop,
       backups: await backups.list(),
+      people,
       jobs: jobs.list().slice(0, 60),
     };
+  }
+
+  /** The people on the PC, read again and sent to every tab. */
+  async function peopleChanged() {
+    send('people', await pc.read());
   }
 
   // -------------------------------------------------------------- polling
@@ -200,6 +217,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
     try {
       await readFleet();
       send('fleet', { fleet: await drives(), fleetAt, fleetError });
+      await peopleChanged().catch(() => {});
       // A drive that is awake anyway is looked inside for nothing extra.
       for (const row of fleet.filter((r) => r.awake)) {
         if (jobs.running(row.name)) continue;
@@ -239,6 +257,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
       pending = null;
       await readFleet();
       send('fleet', { fleet: await drives(), fleetAt, fleetError });
+      await peopleChanged().catch(() => {});
       send('workshop', await workshop.status());
     }, 300);
     pending.unref?.();
@@ -395,6 +414,17 @@ export async function createConsole({ config, store, streams = null, ledger = nu
         if (c === 'log' && method === 'GET') return text(res, 200, await jobs.output(b));
         if (c === 'cancel' && method === 'POST') return json(res, 200, { ok: jobs.cancel(b) });
         if (!c && method === 'GET') return json(res, 200, jobs.get(b) ?? { error: 'no such job' });
+      }
+
+      // People on the PC (pchost.js): the list read now, an invite whose link
+      // comes back in this answer only, and one route per action.
+      if (a === 'people') {
+        if (!b && method === 'GET') return json(res, 200, await pc.read());
+        if (b === 'invite' && !c && method === 'POST') {
+          const made = await pc.invite({ note: body.note, study: body.study === true });
+          return json(res, 200, made);
+        }
+        if (b && c && method === 'POST') return json(res, 202, await pc.act(b, c, body));
       }
 
       if (a === 'drives' && !b && method === 'POST') {
