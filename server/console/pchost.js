@@ -49,7 +49,8 @@ const LOG_LINES = 200;
 const ACTIVITY_LINES = 60;
 const TIMEOUT = { door: 10_000, host: 8_000 };
 const STEPS = ['invited', 'signedIn', 'consented', 'named', 'ready', 'agentConnected', 'firstDocument', 'updated'];
-// The stages someone can stall in: theirs to take, not the PC's.
+// The stages someone can stall in: theirs to take, not the PC's. A drive
+// that is only known to be ready isn't one: its person may be using it.
 const STALLABLE = new Set(['consent', 'naming', 'making', 'no-agent', 'no-document']);
 const ENDING = new Set(['removing', 'deleting']);
 
@@ -267,7 +268,9 @@ function stageOf({ p, h, hostKnown, agent, timeline }) {
   const turns = num(h?.turnsToday) ?? 0;
   if (timeline.firstDocument || working > 0 || turns > 0) return 'using';
   if (timeline.agentConnected || (agent && agent !== 'none')) return 'no-document';
-  return 'no-agent';
+  // No agent is a fact only when marble-host says so; without its word the
+  // drive is ready, and nothing more is claimed.
+  return agent === 'none' ? 'no-agent' : 'ready';
 }
 
 /** Which agent a drive's person connected: marble-host's word (`agent`, from

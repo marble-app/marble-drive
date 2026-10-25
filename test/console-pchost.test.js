@@ -114,6 +114,7 @@ test('the door’s people, marble-host’s drives and the backups join into one 
   assert.equal(hal.agent, null, 'not known: marble-host gave no agent');
   assert.equal(hal.host.channel, 'canary');
   assert.equal(hal.study.inStudy, false);
+  assert.equal(hal.stage, 'ready', 'ready, and no claim about an agent nobody reported');
 
   const dee = row(view, 'invite:inv-dee');
   assert.equal(dee.label, 'Dee');

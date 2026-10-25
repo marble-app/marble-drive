@@ -185,7 +185,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
 
   async function state() {
     if (!fleetAt) await readFleet();
-    const [list, shop] = await Promise.all([drives(), workshop.status()]);
+    const [list, shop, people] = await Promise.all([drives(), workshop.status(), pc.view()]);
     return {
       self,
       org: config.consoleOrg,
@@ -194,7 +194,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
       fleetError,
       workshop: shop,
       backups: await backups.list(),
-      people: await pc.view(),
+      people,
       jobs: jobs.list().slice(0, 60),
     };
   }
