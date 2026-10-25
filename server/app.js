@@ -18,6 +18,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 import { agentsAllowed, createAgents } from './agent/index.js';
@@ -25,6 +27,8 @@ import { backupNow, scheduleBackups } from './backup.js';
 import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
 import { dataUri as iconUri, markFor, refreshed, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten, PLACEHOLDER } from './flatten.js';
+import { attachment, exportEntries, exportName } from './export.js';
+import { zipStream } from './zip-write.js';
 import { createTouched } from './touched.js';
 import { createDoor } from './door.js';
 import { createGate, isLocal, overHttps, returnPath } from './gate.js';
@@ -1589,6 +1593,31 @@ export async function createDrive(config, { log = console, agentProviders = null
           'Content-Disposition': `attachment; filename="${name}.mrbl"`,
           'X-Marble-Blobs-Inlined': String(whole.inlined),
         });
+      }
+
+      // The same, for the whole drive: one zip of every document, flattened,
+      // and every file, to take away (server/export.js). The door's account
+      // page links here as Download my drive. Sent as it is made, so a big
+      // drive never sits in memory.
+      if (route === '/drive/export.zip' && req.method === 'GET') {
+        const name = exportName({ doorName: config.doorName, root: config.root });
+        res.writeHead(200, {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': attachment(`${name}.zip`),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        try {
+          const entries = exportEntries({ root: config.root, blobs: store.blobs, top: name });
+          await pipeline(Readable.from(zipStream(entries), { objectMode: false, highWaterMark: 1 << 18 }), res);
+        } catch (err) {
+          // Half a zip must not pass for a whole one: the connection is cut,
+          // and the browser says the download failed. Someone who closed the
+          // tab is not a failure worth a line.
+          if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') log.error(`[drive] the export stopped: ${err.message}`);
+          res.destroy();
+        }
+        return;
       }
 
       if (route === '/drive/weigh' && req.method === 'GET') {
