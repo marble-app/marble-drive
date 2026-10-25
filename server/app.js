@@ -51,6 +51,7 @@ import { createKeepAwake } from './keep-awake.js';
 import { createLedger } from './ledger.js';
 import { createMemoryGuard } from './memory-guard.js';
 import { createDeepHealth } from './health-deep.js';
+import { signOutClis } from './health-logout.js';
 import { createStudyHealth } from './health-study.js';
 import { createStreams } from './streams.js';
 import { consoleAllowed, createConsole } from './console/index.js';
@@ -932,6 +933,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route === '/health/study' || route === '/health/logout') {
         const host = isLocal(req) && gate.allows(req, { cookie: false });
         if (host && route === '/health/study' && req.method === 'GET' && config.study) return json(res, 200, await studyHealth.read());
+        if (host && route === '/health/logout' && req.method === 'POST' && config.guest) return json(res, 200, await signOutClis({ log }));
         return json(res, 404, { error: 'not found' });
       }
       if (route === '/gate') return gateRoute(req, res, url);
