@@ -12,6 +12,7 @@
 // A blob is a storage decision, never a format one.
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
@@ -60,5 +61,22 @@ export function createBlobs({ dir }) {
     return blob && { hash: blob.hash, type: blob.type, bytes: blob.bytes };
   };
 
-  return { ready, put, get, head, dir };
+  /** A blob to read as a stream, for the reader that must not hold a long
+   *  recording whole (server/export.js): its type as `get` would say it,
+   *  its size, and `stream()`. Null when there is no such blob. */
+  async function open(hash) {
+    if (!/^[0-9a-f]{64}$/.test(hash ?? '')) return null;
+    const file = fileOf(hash);
+    const [info, meta] = await Promise.all([
+      fsp.stat(file).catch(() => null),
+      fsp
+        .readFile(metaOf(hash), 'utf8')
+        .then(JSON.parse)
+        .catch(() => ({ type: 'application/octet-stream' })),
+    ]);
+    if (!info?.isFile()) return null;
+    return { hash, type: meta.type, bytes: info.size, stream: () => fs.createReadStream(file) };
+  }
+
+  return { ready, put, get, head, open, dir };
 }

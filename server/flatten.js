@@ -93,6 +93,52 @@ export async function flatten(source, blobs) {
   return { source: out, inlined, missing };
 }
 
+/** Base64 in pieces whose joins fall on whole three-byte groups, so that the
+ *  pieces read together are what one toString('base64') of the whole is. */
+async function* base64Of(stream) {
+  let carry = Buffer.alloc(0);
+  for await (const chunk of stream) {
+    const bytes = carry.length ? Buffer.concat([carry, chunk]) : chunk;
+    const whole = bytes.length - (bytes.length % 3);
+    if (whole) yield Buffer.from(bytes.subarray(0, whole).toString('base64'), 'latin1');
+    // A copy: the stream may hand the same memory out again.
+    carry = Buffer.from(bytes.subarray(whole));
+  }
+  if (carry.length) yield Buffer.from(carry.toString('base64'), 'latin1');
+}
+
+/**
+ * The document `flatten` makes, in pieces, for a reader that must not hold it
+ * whole: a deck with its talk recorded into it is a gigabyte of sound, which
+ * as one string is more than a string can be. The text between blobs comes as
+ * it is, and each blob is read from disk and sent as base64 a piece at a time.
+ * Read together, the pieces are byte for byte what `flatten` answers, which is
+ * what /drive/download sends (server/export.js; test/drive-export.test.js).
+ */
+export async function* flattenChunks(source, blobs) {
+  const text = (piece) => Buffer.from(piece, 'utf8');
+  let at = 0;
+  for (const match of source.matchAll(BLOB_ATTRS)) {
+    const [whole, hash, type] = match;
+    const blob = await blobs.open(hash);
+    const before = source.slice(at, match.index);
+    if (before) yield text(before);
+    at = match.index + whole.length;
+    if (!blob) {
+      yield text(whole);
+      continue;
+    }
+    const src = source.slice(at).match(/^([^>]*?\ssrc=")([^"]*)(")/);
+    if (!src) continue;
+    yield text(`${src[1]}data:${blob.type || type};base64,`);
+    yield* base64Of(blob.stream());
+    yield text(src[3]);
+    at += src[0].length;
+  }
+  const rest = source.slice(at);
+  if (rest) yield text(rest);
+}
+
 /** Which blobs a document points at, without reading any of them. */
 export const blobsIn = (source) =>
   [...source.matchAll(BLOB_ATTRS)].map(([, hash, type]) => ({ hash, type }));
