@@ -1,0 +1,17 @@
+// marble-host, the owner's user service, may start, stop and restart the
+// drives the PC hosts for other people, and the root-owned helpers that back
+// them up, export their study data and remove them, and nothing else
+// (docs/HOSTING.md, "marble-host and the sandbox"). Not enable, not reset,
+// not any other unit: no guest's service is ever enabled, and marble-host
+// starts them itself. Installed by linux/pc-host/install.sh, with @OWNER@
+// the owner's user name, to /etc/polkit-1/rules.d.
+polkit.addRule(function (action, subject) {
+  if (action.id !== "org.freedesktop.systemd1.manage-units") return polkit.Result.NOT_HANDLED;
+  if (subject.user !== "@OWNER@") return polkit.Result.NOT_HANDLED;
+  var unit = String(action.lookup("unit") || "");
+  var verb = String(action.lookup("verb") || "");
+  var ours = /^marble-guest(-backup|-export|-remove)?@[a-z0-9][a-z0-9-]*\.service$/.test(unit) || unit === "marble-guests-backup.service";
+  var verbs = ["start", "stop", "restart", "try-restart", "reload-or-restart"];
+  if (ours && verbs.indexOf(verb) >= 0) return polkit.Result.YES;
+  return polkit.Result.NOT_HANDLED;
+});

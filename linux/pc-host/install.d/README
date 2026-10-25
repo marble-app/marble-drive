@@ -1,0 +1,26 @@
+Pieces of the PC's guest sandbox that other parts of the build add
+(docs/HOSTING.md, "Other people's drives on the PC").
+
+linux/pc-host/install.sh runs every *.sh here, as root, after it has
+installed the guest units, the slice, the polkit rule and run-guest and
+reloaded systemd. They run in name order (LC_ALL=C), so name each with a
+number first: 20-backup.sh runs before 30-export.sh. `install.sh --uninstall`
+runs them again with --uninstall, in the reverse order, before it takes its
+own parts away.
+
+Each piece gets these in its environment:
+
+  OWNER        the user marble-host runs as (bryanmin)
+  OWNER_HOME   that user's home
+  OPT          /opt/marble: bin, releases and ms-playwright, the owner's
+  ETC          /etc/marble-guests: each drive's settings, the owner's, 700
+  RELEASE_DIR  the marble-drive folder install.sh was run from (the owner's
+               current release, or a checkout)
+
+and in a test, MARBLE_INSTALL_ROOT (a folder standing in for /) and
+MARBLE_SYSTEMCTL (a stand-in for systemctl), which a piece should honour as
+install.sh does.
+
+A piece must be safe to run again, must print no secret, and must exit
+non-zero when it fails: install.sh stops there. Anything root runs belongs
+outside /opt/marble, which the owner can write.

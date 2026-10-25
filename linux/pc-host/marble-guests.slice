@@ -1,0 +1,15 @@
+# Every drive the PC hosts for someone else, together (docs/HOSTING.md,
+# "marble-host and the sandbox"). Installed by linux/pc-host/install.sh.
+# Each drive has its own limits (marble-guest@.service); these are for all of
+# them at once, so a busy evening for the guests cannot take the memory or
+# the CPU the owner's own drive needs. Its weight is half a top-level slice's
+# default, beside user.slice, where the owner's drive runs.
+[Unit]
+Description=Marble: the drives hosted on this PC, together
+Before=slices.target
+
+[Slice]
+MemoryHigh=5G
+MemoryMax=6G
+CPUWeight=50
+TasksMax=4096

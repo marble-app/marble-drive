@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# One drive the PC hosts for someone else, run inside its sandbox
+# (marble-guest@<name>.service; docs/HOSTING.md, "marble-host and the
+# sandbox"). Installed to /opt/marble/bin/run-guest by install.sh; systemd
+# starts it as `/bin/bash /opt/marble/bin/run-guest <name>`, as the drive's
+# own user, with its settings file (/etc/marble-guests/<name>.env) already
+# loaded and its folder in $STATE_DIRECTORY.
+#
+# It makes the drive's folder and home if they are missing, then runs the
+# host from the release the settings name. bash stays the sandbox's first
+# process and node runs under it: in a process namespace of its own, the
+# first process is the one that reaps every orphan, and node in that place
+# left an agent's finished processes behind as zombies. A stop (TERM) is
+# passed to node, which closes the drive cleanly; when node ends, so does
+# this, with its status, and systemd starts the drive again.
+#
+# MARBLE_GUEST_OPT and MARBLE_GUEST_NODE are for test/host-scripts.test.js
+# alone; on the PC the release is always under /opt/marble.
+set -uo pipefail
+
+die() { echo "run-guest: $*" >&2; exit 1; }
+
+opt="${MARBLE_GUEST_OPT:-/opt/marble}"
+node="${MARBLE_GUEST_NODE:-/usr/bin/node}"
+name="${1:-}"
+[[ $name =~ ^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$ ]] || die "a drive's name is 3 to 40 of a-z, 0-9 and -, not \"$name\""
+[[ ${MARBLE_GUEST_NAME:-} == "$name" ]] || die "the settings systemd loaded are for ${MARBLE_GUEST_NAME:-no drive}, not $name"
+release="${MARBLE_GUEST_RELEASE:-}"
+[[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || die "MARBLE_GUEST_RELEASE is not a release's name"
+app="$opt/releases/$release/marble-drive"
+[[ -f $app/bin/marble-drive.js ]] || die "the release $release is not in $opt/releases"
+state="${STATE_DIRECTORY:-}"
+[[ -n $state && -d $state && -w $state ]] || die "STATE_DIRECTORY is not a folder this drive can write (systemd sets it from StateDirectory=)"
+
+home="$state/home"
+mkdir -p "$state/drive" "$home/.config/marble-drive" "$state/crash" || die "could not make the drive's folders in $state"
+
+export HOME="$home"
+export MARBLE_DRIVE_ROOT="$state/drive"
+export HOST=127.0.0.1
+export NODE_ENV=production
+export MARBLE_DRIVE_AGENTS=1
+export MARBLE_DRIVE_AGENT_KEYS="$home/.config/marble-drive/agent-keys"
+export PLAYWRIGHT_BROWSERS_PATH="$opt/ms-playwright"
+# The release pins Claude Code; it must not update itself.
+export DISABLE_AUTOUPDATER=1
+export MARBLE_GUEST=1
+export PATH="$app/node_modules/.bin:/usr/local/bin:/usr/bin:/bin"
+cd "$app" || die "could not open $app"
+
+pid=""
+stopping=0
+stop() {
+  stopping=1
+  [[ -n $pid ]] && kill -TERM "$pid" 2>/dev/null
+}
+# Set before node starts: the first process of a namespace hears only the
+# signals it has asked for.
+trap stop TERM INT HUP
+
+"$node" --report-on-fatalerror --report-directory="$state/crash" bin/marble-drive.js serve &
+pid=$!
+((stopping)) && kill -TERM "$pid" 2>/dev/null
+
+# `wait` returns early when a signal lands, so wait again until node is gone.
+# Every other child that ends meanwhile (an orphan handed to this process) is
+# reaped by bash as it goes.
+status=0
+while kill -0 "$pid" 2>/dev/null; do
+  wait "$pid"
+  status=$?
+done
+((stopping)) && exit 0
+echo "run-guest: the host for $name exited (status $status)" >&2
+exit "$status"
