@@ -152,7 +152,8 @@ export async function main(argv, { settingsPath = SETTINGS, fetchImpl = fetch, o
       case 'drives': {
         const { drives } = await call('GET', '/drives');
         if (!drives.length) return out('No drives yet.'), 0;
-        for (const line of pad([['name', 'state', 'owner', 'sprite', 'made'], ...drives.map((d) => [d.name, d.state === 'failed' ? `failed at ${d.failed}` : d.state, d.owner, d.sprite ?? '', day(d.created)])])) out(line);
+        // Where it runs: its sprite on Fly, or the PC host, which has no sprite.
+        for (const line of pad([['name', 'state', 'owner', 'runs on', 'made'], ...drives.map((d) => [d.name, d.state === 'failed' ? `failed at ${d.failed}` : d.state, d.owner, d.home === 'pchost' ? 'the PC host' : d.sprite ?? '', day(d.created)])])) out(line);
         return 0;
       }
       case 'hold': {

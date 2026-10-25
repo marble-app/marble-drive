@@ -3,10 +3,13 @@
 // move always sees it (KV can lag by a minute). The Mac, the sprite and
 // tools/drive-home.mjs are its only callers, with one shared bearer token.
 // Its second job is the front door: a marbledrive.app name is routed to its
-// drive (router.js) and never needs the token.
+// drive (router.js) and never needs the token. Its third runs on a timer: a
+// look at the PC host every five minutes (pc-host.js, wrangler.toml's
+// [triggers]), which does nothing until the PC host is set up.
 
 import { INITIAL, move } from './lease.js';
 import { Directory } from './door/directory.js';
+import { checkPcHost } from './pc-host.js';
 import { isFrontDoor, route } from './router.js';
 
 const json = (status, body) =>
@@ -45,6 +48,14 @@ export async function handle(request, env, ctx) {
   return env.LEASE.get(env.LEASE.idFromName(match[1])).fetch(request);
 }
 
+/** The cron: the Worker's own check on the PC host. A failure is logged and
+ *  the next run tries again. */
+export function scheduled(controller, env, ctx) {
+  const work = checkPcHost(env).catch((err) => console.log(`pc-host watch failed: ${err?.name ?? 'Error'}`));
+  ctx?.waitUntil?.(work);
+  return work;
+}
+
 export { Directory };
 
-export default { fetch: handle };
+export default { fetch: handle, scheduled };

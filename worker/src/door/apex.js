@@ -23,6 +23,7 @@
 // same-site with the apex, so SameSite cookies alone would let a document on
 // a drive post here.
 
+import { newDriveHome, pcHostReady, PCHOST, pokePcHost } from '../pc-host.js';
 import { directory } from './directory.js';
 import { nameProblem, nameSuggestions } from './names.js';
 import { APEX_ORIGIN, DoorError, cookie, finish, isProvider, providerReady, readCookie, start } from './oauth.js';
@@ -339,8 +340,11 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
     if (path === '/name') {
       if (!session) return signedOut();
       if (!session.account.mayMake) return await onward(session, dir);
-      // Without the door sprite a drive would wait in the queue for ever.
-      if (!env.DOOR_SPRITE_URL) {
+      // Without its maker a drive would wait in the queue for ever: the door
+      // sprite for a drive on Fly, marble-host for one on the PC host
+      // (NEW_DRIVE_HOME, worker/src/pc-host.js).
+      const home = newDriveHome(env);
+      if (home === PCHOST ? !pcHostReady(env) : !env.DOOR_SPRITE_URL) {
         return pages.problem({ title: 'Drives can’t be made yet', text: 'Bryan hasn’t switched on making drives. Your invite still works; try again later.', status: 503, action: { href: '/account', label: 'Your account' } });
       }
       if (method === 'GET') {
@@ -356,9 +360,10 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
         } catch {
           name = '';
         }
-        const r = await dir('POST', '/drive', { account: session.account.id, name });
+        const r = await dir('POST', '/drive', { account: session.account.id, name, ...(home === PCHOST ? { home } : {}) });
         if (!r.ok) return pages.nameDrive({ value: name, said: r.data.why ?? 'That didn’t work. Try again.', ok: false, status: r.status });
-        poke(env, fetchImpl, ctx);
+        if (home === PCHOST) pokePcHost(env, fetchImpl, ctx);
+        else poke(env, fetchImpl, ctx);
         return redirect(`/making/${encodeURIComponent(r.data.drive.name)}`);
       }
     }

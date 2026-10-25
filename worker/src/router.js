@@ -12,6 +12,10 @@
 // and a script's own bearer pass through for the drive to judge. A drive with
 // no owner yet (bryan, until a claim invite hands it over) is routed exactly
 // as before.
+//
+// A drive the Directory says lives on the PC host (worker/src/pc-host.js) goes
+// to PC_HOST_URL, the one tunnel into the owner's PC, with its name and the
+// host key in two headers that only this Worker sets.
 
 import { CREDIT_PATH, credit } from './credit.js';
 import { apex, clearPass, doorReady, edgeVerifyKeys, mintPass, passCookie, PASS_COOKIE } from './door/apex.js';
@@ -20,10 +24,14 @@ import { readCookie } from './door/oauth.js';
 import { esc } from './door/pages.js';
 import { returnPath } from './door/paths.js';
 import { verify } from './door/tokens.js';
+import { DRIVE_HEADER, KEY_HEADER, PCHOST, pcHostReady } from './pc-host.js';
 
 export const APEX = 'marbledrive.app';
 const RESERVED = new Set(['www', 'app', 'api', 'docs', 'status', 'admin', 'mail']);
 const UNREACHABLE = new Set([530]); // a Cloudflare tunnel with no connector (error 1033)
+// The PC host's tunnel with no connector (530), or its router with no drive
+// behind it (502, 503, 504).
+const PC_UNREACHABLE = new Set([502, 503, 504, 530]);
 
 export const isFrontDoor = (hostname) => hostname === APEX || hostname.endsWith(`.${APEX}`);
 
@@ -40,6 +48,15 @@ const away = (home) =>
   MACHINE_NAMES[home]
     ? page(503, 'This drive is out of reach', `Your drive is at home on your ${MACHINE_NAMES[home]}, which isn’t reachable right now (asleep or offline). On the ${MACHINE_NAMES[home]}: <code>node tools/drive-home.mjs to fly</code> moves it to Fly. If the ${MACHINE_NAMES[home]} is off for good, from another machine: <code>node tools/drive-home.mjs rescue-to fly --from ${home}</code> brings it back from its last upload.`, { 'retry-after': '30' })
     : page(503, 'This drive is out of reach', 'Fly isn’t answering right now; try again in a minute.', { 'retry-after': '30' });
+
+// A drive on the PC host while the PC can't be reached. Its person is told it
+// is resting and that Bryan knows (the Worker's own check, every five
+// minutes); never away()'s words, which are the owner's commands.
+const RESTING = 'Your drive is resting. Bryan has been told, and your work is safe.';
+const resting = (request) =>
+  wantsHtml(request)
+    ? page(503, 'Your drive is resting', 'Bryan has been told, and your work is safe.', { 'retry-after': '30' })
+    : new Response(JSON.stringify({ error: RESTING, resting: true }), { status: 503, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'retry-after': '30' } });
 
 function drives(env) {
   const raw = env.DRIVES ?? {};
@@ -167,10 +184,12 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
   if (host === APEX || host === `www.${APEX}`) return doorReady(env) ? apex(request, env, { fetchImpl, now, ctx }) : placeholder();
 
   const name = host.slice(0, -(APEX.length + 1));
-  // A machine's own tunnel (pc-bryan, mac-bryan) is never this Worker's to
-  // answer. Its routes should keep it off the Worker altogether; if the
-  // wildcard route ever catches one, the request goes on to the tunnel as it
-  // came, since a Worker's request to its own zone goes to the origin.
+  // A machine's own tunnel (pc-bryan, mac-bryan, and pc-host, the PC host's)
+  // is never this Worker's to answer. Its routes should keep it off the Worker
+  // altogether; if the wildcard route ever catches one, the request goes on to
+  // the tunnel as it came, since a Worker's request to its own zone goes to
+  // the origin. Nothing is added to it: pc-host's router wants the key, and
+  // only a drive's request routed below is given that.
   if (/^(mac|pc)-[a-z0-9-]+$/.test(name)) return fetchImpl(request);
   const table = drives(env);
   if (!name || name.includes('.') || RESERVED.has(name)) return nobody();
@@ -210,8 +229,9 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
     if (!origin) return lost();
   } else {
     if (record.state !== 'ready') return making();
-    home = 'fly';
-    origin = record.homes?.fly;
+    // On the PC host every drive shares one address; the header says whose.
+    home = record.home === PCHOST ? PCHOST : 'fly';
+    origin = home === PCHOST ? (pcHostReady(env) ? env.PC_HOST_URL : null) : record.homes?.fly;
     if (!origin) return lost();
   }
 
@@ -229,8 +249,16 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
 
   const headers = new Headers(request.headers);
   headers.delete('host');
+  // Only this Worker says which drive a request is for, and holds the key
+  // that proves it: whatever the browser sent under those names goes first.
+  headers.delete(DRIVE_HEADER);
+  headers.delete(KEY_HEADER);
   headers.set('x-forwarded-host', host);
   headers.set('x-forwarded-proto', 'https');
+  if (home === PCHOST) {
+    headers.set(DRIVE_HEADER, name);
+    headers.set(KEY_HEADER, env.PC_HOST_KEY);
+  }
   if (home === 'fly' && env.SPRITES_TOKEN && !headers.has('authorization')) headers.set('authorization', `Bearer ${env.SPRITES_TOKEN}`);
 
   const init = { method: request.method, headers, redirect: 'manual' };
@@ -243,7 +271,11 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
   try {
     res = await fetchImpl(target, init);
   } catch {
-    return away(home);
+    return home === PCHOST ? resting(request) : away(home);
+  }
+  if (home === PCHOST && PC_UNREACHABLE.has(res.status)) {
+    await res.body?.cancel().catch(() => {});
+    return resting(request);
   }
   if (UNREACHABLE.has(res.status)) return away(home);
   if (!renew) return res;
