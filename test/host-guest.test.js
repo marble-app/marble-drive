@@ -147,10 +147,10 @@ test('/health/deep\'s answer: the release, both CLIs, the person\'s own document
   assert.equal(await madeDocs(store), 1, 'only the one its person made');
   let t = 0;
   const cli = fakeCli();
-  const deep = createDeepHealth({ store, keysFile: null, env: { MARBLE_GUEST_RELEASE: 'r1', HOME: '/h', PATH: '/p', MARBLE_DRIVE_SECRET: 'never-handed-on' }, run: cli.run, now: () => t });
+  const deep = createDeepHealth({ store, keysFile: null, env: { MARBLE_GUEST_RELEASE: 'r1', HOME: '/h', PATH: '/p', MARBLE_DRIVE_SECRET: 'never-handed-on', ANTHROPIC_API_KEY: 'sk-ant-x', CODEX_API_KEY: 'sk-x' }, run: cli.run, now: () => t });
   assert.deepEqual(await deep.read(), { ok: true, release: 'r1', claude: { version: '2.1.281', signedIn: false }, codex: { version: '0.159.3', signedIn: false }, docs: 1, agentConnected: false });
-  assert.deepEqual(cli.asked.map((a) => a.line).sort(), ['claude --version', 'claude auth status', 'codex --version', 'codex login status']);
-  assert.ok(cli.asked.every((a) => !('MARBLE_DRIVE_SECRET' in a.env) && a.env.HOME === '/h'), 'the CLIs get a turn\'s environment, not the drive\'s secret');
+  assert.deepEqual(cli.asked.map((a) => a.line).sort(), ['claude --version', 'claude auth status --json', 'codex --version', 'codex login status']);
+  assert.ok(cli.asked.every((a) => !('MARBLE_DRIVE_SECRET' in a.env) && !('ANTHROPIC_API_KEY' in a.env) && !('CODEX_API_KEY' in a.env) && a.env.HOME === '/h'), 'the drive\'s own home, and no secret or key, so the answer is about the login');
   t += 59_000;
   await Promise.all([deep.read(), deep.read()]);
   assert.equal(cli.asked.length, 4, 'kept a minute');

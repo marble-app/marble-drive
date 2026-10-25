@@ -6,10 +6,15 @@
 //
 // Answered only on this machine and only to the owner (server/app.js), and
 // kept a minute: each fresh answer runs four short CLI commands. The CLIs are
-// asked about their own logins (`claude auth status`, `codex login status`),
-// with the environment a turn gets (server/agent/env.js) and nothing more;
-// the keys file is asked only whether a key is set, never for one.
+// asked about their own logins the way Connect an agent asks
+// (`claudeStatus`, `codexStatus`): under the drive's own home, with no key in
+// the environment, so the answer is about the login, and never by opening
+// ~/.claude or ~/.codex. The keys file is asked only whether a key is set.
+// On a drive the PC hosts (no starter credit, no Cursor) `agentConnected` is
+// what GET /agent/setup calls `ready`.
 
+import { claudeStatus } from './agent/claude-signin.js';
+import { codexStatus } from './agent/codex-signin.js';
 import { pickEnv } from './agent/env.js';
 import { createKeyStore } from './agent/keys.js';
 import { runCommand } from './agent/providers/exec.js';
@@ -31,22 +36,15 @@ export function createDeepHealth({ store, keysFile, env = process.env, run = run
   let asking = null;
 
   async function ask() {
-    const probeEnv = pickEnv(env);
-    const cli = (command, args) => run(command, args, { env: probeEnv, timeout: timeoutMs });
-    const [claudeVersion, claudeStatus, codexVersion, codexStatus] = await Promise.all([
-      cli('claude', ['--version']),
-      cli('claude', ['auth', 'status']),
-      cli('codex', ['--version']),
-      cli('codex', ['login', 'status']),
+    const version = (command) => run(command, ['--version'], { env: pickEnv(env), timeout: timeoutMs });
+    const [claudeVersion, claude, codexVersion, codex] = await Promise.all([
+      version('claude'),
+      claudeStatus({ env, exec: run, timeout: timeoutMs }),
+      version('codex'),
+      codexStatus({ env, exec: run, timeout: timeoutMs }),
     ]);
-    let claudeIn = false;
-    try {
-      claudeIn = JSON.parse(claudeStatus.stdout)?.loggedIn === true;
-    } catch {
-      // Not JSON: an older CLI, or one that failed. Not signed in, as far as can be told.
-    }
-    const said = `${codexStatus.stdout ?? ''}\n${codexStatus.stderr ?? ''}`;
-    const codexIn = codexStatus.code === 0 && /\blogged in\b/i.test(said) && !/\bnot logged in\b/i.test(said);
+    const claudeIn = claude.signedIn;
+    const codexIn = codex.signedIn;
     const keys = keysFile ? await createKeyStore({ file: keysFile }).flags().catch(() => ({})) : {};
     return {
       ok: true,
