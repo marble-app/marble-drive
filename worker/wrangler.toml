@@ -23,8 +23,10 @@ routes = [
   # through here, so a drive made by sign-up needs no route of its own. Turn
   # it on only after routes with no Worker for pc-bryan.marbledrive.app/*,
   # mac-bryan.marbledrive.app/* and pc-host.marbledrive.app/* are added in the
-  # dashboard and proven to keep the tunnels off this Worker.
-  # { pattern = "*.marbledrive.app/*", zone_name = "marbledrive.app" },
+  # dashboard and proven to keep the tunnels off this Worker. Switched on for
+  # the PC host (step 17 of the owner's list in "Running the probe study from
+  # the PC"), after those routes were proven.
+  { pattern = "*.marbledrive.app/*", zone_name = "marbledrive.app" },
 ]
 
 [vars]
@@ -59,7 +61,7 @@ PC_HOST_URL = "https://pc-host.marbledrive.app"
 # Where a drive made by sign-up lives: "fly" (the door sprite makes it, as
 # before) or "pchost" (marble-host makes it on the PC, with no starter credit).
 # Unset is fly.
-# NEW_DRIVE_HOME = "pchost"
+NEW_DRIVE_HOME = "pchost"
 
 # The Worker's own look at the PC host every five minutes (pc-host.js): it does
 # nothing until PC_HOST_URL and PC_HOST_KEY are set.
