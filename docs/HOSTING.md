@@ -1238,8 +1238,9 @@ drive.
 Both `/health` routes answer only marble-host. That is a request made on this
 machine (loopback with no forwarded header, `isLocal` in `server/gate.js`)
 carrying the drive's own passphrase as a bearer, `MARBLE_DRIVE_SECRET` from
-its settings file. Every guest shares the PC's loopback, so being asked
-locally is not enough: another drive could ask, and sign this one out.
+its settings file. Every guest can reach the others' loopback addresses, so
+being asked locally is not enough: another drive could ask, and sign this
+one out.
 Anything else gets `404 {"error":"not found"}`, the same as a request through
 the router, and it gets it before the gate, so to anyone else the routes are
 not there. `/health/study` answers only on a drive with `MARBLE_STUDY=1`, and
