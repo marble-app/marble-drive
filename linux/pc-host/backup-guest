@@ -54,7 +54,7 @@ mode=backup force=0 yes=0
 while (($#)); do
   case $1 in
     --force) force=1 ;;
-    --trash-prefix) mode=trash-prefix ;;
+    --trash-prefix) mode='trash-prefix' ;;
     --forget) mode=forget ;;
     --yes) yes=1 ;;
     -h | --help) usage ;;

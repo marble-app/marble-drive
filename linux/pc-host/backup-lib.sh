@@ -6,6 +6,7 @@
 # Every path can be moved through the environment, so test/host-backup.test.js
 # runs all of it without root or R2. The defaults are the PC's. The caller sets
 # HERE to its own folder first.
+# shellcheck disable=SC2034  # the settings here are read by the scripts that source this
 
 # Times and names compare byte by byte, whatever the locale.
 export LC_ALL=C
@@ -96,7 +97,7 @@ load_settings() {
   [[ $CFG_GUEST_BACKUP_MAX_BYTES =~ ^[0-9]+$ ]] || { SETTINGS_WHY="GUEST_BACKUP_MAX_BYTES is not a number"; return 1; }
 }
 
-rclone_bare() { (export RCLONE_CONFIG=/dev/null && exec "$RCLONE" "$@"); }
+rclone_bare() { RCLONE_CONFIG=/dev/null "$RCLONE" "$@"; }
 
 # The drive's remote, guest:, an rclone crypt over guests/<name>/ in the hub's
 # bucket, with this backup's own passphrase and salt, never the hub's. Each is
