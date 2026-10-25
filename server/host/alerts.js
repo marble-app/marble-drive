@@ -10,12 +10,13 @@ export function createAlerts({ url = null, fetchImpl = fetch, log = console, now
   const last = new Map();
   return {
     on: Boolean(url),
-    /** Resolves with whether a note went; never throws. */
+    /** Resolves { due, sent }: whether it was due (not held back by the
+     *  hourly limit), and whether a note went. Never throws. */
     async send({ drive = null, kind, message, once = true }) {
       const key = `${drive ?? '*'}:${kind}`;
-      if (once && last.has(key) && now() - last.get(key) < everyMs) return false;
+      if (once && last.has(key) && now() - last.get(key) < everyMs) return { due: false, sent: false };
       last.set(key, now());
-      if (!url) return false;
+      if (!url) return { due: true, sent: false };
       try {
         const res = await fetchImpl(url, {
           method: 'POST',
@@ -24,11 +25,20 @@ export function createAlerts({ url = null, fetchImpl = fetch, log = console, now
           signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok) log.error?.(`[host] the alert about ${key} was refused (${res.status})`);
-        return res.ok;
+        return { due: true, sent: res.ok };
       } catch (err) {
         log.error?.(`[host] the alert about ${key} did not go: ${err.message}`);
-        return false;
+        return { due: true, sent: false };
       }
     },
+  };
+}
+
+/** An alert that is also an event, so the Console shows what the phone was told. */
+export function notifier({ alerts, registry }) {
+  return async (drive, kind, message, { once = true } = {}) => {
+    const r = await alerts.send({ drive, kind, message, once });
+    if (r.due) await registry.event(drive, 'alert', { kind, message, sent: r.sent });
+    return r;
   };
 }

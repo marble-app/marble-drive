@@ -36,7 +36,7 @@ export function createMaker({
   units,
   envs,
   probe,
-  alerts = { send: async () => false },
+  notify = async () => {},
   fetchImpl = fetch,
   log = console,
   newSecret = makeSecret,
@@ -127,7 +127,7 @@ export function createMaker({
         });
       }
       await registry.event(name, 'failed', { step, why: err.message });
-      await alerts.send({ drive: name, kind: 'failed', message: `Making ${name} stopped at ${step}: ${err.message}`, once: false });
+      await notify(name, 'failed', `Making ${name} stopped at ${step}: ${err.message}`, { once: false });
       log.error?.(`[host] making ${name} stopped at ${step}: ${err.message}`);
       return { ok: false, status, step, why: err.message };
     }
