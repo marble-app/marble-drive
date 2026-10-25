@@ -18,21 +18,25 @@ not in the drive and not in `.marble/`. The settings panel writes them there.
 `CODEX_API_KEY` for a host that has no panel-set key; both files are gitignored.
 
 A drive that can run no agent — Claude with neither a signed-in login nor a
-key, and Codex the same — says so on the first page of a visit: a popup
-(`<marble-agent-setup>` in `runtime/agent-ui.js`) with a field to paste an API
-key into. It reads **Connect Claude** on a drive that has only Claude, and
-**Connect an agent**, with a Claude | Codex choice, on one that has both; a
-pasted `sk-ant-` key moves the choice to Claude and another `sk-` key to Codex.
-`GET /agent/setup` answers whether it is needed and which agents a key could
-connect (`offers`); `POST /agent/setup {key}` checks a Claude key with
+key, and Codex the same — says so on the first page of a visit: the connect
+sheet (`<marble-agent-setup>` in `runtime/agent-ui.js`; "Connect an agent"
+below) offers the person's own Claude or ChatGPT, each signed in on its
+company's page, or an API key for either. `GET /agent/setup` answers whether
+it is needed (`needed`), whether any agent can run at all (`ready`, which
+Start here's first row reads), which agents a key could connect (`offers`),
+which sign in on their own page (`signIns`), and who hosts the drive (`host`).
+`POST /agent/setup {key}` checks a Claude key with
 Anthropic (the model list, via `@anthropic-ai/sdk`; nothing is spent) and
 keeps it only if Anthropic does not refuse it, then switches Claude to the key.
 `POST /agent/setup {provider: 'codex', key}` does the same with OpenAI's model
 list, keeps the key for Codex, and makes Codex the agent new chats start on if
-the current one cannot run. `GET /agent/settings` reports as `defaultProvider`
-the saved default when it can run, else the first agent that can, so a Run
-button or the day never starts on a Claude that is not signed in. An unreachable company keeps the key and says it
-went unchecked. "Not now" lasts the tab; a page inside another page never asks.
+the current one cannot run. In the key view a pasted `sk-ant-` key moves the
+choice to Anthropic and another `sk-` key to OpenAI. `GET /agent/settings`
+reports as `defaultProvider` the saved default when it can run, else the
+first agent that can, so a Run button or the day never starts on a Claude
+that is not signed in. An unreachable company keeps the key and says it went
+unchecked. "Not now" is kept for the drive; a page inside another page never
+asks.
 `MARBLE_DRIVE_ANTHROPIC_BASE` and `MARBLE_DRIVE_OPENAI_BASE` point the checks
 elsewhere (the tests' fakes).
 
@@ -653,48 +657,125 @@ tested against streams recorded from real runs in `test/fixtures/providers/`;
 record a new one when a CLI changes its output. A provider may also offer
 `failure(stderr)`: the reason a run that ended without a result died, read the
 way its CLI writes it (Codex's own `Error:` line, past its MCP servers' logs).
-Codex's models and efforts come from `codex debug models` (the ones it lists);
-naming falls back to Codex last, only on its login.
+Codex's models and efforts come from `codex debug models` (the ones it lists),
+and the small jobs beside a turn run on it when Claude cannot (below).
 
-### Connect your Claude
+### The small jobs beside a turn
 
-A person can put a drive's Claude on their own Pro or Max plan from the
-browser, without a terminal. The sheet that does it opens from Agents ›
-Settings › Claude, and from any page that fires
-`document.dispatchEvent(new CustomEvent('marble:connect-claude'))`.
+A chat's title (`namer.js`), the progress drawing (`drawer.js`), a callout's
+suggestions (`offer.js`), a build's picks and its answers to comments
+(`build/pieces.js`, `build/reply.js`), a few words read as one rule
+(`change/intent.js`) and fan_out's workers (`change/fanout.js`) each ask a
+model one question with no tools. They ask `server/agent/side-model.js`,
+which runs the question on whichever CLI the drive has connected. That is
+Claude when it works (its login, a plan token an older Connect kept, an API
+key, or starter credit, in that order), else Codex (the ChatGPT login, then
+an OpenAI key). Whether each works is the CLI's own word (`claude auth status`, `codex
+login status`), asked at most once a minute and again after a sign-in, a
+sign-out or a key. A run that is refused quickly (signed out, out of usage)
+moves on to the next way while the job's time lasts; a timeout does not. Each
+job keeps its prompt, timeout and Claude model. On Codex the model is the same
+tier of Codex's own (`CODEX_FOR_CLAUDE`: Haiku is GPT-6-Luna at low effort,
+Sonnet GPT-6.1-Sol at medium, Opus GPT-6.1-Sol at high, Fable GPT-6-Astra at
+high). A model the account lacks falls back to Codex's default. Codex runs them read-only, with no shell, none of the person's
+config and nothing kept. A drive with only an API key now spends a little of
+it on these; before, they failed quietly. Naming tries Cursor's agent last.
 
-Pressing Open Claude sign-in asks the host (`POST /agent/claude/sign-in`) to
-run `claude setup-token` in a pseudo-terminal and answer the sign-in address
-it prints. The page opens that address in a new tab. Claude's page shows a
-code; the person pastes it into the sheet, and `POST
-/agent/claude/sign-in/code` hands it to the same run. The long-lived token it
-prints is kept in the agent keys file as `claude`, next to the API keys, and
-reaches `claude-subscription` as `CLAUDE_CODE_OAUTH_TOKEN`. The switch moves
-to the login, and a default of Claude moves with it. `claude-api` never sees
-the token. Settings › Claude then says "On your Claude plan", with Disconnect.
+### Connect an agent: the person's own Claude or ChatGPT
 
-The pseudo-terminal is the system's `script` (`server/agent/claude-signin.js`),
-not a native module, and it is made 1000 columns wide so nothing wraps. Only
-one sign-in runs at a time. A sign-in with no code after
-`MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS` (600) is killed, and so is one the sheet
-was closed on. The routes sit behind the gate like every `/agent` route.
+A person can put a drive's agent on their own Claude or ChatGPT plan from the
+browser, without a terminal, and Marble never sees the password or keeps the
+login. Each CLI signs itself in, on its company's own page, and keeps the
+login under the drive's home, as it would on a laptop. Anthropic's terms for
+hosting Claude Code (code.claude.com/docs/en/legal-and-compliance) require
+exactly that: the binary unmodified, every sign-in method kept, the sign-in
+finished on Anthropic's own page, and no host collecting, storing or passing
+along a Claude.ai login. Codex is held to the same rules.
 
-What `claude setup-token` prints was read from Claude Code 2.1.281 on Linux,
-with a fresh HOME and `BROWSER=false`. It asks nothing first, tries to open a
-browser, and after about three seconds prints the address, both as a terminal
-hyperlink and as text, then `Paste code here if prompted >`. A pasted code
-reaches it through the pseudo-terminal. A wrong code gets `OAuth error:
-Request failed with status code 400` and `Press Enter to retry`, which the
-host reads as a refusal and ends the run. A good code gets `Your OAuth token
-(valid for 1 year):` and the `sk-ant-oat…` token on its own line.
-`test/fixtures/fake-claude-setup-token.mjs` draws the same screen. Record it
-again if a new Claude Code changes it.
+The sheet is `<marble-agent-setup>` in `runtime/agent-ui.js`. It opens by
+itself on the first page of a visit to a drive whose Claude and Codex can run
+on neither a login nor a key. It also opens from Agents › Settings, from
+Start here's first row, and from any page that fires `marble:connect-agent`
+(detail `{ agent: 'claude' | 'codex' | 'key' }`) or `marble:connect-claude` on
+the document. Its first view is "Connect an agent": "Agents on this drive run on
+your own Claude or ChatGPT plan. You sign in on their page, so Bryan never
+sees your password." The name is `MARBLE_HOST_OWNER` (`host` in `GET
+/agent/setup`); unset, it says "so nobody else sees your password". Its
+choices are the sign-ins the drive has (`signIns`), and "Use an API key
+instead", which takes an Anthropic key for Claude or an OpenAI key for Codex.
+The key is checked before it is kept (`POST /agent/setup`). Inside the drive ChatGPT's
+agent is called Codex, and the ChatGPT row says so, once.
 
-Not yet tried end to end with a real sign-in. The first real one should be on
-t-bryan: open Agents › Settings, choose Claude login, press Connect your
-Claude, sign in, paste the code, and send a chat. If the code is refused
-there, the fallback is Codex's `--device-auth` pattern, where the person
-types a short code on Anthropic's page instead. The sheet stays the same.
+For Claude, Open Claude sign-in asks the host (`POST /agent/claude/sign-in`)
+to run `claude auth login --claudeai` in a pseudo-terminal
+(`server/agent/claude-signin.js`) and answers the address it prints. The page
+opens it in a new tab. Claude's page shows a code; the person pastes it into
+the sheet, and `POST /agent/claude/sign-in/code` types it into the same run's
+prompt. The sign-in is done when the command exits 0 and `claude auth status
+--json` says `loggedIn`. Claude then runs on the plan: the switch moves to the
+login, and a default of Claude moves with it. A code without its `#state`
+half is answered 400 with `retry: true`, and the same run takes another paste.
+`GET` says whether one is waiting and whether Claude Code is signed in,
+`DELETE` ends it, and `POST /agent/claude/sign-out` is `claude auth logout`.
+
+For ChatGPT, choosing it asks the host (`POST /agent/codex/sign-in`) to
+run `codex login --device-auth` (`server/agent/codex-signin.js`), and answers
+OpenAI's device page and the one-time code it prints. The sheet shows the
+code large, with Copy, and Open OpenAI sign-in opens the page. The person
+enters the code there and OpenAI hands the login to the waiting command;
+nothing comes back through Marble. The sheet asks `GET /agent/codex/sign-in`
+every two seconds and closes when it says `signed-in`, which is the command
+exiting 0 and `codex login status` saying "Logged in using ChatGPT". Codex
+then becomes the agent new chats start on if the one they start on cannot
+run. The code lasts 15 minutes (`MARBLE_DRIVE_CODEX_SIGNIN_SECONDS`, 900), and
+so does the run. `DELETE` ends it and `POST /agent/codex/sign-out` is `codex
+logout`. Closing the sheet does not end it, since the code may already be
+typed on OpenAI's page; opening it again shows the same code.
+
+Each runner holds one sign-in at a time, and starting again ends the one
+before. A Claude sign-in with no code after `MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS`
+(600) is killed, and so is one the sheet was closed on. The pseudo-terminal is
+the system's `script`, made 1000 columns wide with echo off, so the code typed
+into it never comes back in what the host reads. The shell around the command
+prints its process id and its exit code, so the run is ended as a group and
+"exits 0" reads the same through every `script`. Codex runs on plain pipes in a
+process group of its own: `codex` is a Node launcher that starts the real
+binary as a child, and the whole group is what is ended. The routes sit behind
+the gate like every `/agent` route.
+
+Settings › Claude and the Codex row say "On your Claude plan" or "On your
+ChatGPT plan", or offer Connect. Disconnect runs the CLI's own logout, so it is
+offered only for a login this drive made (`claudeLoginHere`,
+`codexLoginHere`), a token an older Connect kept, or on a guest
+(`signOut` in `GET /agent/settings`), because on the owner's own machine the
+CLI's login is also the terminal's.
+
+An older Connect ran `claude setup-token` and kept the token it printed in
+the agent keys file as `claude`, which reached `claude-subscription` as
+`CLAUDE_CODE_OAUTH_TOKEN`. Nothing makes one now. A drive that has one keeps
+running on it until Disconnect, which removes it with the logout; a new
+Claude sign-in removes it too, since the token would win over the CLI's own
+login.
+
+What the commands print was read from Claude Code 2.1.281 and Codex 0.159.3 on
+Linux, with a throwaway HOME, stopped before any sign-in. `claude auth login
+--claudeai` prints "Opening browser to sign in…", the address as a terminal
+hyperlink and as text after "If the browser didn't open, visit:", then "Paste
+code here if prompted >", and reads a line. A code missing its `#` gets
+"Invalid code. Please make sure the full code was copied." and the prompt
+waits on. A refused one gets "Login failed: Request failed with status code
+400" and exit 1. A good one gets "Login successful." and exit 0 (read from the
+binary). `codex login --device-auth` prints its steps, `https://auth.openai.com/codex/device`,
+and "Enter this one-time code (expires in 15 minutes)" with a code like
+`H43K-IT446` on the next line, then waits; "Successfully logged in" and exit
+0 when the login lands, "Error logging in with device code: …" and exit 1
+when it does not. `test/fixtures/fake-claude-auth.mjs` and
+`fake-codex-login.mjs` print the same. Record them again if a new version
+changes them.
+
+Not yet tried end to end with a real sign-in: that needs a person's own
+account. The first real one should be on a test guest drive once the PC host
+runs one.
 
 ## The drawer
 
