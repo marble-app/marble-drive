@@ -435,6 +435,12 @@ deploy. New drives are made on Fly again; drives already on the PC stay there.
 | Worker secret | `PC_HOST_KEY` | the key the Worker adds to every request it sends the PC host: `HOST_KEY` in the PC's `host.env`. Without it nothing is sent there |
 | Worker secret | `ALERT_NTFY_URL` | optional: the ntfy topic the Worker's check posts to when the PC isn't answering |
 | Worker cron | `*/5 * * * *` | that check, `[triggers]` in `wrangler.toml`; it asks nothing until `PC_HOST_URL` and `PC_HOST_KEY` are set |
+| PC `host.env` | `HOST_KEY` | the router's key, the same value as the Worker's `PC_HOST_KEY`; `node tools/pc-host.mjs init` makes it |
+| PC `host.env` | `HOST_ADMIN_TOKEN` | the bearer for marble-host's admin API, for the Console and `tools/pc-host.mjs` |
+| PC `host.env` | `DOOR_URL`, `DOOR_ADMIN_TOKEN`, `MARBLE_DOOR_KEYS` | copied by `init` from `door.env` and `door-keys`: marble-host reads the door's queue, and gives each drive the door's public keys |
+| PC `host.env` | `HOST_ROUTER_PORT`, `HOST_ADMIN_PORT`, `HOST_GUEST_PORTS`, `HOST_PUBLIC_SUFFIX`, `HOST_MODE`, `HOST_OWNER_NAME` | `4460`, `4461`, `4500-4599`, `marbledrive.app`, `system` (or `user` for a trial) and `Bryan` |
+| PC `host.env` | `HOST_NTFY_URL` | optional: where marble-host's own alerts go, `https://ntfy.sh/<the topic in ntfy-topic>` |
+| PC `/etc/marble-guests/<name>.env` | `MARBLE_GUEST_NAME`, `MARBLE_GUEST_RELEASE`, `PORT`, `MARBLE_DRIVE_SECRET`, `MARBLE_DOOR_KEYS`, `MARBLE_DOOR_NAME`, `MARBLE_DOOR_OWNER`, `MARBLE_DRIVE_GATE=tools`, `MARBLE_DRIVE_PUBLIC_URL`, `GIT_*`, `MARBLE_HOST_OWNER`, and `MARBLE_STUDY=1` for a study invite | one drive on the PC, written by marble-host, mode 600, hidden from every drive ([HOSTING.md](HOSTING.md), "marble-host and the sandbox") |
 | drive `sprite.env` | `MARBLE_DOOR_KEYS` | `<kid>:<base64 SPKI>` entries separated by spaces |
 | drive `sprite.env` | `MARBLE_DOOR_NAME`, `MARBLE_DOOR_OWNER` | the name a pass must be for, and the account it must name |
 | drive `sprite.env` | `MARBLE_DRIVE_GATE` | `on` (the default) or `tools` |

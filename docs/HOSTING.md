@@ -597,6 +597,242 @@ sandbox of its own, behind one Cloudflare tunnel. The design is the drive page
 *Research/Marble/Marble for Publication/Running the probe study from the PC*;
 each part below says what it built.
 
+### marble-host and the sandbox
+
+Built 2026-10-25 and tried on the PC without root; not installed. Nothing on
+the PC changes until the owner runs `install.sh` with sudo. Two parts are not
+built, and both are the owner's to write. The updater puts releases in
+`/opt/marble` and moves drives between them. The escape check tries the
+sandbox's walls from inside. The end of this part says what each must do.
+
+marble-host is the one service outside every guest's sandbox, and the only
+thing that starts and stops their drives. It runs as the owner's user service
+`marble-host.service`: `node bin/marble-drive.js host` from his current
+release. Its code is in `server/host/`.
+
+The router, on 127.0.0.1:4460, is all the tunnel `marble-pc-host` reaches. A
+request without the Worker's key (`x-marble-host-key`) gets a 401. Otherwise
+the router takes that header and `x-marble-drive` off and passes the request
+to the drive's port. It adds `X-Forwarded-For`, so no drive takes the request
+for a local one. The Worker's `X-Forwarded-Host` and `X-Forwarded-Proto` go on
+as they came. Both directions stream, so live updates and uploads pass
+through as they are written. A browser that leaves cuts the drive's request
+too. A drive that isn't running gets a 503, which the Worker turns into its
+resting page. `GET /_host/health` with the key answers 200 with `{ ok: true,
+drives, running, release }` whenever marble-host answers at all.
+`POST /_host/poke` makes it read the door's queue now.
+
+The admin API, on 127.0.0.1:4461, is how the Console and `tools/pc-host.mjs`
+see and change the drives. Every request carries
+`Authorization: Bearer <HOST_ADMIN_TOKEN>`. Every guest shares the PC's
+loopback, so the token is what keeps a guest out. It lives in `host.env`, in
+the owner's home, which no guest can see.
+
+The maker makes the drives the door queues for the PC
+(`GET /_door/queue?home=pchost`). It looks at start, when poked, and every
+five minutes. It reports `machine`, `install` and `check` to the door, then
+`{ state: 'ready', home: 'pchost' }`. If the door didn't hear the ready
+report, the maker tells it again at the next look.
+
+The watcher reads each running drive's `/health` and its service's memory
+every 30 s. Two missed answers in a row restart the drive. Memory past 90% of
+the drive's `MemoryMax` is an alert to `HOST_NTFY_URL`, and so is the disk
+under `/var/lib` past 90%. Each kind is sent at most once an hour per drive.
+Everything that happens is a line in `~/.local/state/marble-host/events.jsonl`
+(`node tools/pc-host.mjs events`). The drives' registry, `registry.json`, is
+beside it, rewritten whole through a temporary file. marble-host will not
+start on a registry it cannot read, rather than forget its drives.
+
+Each drive is `marble-guest@<name>.service`, an instance of a system template.
+It has a Linux user of its own (DynamicUser) and a folder of its own,
+`/var/lib/private/marble-guests/<name>`, with the drive in `drive/` and its
+home in `home/`. Its settings are `/etc/marble-guests/<name>.env`, mode 600.
+marble-host writes that file, and systemd reads it before the walls close.
+The folder of settings files is then hidden from every drive.
+
+The walls are those of the plan's "A sandbox for each drive". Each drive gets
+its own user and process namespace and a private `/tmp`. The system is
+read-only. The owner's home, `/mnt`, and WSL's, Tailscale's and Docker's
+sockets are hidden. IP rules close the home network, link-local addresses and
+the tailnet, but let Tailscale's DNS through (100.100.100.100 and
+fd7a:115c:a1e0::53). A drive slows at 1 GB, stops at 1.5 GB, and has at most
+512 tasks. All the guests together are capped at 6 GB in
+`marble-guests.slice`. Their CPU weight, half a slice's, is on `marble.slice`
+above it, beside `user.slice`, where the owner's drive runs. A dash in a
+slice's name is a level in the tree, and a weight counts only against
+siblings.
+
+No guest's unit is ever enabled. When marble-host starts, it starts every
+drive the registry says is running whose unit is down. It marks a drive that
+was cut off while being made as failed. A running drive whose settings file
+has gone gets a new one. So after the PC restarts, the Windows task brings
+WSL up, lingering brings up marble-host, and marble-host brings up the
+drives. Stopping marble-host leaves the drives running. A drive that keeps
+failing is started again however often, because marble-host may start a unit
+but not reset one.
+
+A new drive runs the release the registry names for everyone, which only the
+updater will set. Until then it runs the newest folder in
+`/opt/marble/releases`, by name, since a release's name starts with its UTC
+time. `run-guest` runs node from
+`/opt/marble/releases/$MARBLE_GUEST_RELEASE/marble-drive` as the drive's own
+user. Its `HOME` is in the drive's folder, and Chromium comes from
+`/opt/marble/ms-playwright`. bash stays the sandbox's first process and passes
+a stop on to node: in that place, node left an agent's finished processes as
+zombies.
+
+Inside each drive, `/health` names its `release`. Its ledger and memory guard
+read the drive's own cgroup when it has a numeric `memory.max`
+(`server/cgroup.js`). The drive's memory then leaves out the file cache the
+kernel can drop. In the trial, the first drive to read a release held 476 MB,
+and 96 MB of that was its own. The guard acts with 10% of `MemoryMax` left. It
+also acts when the drive's tasks wait on memory past 90% of `MemoryHigh`.
+
+`GET /health/deep` (`server/health-deep.js`) answers only the owner, on this
+machine. That is loopback with no forwarded header, and the drive's
+passphrase as a bearer, which marble-host reads from the settings file.
+Through the router it is a 404. Its answer, kept a minute, is `{ ok, release,
+claude: { version, signedIn }, codex: { version, signedIn }, docs,
+agentConnected }`. `docs` counts the documents the person made, not the pages
+the drive was seeded with. `agentConnected` is a login to either CLI, or a key
+in the drive's own key file.
+
+`HOST_MODE=user` in `host.env` runs each drive as a transient unit of the
+owner's own systemd, for a machine without the sudo step and for a trial. It
+has every wall a user manager enforces, but the drive runs as the owner, and a
+user manager ignores IP rules. The network walls exist only in `system` mode,
+so `user` mode is never for other people's drives.
+
+| Piece | Where |
+|---|---|
+| marble-host: router, admin API, maker, watcher, registry, boot | `server/host/`, run by `marble-drive host` |
+| Its service | `linux/pc-host/host.sh` renders `marble-host.service.in` into `~/.config/systemd/user/`; log `~/.local/state/marble-drive/host.log` |
+| Its tunnel | `linux/pc-host/tunnel.sh`: `marble-pc-host`, from `pc-host.marbledrive.app` to `http://127.0.0.1:4460` alone; user unit `marble-host-tunnel.service`, log `host-tunnel.log` |
+| The sandbox | `linux/pc-host/marble-guest@.service`, `marble.slice`, `marble-guests.slice` |
+| The polkit rule | `linux/pc-host/50-marble-host.rules`: the owner may start, stop, restart, try-restart and reload-or-restart `marble-guest@`, `marble-guest-backup@`, `marble-guest-export@` and `marble-guest-remove@` instances and `marble-guests-backup.service`, and nothing else |
+| A drive's first process | `linux/pc-host/run-guest`, installed as `/opt/marble/bin/run-guest` |
+| The sudo step | `linux/pc-host/install.sh`, which then runs every `install.d/*.sh` (`install.d/README`) |
+| marble-host's settings | `~/.config/marble-drive/host.env`, mode 600, from `node tools/pc-host.mjs init` |
+| From the terminal | `tools/pc-host.mjs` |
+| Tests | `node --test test/host-*.test.js`, with stand-ins for systemctl and the drives |
+
+`install.sh` installs the template and both slices into `/etc/systemd/system`,
+the polkit rule with the owner's name in it, and `run-guest`. It makes
+`/opt/marble`, with `bin`, `releases` and `ms-playwright` in it, the owner's
+and mode 755. It makes `/etc/marble-guests`, the owner's and mode 700. Then it
+reloads systemd and runs every `install.d/*.sh` in name order, as root, with
+`OWNER`, `OWNER_HOME`, `OPT`, `ETC` and `RELEASE_DIR` set. `20-backup.sh` is
+the backups' piece. `install.sh` copies no release, and it is safe to run
+again. With `--uninstall` it stops every guest and runs the pieces with
+`--uninstall` in reverse order. Then it takes away all of the above,
+`/opt/marble` and `/etc/marble-guests` included, but never the drives'
+folders.
+
+The admin API's routes, all JSON. A refusal is `{ why }` with its status.
+
+| Route | Does |
+|---|---|
+| `GET /drives` | every drive: `{ name, port, owner, channel, release, state, active, memoryBytes, health: { ok, working, release, at }, restarts, created, cohort }`, with `failed` or `removed` when they apply |
+| `POST /drives` `{ name, owner, cohort? }` | make one now, as the door's queue does; 201 once its check passes |
+| `POST /drives/<name>/restart` | restart it; a drive whose making failed is tried again |
+| `POST /drives/<name>/suspend`, `/resume` | stop it and mark it so boot and the watcher leave it; start it again |
+| `POST /drives/<name>/remove` `{ confirm: <name> }` | stop it, mark it removed and delete its settings file; its folder stays |
+| `POST /drives/<name>/channel` `{ channel }` | `canary` or `everyone`, for the updater to act on |
+| `GET /releases` | `{ channels: { canary, everyone }, paused, onDisk, newDrives: { release, from } }` |
+| `POST /release`, `/promote`, `/rollback`, `/pause` | 501 `{ "why": "the updater isn't built yet" }` |
+| `GET /events?limit=` | newest first: `{ at, drive, kind, detail }`, where kind is made, failed, started, restarted, unhealthy, suspended, resumed, removed, channel or alert |
+
+Removing a drive deletes nothing of its person's. The backups' root helper,
+`marble-guest-remove@<name>.service`, deletes the folder. It refuses until the
+drive is stopped and its settings file is gone, which is what `remove` does
+first. marble-host doesn't start the helper yet. The plan runs the drive's CLI
+logouts before anything is deleted, and that comes with the Console's Remove.
+
+The trial ran on 2026-10-25, in `user` mode, with marble-host from this branch
+and its folders under `/var/tmp`. The release was a copy of the owner's
+installed one with this branch's files laid over it. Chromium was copied from
+`~/.cache/ms-playwright`. Two drives made through the admin API passed their
+checks in about two seconds. Each answered through the router as itself with
+the key, with a `302` to `https://marbledrive.app/enter?drive=<name>`.
+Without the key the router said 401, and `/health/deep` through it was a 404.
+With marble-host stopped, the drives kept running. With both drives stopped
+too and marble-host started again, both answered within a second. Suspend,
+resume and remove did what the table says. Nothing in the trial tried the
+walls, and everything it made was removed.
+
+To put it on the PC after this is merged, in Ubuntu as the owner (the paths
+are in his current release):
+
+1. Release the new code to his drive:
+   `cd ~/Development/marble-drive && tools/home-release.sh`.
+2. Write marble-host's settings:
+   `cd ~/.local/share/marble-drive/app/current/marble-drive && node tools/pc-host.mjs init`.
+   It says what it did with each setting, never a value, and
+   `ls -l ~/.config/marble-drive/host.env` shows `-rw-------`. It copies the
+   door's admin token from `door.env` and its keys from `door-keys`, and the
+   alert topic from `ntfy-topic` when that is there.
+3. Install the sandbox:
+   `sudo bash ~/.local/share/marble-drive/app/current/marble-drive/linux/pc-host/install.sh`.
+   It ends by printing the next two steps. Its backups piece needs the pinned
+   rclone in `~/.local/bin` and the hub settings ("Backups of PC drives").
+4. Run the escape check, once it is written (below). Go on only if every wall
+   holds.
+5. Start marble-host:
+   `bash ~/.local/share/marble-drive/app/current/marble-drive/linux/pc-host/host.sh install`.
+   It says `marble-host is up: router on 127.0.0.1:4460 (system mode)`.
+6. Put a release in `/opt/marble/releases`, and the Chromium it needs in
+   `/opt/marble/ms-playwright`. That is the updater's job (below). Until a
+   release is there, no drive can be made.
+7. Check it:
+   `node ~/.local/share/marble-drive/app/current/marble-drive/tools/pc-host.mjs status`.
+   It says marble-host is up, which release new drives get, and how many
+   drives run.
+8. Start the tunnel:
+   `bash ~/.local/share/marble-drive/app/current/marble-drive/linux/pc-host/tunnel.sh setup && bash ~/.local/share/marble-drive/app/current/marble-drive/linux/pc-host/tunnel.sh install`.
+   Then, from anywhere,
+   `curl -s -o /dev/null -w '%{http_code}\n' https://pc-host.marbledrive.app/_host/health`
+   prints `401`. The Worker's side is in [ACCOUNTS.md](ACCOUNTS.md), "A drive
+   on the PC host".
+
+The updater is the owner's to write. It copies a release, with its Chromium,
+into `/opt/marble`, and moves drives from one release to another. It is also
+what `tools/home-release.sh` hands a new release to. Until it exists,
+`/release`, `/promote`, `/rollback` and `/pause` answer 501, and
+`tools/pc-host.mjs release|promote|rollback|pause` say "the updater isn't
+built yet" and exit 1. Every drive stays on the release it was made on.
+
+What the updater must do is the plan's "Shipping a fix to everyone". Canary
+drives move first and everyone after. Each drive moves only when its
+`/health` says `working` is 0, so no turn is cut off. A moved drive is checked
+within 60 s: `/health` names the new release, `GET /` answers below 500, and
+`/health/deep` shows both CLIs' versions. That is the check `checkDrive` in
+`server/host/check.js` makes. A drive that fails goes back to its last release
+by itself, and the owner is told. Promoting moves several drives at once.
+Rolling back is one action for everyone. The last three releases stay on
+disk, and Pause stops all of it. The registry already has a place for each of
+these: `channels`, `paused`, and each drive's `channel`, `release` and
+`previous`. The watcher leaves alone any drive its `busy` says is being moved.
+
+The escape check is the owner's to write too. It is a throwaway drive started
+from the installed template. It tries every wall from inside, and prints
+`PASS <check>` or `FAIL <check>: <why>` for each. No drive may be called
+`escape-check`, so the name is free for it; `run-guest` has no command for it
+yet. It must show each row of the plan's table in "A sandbox for each drive",
+in `system` mode, and run again after any change to the template:
+
+| What a drive can reach | Must be |
+|---|---|
+| Its own folder and home | yes, read and write |
+| The owner's drive, settings and keys | no: his home looks empty |
+| His Claude and ChatGPT logins | no: both CLIs say not logged in |
+| His processes | no, with its own process namespace |
+| The Windows C: drive | no, with `/mnt` closed off |
+| Windows programs | no, with `/mnt` and WSL's sockets hidden |
+| His Mac, iPad and iPhone on Tailscale, and his home network | no, through systemd's IP rules, which only a system service has |
+| Anthropic, OpenAI and the internet | yes |
+| Other drives on the PC | only through their own sign-in |
+| Memory and processes | capped per drive, and for all of them together |
+
 ### The front door for PC drives
 
 Built 2026-10-25, not switched on: `PC_HOST_KEY` is not set and
