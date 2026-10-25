@@ -55,8 +55,9 @@ test('host.env is read, the environment wins over it, and an empty value is no v
 });
 
 test('every place marble-host reads or writes can be moved', () => {
-  const p = hostPaths({ HOME: '/h', MARBLE_HOST_ENV: '/x/host.env', HOST_STATE_DIR: '/x/state', HOST_OPT: '/x/opt', HOST_GUEST_ENV_DIR: '/x/etc', HOST_GUEST_STATE_DIR: '/x/guests' });
-  assert.deepEqual(p, { hostEnv: '/x/host.env', state: '/x/state', opt: '/x/opt', guestEnvDir: '/x/etc', guestStateDir: '/x/guests' });
+  const p = hostPaths({ HOME: '/h', MARBLE_HOST_ENV: '/x/host.env', HOST_STATE_DIR: '/x/state', HOST_OPT: '/x/opt', HOST_GUEST_ENV_DIR: '/x/etc', HOST_GUEST_STATE_DIR: '/x/guests', HOST_BACKUP_STATUS_DIR: '/x/backups' });
+  assert.deepEqual(p, { hostEnv: '/x/host.env', state: '/x/state', opt: '/x/opt', guestEnvDir: '/x/etc', guestStateDir: '/x/guests', backupStatusDir: '/x/backups' });
+  assert.equal(hostPaths({ HOME: '/h' }).backupStatusDir, '/var/lib/marble-backup/status', 'where root\'s backup writes each drive\'s status');
 });
 
 test('a host.env others can read is refused, naming the file and not a value', async () => {

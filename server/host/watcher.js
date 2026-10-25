@@ -5,11 +5,13 @@
 // told; one failure alone is a drive busy for a moment. Memory past 90% of
 // its service's MemoryMax, or the disk under /var/lib past 90%, is an alert,
 // at most once an hour per drive and kind. A drive being moved to a release
-// is the updater's to watch, and is skipped here.
+// is the updater's to watch, and one being removed the remover's, and both
+// are skipped here. A restart is told to the door, through `onRestart`, for
+// the sign-up timeline.
 
 import fs from 'node:fs';
 
-export function createWatcher({ registry, units, probe, notify, diskPath = '/var/lib', statfs = (p) => fs.statfsSync(p), busy = () => false, everyMs = 30_000, now = Date.now, log = console }) {
+export function createWatcher({ registry, units, probe, notify, diskPath = '/var/lib', statfs = (p) => fs.statfsSync(p), busy = () => false, onRestart = async () => {}, everyMs = 30_000, now = Date.now, log = console }) {
   const strikes = new Map();
   const readings = new Map();
   let ticking = false;
@@ -26,6 +28,8 @@ export function createWatcher({ registry, units, probe, notify, diskPath = '/var
       strikes.set(d.name, n);
       if (n >= 2) {
         strikes.set(d.name, 0);
+        // Not one that began to be removed while it was being looked at.
+        if (registry.drive(d.name)?.state !== 'running' || busy(d.name)) return;
         await registry.event(d.name, 'unhealthy', { why: 'it did not answer /health twice in a row' });
         let restarted = true;
         try {
@@ -39,6 +43,9 @@ export function createWatcher({ registry, units, probe, notify, diskPath = '/var
             if (r.drives[d.name]) r.drives[d.name].restarts = (r.drives[d.name].restarts ?? 0) + 1;
           });
           await registry.event(d.name, 'restarted', { by: 'watcher' });
+          await Promise.resolve()
+            .then(() => onRestart(d.name, registry.drive(d.name)?.restarts ?? 0))
+            .catch((err) => log.error?.(`[host] could not tell anyone ${d.name} was restarted: ${err.message}`));
         }
         await notify(d.name, 'unhealthy', restarted ? `${d.name} stopped answering and was restarted.` : `${d.name} stopped answering, and restarting it failed.`);
       }

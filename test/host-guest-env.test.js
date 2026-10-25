@@ -101,6 +101,30 @@ test('written mode 600, read back, changed in place keeping its order, and remov
   assert.deepEqual(await fsp.readdir(dir), []);
 });
 
+test('a setting given as null is taken out; changes to one file go in the order asked, and none writes a file back once it is deleted', async () => {
+  const dir = await temp.make('guest-env-');
+  const envs = createGuestEnvs({ dir });
+  await envs.write('ana', guestEntries({ ...base, cohort: 'study' }));
+  await envs.update('ana', { MARBLE_CONSENT: 'v1@2026-10-25T11:00:00.000Z' });
+  assert.equal((await envs.read('ana')).MARBLE_STUDY, '1');
+  await envs.update('ana', { MARBLE_STUDY: null, MARBLE_CONSENT: null, NEVER_THERE: null });
+  const env = await envs.read('ana');
+  assert.equal(env.MARBLE_STUDY, undefined);
+  assert.equal(env.MARBLE_CONSENT, undefined);
+  assert.equal(env.NEVER_THERE, undefined);
+  assert.equal(env.MARBLE_DRIVE_SECRET, 'a'.repeat(64), 'the rest kept');
+  assert.equal((await fsp.stat(envs.file('ana'))).mode & 0o777, 0o600);
+
+  const before = envs.update('ana', { MARBLE_CONSENT: 'v2@2026-10-25T12:00:00.000Z' });
+  const gone = envs.remove('ana');
+  const after = envs.update('ana', { MARBLE_CONSENT: 'v3@2026-10-25T13:00:00.000Z' });
+  await before;
+  await gone;
+  await assert.rejects(after, { code: 'ENOENT' });
+  assert.equal(await envs.read('ana'), null, 'not written back');
+  assert.deepEqual(await fsp.readdir(dir), []);
+});
+
 test('a passphrase is 64 random hex characters', () => {
   const a = newSecret();
   assert.match(a, /^[0-9a-f]{64}$/);

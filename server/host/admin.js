@@ -12,8 +12,15 @@
 // Moving drives between releases is the updater's, which the owner is writing
 // himself, so its four routes (/release, /promote, /rollback, /pause) answer
 // 501 until it exists.
+//
+// Removing a drive goes the remover's one way (server/host/remover.js), and a
+// drive the door made is ended at the door first. Exporting a drive's study
+// data and backing it up start root's helpers and answer at once (202): each
+// runs as a service of its own.
 
+import fsp from 'node:fs/promises';
 import http from 'node:http';
+import path from 'node:path';
 
 import { releaseForNewDrives, releasesOnDisk } from './releases.js';
 import { same } from './router.js';
@@ -23,7 +30,23 @@ export const NOT_BUILT = Object.freeze({ why: "the updater isn't built yet" });
 const UPDATER = new Set(['/release', '/promote', '/rollback', '/pause']);
 const CHANNELS = ['canary', 'everyone'];
 const MAX_BODY = 64 * 1024;
-const ACTION = /^\/drives\/([^/]+)\/(restart|suspend|resume|remove|channel)$/;
+const ACTION = /^\/drives\/([^/]+)\/(restart|suspend|resume|remove|channel|export|backup)$/;
+// A drive the door is ending, or has ended.
+const ENDING = new Set(['removing', 'deleting', 'removed']);
+const BACKUP_FIELDS = ['name', 'at', 'ok', 'why', 'files', 'bytes', 'changed', 'lastGood'];
+
+/** A drive's last backup, as root's backup service wrote it
+ *  (docs/HOSTING.md, "Backups of PC drives"): counts and times, or null
+ *  before its first. */
+export async function backupStatus(dir, name) {
+  try {
+    const status = JSON.parse(await fsp.readFile(path.join(dir, `${name}.json`), 'utf8'));
+    if (!status || typeof status !== 'object' || Array.isArray(status)) return null;
+    return Object.fromEntries(BACKUP_FIELDS.filter((k) => Object.hasOwn(status, k)).map((k) => [k, status[k]]));
+  } catch {
+    return null;
+  }
+}
 
 class Refusal extends Error {
   constructor(status, why) {
@@ -60,7 +83,7 @@ function readJson(req) {
   });
 }
 
-export function createAdmin({ token, settings, registry, units, maker, watcher = null, envs, probe, log = console, now = () => new Date().toISOString() }) {
+export function createAdmin({ token, settings, registry, units, maker, watcher = null, envs, probe, remover, looks = null, door = null, log = console, now = () => new Date().toISOString() }) {
   if (!token) throw new Error('the admin API needs HOST_ADMIN_TOKEN');
 
   const drive = (name) => {
@@ -70,7 +93,8 @@ export function createAdmin({ token, settings, registry, units, maker, watcher =
   };
 
   /** A drive as GET /drives shows it: the registry's record, with what its
-   *  service and its last /health say now. */
+   *  service and its last /health say now, what the last look at it found
+   *  (server/host/looks.js) and its last backup. */
   async function row(d) {
     const unit = d.state === 'removed' ? null : await units.show(d.name).catch(() => null);
     let health = watcher?.health(d.name) ?? null;
@@ -92,7 +116,10 @@ export function createAdmin({ token, settings, registry, units, maker, watcher =
       restarts: d.restarts ?? 0,
       created: d.created,
       cohort: d.cohort ?? null,
+      ...(looks?.row(d.name) ?? { agent: null, turnsToday: null, lastActive: null, study: null }),
+      backup: d.state === 'removed' ? null : await backupStatus(settings.backupStatusDir, d.name),
       ...(d.failed ? { failed: d.failed } : {}),
+      ...(d.removing ? { removing: { at: d.removing.at, by: d.removing.by } } : {}),
       ...(d.removed ? { removed: d.removed } : {}),
     };
   }
@@ -139,25 +166,65 @@ export function createAdmin({ token, settings, registry, units, maker, watcher =
     return answer(d.name);
   }
 
-  /** Stopped for good, its settings file gone. Its folder stays: deleting a
-   *  drive's data is a root helper's job, never marble-host's. */
+  /** Off the PC for good, the remover's way: its CLIs signed out, stopped,
+   *  its settings file gone, its folder deleted by root's helper, and the
+   *  door told. A drive the door made is ended at the door first, so the edge
+   *  stops serving it and its person's sessions end; if the door can't be
+   *  reached, nothing is changed. */
   async function remove(d, body) {
     if (body.confirm !== d.name) throw new Refusal(400, `to remove ${d.name}, send { "confirm": "${d.name}" }`);
     if (d.state === 'removed') return answer(d.name);
     if (d.state === 'making') throw new Refusal(409, `${d.name} is being made; remove it once that ends`);
-    await units.stop(d.name);
-    await envs.remove(d.name);
-    await registry.update((r) => {
-      Object.assign(r.drives[d.name], { state: 'removed', removed: now() });
-    });
-    await registry.event(d.name, 'removed', { by: 'owner' });
-    return answer(d.name);
+    let tell = false;
+    if (door?.on && d.door) {
+      try {
+        const theirs = (await door.drives()).find((x) => x?.name === d.name);
+        if (theirs && theirs.home === 'pchost' && theirs.owner === d.owner) {
+          if (!ENDING.has(theirs.state)) await door.remove(d.name);
+          tell = true;
+        }
+      } catch (err) {
+        throw new Refusal(502, `the door could not end ${d.name} (${err.message}); nothing was changed, so try again`);
+      }
+    }
+    const r = await remover.remove(d.name, { by: 'owner', door: tell });
+    if (!r.ok) throw new Refusal(r.status ?? 500, r.why);
+    return { ...(await answer(d.name)), ...(r.detail ? { removal: r.detail } : {}) };
+  }
+
+  /** The study's data, copied into the owner's drive by root's helper,
+   *  which reads the drive's settings itself and refuses without consent on
+   *  file. Asked here only for a drive whose settings say it is in the
+   *  study, as the last look at the door left them. */
+  async function exportStudy(d) {
+    if (!['running', 'suspended', 'failed'].includes(d.state)) throw new Refusal(409, `${d.name} is ${d.state}`);
+    const env = await envs.read(d.name);
+    if (env?.MARBLE_STUDY !== '1' || !env?.MARBLE_CONSENT) throw new Refusal(409, `${d.name} isn't in the study, so nothing of it is exported`);
+    const unit = await helper('export', d);
+    await registry.event(d.name, 'export', { unit });
+    return { ...(await answer(d.name)), started: unit };
+  }
+
+  /** A backup now, as the hourly timer would make one. */
+  async function backup(d) {
+    if (!['running', 'suspended', 'failed'].includes(d.state)) throw new Refusal(409, `${d.name} is ${d.state}`);
+    const unit = await helper('backup', d);
+    await registry.event(d.name, 'backup', { unit });
+    return { ...(await answer(d.name)), started: unit };
+  }
+
+  async function helper(kind, d) {
+    try {
+      return await units.helper(kind, d.name, { wait: false });
+    } catch (err) {
+      throw new Refusal(err.status ?? 500, err.message);
+    }
   }
 
   /** Which release channel a drive follows; only the updater acts on it. */
   async function channel(d, body) {
     if (!CHANNELS.includes(body.channel)) throw new Refusal(400, 'channel is canary or everyone');
-    if (d.state === 'removed') throw new Refusal(409, `${d.name} is removed`);
+    if (d.state === 'removed' || d.state === 'removing') throw new Refusal(409, `${d.name} is ${d.state}`);
     if ((d.channel ?? 'everyone') !== body.channel) {
       await registry.update((r) => {
         r.drives[d.name].channel = body.channel;
@@ -190,6 +257,8 @@ export function createAdmin({ token, settings, registry, units, maker, watcher =
       if (verb === 'suspend') return [200, await suspend(d)];
       if (verb === 'resume') return [200, await resume(d)];
       if (verb === 'remove') return [200, await remove(d, body)];
+      if (verb === 'export') return [202, await exportStudy(d)];
+      if (verb === 'backup') return [202, await backup(d)];
       return [200, await channel(d, body)];
     }
     if (method === 'GET' && route === '/releases') {

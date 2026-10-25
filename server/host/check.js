@@ -10,6 +10,10 @@
 // within a minute: /health answers naming that release, its first page
 // answers below 500 (a sign-in redirect is an answer), and /health/deep shows
 // both agent CLIs' versions, so its agent can start.
+//
+// The same probe asks the drive's other routes for its owner on this machine,
+// each with the drive's passphrase as the bearer: /health/study's counts and
+// POST /health/logout, which signs its CLIs out before it is removed.
 
 import http from 'node:http';
 
@@ -17,12 +21,14 @@ import { guestAddress, HOST_SIDE } from './addresses.js';
 
 const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const MAX_ANSWER = 256 * 1024;
+// What /health/logout says of each CLI.
+const SIGNED_OUT = new Set(['signed-out', 'was-not-signed-in', 'failed']);
 
 export function createProbe({ timeoutMs = 5000, from = HOST_SIDE } = {}) {
   /** One request to the drive on `port`: { status, body } with the body as
    *  JSON (null when it is not), or null when the drive did not answer.
    *  `statusOnly` reads no body at all, for a page. */
-  function ask(port, method, route, { bearer = null, accept = 'application/json', body = null, statusOnly = false } = {}) {
+  function ask(port, method, route, { bearer = null, accept = 'application/json', body = null, statusOnly = false, timeoutMs: limit = timeoutMs } = {}) {
     let host;
     try {
       host = guestAddress(port);
@@ -42,7 +48,7 @@ export function createProbe({ timeoutMs = 5000, from = HOST_SIDE } = {}) {
       const timer = setTimeout(() => {
         req?.destroy();
         finish(null);
-      }, timeoutMs);
+      }, limit);
       req = http.request(
         {
           host,
@@ -104,6 +110,20 @@ export function createProbe({ timeoutMs = 5000, from = HOST_SIDE } = {}) {
     /** The status of the drive's first page, as a browser would ask for it. */
     async page(port) {
       return (await get(port, '/', { accept: 'text/html', statusOnly: true }))?.status ?? null;
+    },
+    /** /health/study's answer, counts and times only, or null. */
+    async study(port, secret) {
+      const r = await get(port, '/health/study', { bearer: secret });
+      return r?.status === 200 && r.body?.ok ? r.body : null;
+    },
+    /** The drive signs both its CLIs out: { claude, codex }, each
+     *  signed-out, was-not-signed-in or failed; null when it did not answer.
+     *  Each CLI's logout is a command of its own, so this waits a minute. */
+    async logout(port, secret) {
+      const r = await ask(port, 'POST', '/health/logout', { bearer: secret, body: {}, timeoutMs: 60_000 });
+      if (r?.status !== 200 || !r.body || typeof r.body !== 'object') return null;
+      const said = (v) => (SIGNED_OUT.has(v) ? v : null);
+      return { claude: said(r.body.claude), codex: said(r.body.codex) };
     },
   };
 }

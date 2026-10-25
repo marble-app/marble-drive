@@ -90,3 +90,33 @@ test('an answer bigger than any health answer is no answer, and one that never e
   assert.equal(await p.get(drive.port, '/slow'), null);
   assert.ok(Date.now() - started < 2000);
 });
+
+test('the probe asks /health/study and POST /health/logout with the passphrase; logout\'s words only, and a minute to answer', async (t) => {
+  const seen = [];
+  const drive = await listenGuest((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, auth: req.headers.authorization ?? null, origin: req.headers.origin ?? null, body, remote: req.socket.remoteAddress });
+      const ok = req.headers.authorization === 'Bearer pass';
+      if (req.url === '/health/study') return res.end(JSON.stringify(ok ? { ok: true, at: '2026-10-25T12:00:00.000Z', days: 2, prompts: 9 } : { error: 'not found' }));
+      if (req.url === '/health/logout' && req.method === 'POST') {
+        // The CLIs take their time; well past the probe's own limit.
+        return setTimeout(() => res.end(JSON.stringify({ claude: 'signed-out', codex: 'something new' })), 400);
+      }
+      res.statusCode = 404;
+      res.end('{}');
+    });
+  });
+  t.after(() => drive.close());
+  const p = createProbe({ timeoutMs: 150 });
+  assert.deepEqual(await p.study(drive.port, 'pass'), { ok: true, at: '2026-10-25T12:00:00.000Z', days: 2, prompts: 9 });
+  assert.equal(await p.study(drive.port, 'wrong'), null);
+  assert.deepEqual(await p.logout(drive.port, 'pass'), { claude: 'signed-out', codex: null });
+  assert.deepEqual(seen.map((s) => [s.method, s.url, s.auth]), [['GET', '/health/study', 'Bearer pass'], ['GET', '/health/study', 'Bearer wrong'], ['POST', '/health/logout', 'Bearer pass']]);
+  assert.equal(seen[2].body, '{}');
+  assert.equal(seen[2].origin, null, 'a script with a bearer, which the drive\'s origin check lets through');
+  assert.ok(seen.every((s) => s.remote === '127.0.0.2'));
+  await drive.close();
+  assert.equal(await p.logout(drive.port, 'pass'), null, 'a drive that does not answer');
+});
