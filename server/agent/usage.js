@@ -10,11 +10,18 @@
 // keychain alone left a signed-in drive with no Claude meter at all, which
 // the composer read as "no quota" and greyed out every Claude model. The
 // file is the second place to look, never the first.
+//
+// A drive hosted for someone else reads neither (collectUsageFromCli). Their
+// login is theirs: reading it to ask Anthropic is handling the token, which
+// the terms for hosting Claude Code rule out. There Claude Code is asked
+// instead: `/usage` is one of its own commands, and it prints the plan's
+// limits as words, which are read back into the same meter.
 
-import { readFile, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { pickEnv } from './env.js';
 import { runCommand } from './providers/exec.js';
 
 const CLAUDE_USAGE = 'https://api.anthropic.com/api/oauth/usage';
@@ -234,6 +241,93 @@ export async function collectUsage({ exec = defaultExec, request = defaultReques
     return { meters: [] };
   }
   return { meters };
+}
+
+// ------------------------------------------------- asked of the CLI itself
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/** The wall time `parts` reads in `timeZone` at the instant `at`, as if UTC. */
+const wallAt = (at, timeZone) => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
+  }).formatToParts(new Date(at)).map((part) => [part.type, part.value]));
+  return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour) % 24, Number(parts.minute), Number(parts.second));
+};
+
+/** When a limit resets, from Claude Code's words for it ("Oct 25, 4:30pm
+ *  (America/Los_Angeles)", "Jan 2, 2027, 10am (UTC)") as an ISO time, or
+ *  null when it cannot be read. A date with no year is the next one. */
+export function parseCliReset(text, now = Date.now()) {
+  const found = /^([A-Za-z]{3})[a-z]*\.? (\d{1,2}),(?: (\d{4}),)? (\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?(?:\s*\(([^)]+)\))?$/i.exec(String(text ?? '').trim());
+  if (!found) return null;
+  const month = MONTHS.indexOf(found[1].toLowerCase());
+  if (month === -1) return null;
+  const hour = (Number(found[4]) % 12) + (found[6].toLowerCase() === 'p' ? 12 : 0);
+  const zone = found[7] ?? 'UTC';
+  const at = (year) => {
+    const wall = Date.UTC(year, month, Number(found[2]), hour, Number(found[5] ?? 0));
+    // The instant whose wall time there is `wall`: once for the offset, once
+    // more in case a clock change sits between.
+    let instant = wall - (wallAt(wall, zone) - wall);
+    instant = wall - (wallAt(instant, zone) - instant);
+    return instant;
+  };
+  try {
+    const thisYear = new Date(now).getUTCFullYear();
+    let instant = at(found[3] ? Number(found[3]) : thisYear);
+    if (!found[3] && instant < now - 183 * 86_400_000) instant = at(thisYear + 1);
+    return Number.isFinite(instant) ? new Date(instant).toISOString() : null;
+  } catch {
+    return null; // a time zone this machine does not know
+  }
+}
+
+// One line of `/usage`: "Current session: 23% used · resets Oct 25, 4:30pm (UTC)".
+const CLI_LIMIT = /^[ \t]*(Current session|Current week \(([^)\n]+)\)):[ \t]*(\d+(?:\.\d+)?)% used(?:[ \t]*[·•-][ \t]*resets[ \t]+([^\n]+?))?[ \t]*$/gim;
+
+/**
+ * Claude Code's own `/usage`, as a meter: the same one parseClaudeUsage
+ * makes from Anthropic's answer, read from the words the CLI prints.
+ * Null when the CLI is not on a Claude plan (it prints a session's cost
+ * instead); an unavailable meter when it is, and could not say its limits.
+ */
+export function parseCliUsage(text, { now = Date.now() } = {}) {
+  const said = String(text ?? '');
+  const limits = {};
+  for (const line of said.matchAll(CLI_LIMIT)) {
+    const scope = line[2] ?? '';
+    const key = !line[2] ? 'five_hour' : /^all models$/i.test(scope) ? 'seven_day' : /\bfable\b/i.test(scope) ? 'fable' : null;
+    if (!key || limits[key]) continue;
+    limits[key] = { utilization: Number(line[3]), resets_at: line[4] ? parseCliReset(line[4], now) : null };
+  }
+  if (!Object.keys(limits).length) {
+    return /using your (?:subscription|overages)/i.test(said) ? unavailableMeter('claude-subscription', 'Claude', 'error') : null;
+  }
+  return parseClaudeUsage({
+    five_hour: limits.five_hour,
+    seven_day: limits.seven_day,
+    limits: limits.fable ? [{ kind: 'weekly_scoped', group: 'weekly', percent: limits.fable.utilization, resets_at: limits.fable.resets_at, scope: { model: { display_name: 'Fable' } } }] : [],
+  });
+}
+
+/** The arguments that ask Claude Code for `/usage`: no tools, no MCP server,
+ *  none of the person's settings, and no session kept for it. */
+export const CLI_USAGE_ARGS = ['-p', '--no-session-persistence', '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', '/usage'];
+
+/** Usage on a drive hosted for someone else: Claude Code asked, its login
+ *  never opened. No Cursor meter: that one reads a keychain. */
+export async function collectUsageFromCli({ exec = runCommand, env = process.env, command = 'claude', timeout = 20_000, now = Date.now } = {}) {
+  try {
+    const cwd = path.join(tmpdir(), 'marble-agent-namer');
+    await mkdir(cwd, { recursive: true });
+    const result = await exec(command, CLI_USAGE_ARGS, { env: pickEnv(env), timeout, cwd });
+    if (result?.missing || result?.aborted || result?.timedOut || result?.code) return { meters: [] };
+    const meter = parseCliUsage(result.stdout, { now: now() });
+    return { meters: meter ? [meter] : [] };
+  } catch {
+    return { meters: [] };
+  }
 }
 
 // How long to wait before asking again, once the API has said "not now". The

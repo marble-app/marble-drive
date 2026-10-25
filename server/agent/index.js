@@ -30,7 +30,7 @@ import { listSkills, skillDirs } from './skills.js';
 import { createAgentStore } from './store.js';
 import { createTools } from './tools.js';
 import { builtInProviders } from './providers/index.js';
-import { collectUsage, createUsageReader } from './usage.js';
+import { collectUsage, collectUsageFromCli, createUsageReader } from './usage.js';
 import { createUsageHistory } from './usage-history.js';
 import { createBuilds } from '../build/index.js';
 import { createBuildRoutes } from '../build/routes.js';
@@ -322,8 +322,10 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     // cadence keeps the limit tripped while the sliders read Unavailable. The
     // reader backs off and keeps serving the last good reading, on disk so a
     // restart mid-limit still has numbers.
+    // On a drive hosted for someone else the meter never opens their login:
+    // it asks Claude Code's own /usage instead (usage.js).
     usage: usage ?? createUsageReader({
-      collect: () => collectUsage(),
+      collect: () => (config.guest ? collectUsageFromCli({ env: hostEnv }) : collectUsage()),
       file: path.join(store.marbleDir, 'usage-last.json'),
     }),
     usageHistory: usageHistory ?? createUsageHistory(),
