@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
+import { isLoopbackAddress } from '../gate.js';
+
 export const BROWSER_TOOLS = [
   'browser_tabs',
   'browser_navigate',
@@ -145,13 +147,17 @@ async function info(page) {
 const LOOPBACK_NAMES = ['127.0.0.1', 'localhost'];
 
 /** The cookies a drive pass plants: its own host's, under both names a page on
- *  it is reached by when that host is loopback. Never any other site's. */
+ *  it is reached by when that host is loopback. A drive the PC hosts for
+ *  someone else is on a loopback address of its own (127.0.0.37), where its
+ *  agent's browser opens it, so that address is planted too. Never any other
+ *  site's. */
 export function passCookies(pass) {
   if (!pass?.origin || !pass?.cookie) return [];
   const at = pass.cookie.indexOf('=');
   if (at < 1) return [];
   const { hostname } = new URL(pass.origin);
-  const hosts = LOOPBACK_NAMES.includes(hostname) ? LOOPBACK_NAMES : [hostname];
+  const loopback = LOOPBACK_NAMES.includes(hostname) || isLoopbackAddress(hostname);
+  const hosts = loopback ? [...new Set([...LOOPBACK_NAMES, hostname])] : [hostname];
   return hosts.map((domain) => ({
     name: pass.cookie.slice(0, at),
     value: pass.cookie.slice(at + 1),

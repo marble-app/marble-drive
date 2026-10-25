@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 import { enginePath, examine } from '../engine.js';
 import { build as buildStarter, composeScript } from '../gallery.js';
+import { isLoopbackAddress } from '../gate.js';
 import { createHub } from './hub.js';
 import { createCreditReader } from './credit.js';
 import { createKeyStore } from './keys.js';
@@ -42,7 +43,9 @@ import { writeReply } from '../build/reply.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.resolve(HERE, '..', '..', 'bin', 'marble-mcp.js');
 const BROWSER = path.resolve(HERE, '..', '..', 'bin', 'marble-browser-mcp.js');
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+// Loopback by name, or any address in 127/8 or ::1: a drive the PC hosts for
+// someone else is bound to one of its own, such as 127.0.0.37.
+const loopbackHost = (host) => host === 'localhost' || isLoopbackAddress(host);
 const ANY_HOST = new Set(['0.0.0.0', '::']);
 
 const READS = new Set(['list_documents', 'read_document']);
@@ -65,12 +68,14 @@ const CONNECTOR_READER = Object.freeze({ id: 'connector', conversationId: 'conne
 export function agentsAllowed(config) {
   if (!config.agents) return { ok: false, why: 'MARBLE_DRIVE_AGENTS is not set' };
   if (config.multiTenant) return { ok: false, why: 'agents are for one owner, and this host is multi-tenant' };
-  if (!config.secret && !LOOPBACK_HOSTS.has(config.host)) {
+  if (!config.secret && !loopbackHost(config.host)) {
     return { ok: false, why: `an ungated host on ${config.host} would let anyone who reaches it run agents on this machine` };
   }
-  // The bridge calls back on loopback. A host bound to one other address
-  // never hears it; one bound to every address does.
-  if (!LOOPBACK_HOSTS.has(config.host) && !ANY_HOST.has(config.host)) {
+  // The bridge calls back at the address the host is bound to
+  // (server/app.js, callbackOrigin), and only ever on loopback: a host bound
+  // to every address is called back at 127.0.0.1, and one bound to some other
+  // address alone is refused.
+  if (!loopbackHost(config.host) && !ANY_HOST.has(config.host)) {
     return { ok: false, why: `the agent bridge calls back on loopback, and a host bound only to ${config.host} would not answer it` };
   }
   const inside = path.relative(config.root, config.agentWorkdir);

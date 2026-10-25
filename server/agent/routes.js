@@ -6,7 +6,9 @@
 //     turn's token and not the drive's secret — which is the point.
 //     "This machine" means a loopback socket with no proxy in front of it:
 //     behind Tailscale Serve every peer arrives from 127.0.0.1, and only the
-//     forwarding headers tell them apart.
+//     forwarding headers tell them apart. Loopback is all of 127/8: a drive
+//     the PC hosts listens on an address of its own, and its bridge calls
+//     back from there.
 //   - everything else is for the person, behind the gate like every other
 //     route, and a change also has to come from this origin. A host with no
 //     gate also has to be addressed as itself — localhost — or a page on any
@@ -16,6 +18,7 @@ import crypto from 'node:crypto';
 
 import { conversationHasReview, listReview } from '../change/review.js';
 import { sliceOf } from '../engine.js';
+import { isLoopbackAddress } from '../gate.js';
 import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
@@ -33,7 +36,6 @@ import { speakable } from './voice/speakable.js';
 import { VOICES, VoiceError, baseType } from './voice/openai.js';
 import { patchVoice, voiceSettings } from './voice/settings.js';
 
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const LOCAL_NAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
 const FORWARDED = ['x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host'];
 const DETECT_TIMEOUT = 5_000;
@@ -50,7 +52,7 @@ const askLead = (events, askSeq) => events
     ? { type: 'text', text: String(event.text ?? '') }
     : { type: 'tool.call', name: event.name, input: event.input ?? {} }));
 
-export const isLoopback = (req) => LOOPBACK.has(req.socket?.remoteAddress);
+export const isLoopback = (req) => isLoopbackAddress(req.socket?.remoteAddress);
 export const isProxied = (req) => FORWARDED.some((name) => req.headers[name] !== undefined);
 
 /** The Host header's name, without its port. */

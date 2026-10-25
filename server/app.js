@@ -263,6 +263,16 @@ export const rootRemoved = (priorSource, ops) => {
   return roots.size > 0 && (ops ?? []).some((op) => op?.type === 'remove' && roots.has(op.id));
 };
 
+/** Where this server's own agents reach it, from what `server.address()`
+ *  says: the address it is bound to, so a drive the PC hosts, which listens
+ *  on a loopback address of its own (127.0.0.37) and may not use 127.0.0.1,
+ *  is called back there; loopback for a server bound to every address. */
+export function callbackOrigin(address) {
+  const any = address.address === '0.0.0.0' || address.address === '::' || !address.address;
+  const host = any ? (address.family === 'IPv6' ? '::1' : '127.0.0.1') : address.address;
+  return `http://${host.includes(':') ? `[${host}]` : host}:${address.port}`;
+}
+
 export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, genui: genuiOpts = null, agentSandbox = null, drawSummary = null, deepHealth: deepHealthOpts = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
@@ -1647,18 +1657,15 @@ export async function createDrive(config, { log = console, agentProviders = null
       // for the life of the process, a turn's touches forked every later edit
       // near them — the person against an agent that finished an hour ago.
       forgetWriter: (client) => sessionTouched.forget?.(client),
-      // Where the bridge calls back: this server, on loopback, whatever port it
-      // ended up on.
-      origin: () => {
-        const address = server.address();
-        const loopback = address.family === 'IPv6' ? '[::1]' : '127.0.0.1';
-        return `http://${loopback}:${address.port}`;
-      },
+      // Where the bridge calls back: this server, at the address it is bound
+      // to, whatever port it ended up on (callbackOrigin).
+      origin: () => callbackOrigin(server.address()),
       // An agent's browser is a fresh Chromium, and this host's own gate would
       // turn it away from the drive it is working on. A pass is the gate's own
       // cookie, good for a day, planted for this host only (server/agent/browser.js).
-      // Under the plain name: the browser opens the drive at http://127.0.0.1,
-      // where that is the name the gate reads (server/gate.js).
+      // Under the plain name: the browser opens the drive at http://127.0.0.1
+      // (or the drive's own loopback address on the PC), where that is the
+      // name the gate reads (server/gate.js).
       browserPass: gate.open ? null : () => `${gate.cookieName}=${gate.issue(24 * 60 * 60 * 1000)}`,
       providers: agentProviders ?? null,
       log,

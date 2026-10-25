@@ -18,20 +18,34 @@ import crypto from 'node:crypto';
 
 const DAY = 24 * 60 * 60 * 1000;
 
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const V4_LOOPBACK = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+/** An address on this machine's own loopback: anywhere in 127.0.0.0/8, ::1,
+ *  or an IPv4 one as an IPv6 socket names it (::ffff:127.0.0.1). All of
+ *  127/8 is loopback, and the PC uses more of it than 127.0.0.1: a drive it
+ *  hosts for someone else listens on an address of its own, 127.0.0.10 and
+ *  up, and marble-host asks it everything from 127.0.0.2
+ *  (server/host/addresses.js). */
+export function isLoopbackAddress(address) {
+  if (typeof address !== 'string') return false;
+  if (address === '::1') return true;
+  const m = V4_LOOPBACK.exec(address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address);
+  return Boolean(m) && m.slice(1).every((part) => Number(part) <= 255);
+}
 
 /** Did this request reach the host over HTTPS? Only a proxy on this machine is
  *  believed when it says so — Tailscale Serve terminates TLS and forwards to
- *  loopback — because a header is a thing anybody can type. */
+ *  loopback, and so does marble-host's router for a drive on the PC — because
+ *  a header is a thing anybody can type. */
 export const overHttps = (req) =>
-  LOOPBACK.has(req?.socket?.remoteAddress) && req.headers?.['x-forwarded-proto'] === 'https';
+  isLoopbackAddress(req?.socket?.remoteAddress) && req.headers?.['x-forwarded-proto'] === 'https';
 
 /** A request made on this machine, not passed on by something in front of
  *  it: loopback, and none of the headers a tunnel (`Cf-Ray`), the edge
  *  (`X-Forwarded-Host`) or another proxy (`X-Forwarded-For`, `Forwarded`)
  *  adds. Where the passphrase still opens a drive in `tools` mode. */
 export const isLocal = (req) =>
-  LOOPBACK.has(req?.socket?.remoteAddress) &&
+  isLoopbackAddress(req?.socket?.remoteAddress) &&
   !req.headers?.['x-forwarded-host'] &&
   !req.headers?.['cf-ray'] &&
   !req.headers?.['x-forwarded-for'] &&

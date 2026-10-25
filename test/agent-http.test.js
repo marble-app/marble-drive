@@ -430,6 +430,11 @@ test('only loopback is loopback', () => {
   assert.equal(isLoopback({ socket: { remoteAddress: '127.0.0.1' } }), true);
   assert.equal(isLoopback({ socket: { remoteAddress: '::ffff:127.0.0.1' } }), true);
   assert.equal(isLoopback({ socket: { remoteAddress: '100.108.111.56' } }), false);
+  // A drive the PC hosts listens on an address of its own, and its bridge
+  // calls back from there once that address is on lo.
+  assert.equal(isLoopback({ socket: { remoteAddress: '127.0.0.37' } }), true);
+  assert.equal(isLoopback({ socket: { remoteAddress: '::ffff:127.0.0.37' } }), true);
+  assert.equal(isLoopback({ socket: { remoteAddress: '10.0.0.37' } }), false);
 });
 
 test('a mutation from another origin is refused', async () => {
@@ -569,6 +574,9 @@ test('a workdir named like a parent is still inside the drive; a host bound wher
   assert.equal(agentsAllowed({ ...base, host: '::1' }).ok, true);
   assert.equal(agentsAllowed({ ...base, host: 'localhost' }).ok, true);
   assert.match(agentsAllowed({ ...base, host: '100.108.111.56' }).why ?? '', /loopback/);
+  // A drive the PC hosts, on its own loopback address.
+  assert.equal(agentsAllowed({ ...base, host: '127.0.0.37' }).ok, true);
+  assert.equal(agentsAllowed({ ...base, host: '127.0.0.37', secret: null }).ok, true);
 });
 
 test('a host with agents off answers 404 to all of it', async () => {

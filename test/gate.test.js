@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createGate } from '../server/gate.js';
+import { createGate, isLocal, isLoopbackAddress, overHttps } from '../server/gate.js';
 
 const request = (headers = {}) => ({ headers });
 
@@ -75,6 +75,26 @@ test('Secure follows the request when it came through a local HTTPS proxy', () =
   // Plain http://localhost keeps working, in Safari too, which drops a Secure
   // cookie over http even on localhost.
   assert.ok(!gate.cookieHeader(arriving('127.0.0.1')).includes('Secure'));
+});
+
+test('loopback is all of 127/8 and ::1: a drive the PC hosts is asked from 127.0.0.2, and its agents call it from its own 127.0.0.37', () => {
+  for (const peer of ['127.0.0.1', '127.0.0.2', '127.0.0.37', '127.0.0.109', '127.255.255.254', '::1', '::ffff:127.0.0.2', '::ffff:127.0.0.37']) {
+    assert.equal(isLoopbackAddress(peer), true, peer);
+    assert.equal(isLocal(arriving(peer)), true, peer);
+    assert.equal(overHttps(arriving(peer, { 'x-forwarded-proto': 'https' })), true, peer);
+  }
+  for (const peer of ['10.0.0.37', '128.0.0.1', '126.0.0.1', '::ffff:10.0.0.1', '::2', '100.101.200.37', '127.0.0.256', '127.0.0', '127.0.0.1.5', 'localhost', '', undefined, null]) {
+    assert.equal(isLoopbackAddress(peer), false, String(peer));
+    assert.equal(isLocal(arriving(peer)), false, String(peer));
+    assert.equal(overHttps(arriving(peer, { 'x-forwarded-proto': 'https' })), false, String(peer));
+  }
+  // Through marble-host's router, from 127.0.0.2, a request is still one the
+  // edge passed on, not one made on this machine; its https is believed.
+  const routed = arriving('127.0.0.2', { 'x-forwarded-for': '203.0.113.9, 127.0.0.1', 'x-forwarded-host': 'ana.marbledrive.app', 'x-forwarded-proto': 'https' });
+  assert.equal(isLocal(routed), false);
+  assert.equal(overHttps(routed), true);
+  assert.equal(createGate({ secret: 'x' }).cookieNameFor(routed), '__Host-marble_drive');
+  assert.equal(createGate({ secret: 'x', secure: true }).cookieNameFor(arriving('127.0.0.37')), 'marble_drive', 'the agent\'s browser at the drive\'s own address keeps the plain name');
 });
 
 test('a forwarded-proto header from anywhere but loopback is not believed', () => {
