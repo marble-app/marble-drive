@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# A PC drive back from its encrypted backup in R2 (backup-guest; docs/HOSTING.md,
+# "Backups of PC drives"). Run as root, by hand.
+#
+#   restore-guest <name> [--from <utc>] [--as <other name>] [--force]
+#   restore-guest <name> --list
+#
+# Downloads the backup into a folder of root's, /var/lib/marble-backup/restoring,
+# and checks it file by file against the backup's file list. Only then does it
+# touch the drive: masks and stops its service, so marble-host's watcher cannot
+# start it halfway; sets the current drive aside as drive.kept-<utc> beside it,
+# never deleted; moves the restored one in; unmasks it and starts it again if
+# it was running. The drive's home, with the person's Claude or ChatGPT login,
+# is not touched. A download that fails or does not match changes nothing.
+#
+# --from <utc> restores the drive as the last backup at or before then saw it
+# (20261025T170000Z or 2026-10-25T17:00:00Z): every later backup moved what it
+# replaced or deleted into its own trash/<utc>/, so each file's version is the
+# first one in a later trash, or else the one in drive/. --list prints the
+# times there are.
+#
+# --as <other> restores <name>'s backup into another drive's folder and leaves
+# <name> as it is: the one-time trial (backup-check.sh) restores into a scratch
+# name this way. A folder new to the PC gets no home, so a drive started there
+# signs in again.
+#
+# --force swaps in a copy that does not match its file list, which happens only
+# for --from a time whose old versions a lifecycle rule has since deleted.
+#
+# Ownership is systemd's. On the drive's next start, DynamicUser= hands its
+# state folder to the drive's user, and since systemd 257, where the disk
+# allows ID-mapped mounts (ext4 under WSL2 does), it does so by owning the
+# files as nobody on disk and mapping nobody to the drive's user, not by
+# chowning. Either way it decides from the folder's top alone: a top owned by
+# nobody (or by the drive's user) is taken to mean everything below is too,
+# and nothing is walked (systemd.exec(5), "As an optimization..."; v259's
+# setup_exec_directory() and path_chown_recursive()). The restored files are
+# root's, so the folder's top is given to root here: from a root-owned top
+# the next start chowns the whole tree, on either path.
+set -euo pipefail
+umask 077
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=backup-lib.sh
+. "$HERE/backup-lib.sh"
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
+
+name=${1:-}
+[[ $name =~ $NAME_RE ]] || usage
+shift
+from="" as="" force=0 list=0
+while (($#)); do
+  case $1 in
+    --from) from=${2:-}; shift ;;
+    --as) as=${2:-}; shift ;;
+    --force) force=1 ;;
+    --list) list=1 ;;
+    -h | --help) usage ;;
+    *) die "unknown option $1" ;;
+  esac
+  shift
+done
+target=${as:-$name}
+[[ $target =~ $NAME_RE ]] || die "--as takes a drive's name: lowercase letters, digits and dashes"
+need_root
+load_settings || die "$SETTINGS_WHY"
+remote_for "$name" || die "rclone could not be run ($RCLONE)"
+
+utc="$(utc_of "$(stamp_now)")"
+unit="marble-guest@$target.service"
+WORK="$(mktemp -d)"
+staged="" masked=0 was_active=0 started=0 folder="" kept="" swapped=1
+on_exit() {
+  # Cut off between setting the drive aside and moving the restored one in:
+  # the drive goes back where it was before anything starts it.
+  if ((!swapped)) && [[ -n $kept && ! -e $folder/drive ]]; then mv -T "$kept" "$folder/drive" || true; fi
+  if ((masked)); then "$SYSTEMCTL" unmask --runtime --quiet "$unit" || say "could not unmask $unit: systemctl unmask --runtime $unit" >&2; fi
+  if ((was_active && !started)); then "$SYSTEMCTL" start "$unit" || say "$unit did not start again; see journalctl -u $unit" >&2; fi
+  if [[ -n $staged ]]; then rm -rf "$staged"; fi
+  rm -rf "$WORK"
+}
+trap on_exit EXIT
+
+code=0
+rc_fetch guest:manifest.json "$WORK/latest.json" || code=$?
+((code != 2)) || die "R2 could not be reached"
+((code == 0)) || die "R2 holds no backup of $name"
+
+# Every backup's time, oldest first.
+points() {
+  local code=0
+  rc lsf --files-only guest:manifests/ >"$WORK/points.raw" 2>"$WORK/points.err" || code=$?
+  ((code == 0 || code == 3)) || die "R2 could not be reached (rclone exit $code)"
+  sed -n 's/^\([0-9]\{8\}T[0-9]\{6\}Z\)\.json$/\1/p' "$WORK/points.raw" | sort
+}
+latest="$(utc_of "$(field at "$(tree counts "$WORK/latest.json")")")"
+if ((list)); then
+  points >"$WORK/points"
+  while read -r point; do
+    if [[ $point == "$latest" ]]; then say "$point  latest"; else say "$point"; fi
+  done <"$WORK/points"
+  exit 0
+fi
+
+# One restore of a drive at a time, and no backup of either drive meanwhile: a
+# backup of <name> writing R2 while this reads it would hand back half of each.
+for drive in $(printf '%s\n' "$name" "$target" | sort -u); do
+  lock_drive "$drive" 900 || die "a backup, restore or removal of $drive is running; try again when it ends"
+done
+
+point="$WORK/latest.json"
+if [[ -n $from ]]; then
+  want="$(utc_of "$from")"
+  [[ $want =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || die "--from takes a UTC time like 20261025T170000Z or 2026-10-25T17:00:00Z"
+  points >"$WORK/points"
+  pick="$(awk -v want="$want" '$0 <= want' "$WORK/points" | tail -1)"
+  [[ -n $pick ]] || die "no backup of $name is from $want or before; the first is from $(head -1 "$WORK/points")"
+  code=0
+  rc_fetch "guest:manifests/$pick.json" "$WORK/point.json" || code=$?
+  ((code == 0)) || die "the file list of the backup at $pick could not be read from R2"
+  point="$WORK/point.json"
+fi
+line="$(tree counts "$point")"
+point_at="$(field at "$line")" point_files="$(field files "$line")"
+since="$(utc_of "$point_at")"
+
+# The trash of every backup after that one.
+mkdir "$WORK/trash"
+code=0
+rc lsf --dirs-only guest:trash/ >"$WORK/trash.dirs" 2>"$WORK/trash.err" || code=$?
+((code == 0 || code == 3)) || die "R2 could not be reached (rclone exit $code)"
+while read -r dir; do
+  dir=${dir%/}
+  [[ $dir =~ ^[0-9]{8}T[0-9]{6}Z$ && $dir > $since ]] || continue
+  rc lsjson -R --files-only --no-modtime --no-mimetype "guest:trash/$dir" >"$WORK/trash/$dir.json" ||
+    die "R2 could not list trash/$dir (rclone exit $?)"
+done <"$WORK/trash.dirs"
+
+mkdir -p "$BACKUP_STATE/restoring"
+chmod 700 "$BACKUP_STATE/restoring"
+staged="$BACKUP_STATE/restoring/$target.$utc"
+mkdir "$staged"
+say "downloading $name's backup of $point_at ($point_files files)"
+if sources="$(tree plan "$point" "$WORK/trash" "$WORK")"; then
+  for source in $sources; do
+    if [[ $source == drive ]]; then remote=guest:drive; else remote="guest:trash/$source"; fi
+    rc copy "$remote" "$staged" --files-from-raw "$WORK/from-$source.list" --no-traverse --transfers 8 ||
+      die "R2 did not hand back ${remote#guest:} (rclone exit $?); nothing was changed"
+  done
+elif [[ "$(field refused "$sources")" == unlistable && -z "$(ls -A "$WORK/trash")" ]]; then
+  # A name holding a line break cannot go in a list. With no later trash to
+  # pick versions from, drive/ as it is is the copy.
+  rc copy guest:drive "$staged" "${EXCLUDES[@]}" --transfers 8 ||
+    die "R2 did not hand back the drive (rclone exit $?); nothing was changed"
+else
+  die "a file name in this backup cannot be listed, so only its latest backup can be restored"
+fi
+if ! check="$(tree verify "$staged" "$point")"; then
+  ((force)) || die "the download does not match the backup's file list ($check); nothing was changed (--force swaps it in anyway)"
+  say "the download does not match the backup's file list ($check); swapping it in, as --force asks"
+fi
+
+# The swap, with the drive stopped and kept stopped.
+if "$SYSTEMCTL" is-active --quiet "$unit"; then was_active=1; fi
+"$SYSTEMCTL" mask --runtime --quiet "$unit"
+masked=1
+"$SYSTEMCTL" stop "$unit"
+folder="$GUESTS/$target"
+[[ -d $folder || ! -e $folder ]] || die "$folder is not a folder"
+[[ -d $folder ]] || install -d -m 755 "$folder"
+if [[ -e $folder/drive || -L $folder/drive ]]; then
+  [[ ! -e $folder/drive.kept-$utc && ! -L $folder/drive.kept-$utc ]] || die "$folder/drive.kept-$utc is there already; nothing was changed"
+  swapped=0
+  kept="$folder/drive.kept-$utc"
+  mv -T "$folder/drive" "$kept"
+fi
+mv -T "$staged" "$folder/drive"
+staged="" swapped=1
+if ((EUID == 0)); then chown 0:0 "$folder"; fi
+"$SYSTEMCTL" unmask --runtime --quiet "$unit"
+masked=0
+if ((was_active)); then
+  "$SYSTEMCTL" start "$unit"
+  started=1
+fi
+
+say "restored $name's drive as of $point_at ($point_files files) into $folder/drive"
+if [[ -n $kept ]]; then say "the drive before it is at $kept; delete that once the restored one is right"; fi
+if ((was_active)); then say "$target is running again"; else say "$target was not running, and stays stopped"; fi

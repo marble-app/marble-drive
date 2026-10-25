@@ -1,0 +1,17 @@
+# Each hour, the PC drives' backups (marble-guests-backup.service;
+# docs/HOSTING.md, "Backups of PC drives"). Installed and enabled by
+# install.d/20-backup.sh. A drive that has not changed sends nothing, so an
+# hour with no work costs a look at each drive's files.
+[Unit]
+Description=Hourly encrypted backups of the PC drives
+Documentation=https://github.com/marble-app/marble-drive/blob/main/docs/HOSTING.md
+
+[Timer]
+OnCalendar=hourly
+# An hour missed while the PC was off is run when it comes back.
+Persistent=true
+# Not on the hour exactly, when everything else on the PC wakes.
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
