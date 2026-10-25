@@ -226,6 +226,8 @@ export async function fakeHost({ token = HOST_TOKEN } = {}) {
     else if (verb === 'remove') {
       if (call.body.confirm !== name) return reply(res, 400, { why: `to remove ${name}, send { "confirm": "${name}" }` });
       d.state = 'removed';
+      // As marble-host's remover answers (server/host/remover.js).
+      return reply(res, 200, { drive: d, removal: { by: 'owner', claude: 'signed-out', codex: 'was-not-signed-in', folder: 'deleted' } });
     } else if (verb === 'channel') d.channel = call.body.channel;
     else if (verb === 'export' || verb === 'backup') return reply(res, 202, { started: true });
     else return reply(res, 404, { why: 'no such route' });

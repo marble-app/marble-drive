@@ -247,6 +247,7 @@ test('each action is a job on its drive: marble-host’s verbs, export, and remo
   const byHand = await s.pc.act('hal', 'remove', { confirm: 'hal' });
   assert.equal((await settle(s.jobs, byHand.id)).state, 'done');
   assert.deepEqual(posted('/drives/hal/remove')[0].body, { confirm: 'hal' });
+  assert.match(await s.jobs.output(byHand.id), /hal is removed\. It is deleted from the PC, its agents’ logins with it\. Its encrypted backup stays until you forget it\./);
 
   await assert.rejects(s.pc.act('nobody', 'restart'), /there is no drive nobody on the PC/);
   await assert.rejects(s.pc.act('../etc', 'restart'), /not a drive’s name/);

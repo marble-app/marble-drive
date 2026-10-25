@@ -1402,7 +1402,7 @@
     return section('Remove', null,
       h('p.soft', { style: { margin: '0 0 .6rem', 'font-size': '.85rem' }, text: viaDoor
         ? `Ends ${p.drive} at the door for good and signs its person out everywhere. marble-host then signs its agents out and deletes it from the PC. Its encrypted backup stays until you forget it, and the name is never given out again.`
-        : `The door doesn't know ${p.drive}, so marble-host stops it and deletes its settings. Its folder stays on the PC until the root helper deletes it.` }),
+        : `The door doesn't know ${p.drive}, so marble-host alone removes it: it signs its agents out and deletes it from the PC. Its encrypted backup stays until you forget it.` }),
       jobButton({ key: `pcremove:${p.drive}`, target: pcTarget(p), kind: 'pc-remove', cls: 'danger', onclick: (e) => confirmTyped(e.currentTarget, {
         title: `Remove ${p.drive}?`,
         body: viaDoor ? `${who} can't open it again, and marble-host deletes it from the PC.` : `${p.drive} stops for good.`,

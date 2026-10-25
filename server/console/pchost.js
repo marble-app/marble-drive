@@ -588,8 +588,9 @@ export function createPcHost({ hostEnv = null, doorEnv = null, statusDir = BACKU
         ctx.say('marble-host finishes at its next look at the door: it signs the drive’s agents out and deletes it from the PC. Its encrypted backup stays until you forget it, and the name is never given out again.');
       } else {
         ctx.say(`==> asking marble-host to remove ${name}`);
-        await call('POST', `/drives/${encodeURIComponent(name)}/remove`, { confirm: name });
-        ctx.say(`${name} is stopped and its settings file is gone. Its folder stays on the PC: deleting it is the root helper’s job.`);
+        const out = await call('POST', `/drives/${encodeURIComponent(name)}/remove`, { confirm: name });
+        const gone = out?.removal?.folder === 'kept' ? 'Its folder stays where the trial keeps it: user mode has no root helper.' : 'It is deleted from the PC, its agents’ logins with it.';
+        ctx.say(`${name} is removed. ${gone} Its encrypted backup stays until you forget it.`);
       }
     });
   }
