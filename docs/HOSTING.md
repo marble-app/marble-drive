@@ -613,8 +613,9 @@ release. Its code is in `server/host/`.
 The router, on 127.0.0.1:4460, is all the tunnel `marble-pc-host` reaches. A
 request without the Worker's key (`x-marble-host-key`) gets a 401. Otherwise
 the router takes that header and `x-marble-drive` off and passes the request
-to the drive's port. It adds `X-Forwarded-For`, so no drive takes the request
-for a local one. The Worker's `X-Forwarded-Host` and `X-Forwarded-Proto` go on
+to the drive, at the drive's own address (below). It adds `X-Forwarded-For`,
+so no drive takes the request for a local one. The Worker's
+`X-Forwarded-Host` and `X-Forwarded-Proto` go on
 as they came. Both directions stream, so live updates and uploads pass
 through as they are written. A browser that leaves cuts the drive's request
 too. A drive that isn't running gets a 503, which the Worker turns into its
@@ -624,9 +625,9 @@ drives, running, release }` whenever marble-host answers at all.
 
 The admin API, on 127.0.0.1:4461, is how the Console and `tools/pc-host.mjs`
 see and change the drives. Every request carries
-`Authorization: Bearer <HOST_ADMIN_TOKEN>`. Every guest shares the PC's
-loopback, so the token is what keeps a guest out. It lives in `host.env`, in
-the owner's home, which no guest can see.
+`Authorization: Bearer <HOST_ADMIN_TOKEN>`. No guest can open 127.0.0.1,
+where it listens (below), and the token keeps out anything else on the PC.
+It lives in `host.env`, in the owner's home, which no guest can see.
 
 The maker makes the drives the door queues for the PC
 (`GET /_door/queue?home=pchost`). It looks at start, when poked, and every
@@ -653,14 +654,43 @@ The folder of settings files is then hidden from every drive.
 The walls are those of the plan's "A sandbox for each drive". Each drive gets
 its own user and process namespace and a private `/tmp`. The system is
 read-only. The owner's home, `/mnt`, and WSL's, Tailscale's and Docker's
-sockets are hidden. IP rules close the home network, link-local addresses and
-the tailnet, but let Tailscale's DNS through (100.100.100.100 and
-fd7a:115c:a1e0::53). A drive slows at 1 GB, stops at 1.5 GB, and has at most
-512 tasks. All the guests together are capped at 6 GB in
-`marble-guests.slice`. Their CPU weight, half a slice's, is on `marble.slice`
-above it, beside `user.slice`, where the owner's drive runs. A dash in a
-slice's name is a level in the tree, and a weight counts only against
-siblings.
+sockets are hidden. IP rules close 127.0.0.1 and ::1, the home network,
+link-local addresses and the tailnet, but let Tailscale's DNS through
+(100.100.100.100 and fd7a:115c:a1e0::53). A drive slows at 1 GB, stops at
+1.5 GB, and has at most 512 tasks. All the guests together are capped at 6 GB
+in `marble-guests.slice`. Their CPU weight, half a slice's, is on
+`marble.slice` above it, beside `user.slice`, where the owner's drive runs. A
+dash in a slice's name is a level in the tree, and a weight counts only
+against siblings.
+
+Each drive listens on a loopback address of its own, and no drive may use
+127.0.0.1. The owner's drive listens there (127.0.0.1:4401), and so do
+marble-host's router and admin API and cloudflared's metrics
+(127.0.0.1:20241). The owner's gate counts a request from loopback as one made
+on this machine, and it has no limit on wrong guesses. If every guest shared
+127.0.0.1, a participant's agent could guess at his passphrase as long as it
+liked. So the guest unit denies 127.0.0.1/32 and ::1/128, and each drive
+listens on 127.0.0.<10 + (port − 4500)>: 127.0.0.10 for port 4500, up to
+127.0.0.109 for 4599. `server/host/addresses.js` is the one place that works
+it out.
+marble-host writes it into the drive's settings as `HOST`, and `run-guest`
+refuses any address outside that range. Drives can still reach each other's
+addresses, where a 64-character passphrase and the door's pass stand in the
+way.
+
+systemd checks the far end of every packet a drive sends or receives, so a
+connection from 127.0.0.1 can't reach a drive either. marble-host makes every
+request to a drive from 127.0.0.2: the router, the checks, the watcher and the
+port picker. A drive's own agents call it back at its own address
+(`callbackOrigin` in `server/app.js`), and their browser is signed in there.
+Linux sends a connection to anywhere in 127/8 from 127.0.0.1 unless the
+address it goes to is on lo itself. `marble-guest-addresses.service` puts the
+hundred addresses on lo, and every guest unit requires it, so a drive's
+connections to itself come from its own address. One thing changes for the
+person: a server an agent starts inside the drive on 127.0.0.1 or `localhost`
+can't be reached from that drive. It must listen on the drive's own address
+instead. When the owner writes the escape check, it should find 127.0.0.1 and
+::1 closed to a drive, and the drive's own address open to it.
 
 No guest's unit is ever enabled. When marble-host starts, it starts every
 drive the registry says is running whose unit is down. It marks a drive that
@@ -711,7 +741,7 @@ so `user` mode is never for other people's drives.
 | marble-host: router, admin API, maker, watcher, registry, boot | `server/host/`, run by `marble-drive host` |
 | Its service | `linux/pc-host/host.sh` renders `marble-host.service.in` into `~/.config/systemd/user/`; log `~/.local/state/marble-drive/host.log` |
 | Its tunnel | `linux/pc-host/tunnel.sh`: `marble-pc-host`, from `pc-host.marbledrive.app` to `http://127.0.0.1:4460` alone; user unit `marble-host-tunnel.service`, log `host-tunnel.log` |
-| The sandbox | `linux/pc-host/marble-guest@.service`, `marble.slice`, `marble-guests.slice` |
+| The sandbox | `linux/pc-host/marble-guest@.service`, `marble.slice`, `marble-guests.slice`, and `marble-guest-addresses.service` for each drive's loopback address |
 | The polkit rule | `linux/pc-host/50-marble-host.rules`: the owner may start, stop, restart, try-restart and reload-or-restart `marble-guest@`, `marble-guest-backup@`, `marble-guest-export@` and `marble-guest-remove@` instances and `marble-guests-backup.service`, and nothing else |
 | A drive's first process | `linux/pc-host/run-guest`, installed as `/opt/marble/bin/run-guest` |
 | The sudo step | `linux/pc-host/install.sh`, which then runs every `install.d/*.sh` (`install.d/README`) |
@@ -719,16 +749,20 @@ so `user` mode is never for other people's drives.
 | From the terminal | `tools/pc-host.mjs` |
 | Tests | `node --test test/host-*.test.js`, with stand-ins for systemctl and the drives |
 
-`install.sh` installs the template and both slices into `/etc/systemd/system`,
-the polkit rule with the owner's name in it, and `run-guest`. It makes
-`/opt/marble`, with `bin`, `releases` and `ms-playwright` in it, the owner's
-and mode 755. It makes `/etc/marble-guests`, the owner's and mode 700. Then it
-reloads systemd and runs every `install.d/*.sh` in name order, as root, with
-`OWNER`, `OWNER_HOME`, `OPT`, `ETC` and `RELEASE_DIR` set. `20-backup.sh` is
-the backups' piece. `install.sh` copies no release, and it is safe to run
-again. With `--uninstall` it stops every guest and runs the pieces with
-`--uninstall` in reverse order. Then it takes away all of the above,
-`/opt/marble` and `/etc/marble-guests` included, but never the drives'
+`install.sh` installs the template, both slices and
+`marble-guest-addresses.service` into `/etc/systemd/system`, the polkit rule
+with the owner's name in it, and `run-guest`. It makes `/opt/marble`, with
+`bin`, `releases` and `ms-playwright` in it, the owner's and mode 755. It
+makes `/etc/marble-guests`, the owner's and mode 700. Then it reloads systemd
+and starts `marble-guest-addresses.service`, which puts 127.0.0.10 to
+127.0.0.109 on lo, so a failure there shows at once. It starts it and never
+restarts it, because a restart would restart every drive. Last it runs every
+`install.d/*.sh` in name order, as root, with `OWNER`, `OWNER_HOME`, `OPT`,
+`ETC` and `RELEASE_DIR` set. `20-backup.sh` is the backups' piece.
+`install.sh` copies no release, and it is safe to run again. With
+`--uninstall` it stops every guest, takes the addresses off lo, and runs the
+pieces with `--uninstall` in reverse order. Then it takes away all of the
+above, `/opt/marble` and `/etc/marble-guests` included, but never the drives'
 folders.
 
 The admin API's routes, all JSON. A refusal is `{ why }` with its status.
@@ -826,7 +860,9 @@ in `system` mode, and run again after any change to the template:
 | What a drive can reach | Must be |
 |---|---|
 | Its own folder and home | yes, read and write |
+| Its own address (127.0.0.<10 + port − 4500>) from inside | yes: its agents' tools and browser reach it |
 | The owner's drive, settings and keys | no: his home looks empty |
+| Anything on 127.0.0.1 or ::1: his drive at 4401, marble-host's 4460 and 4461, cloudflared's metrics at 20241 | no, through the unit's IP rules, which drop every packet to or from those two addresses |
 | His Claude and ChatGPT logins | no: both CLIs say not logged in |
 | His processes | no, with its own process namespace |
 | The Windows C: drive | no, with `/mnt` closed off |
