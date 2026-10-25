@@ -5,12 +5,16 @@ import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { hostPaths, loadHostSettings, NAME, NEVER_PORTS, parseRange, readSettingsFile, RELEASE } from '../server/host/settings.js';
+import { tempDirs } from './fixtures/host.js';
+
+const temp = tempDirs();
+after(temp.cleanup);
 
 async function home(text, mode = 0o600) {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'host-settings-'));
+  const dir = await temp.make('host-settings-');
   const file = path.join(dir, '.config', 'marble-drive', 'host.env');
   await fsp.mkdir(path.dirname(file), { recursive: true });
   if (text !== null) {

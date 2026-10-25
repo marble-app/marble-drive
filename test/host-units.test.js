@@ -5,10 +5,13 @@ import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { createUnits, parseShow, unitOf, userProperties } from '../server/host/units.js';
-import { quiet } from './fixtures/host.js';
+import { tempDirs, quiet } from './fixtures/host.js';
+
+const temp = tempDirs();
+after(temp.cleanup);
 
 /** A command runner that records each call and answers from `answers`. */
 function fakeRun(answers = {}) {
@@ -64,7 +67,7 @@ test('system mode: a refusal is an error naming the unit and what systemctl said
 });
 
 test('user mode: a transient unit in marble-guests.slice, its walls, its settings file, and bash running run-guest', async () => {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'units-'));
+  const root = await temp.make('units-');
   const opt = path.join(root, 'opt');
   const guestEnvDir = path.join(root, 'etc');
   const guestStateDir = path.join(root, 'guests');
@@ -110,7 +113,7 @@ test('user mode: the release is at /opt/marble inside the walls, wherever it rea
 });
 
 test('user mode: a failed systemd-run is an error', async () => {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'units-'));
+  const root = await temp.make('units-');
   const f = fakeRun({ show: { stdout: 'ActiveState=inactive\n' }, 'systemd-run': { code: 1, stderr: 'Unit marble-guest@ana.service already exists.' } });
   const units = createUnits({ mode: 'user', run: f.run, opt: path.join(root, 'opt'), guestEnvDir: path.join(root, 'etc'), guestStateDir: path.join(root, 'guests'), log: quiet });
   await assert.rejects(units.start('ana'), /systemd-run --user --unit=marble-guest@ana\.service failed \(exit 1\): Unit marble-guest@ana\.service already exists/);

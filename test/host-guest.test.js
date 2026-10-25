@@ -7,12 +7,16 @@ import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { cgroupMemory, ownCgroup } from '../server/cgroup.js';
 import { createDeepHealth, madeDocs } from '../server/health-deep.js';
 import { systemReaders } from '../server/ledger.js';
 import { createMemoryGuard } from '../server/memory-guard.js';
+import { tempDirs } from './fixtures/host.js';
+
+const temp = tempDirs();
+after(temp.cleanup);
 
 const MB = 2 ** 20;
 const GiB = 2 ** 30;
@@ -20,7 +24,7 @@ const UNIT = '/system.slice/marble-guests.slice/marble-guest@ana.service';
 
 /** A /proc and a /sys/fs/cgroup for one process in marble-guest@ana.service. */
 async function fakeMachine({ cgroupLine = `0::${UNIT}`, max = String(1536 * MB), high = String(1024 * MB), currentMB = 300, inactiveMB = 50, activeMB = 0, slabMB = 0, pressure = 0, procs = [], meminfo = { totalMB: 12_000, availableMB: 200 } } = {}) {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'guest-cg-'));
+  const root = await temp.make('guest-cg-');
   const proc = path.join(root, 'proc');
   const cg = path.join(root, 'cgroup');
   await fsp.mkdir(path.join(proc, 'self'), { recursive: true });
@@ -128,7 +132,7 @@ function fakeCli({ claudeIn = false, codexIn = false, claude = '2.1.281 (Claude 
 }
 
 const fakeStore = (entries, seeded = {}) => {
-  const marbleDir = fsp.mkdtemp(path.join(os.tmpdir(), 'deep-marble-'));
+  const marbleDir = temp.make('deep-marble-');
   return marbleDir.then(async (dir) => {
     await fsp.writeFile(path.join(dir, 'apps.json'), JSON.stringify({ seeded, docs: {} }));
     return { marbleDir: dir, list: async () => entries };
@@ -165,7 +169,7 @@ test('/health/deep: signed in to either CLI, or a key in the drive\'s own file, 
   assert.deepEqual(said.codex, { version: '0.159.3', signedIn: true });
   assert.deepEqual(said.claude, { version: null, signedIn: false });
   assert.equal(said.agentConnected, true);
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'deep-keys-'));
+  const dir = await temp.make('deep-keys-');
   const keysFile = path.join(dir, 'agent-keys');
   await fsp.writeFile(keysFile, JSON.stringify({ openai: 'sk-never-read-out' }), { mode: 0o600 });
   const keyed = await createDeepHealth({ store, keysFile, env: {}, run: fakeCli().run }).read();
@@ -176,7 +180,7 @@ test('/health/deep: signed in to either CLI, or a key in the drive\'s own file, 
 test('a drive: /health names its release; /health/deep answers only the owner, only on this machine', async (t) => {
   const { createDrive } = await import('../server/app.js');
   const { loadConfig } = await import('../server/config.js');
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'guest-drive-'));
+  const root = await temp.make('guest-drive-');
   const config = loadConfig({ MARBLE_DRIVE_ROOT: root, MARBLE_DRIVE_SECRET: 'pw-guest-1234', MARBLE_DRIVE_AGENT_KEYS: path.join(root, 'no-keys') });
   const cli = fakeCli();
   const drive = await createDrive(config, { log: { log() {}, error() {}, info() {} }, agents: false, deepHealth: { run: cli.run } });

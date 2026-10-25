@@ -13,6 +13,20 @@ import { parseRange } from '../../server/host/settings.js';
 
 export const quiet = { log() {}, error() {}, info() {} };
 
+/** Temporary folders a test file makes, all removed by `cleanup` (its
+ *  after() hook): /tmp on the PC is a small RAM disk. */
+export function tempDirs() {
+  const made = [];
+  return {
+    make: async (prefix) => {
+      const dir = await fsp.mkdtemp(path.join(os.tmpdir(), prefix));
+      made.push(dir);
+      return dir;
+    },
+    cleanup: () => Promise.all(made.splice(0).map((dir) => fsp.rm(dir, { recursive: true, force: true }))),
+  };
+}
+
 /** A scratch PC. `releases` are made in <opt>/releases with a host in each. */
 export async function scratchPc({ releases = ['20261025T161133Z-4b2103a'], ...more } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'pc-host-'));

@@ -7,12 +7,16 @@ import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { init, main } from '../tools/pc-host.mjs';
+import { tempDirs } from './fixtures/host.js';
+
+const temp = tempDirs();
+after(temp.cleanup);
 
 async function tempHome() {
-  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'pc-host-home-'));
+  const home = await temp.make('pc-host-home-');
   const dir = path.join(home, '.config', 'marble-drive');
   await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
   return { home, dir, file: path.join(dir, 'host.env') };
@@ -112,7 +116,7 @@ test('init refuses a settings file others can read, and door keys or a topic tha
 });
 
 test('init makes the settings folder when there is none', async () => {
-  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'pc-host-bare-'));
+  const home = await temp.make('pc-host-bare-');
   const done = init({ home, out() {} });
   assert.ok(done.length >= 12);
   const stat = await fsp.stat(path.join(home, '.config', 'marble-drive'));

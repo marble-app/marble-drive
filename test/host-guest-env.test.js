@@ -5,9 +5,13 @@ import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { checkEntry, createGuestEnvs, guestEntries, newSecret, parseEntries, renderEnv } from '../server/host/guest-env.js';
+import { tempDirs } from './fixtures/host.js';
+
+const temp = tempDirs();
+after(temp.cleanup);
 
 const base = { name: 'ana', release: '20261025T161133Z-4b2103a', port: 4501, secret: 'a'.repeat(64), doorKeys: 'k1:AAAA', owner: 'acct_1', publicSuffix: 'marbledrive.app', ownerName: 'Bryan' };
 
@@ -57,7 +61,7 @@ test('nothing systemd and node might read differently gets in, and the value is 
 });
 
 test('written mode 600, read back, changed in place keeping its order, and removed', async () => {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'guest-env-'));
+  const dir = await temp.make('guest-env-');
   const envs = createGuestEnvs({ dir });
   await envs.write('ana', guestEntries(base));
   const file = path.join(dir, 'ana.env');

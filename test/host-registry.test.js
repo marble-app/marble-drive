@@ -7,11 +7,15 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { atomicWrite, openRegistry } from '../server/host/registry.js';
+import { tempDirs } from './fixtures/host.js';
 
-const scratch = () => fsp.mkdtemp(path.join(os.tmpdir(), 'host-registry-'));
+const temp = tempDirs();
+after(temp.cleanup);
+
+const scratch = () => temp.make('host-registry-');
 
 test('an update is written, survives a reopen, and leaves no temporary file', async () => {
   const dir = await scratch();
