@@ -1,0 +1,467 @@
+#!/usr/bin/env python3
+# The file work behind the PC drives' backups (backup-guest, restore-guest and
+# backup-check.sh, beside this file; docs/HOSTING.md, "Backups of PC drives"):
+# listing a drive, copying what changed out of it, checking a restored copy
+# against the list it was made from, and the status file the Console reads.
+#
+# It runs as root over a folder the drive's own agents can write to while it
+# runs. So it never follows a symbolic link, at any depth: every folder is
+# opened from its parent's descriptor with O_NOFOLLOW, and only regular files
+# are read. An agent that swaps a folder for a link to /etc/marble-backup
+# halfway through gets its own folder read, or nothing, never the key; a pipe
+# or a socket is passed over, never opened for long. rclone then reads only the
+# copies made here, in a folder of root's that no drive can reach.
+#
+#   backup-tree scan <drive> <out.json>
+#   backup-tree same <scan.json> <manifest.json>
+#   backup-tree prepare <drive> <scan.json> <remote manifest.json | -> <work> <seq> <at>
+#   backup-tree verify <dir> <manifest.json>
+#   backup-tree plan <manifest.json> <trash listings dir> <work>
+#   backup-tree compare <drive> <copy> <manifest.json>
+#   backup-tree counts <manifest.json>
+#   backup-tree status <file> <name> <ok|fail> <why> <files> <bytes> <changed> <lastGood> <at>
+#
+# A file list is {"seq", "at", "files": {path: [size, mtimeMs]}, "count",
+# "bytes", "documents"}, the shape server/hub/sync.js keeps for the hub, plus
+# the counts. Paths are relative to the drive, with forward slashes.
+
+import hashlib
+import json
+import os
+import stat
+import sys
+
+O_DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+# O_NONBLOCK: a pipe swapped in for a file between the look and the open must
+# not hold the backup until something writes to it.
+O_FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+# Marble's own paths are at most 16 folders deep (server/paths.js); a tree an
+# agent made deeper than this is passed over rather than walked.
+MAX_DEPTH = 64
+CHUNK = 1 << 20
+
+
+def left_out(rel, is_dir=False):
+    """What a backup leaves out: what the hub leaves out (server/hub/sync.js,
+    EXCLUDES: the host lock, the usage ledger, Console's backup reports), and
+    the thumbnail maker's scratch folders (server/thumbs.js), which are this
+    machine's for the seconds a thumbnail takes. Keep in step with EXCLUDES in
+    backup-lib.sh."""
+    key = rel + '/' if is_dir else rel
+    return (
+        key == '.marble/agents/host.lock'
+        or key.startswith('.marble/usage/')
+        or key.startswith('.marble/console/backups/')
+        or key.startswith('.marble/thumbs/.work-')
+    )
+
+
+def ms(ns):
+    return (ns + 500_000) // 1_000_000
+
+
+def same_entry(a, b):
+    # As in server/hub/sync.js: a stored mtime can land a rounded millisecond
+    # either side, never more.
+    return bool(a) and bool(b) and a[0] == b[0] and abs(a[1] - b[1]) <= 1
+
+
+def is_document(rel):
+    return rel.endswith('.mrbl') and not rel.startswith('.marble/')
+
+
+class Refusal(Exception):
+    pass
+
+
+def open_root(root):
+    try:
+        return os.open(root, O_DIR)
+    except FileNotFoundError:
+        raise Refusal('missing')
+    except OSError:
+        # ELOOP for a link, ENOTDIR for a file: either way not a drive to read.
+        raise Refusal('not-a-folder')
+
+
+def walk(root_fd):
+    """Every regular file under the folder open at root_fd that a backup keeps,
+    as {path: [size, mtimeMs]}, and how many folders were too deep to walk."""
+    files = {}
+    deep = 0
+
+    def visit(dfd, rel, depth):
+        nonlocal deep
+        try:
+            with os.scandir(dfd) as it:
+                names = [entry.name for entry in it]
+        except OSError:
+            return
+        for name in names:
+            r = f'{rel}/{name}' if rel else name
+            try:
+                st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                if left_out(r, is_dir=True):
+                    continue
+                if depth >= MAX_DEPTH:
+                    deep += 1
+                    continue
+                try:
+                    cfd = os.open(name, O_DIR, dir_fd=dfd)
+                except OSError:
+                    continue  # gone, or swapped for something that is not a folder
+                try:
+                    visit(cfd, r, depth + 1)
+                finally:
+                    os.close(cfd)
+            elif stat.S_ISREG(st.st_mode) and not left_out(r):
+                files[r] = [st.st_size, ms(st.st_mtime_ns)]
+            # Links, pipes, sockets and devices are never part of a backup.
+
+    visit(root_fd, '', 0)
+    return files, deep
+
+
+def open_file(root_fd, rel):
+    """rel opened for reading from root_fd, every folder on the way opened
+    without following a link, or None when it is gone or not a regular file."""
+    parts = rel.split('/')
+    held = []
+    dfd = root_fd
+    try:
+        for part in parts[:-1]:
+            dfd = os.open(part, O_DIR, dir_fd=dfd)
+            held.append(dfd)
+        fd = os.open(parts[-1], O_FILE, dir_fd=dfd)
+    except OSError:
+        return None
+    finally:
+        for h in held:
+            os.close(h)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        return None
+    return fd
+
+
+def read_json(file):
+    with open(file, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def write_json(file, value, mode=0o600):
+    tmp = f'{file}.{os.getpid()}.tmp'
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, mode)
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        json.dump(value, f, separators=(',', ':'))
+        f.write('\n')
+    os.chmod(tmp, mode)
+    os.replace(tmp, file)
+
+
+def write_list(file, paths):
+    # One path a line, for rclone's --files-from-raw. Names that are not UTF-8
+    # go back out as the bytes they were.
+    with open(file, 'w', encoding='utf-8', errors='surrogateescape') as f:
+        for p in paths:
+            f.write(p + '\n')
+
+
+def unlistable(paths):
+    """A list file is one path a line: a name holding a line break cannot be
+    said, and one that is not UTF-8 is not said the same way by rclone."""
+    for p in paths:
+        if '\n' in p or '\r' in p:
+            return True
+        try:
+            p.encode('utf-8')
+        except UnicodeEncodeError:
+            return True
+    return False
+
+
+def counts(files):
+    return {
+        'count': len(files),
+        'bytes': sum(v[0] for v in files.values()),
+        'documents': sum(1 for rel in files if is_document(rel)),
+    }
+
+
+def summary(c):
+    return f"files={c['count']} bytes={c['bytes']} documents={c['documents']}"
+
+
+def cmd_scan(root, out):
+    try:
+        fd = open_root(root)
+    except Refusal as why:
+        print(f'refused={why}')
+        return 3
+    try:
+        files, deep = walk(fd)
+    finally:
+        os.close(fd)
+    write_json(out, {'files': files, **counts(files)})
+    print(f'{summary(counts(files))} deep={deep}')
+    return 0
+
+
+def cmd_same(scan_file, manifest_file):
+    try:
+        want = read_json(scan_file)['files']
+        have = read_json(manifest_file)['files']
+    except (OSError, ValueError, KeyError):
+        return 1
+    if want.keys() != have.keys():
+        return 1
+    return 0 if all(same_entry(want[r], have[r]) for r in want) else 1
+
+
+def copy_out(root_fd, rel, stage):
+    """Copies rel into the stage with its mtime, from a descriptor opened
+    without following links. Returns [size, mtimeMs] of what was copied, or
+    None when it is gone. A file that changes while it is copied is copied
+    again, up to three times, then kept as last read under the time it had
+    before that read, which the file no longer has: the next run sends it
+    again."""
+    fd = open_file(root_fd, rel)
+    if fd is None:
+        return None
+    dest = os.path.join(stage, rel)
+    os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
+    tmp = dest + '.part'
+    try:
+        for _ in range(3):
+            before = os.fstat(fd)
+            os.lseek(fd, 0, os.SEEK_SET)
+            out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600)
+            try:
+                while True:
+                    chunk = os.read(fd, CHUNK)
+                    if not chunk:
+                        break
+                    os.write(out, chunk)
+            finally:
+                os.close(out)
+            after = os.fstat(fd)
+            if (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns):
+                break
+        mtime = before.st_mtime_ns
+        size = os.stat(tmp).st_size
+        os.utime(tmp, ns=(mtime, mtime))
+        os.replace(tmp, dest)
+        return [size, ms(mtime)]
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return None
+    finally:
+        os.close(fd)
+
+
+def cmd_prepare(root, scan_file, remote_file, work, seq, at):
+    """Decides what this run sends and copies it out of the drive.
+
+    With a trusted file list from the last upload (remote_file), only what
+    differs is copied and listed in work/differ.list, and what the upload
+    holds that the drive no longer does goes in work/extra.list. Without one,
+    the whole drive is copied and the upload is a full sync. Writes the new
+    file list to work/manifest.json and prints what it did."""
+    scan = read_json(scan_file)['files']
+    remote = None if remote_file == '-' else read_json(remote_file).get('files', {})
+    stage = os.path.join(work, 'stage')
+    os.makedirs(stage, mode=0o700, exist_ok=True)
+    mode = 'full'
+    differ, extra = sorted(scan), []
+    if remote is not None:
+        differ = sorted(r for r in scan if not same_entry(scan[r], remote.get(r)))
+        extra = sorted(r for r in remote if r not in scan and not left_out(r))
+        mode = 'incremental'
+        if unlistable(differ + extra):
+            mode, differ, extra = 'full', sorted(scan), []
+    # The copies wait on this disk until rclone has sent them, so they must
+    # leave room for the drives and the PC: WSL's disk grows into Windows'.
+    need = sum(scan[r][0] for r in differ)
+    vfs = os.statvfs(stage)
+    free = vfs.f_bavail * vfs.f_frsize
+    if need + (1 << 30) > free:
+        print(f'refused=no-room need={need} free={free}')
+        return 3
+    try:
+        fd = open_root(root)
+    except Refusal as why:
+        print(f'refused={why}')
+        return 3
+    files = dict(scan)
+    sent = []
+    try:
+        for rel in differ:
+            got = copy_out(fd, rel, stage)
+            if got is None:
+                # Gone since the scan: nothing to send, and if the upload
+                # holds it, it goes to the trash with the rest.
+                del files[rel]
+                if remote is not None and rel in remote:
+                    extra.append(rel)
+                continue
+            files[rel] = got
+            sent.append(rel)
+    finally:
+        os.close(fd)
+    if mode == 'full':
+        sent = sorted(files)
+    write_list(os.path.join(work, 'differ.list'), sent)
+    write_list(os.path.join(work, 'extra.list'), sorted(set(extra)))
+    c = counts(files)
+    write_json(os.path.join(work, 'manifest.json'), {'seq': int(seq), 'at': at, 'files': files, **c})
+    print(f'mode={mode} differ={len(sent)} extra={len(set(extra))} {summary(c)}')
+    return 0
+
+
+def cmd_verify(root, manifest_file):
+    want = read_json(manifest_file)['files']
+    try:
+        fd = open_root(root)
+    except Refusal as why:
+        print(f'refused={why}')
+        return 3
+    try:
+        have, _ = walk(fd)
+    finally:
+        os.close(fd)
+    differ = sum(1 for r in want if r in have and not same_entry(want[r], have[r]))
+    missing = sum(1 for r in want if r not in have)
+    extra = sum(1 for r in have if r not in want)
+    print(f'files={len(have)} differ={differ} missing={missing} extra={extra}')
+    return 0 if differ == missing == extra == 0 else 1
+
+
+def cmd_plan(manifest_file, listings, work):
+    """Where each file of a past file list comes from, for a restore as of
+    that list's time. Every upload after it moved what it replaced or deleted
+    into its own trash/<utc>/, so a file's version at that time is in the
+    first trash folder after it that holds the file, and a file no later
+    upload touched is still in drive/. Writes work/from-drive.list and
+    work/from-<utc>.list and prints the sources used, oldest trash first."""
+    want = read_json(manifest_file)['files']
+    if unlistable(list(want)):
+        print('refused=unlistable')
+        return 3
+    held = []
+    for name in sorted(os.listdir(listings)):
+        if name.endswith('.json'):
+            entries = read_json(os.path.join(listings, name)) or []
+            held.append((name[:-5], {e['Path'] for e in entries if not e.get('IsDir')}))
+    sources = {}
+    for rel in want:
+        source = next((utc for utc, paths in held if rel in paths), 'drive')
+        sources.setdefault(source, []).append(rel)
+    used = []
+    for source in ['drive'] + [utc for utc, _ in held]:
+        if source in sources:
+            write_list(os.path.join(work, f'from-{source}.list'), sorted(sources[source]))
+            used.append(source)
+    print(' '.join(used))
+    return 0
+
+
+def sha256(fd):
+    h = hashlib.sha256()
+    while True:
+        chunk = os.read(fd, CHUNK)
+        if not chunk:
+            return h.hexdigest()
+        h.update(chunk)
+
+
+def cmd_compare(drive, copy, manifest_file):
+    """A restored copy against the drive it came from, file by file, by
+    checksum. Only files the drive still holds as the file list recorded
+    them can be compared; one the drive has changed since the backup is
+    counted, not judged. Prints the counts; exits 1 on any difference."""
+    want = read_json(manifest_file)['files']
+    try:
+        dfd, cfd = open_root(drive), open_root(copy)
+    except Refusal as why:
+        print(f'refused={why}')
+        return 3
+    same = differ = missing = changed = 0
+    try:
+        have, _ = walk(cfd)
+        now, _ = walk(dfd)
+        extra = sum(1 for r in have if r not in want)
+        for rel, entry in want.items():
+            if rel not in have:
+                missing += 1
+                continue
+            if not same_entry(entry, have[rel]):
+                differ += 1
+                continue
+            if not same_entry(entry, now.get(rel)):
+                changed += 1
+                continue
+            a, b = open_file(dfd, rel), open_file(cfd, rel)
+            try:
+                if a is None or b is None:
+                    changed += 1
+                elif sha256(a) == sha256(b):
+                    same += 1
+                else:
+                    differ += 1
+            finally:
+                for f in (a, b):
+                    if f is not None:
+                        os.close(f)
+    finally:
+        os.close(dfd)
+        os.close(cfd)
+    print(f'same={same} differ={differ} missing={missing} extra={extra} changed={changed}')
+    return 0 if differ == missing == extra == 0 else 1
+
+
+def cmd_counts(manifest_file):
+    try:
+        m = read_json(manifest_file)
+    except (OSError, ValueError):
+        print('seq=0')
+        return 1
+    c = counts(m.get('files', {}))
+    print(f"seq={int(m.get('seq', 0))} at={m.get('at', '')} {summary(c)}")
+    return 0
+
+
+def cmd_status(file, name, ok, why, files, nbytes, changed, last_good, at):
+    """The one file about a drive's backups that anyone on the PC may read:
+    counts and times, never a path, a name inside the drive or a key."""
+    value = {'name': name, 'at': at, 'ok': ok == 'ok'}
+    if why:
+        value['why'] = why
+    value.update({'files': int(files), 'bytes': int(nbytes), 'changed': changed == 'true'})
+    value['lastGood'] = last_good or None
+    write_json(file, value, mode=0o644)
+    return 0
+
+
+COMMANDS = {
+    'scan': (cmd_scan, 2),
+    'same': (cmd_same, 2),
+    'prepare': (cmd_prepare, 6),
+    'verify': (cmd_verify, 2),
+    'plan': (cmd_plan, 3),
+    'compare': (cmd_compare, 3),
+    'counts': (cmd_counts, 1),
+    'status': (cmd_status, 9),
+}
+
+if __name__ == '__main__':
+    command, args = (sys.argv[1] if len(sys.argv) > 1 else ''), sys.argv[2:]
+    if command not in COMMANDS or len(args) != COMMANDS[command][1]:
+        sys.stderr.write(f'backup-tree: usage: {" | ".join(COMMANDS)} (see the top of this file)\n')
+        sys.exit(2)
+    sys.exit(COMMANDS[command][0](*args))

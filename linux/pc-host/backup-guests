@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Every PC drive's backup, one drive at a time (docs/HOSTING.md, "Backups of
+# PC drives"). Run as root by marble-guests-backup.service, from
+# marble-guests-backup.timer each hour.
+#
+#   backup-guests
+#
+# Starts marble-guest-backup@<name>.service for each folder under
+# /var/lib/private/marble-guests that holds a drive, and waits for each before
+# the next: every drive's backup runs in its own sandbox, which sees that one
+# drive and nothing else of the others. A drive that has not changed costs a
+# look at its files and nothing in R2 (backup-guest). Status files and file
+# lists of drives whose folder is gone are dropped. Exits 1 when any drive's
+# backup failed; the next hour tries again.
+set -euo pipefail
+umask 077
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=backup-lib.sh
+. "$HERE/backup-lib.sh"
+[[ $# -eq 0 ]] || { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
+need_root
+
+shopt -s nullglob
+names=() failed=()
+for dir in "$GUESTS"/*/; do
+  dir=${dir%/}
+  name=${dir##*/}
+  [[ $name =~ $NAME_RE && ! -L $dir && -d $dir/drive ]] || continue
+  names+=("$name")
+  "$SYSTEMCTL" start "marble-guest-backup@$name.service" || failed+=("$name")
+done
+
+for file in "$BACKUP_STATE"/status/*.json "$BACKUP_STATE"/manifests/*.json; do
+  name=${file##*/}
+  name=${name%.json}
+  [[ -e $GUESTS/$name ]] || rm -f "$file"
+done
+
+if ((${#failed[@]})); then
+  say "backed up ${#names[@]} drives; failed: ${failed[*]} (journalctl -u marble-guest-backup@<name>)"
+  exit 1
+fi
+say "backed up ${#names[@]} drives"

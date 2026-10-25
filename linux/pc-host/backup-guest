@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# One PC drive's documents to R2, encrypted (docs/HOSTING.md, "Backups of PC
+# drives"). Run as root by marble-guest-backup@<name>.service: each hour from
+# marble-guests-backup.timer, or when marble-host starts it.
+#
+#   backup-guest <name> [--force]
+#   backup-guest <name> --trash-prefix
+#   backup-guest <name> --forget [--yes]
+#
+# Only the drive, /var/lib/private/marble-guests/<name>/drive, never its home:
+# that holds the person's Claude or ChatGPT login, and the host keeps no
+# credentials, so a restored drive signs in again. Left out as the hub leaves
+# them out: the host lock, the usage ledger, Console's backup reports, and the
+# thumbnail maker's scratch folders.
+#
+# R2 holds guests/<name>/ in the hub's bucket, under an rclone crypt remote
+# with this backup's own passphrase and salt (/etc/marble-backup/backup.env),
+# so every name and every byte there is ciphertext:
+#
+#   drive/                the drive as the last good run sent it
+#   trash/<utc>/          what the run at <utc> replaced or deleted
+#   manifest.json         the last run's file list, [size, mtimeMs] by path
+#   manifests/<utc>.json  every run's file list, for restore-guest --from
+#
+# A run that finds the drive as the last good run left it sends nothing and
+# asks nothing of R2. One that finds changes copies them out of the drive
+# (backup-tree, which never follows a link) and sends only those, against the
+# file list in R2 when it is the one this PC last wrote (the same seq), as
+# server/hub/sync.js does; otherwise it is a full sync. It refuses, and says
+# so, when the drive has lost all its documents or more than half its files
+# since the last good run (--force sends it anyway), or holds more than
+# GUEST_BACKUP_MAX_BYTES.
+#
+# Every run ends in /var/lib/marble-backup/status/<name>.json, which anyone on
+# the PC may read: { name, at, ok, why?, files, bytes, changed, lastGood }.
+# Counts and times only, never a name from inside the drive; what rclone said
+# goes to the journal.
+#
+# --trash-prefix prints the R2 prefix the drive's trash is under, for a
+# lifecycle rule. --forget deletes guests/<name>/ from R2 for good, only once
+# remove-guest has taken the drive off the PC, and only with --yes.
+set -euo pipefail
+umask 077
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=backup-lib.sh
+. "$HERE/backup-lib.sh"
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
+
+name=${1:-}
+[[ $name =~ $NAME_RE ]] || usage
+shift
+mode=backup force=0 yes=0
+while (($#)); do
+  case $1 in
+    --force) force=1 ;;
+    --trash-prefix) mode=trash-prefix ;;
+    --forget) mode=forget ;;
+    --yes) yes=1 ;;
+    -h | --help) usage ;;
+    *) die "unknown option $1" ;;
+  esac
+  shift
+done
+need_root
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+if [[ $mode != backup ]]; then
+  load_settings || die "$SETTINGS_WHY"
+  remote_for "$name" || die "rclone could not be run ($RCLONE)"
+  if [[ $mode == trash-prefix ]]; then
+    encoded="$(rc backend encode guest: trash | head -1)"
+    say "guests/$name/$encoded/"
+    exit 0
+  fi
+  if [[ -e $GUESTS/$name || -L $GUESTS/$name ]]; then
+    die "$name still has a folder on the PC ($GUESTS/$name); remove-guest takes it off first"
+  fi
+  if ((!yes)); then
+    say "This deletes guests/$name/ from R2, every backup of $name, for good. Add --yes to do it."
+    exit 0
+  fi
+  rc purge "$RAW_PREFIX" || die "R2 did not delete guests/$name/ (rclone exit $?)"
+  rm -f "$BACKUP_STATE/status/$name.json" "$BACKUP_STATE/manifests/$name.json"
+  say "deleted guests/$name/ from R2"
+  exit 0
+fi
+
+folder="$GUESTS/$name"
+drive="$folder/drive"
+local_list="$BACKUP_STATE/manifests/$name.json"
+mkdir -p "$BACKUP_STATE/manifests"
+chmod 700 "$BACKUP_STATE/manifests"
+if ! lock_drive "$name" 900; then
+  say "$name: a restore, a removal or another backup of it is running; skipped"
+  exit 0
+fi
+# Nothing of this drive left (remove-guest ran while this waited): no status.
+if [[ ! -e $folder ]]; then
+  say "$name: no folder on the PC; nothing to back up"
+  exit 0
+fi
+
+files=0 bytes=0
+last_good="$(last_good_of "$name")"
+last_seq=0 last_files=0 last_docs=0 last_at=""
+if line="$(tree counts "$local_list" 2>/dev/null)"; then
+  last_seq="$(field seq "$line")" last_files="$(field files "$line")"
+  last_docs="$(field documents "$line")" last_at="$(field at "$line")"
+fi
+at="$(stamp_now)"
+# A run's stamp names its trash and its file list; two in one second would share them.
+if [[ -n $last_at && "$(utc_of "$last_at")" == "$(utc_of "$at")" ]]; then
+  sleep 1
+  at="$(stamp_now)"
+fi
+utc="$(utc_of "$at")"
+
+finish() { write_status "$name" "$1" "$2" "$files" "$bytes" "$3" "$last_good" "$at"; }
+fail() {
+  finish fail "$1" false
+  say "$name: $1" >&2
+  exit 1
+}
+
+load_settings || fail "$SETTINGS_WHY"
+
+line="$(tree scan "$drive" "$WORK/scan.json")" || case "$(field refused "$line")" in
+  missing) fail "there is no drive folder for $name" ;;
+  not-a-folder) fail "the drive folder is a link or a file, not a folder; nothing was sent" ;;
+  *) fail "the drive could not be read" ;;
+esac
+files="$(field files "$line")" bytes="$(field bytes "$line")"
+documents="$(field documents "$line")" deep="$(field deep "$line")"
+((deep == 0)) || say "$name: $deep folders nested more than 64 deep were left out"
+
+if ((files == 0 && last_seq == 0)); then
+  last_good=$at
+  finish ok "" false
+  say "$name: the drive is empty; nothing to send"
+  exit 0
+fi
+if ((bytes > CFG_GUEST_BACKUP_MAX_BYTES)); then
+  fail "the drive holds $(gb "$bytes") GB, over the $(gb "$CFG_GUEST_BACKUP_MAX_BYTES") GB a backup takes; nothing was sent"
+fi
+# What server/hub/sync.js calls looking wrong. The last good copy stays as it
+# is until someone looks; --force sends this one anyway.
+if ((!force)); then
+  if ((documents == 0 && last_docs > 0)); then
+    fail "the drive has no documents, and the last backup had $last_docs; nothing was sent"
+  fi
+  if ((last_files > 0 && files * 2 < last_files)); then
+    fail "the drive has $files files, under half of the $last_files last backed up; nothing was sent"
+  fi
+fi
+if ((last_seq > 0)) && tree same "$WORK/scan.json" "$local_list"; then
+  last_good=$at
+  finish ok "" false
+  say "$name: unchanged since the backup of $last_at"
+  exit 0
+fi
+
+remote_for "$name" || fail "rclone could not be run"
+remote=- remote_seq=0 code=0
+rc_fetch guest:manifest.json "$WORK/remote.json" || code=$?
+if ((code == 2)); then fail "R2 could not be reached"; fi
+if ((code == 0)); then
+  line="$(tree counts "$WORK/remote.json")" || fail "the file list in R2 cannot be read"
+  remote_seq="$(field seq "$line")"
+  # Only the list this PC wrote last says what R2 holds; any other (R2 rolled
+  # back, this PC's list lost) costs one full sync.
+  if ((last_seq > 0 && remote_seq == last_seq)); then remote="$WORK/remote.json"; fi
+fi
+seq=$(((remote_seq > last_seq ? remote_seq : last_seq) + 1))
+
+line="$(tree prepare "$drive" "$WORK/scan.json" "$remote" "$WORK" "$seq" "$at")" || case "$(field refused "$line")" in
+  no-room) fail "there is no room on the PC to copy out $(gb "$(field need "$line")") GB for sending; nothing was sent" ;;
+  *) fail "the drive could not be copied out for sending" ;;
+esac
+how="$(field mode "$line")" sent="$(field differ "$line")" extra="$(field extra "$line")"
+files="$(field files "$line")" bytes="$(field bytes "$line")"
+
+trash="guest:trash/$utc"
+if [[ $how == full ]]; then
+  rc sync "$WORK/stage" guest:drive --backup-dir "$trash" "${EXCLUDES[@]}" --fast-list --transfers 8 --skip-links ||
+    fail "R2 did not take the drive (rclone exit $?)"
+else
+  # What the drive no longer holds first, as the hub does: on a store that
+  # folds case, moving notes.mrbl away after sending Notes.mrbl would take the
+  # new copy with it.
+  if ((extra > 0)); then
+    rc move guest:drive "$trash" --files-from-raw "$WORK/extra.list" --no-traverse --transfers 8 ||
+      fail "R2 did not take the deletions (rclone exit $?)"
+  fi
+  if ((sent > 0)); then
+    rc copy "$WORK/stage" guest:drive --files-from-raw "$WORK/differ.list" --no-traverse --ignore-times \
+      --backup-dir "$trash" --transfers 8 || fail "R2 did not take the changes (rclone exit $?)"
+  fi
+fi
+# The data, then the list: a run cut off before the list leaves the old one,
+# and the next run sends again what it holds differently.
+rc rcat -q "guest:manifests/$utc.json" <"$WORK/manifest.json" || fail "R2 did not take the file list (rclone exit $?)"
+rc rcat -q guest:manifest.json <"$WORK/manifest.json" || fail "R2 did not take the file list (rclone exit $?)"
+cp "$WORK/manifest.json" "$local_list.tmp"
+mv -f "$local_list.tmp" "$local_list"
+last_good=$at
+finish ok "" true
+say "$name: sent $sent files, $extra to trash/$utc ($how; $files files, $(gb "$bytes") GB)"
