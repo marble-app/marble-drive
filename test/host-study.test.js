@@ -6,6 +6,8 @@
 // firsts said once. Last, all of it against the door's own Directory, in
 // memory, from invite to deletion.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 import test from 'node:test';
 
 import { Directory } from '../worker/src/door/directory.js';
@@ -75,6 +77,9 @@ test('in the study: MARBLE_STUDY=1 and MARBLE_CONSENT written once, and nothing 
   assert.equal(env.MARBLE_DRIVE_SECRET, SECRET, 'the rest kept');
   assert.equal(env.HOST, '127.0.0.10');
   assert.deepEqual(r.units.calls, [], 'nothing restarted: the export helper reads the file each time it runs');
+  // What the export helper reads (linux/pc-host/backup-tree consent) agrees.
+  const helper = () => spawnSync('python3', [path.join(import.meta.dirname, '../linux/pc-host/backup-tree'), 'consent', r.envs.file('ana')], { encoding: 'utf8' });
+  assert.equal(helper().stdout.trim(), 'study=1 consent=2026-11-irb-v1@2026-10-25T11:00:00.000Z');
   assert.deepEqual((await r.reconciler.tick()).joined, [], 'said once');
   assert.deepEqual(r.fake.heard.map((h) => `${h.method} ${h.path}`), ['GET /_door/people', 'GET /_door/people']);
   assert.ok(r.fake.heard.every((h) => h.auth === 'Bearer door-token'));
@@ -85,6 +90,7 @@ test('in the study: MARBLE_STUDY=1 and MARBLE_CONSENT written once, and nothing 
   assert.equal(env.MARBLE_STUDY, undefined);
   assert.equal(env.MARBLE_CONSENT, undefined);
   assert.equal(env.MARBLE_DRIVE_SECRET, SECRET);
+  assert.equal(helper().stdout.trim(), 'study=0 consent=', 'and the export helper refuses it');
   assert.deepEqual((await r.registry.events(2)).map((e) => [e.kind, e.detail.in]), [['study', false], ['study', true]]);
   assert.deepEqual(r.units.calls, []);
 });
