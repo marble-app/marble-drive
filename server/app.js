@@ -49,7 +49,7 @@ import { createMemoryGuard } from './memory-guard.js';
 import { createStreams } from './streams.js';
 import { consoleAllowed, createConsole } from './console/index.js';
 import { createGit, gitAllowed } from './git.js';
-import { sameOrigin } from './sessions.js';
+import { fromOwnPage, sameOrigin } from './sessions.js';
 import { createStems } from './stems/index.js';
 import { cleanFileName, createUploads } from './uploads.js';
 import { POWERPOINT, pptxToDeck } from './pptx.js';
@@ -61,10 +61,12 @@ import { createDaily } from './daily.js';
 import { createAlive } from './alive.js';
 import { createGrants } from './connector/grants.js';
 import { createMcp } from './connector/mcp.js';
-import { createConnectorRoutes } from './connector/routes.js';
+import { createConnectorRoutes, PUBLIC as CONNECTOR_PUBLIC } from './connector/routes.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
+// What a request may be and change nothing; anything else is a change.
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 // What a file in the drive is allowed to be *rendered* as. An allowlist rather
 // than a table of every extension, because a drive holds whatever somebody put
@@ -895,6 +897,15 @@ export async function createDrive(config, { log = console, agentProviders = null
         });
       }
       if (route === '/favicon.ico') return send(res, 302, '', { Location: '/favicon.svg' });
+      // Every change comes from this drive's own pages (server/sessions.js,
+      // fromOwnPage), whoever is asking: the owner, a share link, the gate's
+      // form. Until marbledrive.app is on the Public Suffix List a page on
+      // another drive is same-site with this one, and its posts would carry
+      // this drive's cookies. Claude's and ChatGPT's doors are the exception:
+      // open to any origin by design, and judged by their own tokens.
+      if (!SAFE_METHODS.has(req.method) && !(connector && CONNECTOR_PUBLIC.has(route)) && !fromOwnPage(req)) {
+        return json(res, 403, { error: 'a change has to come from this drive’s own pages' });
+      }
       if (route === '/gate') return gateRoute(req, res, url);
       // A share link: in front of the gate, because the person holding one
       // has no passphrase. It trades the token for a cookie and goes on to
@@ -1633,6 +1644,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       // An agent's browser is a fresh Chromium, and this host's own gate would
       // turn it away from the drive it is working on. A pass is the gate's own
       // cookie, good for a day, planted for this host only (server/agent/browser.js).
+      // Under the plain name: the browser opens the drive at http://127.0.0.1,
+      // where that is the name the gate reads (server/gate.js).
       browserPass: gate.open ? null : () => `${gate.cookieName}=${gate.issue(24 * 60 * 60 * 1000)}`,
       providers: agentProviders ?? null,
       log,

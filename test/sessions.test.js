@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createSessions, sameOrigin } from '../server/sessions.js';
+import { askedHost, createSessions, fromOwnPage, sameOrigin } from '../server/sessions.js';
 
 const request = (headers = {}) => ({ headers });
 const KEY = 'a-long-random-signing-key';
@@ -64,4 +64,45 @@ test('sameOrigin lets a header-less request through and refuses a foreign Origin
     sameOrigin(request({ host: 'drive.internal:4400', origin: 'https://drive.example', 'x-forwarded-host': 'drive.example' })),
     true,
   );
+});
+
+test('sameOrigin reads the browser’s host first when a proxy added its own, and never matches no host at all', () => {
+  const edge = { host: '127.0.0.1:4501', 'x-forwarded-host': 'ana.marbledrive.app, pc-host.marbledrive.app' };
+  assert.equal(askedHost(request(edge)), 'ana.marbledrive.app');
+  assert.equal(sameOrigin(request({ ...edge, origin: 'https://ana.marbledrive.app' })), true);
+  assert.equal(sameOrigin(request({ ...edge, origin: 'https://pc-host.marbledrive.app' })), false);
+  assert.equal(sameOrigin(request({ host: 'Drive.Example', origin: 'https://drive.example' })), true, 'a host name has no case');
+  assert.equal(sameOrigin(request({ origin: 'file://' })), false);
+});
+
+// A page on bob.marbledrive.app posting to ana's, as a browser sends it:
+// same-site, so Lax lets ana's cookie ride along.
+const ANA = { host: '127.0.0.1:4501', 'x-forwarded-host': 'ana.marbledrive.app', cookie: 'marble_drive=1.sig' };
+
+test('fromOwnPage: a change from the drive’s own page goes on, one from another drive’s page does not', () => {
+  assert.equal(fromOwnPage(request({ ...ANA, origin: 'https://ana.marbledrive.app' })), true);
+  assert.equal(fromOwnPage(request({ ...ANA, origin: 'https://bob.marbledrive.app' })), false);
+  assert.equal(fromOwnPage(request({ ...ANA, origin: 'https://marbledrive.app' })), false, 'not even the door');
+  assert.equal(fromOwnPage(request({ ...ANA, origin: 'null' })), false, 'a sandboxed frame or a privacy redirect');
+  assert.equal(fromOwnPage(request({ ...ANA, origin: 'https://ana.marbledrive.app', 'sec-fetch-site': 'same-site' })), true, 'Origin, when there is one, decides');
+});
+
+test('fromOwnPage: with no Origin, Sec-Fetch-Site has to say same-origin', () => {
+  assert.equal(fromOwnPage(request({ ...ANA, 'sec-fetch-site': 'same-origin' })), true);
+  for (const site of ['same-site', 'cross-site', 'none', 'nonsense']) assert.equal(fromOwnPage(request({ ...ANA, 'sec-fetch-site': site })), false, site);
+});
+
+test('fromOwnPage: a bearer, or no browser headers at all, goes on to be judged as before', () => {
+  assert.equal(fromOwnPage(request({ ...ANA, authorization: 'Bearer the-passphrase', origin: 'https://bob.marbledrive.app' })), true, 'a script');
+  assert.equal(fromOwnPage(request({ host: '127.0.0.1:4401', 'sec-fetch-mode': 'cors' })), true, 'curl, node’s fetch, the backup job');
+  assert.equal(fromOwnPage(request({ ...ANA, authorization: 'Bearer ', origin: 'https://bob.marbledrive.app' })), false, 'an empty bearer is no bearer');
+  assert.equal(fromOwnPage(request({ ...ANA, authorization: 'Basic eDp5', origin: 'https://bob.marbledrive.app' })), false);
+});
+
+test('fromOwnPage: the agent’s browser at 127.0.0.1 is its own page; localhost is another origin', () => {
+  const local = { host: '127.0.0.1:4401' };
+  assert.equal(fromOwnPage(request({ ...local, origin: 'http://127.0.0.1:4401' })), true);
+  assert.equal(fromOwnPage(request({ host: 'localhost:4401', origin: 'http://localhost:4401' })), true);
+  assert.equal(fromOwnPage(request({ ...local, origin: 'http://localhost:4401' })), false);
+  assert.equal(fromOwnPage(request({ ...local, origin: 'http://127.0.0.1:4402' })), false, 'another drive on this machine');
 });

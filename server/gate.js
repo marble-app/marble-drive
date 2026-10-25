@@ -105,6 +105,18 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
         }),
     );
 
+  // Over https the cookie is `__Host-marble_drive`: Secure, Path=/ and no
+  // Domain, which a browser lets only this host set. Until marbledrive.app is
+  // on the Public Suffix List, another drive under it could plant a plain
+  // `marble_drive` for this one with Domain=marbledrive.app; a __Host- cookie
+  // it cannot. Over https only that name counts, so a planted one is never
+  // read. Plain http keeps the plain name (127.0.0.1 at the desk, the agent's
+  // browser, the Mac at home), where not every browser keeps a __Host-
+  // cookie. A host told it is always https (`secure`, a sprite) is still
+  // plain http to a request made on this machine.
+  const httpsName = cookieName.startsWith('__Host-') ? cookieName : `__Host-${cookieName}`;
+  const nameFor = (req) => (overHttps(req) || (secure && !isLocal(req)) ? httpsName : cookieName);
+
   /** Is this request allowed through? An open host says yes to everything, and
    *  says so at boot rather than quietly. */
   function allows(req, { cookie = true } = {}) {
@@ -112,7 +124,7 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
     const jar = cookies(req.headers.cookie);
     // `cookie: false` is a drive in `tools` mode, asked from outside: the
     // passphrase has left the browser there, and only a script's bearer counts.
-    if (cookie && valid(jar[cookieName])) return true;
+    if (cookie && valid(jar[nameFor(req)])) return true;
     // A bearer token is the same secret by another name, for a script, a
     // backup job, or curl. Not a second mechanism — the same one, unwrapped.
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
@@ -128,9 +140,11 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
   // one Safari drops, even on localhost, so the flag follows the request.
   const secureFor = (req) => secure || overHttps(req);
 
+  // A __Host- name always has Secure beside it: both follow overHttps, or a
+  // host told it is always https.
   const cookieHeader = (req) =>
     [
-      `${cookieName}=${issue()}`,
+      `${nameFor(req)}=${issue()}`,
       'Path=/',
       'HttpOnly',
       'SameSite=Lax',
@@ -141,7 +155,9 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
       .join('; ');
 
   const clearHeader = (req) =>
-    `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFor(req) ? '; Secure' : ''}`;
+    `${nameFor(req)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFor(req) ? '; Secure' : ''}`;
 
-  return { open, allows, accepts, issue, valid, cookieHeader, clearHeader, cookieName };
+  // `cookieName` is the plain name, the one a request on this machine over
+  // plain http is read by: the agent's browser is planted with it.
+  return { open, allows, accepts, issue, valid, cookieHeader, clearHeader, cookieName, cookieNameFor: nameFor };
 }

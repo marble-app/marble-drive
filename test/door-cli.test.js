@@ -88,6 +88,13 @@ test('requests, approve, drives, hold and log', async () => {
   const ident = await (await dir('/identity', { provider: 'github', subject: '9', email: 'cy@example.com', name: 'Cy' })).json();
   await dir('/drive', { account: ident.account.id, name: 'cyra' });
   assert.match((await r.run('drives')).out, /cyra\s+queued/);
+  // A drive on the PC host has no sprite; the list says where it runs.
+  const code = (await (await dir('/invite', { uses: 1 })).json()).code;
+  const pia = await (await dir('/identity', { provider: 'google', subject: '10', email: 'pia@example.com', name: 'Pia', invite: code })).json();
+  await dir('/drive', { account: pia.account.id, name: 'pia', home: 'pchost' });
+  const listed = (await r.run('drives')).out;
+  assert.match(listed, /cyra\s+queued\s+[0-9a-f]{16}\s+d-cyra\s/);
+  assert.match(listed, /pia\s+queued\s+[0-9a-f]{16}\s+the PC host\s/);
   assert.match((await r.run('hold', 'cyra')).out, /cyra is on hold/);
   assert.match((await r.run('hold', 'cyra', '--off')).out, /cyra is open again/);
   const log = await r.run('log', '--account', ident.account.id);

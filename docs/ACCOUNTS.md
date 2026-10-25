@@ -238,7 +238,9 @@ made by hand can use it.
   `MARBLE_CREDIT_URL` and `MARBLE_CREDIT_TOKEN` into its `sprite.env` and makes
   `claude-credit` its agent. `invite --credit <dollars>` gives the drive an
   invite makes a different amount; with `--credit 0` it is made without
-  credit, and its person brings a key or their own Claude.
+  credit, and its person brings a key or their own Claude. A drive the door
+  makes on the PC host gets none, whatever its invite says ("A drive on the
+  PC host", below).
 - **A new drive made by hand**: `tools/sprite-provision.sh ana --credit`. It
   mints the token with `door.mjs` (so it needs `door.env`) and the note it
   prints says there is nothing to set up.
@@ -351,6 +353,59 @@ lists the drive by its name, and the proxy finds it by its token wherever it
 runs. An invite's `--credit` amount applies to a spare handed over just as it
 does to a drive made from nothing.
 
+## A drive on the PC host
+
+With `NEW_DRIVE_HOME=pchost`, sign-up makes each new drive on the owner's PC
+instead of on Fly. marble-host runs it there in a sandbox of its own, and the
+Worker reaches every such drive through one tunnel, `pc-host.marbledrive.app`
+([HOSTING.md](HOSTING.md), "Other people's drives on the PC"). A drive made
+there gets no starter credit: its person connects their own Claude or
+ChatGPT. Unset, or `fly`, sign-up makes drives on Fly as before.
+
+### To turn it on
+
+The door has to be on (above, through step 4's wildcard route, so that
+`<name>.marbledrive.app` reaches the Worker), and marble-host has to be
+installed and answering on the PC. From any machine, `curl -s -o /dev/null -w
+'%{http_code}\n' https://pc-host.marbledrive.app/_host/health` then prints
+`401`: the tunnel is up, and the router refuses a request without the key.
+
+1. In the Cloudflare dashboard, add a route with no Worker for
+   `pc-host.marbledrive.app/*` (Workers Routes, Add route, Worker: None), as
+   step 4 does for `pc-bryan` and `mac-bryan`.
+2. Give the Worker the key it adds to every request it sends the PC: `HOST_KEY`
+   in the PC's `host.env`. On the PC, in a checkout of marble-drive:
+
+   ```sh
+   cd worker
+   sed -n 's/^HOST_KEY=//p' ~/.config/marble-drive/host.env | npx wrangler@latest secret put PC_HOST_KEY
+   ```
+
+3. Give the Worker a private ntfy topic to tell you when the PC isn't
+   answering. Make one, subscribe to it in the ntfy app, and paste its URL at
+   the prompt. The same URL can go in `host.env` as `HOST_NTFY_URL`, so
+   marble-host's own alerts come to the same place.
+
+   ```sh
+   echo "https://ntfy.sh/marble-$(openssl rand -hex 12)"
+   npx wrangler@latest secret put ALERT_NTFY_URL
+   ```
+
+4. In `worker/wrangler.toml`, uncomment `NEW_DRIVE_HOME = "pchost"`, and raise
+   `MAX_DRIVES` if the PC is to hold more than ten drives. `PC_HOST_URL` is
+   already set there. Deploy: `cd worker && npx wrangler@latest deploy`.
+5. Check. `npx wrangler@latest tail` prints no `pc-host watch:` line over the
+   next five minutes. An invite, a name, and the making page goes through its
+   three steps to Open my drive.
+
+To stop making drives on the PC, comment `NEW_DRIVE_HOME` out again and
+deploy. New drives are made on Fly again; drives already on the PC stay there.
+
+| To | Run |
+|---|---|
+| See which drives are on the PC | `node tools/door.mjs drives` (it says "the PC host") |
+| See the Worker's looks at the PC | `cd worker && npx wrangler@latest tail` (a failed look is a `pc-host watch:` line) |
+
 ## Day to day
 
 | To | Run |
@@ -372,9 +427,14 @@ does to a drive made from nothing.
 | Worker secret | `SPRITES_TOKEN` (exists) | pokes the door sprite's private URL |
 | Worker var | `DOOR_KEY_ID` | the key id the edge signs with (`k1`) |
 | Worker var | `MAX_DRIVES` | how many drives sign-up may make, claimed drives aside (10) |
-| Worker var | `DOOR_SPRITE_URL` | the door sprite, poked when a drive is asked for |
+| Worker var | `DOOR_SPRITE_URL` | the door sprite, poked when a drive on Fly is asked for |
 | Worker secret | `CREDIT_ANTHROPIC_KEY` | the starter credit workspace's one key. Without it starter credit is off |
 | Worker var | `DOOR_PUBLIC_KEYS` | the public keys a pass may be signed with, as in `MARBLE_DOOR_KEYS`; unset, derived from the signing key |
+| Worker var | `NEW_DRIVE_HOME` | where sign-up makes drives: `pchost` (the PC host) or `fly`. Unset is `fly` |
+| Worker var | `PC_HOST_URL` | the PC host's router, through its tunnel (`https://pc-host.marbledrive.app`) |
+| Worker secret | `PC_HOST_KEY` | the key the Worker adds to every request it sends the PC host: `HOST_KEY` in the PC's `host.env`. Without it nothing is sent there |
+| Worker secret | `ALERT_NTFY_URL` | optional: the ntfy topic the Worker's check posts to when the PC isn't answering |
+| Worker cron | `*/5 * * * *` | that check, `[triggers]` in `wrangler.toml`; it asks nothing until `PC_HOST_URL` and `PC_HOST_KEY` are set |
 | drive `sprite.env` | `MARBLE_DOOR_KEYS` | `<kid>:<base64 SPKI>` entries separated by spaces |
 | drive `sprite.env` | `MARBLE_DOOR_NAME`, `MARBLE_DOOR_OWNER` | the name a pass must be for, and the account it must name |
 | drive `sprite.env` | `MARBLE_DRIVE_GATE` | `on` (the default) or `tools` |
