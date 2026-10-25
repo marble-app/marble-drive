@@ -5,10 +5,12 @@
 //
 //   node tools/pc-host.mjs init                  write ~/.config/marble-drive/host.env (only what it lacks)
 //   node tools/pc-host.mjs status                is marble-host up, which release new drives get, what runs
-//   node tools/pc-host.mjs drives                every drive: state, port, release, memory, health
+//   node tools/pc-host.mjs drives                every drive: state, port, release, memory, health, agent, last backup
 //   node tools/pc-host.mjs make <name> --owner <door account id> [--cohort <cohort>]
 //   node tools/pc-host.mjs restart|suspend|resume <name>
-//   node tools/pc-host.mjs remove <name> --confirm <name>    stop it for good; its folder stays
+//   node tools/pc-host.mjs remove <name> --confirm <name>    off the PC for good: signed out, stopped, deleted
+//   node tools/pc-host.mjs export <name>         copy its study data into Research/Probe study/<name>/
+//   node tools/pc-host.mjs backup <name>         back it up now
 //   node tools/pc-host.mjs events [--limit <n>]  what happened, newest first
 //
 // release, promote, rollback and pause belong to the updater, which the owner
@@ -168,7 +170,7 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
   const { flags, args } = parseArgs(argv);
   const [command, ...rest] = args;
   if (!command || flags.help) {
-    out('node tools/pc-host.mjs init | status | drives | make <name> --owner <id> | restart|suspend|resume <name> | remove <name> --confirm <name> | events');
+    out('node tools/pc-host.mjs init | status | drives | make <name> --owner <id> | restart|suspend|resume <name> | remove <name> --confirm <name> | export|backup <name> | events');
     return command ? 0 : 2;
   }
 
@@ -236,8 +238,9 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
         const { drives } = await call('GET', '/drives');
         if (!drives.length) return out('No drives on this PC yet.'), 0;
         const health = (d) => (!d.health ? '' : d.health.ok ? `ok${d.health.working ? `, ${d.health.working} working` : ''}` : 'no answer');
-        const rows = drives.map((d) => [d.name, d.state === 'failed' && d.failed ? `failed at ${d.failed.step}` : d.state, d.active, d.port, d.release, mb(d.memoryBytes), health(d), d.restarts, d.owner, d.cohort ?? '', day(d.created)]);
-        for (const line of pad([['name', 'state', 'service', 'port', 'release', 'memory', 'health', 'restarts', 'owner', 'cohort', 'made'], ...rows])) out(line);
+        const backup = (b) => (!b ? '' : b.ok ? day(b.at) : `failed ${day(b.at)}`);
+        const rows = drives.map((d) => [d.name, d.state === 'failed' && d.failed ? `failed at ${d.failed.step}` : d.state, d.active, d.port, d.release, mb(d.memoryBytes), health(d), d.restarts, d.agent ?? '', backup(d.backup), d.owner, d.cohort ?? '', day(d.created)]);
+        for (const line of pad([['name', 'state', 'service', 'port', 'release', 'memory', 'health', 'restarts', 'agent', 'backup', 'owner', 'cohort', 'made'], ...rows])) out(line);
         return 0;
       }
       case 'make': {
@@ -258,11 +261,25 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
       case 'remove': {
         const name = named();
         if (flags.confirm !== rest[0]) {
-          err(`pc-host: removing ${rest[0]} stops it for good and drops its settings; its folder stays. To go on: node tools/pc-host.mjs remove ${rest[0]} --confirm ${rest[0]}`);
+          err(`pc-host: removing ${rest[0]} signs its agents out, stops it for good and deletes it from the PC; its encrypted backup stays. To go on: node tools/pc-host.mjs remove ${rest[0]} --confirm ${rest[0]}`);
           return 2;
         }
-        await call('POST', `/drives/${name}/remove`, { confirm: rest[0] });
-        out(`${rest[0]} is removed. Its folder is still on the PC; deleting it is root's.`);
+        const { removal } = await call('POST', `/drives/${name}/remove`, { confirm: rest[0] });
+        const parts = [];
+        if (removal?.folder === 'deleted') parts.push('its folder is deleted from the PC');
+        if (removal?.folder === 'kept') parts.push('its folder stays, since user mode has no root helper');
+        if (removal?.door === 'told') parts.push('the door knows');
+        out(`${rest[0]} is removed${parts.length ? `: ${parts.join(', and ')}` : ''}. Its encrypted backup stays until you forget it.`);
+        return 0;
+      }
+      case 'export': {
+        const { started } = await call('POST', `/drives/${named()}/export`, {});
+        out(`${started} is copying ${rest[0]}'s study data into Research/Probe study/${rest[0]}/ in your drive, in a folder named for when it ran.`);
+        return 0;
+      }
+      case 'backup': {
+        const { started } = await call('POST', `/drives/${named()}/backup`, {});
+        out(`${started} is backing ${rest[0]} up; node tools/pc-host.mjs drives shows when it last ended well.`);
         return 0;
       }
       case 'events': {
@@ -272,7 +289,7 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
         return 0;
       }
       default:
-        err(`pc-host: no command "${command}"; there is init, status, drives, make, restart, suspend, resume, remove, events`);
+        err(`pc-host: no command "${command}"; there is init, status, drives, make, restart, suspend, resume, remove, export, backup, events`);
         return 2;
     }
   } catch (e) {
