@@ -232,8 +232,11 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     const flags = keys ? await keys.flags() : NO_KEYS;
     const key = Boolean(flags.anthropic);
     const openai = Boolean(flags.openai);
+    // Agents this sheet does not connect (Cursor): one that runs is still an
+    // agent that works, for Start here's first row and its Make it.
+    const others = [...providers.keys()].filter((id) => !isClaude(id) && id !== CODEX);
     // The CLIs are only asked about when it matters: the probe runs them.
-    const found = !key && !openai && (hasClaude || hasCodex) ? await detectAll() : [];
+    const found = (!key && !openai && (hasClaude || hasCodex)) || others.length ? await detectAll() : [];
     const login = hasClaude && !key && providers.has(CLAUDE.login)
       ? Boolean(found.find((p) => p.id === CLAUDE.login)?.signedIn)
       : false;
@@ -251,14 +254,15 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     // not be made is not used up.
     const onCredit = await creditState(settings);
     const creditRuns = Boolean(onCredit?.active && !onCredit.usedUp);
-    const ready = Boolean((hasClaude && (key || login || creditRuns)) || codex.signedIn);
+    const connected = Boolean((hasClaude && (key || login || creditRuns)) || codex.signedIn);
+    const ready = connected || found.some((p) => others.includes(p.id) && p.signedIn);
     // `later`: someone on this drive said Not now to the first-visit popup.
     // Kept for the drive, so a new tab or another device does not ask again;
     // the popup still opens when someone asks for it (runtime/agent-ui.js).
     // `host`: whose machine the drive runs on, when that is someone else's
     // (MARBLE_HOST_OWNER on a drive hosted for a person), for "Bryan never
     // sees your password".
-    return { needed: offers.length > 0 && !ready, ready, later: Boolean(settings.setupLater), login, key, claudeAuth: await claudeAuth(settings), offers, signIns, codex, host: hostOwner || null, ...(onCredit ? { credit: onCredit } : {}) };
+    return { needed: offers.length > 0 && !connected, ready, later: Boolean(settings.setupLater), login, key, claudeAuth: await claudeAuth(settings), offers, signIns, codex, host: hostOwner || null, ...(onCredit ? { credit: onCredit } : {}) };
   };
 
   /** The ChatGPT login landed (codex-signin.js): the next look at the agents

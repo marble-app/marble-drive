@@ -9778,6 +9778,7 @@
     }
     dialog::backdrop { background: rgba(20, 18, 14, .28); }
     h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+    h2:focus { outline: none; }
     .lede { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; text-wrap: pretty; }
     .view[hidden] { display: none; }
     label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -9868,7 +9869,7 @@
       root.innerHTML = `<style>${TOKENS}${SETUP_CSS}</style>
         <dialog aria-labelledby="agent-setup-title" aria-describedby="agent-setup-lede">
           <form>
-            <h2 id="agent-setup-title">Connect an agent</h2>
+            <h2 id="agent-setup-title" tabindex="-1">Connect an agent</h2>
             <p class="lede" id="agent-setup-lede"></p>
             <div class="view" data-view="choose">
               <div class="choices">
@@ -10109,8 +10110,10 @@
       if (this.dialog.open) this.focusView();
     }
 
+    /** Where the caret goes on a view. On the choice it is the title, so
+     *  nothing looks chosen before anything is, and Tab reaches Claude. */
     focusView() {
-      if (this.view === 'choose') this.shadowRoot.querySelector('.choice:not([hidden])')?.focus();
+      if (this.view === 'choose') this.heading.focus();
       else if (this.view === 'key') this.keyInput.focus();
       else this.saveButton.focus();
     }

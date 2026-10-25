@@ -1,6 +1,8 @@
-// Start here, as a new person meets it: / opens it, each of its three rows
-// ticks itself when it has been tried, and the ticks are in the file, so they
-// come back on reload and / goes back to the Drive once all three are done.
+// Start here, as a new person meets it: / opens it, each of its four rows
+// ticks itself when it is done (the first, an agent that works, at once on a
+// drive that has one), and the ticks are in the file, so they come back on
+// reload and / goes back to the Drive once all four are done. A drive with no
+// agent keeps the first row open, and Make it waits and says why.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -40,7 +42,7 @@ test('/ opens Start here, and the Drive is one press away', async () => {
   await page.goto(`${host.base}/`);
   await page.waitForURL(/\/a\/start-here$/);
   await page.locator('h1', { hasText: 'Start here' }).waitFor();
-  assert.equal(await page.locator('[data-step]').count(), 3);
+  assert.equal(await page.locator('[data-step]').count(), 4);
   // Opens as a page to use: not in Describe.
   await ready(page);
   assert.equal(await page.evaluate(() => Boolean(document.querySelector('.marble-marks-layer[data-describing]'))), false);
@@ -51,14 +53,21 @@ test('/ opens Start here, and the Drive is one press away', async () => {
   assert.deepEqual(errors.filter((e) => !/favicon|404|Blocked script execution/.test(e)), []);
 });
 
-test('the three rows tick themselves, and the ticks are in the file', async () => {
+test('the rows tick themselves, and the ticks are in the file', async () => {
   await host.drive.putDocument('start-here', pristine, { label: 'reset', event: 'changed' });
   const { page } = await open();
   await page.goto(`${host.base}/a/start-here`);
   await ready(page);
   for (const step of ['write', 'ask', 'keep']) assert.equal(await done(page, step), null, `${step} starts open`);
 
-  // 1: typing in the box.
+  // 1: this drive's agent works already, so its row ticks at once, in the
+  // file, and has nothing left to press.
+  await page.waitForFunction(() => document.querySelector('[data-step="connect"]').getAttribute('data-done') === 'yes');
+  await page.waitForFunction(async () => /data-step="connect"[^>]*data-done="yes"/.test(await (await fetch('/a/start-here', { cache: 'no-store' })).text()));
+  assert.equal(await page.locator('[data-marble-id="sh-connect-go"]').isVisible(), false);
+  assert.equal(await page.locator('.needs').count(), 0, 'Make it has nothing to wait for');
+
+  // 2: typing in the box.
   await page.locator('[data-marble-id="sh-box"]').click();
   await page.keyboard.type('Trying this out between classes');
   await page.waitForFunction(() => document.querySelector('[data-step="write"]').getAttribute('data-done') === 'yes');
@@ -74,7 +83,7 @@ test('the three rows tick themselves, and the ticks are in the file', async () =
   assert.equal(await page.locator('[data-marble-id="sh-answer"]').textContent(), 'A class: COGS 120, the design lab');
   assert.equal(await done(page, 'ask'), null, 'choosing is not asking Claude');
 
-  // 2: an agent's op landing on the list, the way "put these three in a row" would.
+  // 3: an agent's op landing on the list, the way "put these three in a row" would.
   const before = await store.read('start-here');
   await host.drive.writeOps('start-here', [{ type: 'setAttr', id: 'sh-steps', name: 'style', value: 'display: grid; grid-template-columns: repeat(3, 1fr)' }], { client: 'agent-test' });
   await page.waitForFunction(() => document.querySelector('[data-step="ask"]').getAttribute('data-done') === 'yes');
@@ -85,15 +94,15 @@ test('the three rows tick themselves, and the ticks are in the file', async () =
   const still = await fetch(`${host.base}/`, { redirect: 'manual' });
   assert.equal(still.headers.get('location'), '/a/start-here');
 
-  // 3: the agent Make it starts ticks its row when the document exists.
+  // 4: the agent Make it starts ticks its row when the document exists.
   await host.drive.writeOps('start-here', [{ type: 'setAttr', id: 'sh-keep', name: 'data-done', value: 'yes' }], { client: 'agent-test' });
   await page.waitForFunction(() => document.querySelector('[data-step="keep"]').getAttribute('data-done') === 'yes');
 
-  // A reload, or a new tab, finds all three ticked.
+  // A reload, or a new tab, finds all four ticked.
   const { page: again } = await open();
   await again.goto(`${host.base}/a/start-here`);
   await ready(again);
-  for (const step of ['write', 'ask', 'keep']) assert.equal(await done(again, step), 'yes', `${step} stays ticked`);
+  for (const step of ['connect', 'write', 'ask', 'keep']) assert.equal(await done(again, step), 'yes', `${step} stays ticked`);
   assert.equal(await again.locator('[data-marble-id="sh-box"]').textContent(), 'Trying this out between classes');
 
   // And / is the Drive again.
@@ -159,5 +168,65 @@ test('the page holds up at phone and desk widths, in both schemes', async () => 
       // Last: a full-page shot resizes the window under the page.
       if (process.env.START_HERE_SHOTS) await page.screenshot({ path: `${process.env.START_HERE_SHOTS}/start-here-${name}-${colorScheme}.png`, fullPage: true });
     }
+  }
+});
+
+// A drive where nothing can run yet: the connect sheet opens over Start here,
+// the first row stays open, its Connect opens the sheet again, and Make it
+// waits and says why under it until an agent works.
+test('with no agent that works, the first row waits, Connect opens the sheet, and Make it says why', async () => {
+  let signedIn = false;
+  const bare = await startDrive({
+    documents: {},
+    providers: ['claude-subscription'],
+    signedOut: ['fake'],
+    detect: { 'claude-subscription': async () => ({ installed: true, signedIn, detail: signedIn ? 'signed in (claude.ai)' : 'run `claude` once to sign in' }) },
+  });
+  try {
+    await seedStartHere(bare.drive.store);
+    const opened = await bare.newPage();
+    const { page, errors } = opened;
+    await page.goto(`${bare.base}/a/start-here`);
+    await ready(page);
+    // The sheet opens over the page, as it does on any first visit.
+    await page.waitForFunction(() => document.querySelector('marble-agent-setup')?.shadowRoot.querySelector('dialog')?.open);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('marble-agent-setup').shadowRoot.querySelector('dialog').open);
+
+    assert.equal(await done(page, 'connect'), null);
+    const why = page.locator('.needs');
+    await why.waitFor();
+    assert.equal(await why.textContent(), 'Make it runs on your Claude or ChatGPT. Connect one above first.');
+    assert.equal(await page.locator('[data-marble-id="sh-make"]').getAttribute('aria-disabled'), 'true');
+    assert.equal(await page.locator('.needs').getAttribute('data-marble-transient'), '', 'drawn, never written');
+
+    // Make it, with an answer, starts nothing.
+    const chats = async () => (await (await fetch(`${bare.base}/agent/conversations`)).json()).length;
+    const count = await chats();
+    await page.locator('[data-marble-id="sh-answer"]').click();
+    await page.keyboard.type('A trip: Lisbon in March');
+    // aria-disabled, not disabled: a press still lands, and says why.
+    await page.locator('[data-marble-id="sh-make"]').click({ force: true });
+    await page.waitForTimeout(300);
+    assert.equal(await chats(), count, 'no agent started');
+    assert.equal(await why.count(), 1, 'the reason stays, once');
+
+    // Connect opens the sheet, on its choice.
+    await page.locator('[data-marble-id="sh-connect-go"]').click();
+    await page.waitForFunction(() => document.querySelector('marble-agent-setup')?.shadowRoot.querySelector('dialog')?.open);
+    assert.equal(await page.locator('marble-agent-setup h2').textContent(), 'Connect an agent');
+    await page.keyboard.press('Escape');
+
+    // An agent that works: the sheet says it saved something, and the row ticks.
+    signedIn = true;
+    await fetch(`${bare.base}/agent/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Origin: bare.base }, body: JSON.stringify({ keys: { cursor: '' } }) });
+    await page.evaluate(() => dispatchEvent(new CustomEvent('marble:agent-settings-saved')));
+    await page.waitForFunction(() => document.querySelector('[data-step="connect"]').getAttribute('data-done') === 'yes');
+    await why.waitFor({ state: 'detached' });
+    assert.equal(await page.locator('[data-marble-id="sh-make"]').getAttribute('aria-disabled'), null);
+    await page.waitForFunction(async () => /data-step="connect"[^>]*data-done="yes"/.test(await (await fetch('/a/start-here', { cache: 'no-store' })).text()));
+    assert.deepEqual(errors.filter((e) => !/favicon|404/.test(e)), []);
+  } finally {
+    await bare.close();
   }
 });

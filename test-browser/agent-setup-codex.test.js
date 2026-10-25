@@ -1,7 +1,7 @@
 // The first visit to a drive that has Claude and Codex and can run neither:
-// the popup offers both, says what each one's key looks like and where to make
-// one, follows the key that is pasted, and checks it with the company that
-// issued it.
+// the connect sheet offers both sign-ins, and its key view takes a key for
+// either, says what each one's key looks like and where to make one, follows
+// the key that is pasted, and checks it with the company that issued it.
 
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -43,6 +43,7 @@ async function fresh() {
   const opened = await host.newPage();
   pages.push(opened.page);
   await opened.page.goto(`${host.base}/a/garden`);
+  await setup(opened.page).getByRole('button', { name: 'Use an API key instead' }).click();
   await setup(opened.page).locator('input[name="key"]').waitFor();
   return opened;
 }
@@ -64,14 +65,14 @@ const looks = (page) => page.evaluate(() => {
 test('a drive with Claude and Codex asks once, for either, starting on Claude', async () => {
   const { page, errors } = await fresh();
   const claude = await looks(page);
-  assert.equal(claude.title, 'Connect an agent');
-  assert.match(claude.lede, /Claude or Codex/);
+  assert.equal(claude.title, 'Use an API key');
+  assert.equal(claude.lede, 'Paste a key from Anthropic for Claude, or from OpenAI for Codex.');
   assert.equal(claude.choiceShown, true);
   assert.equal(await chosen(page), 'claude');
   assert.equal(claude.placeholder, 'sk-ant-…');
   assert.match(claude.link, /console\.anthropic\.com/);
 
-  await setup(page).locator('label', { hasText: 'Codex' }).click();
+  await setup(page).locator('.agent-choice label', { hasText: 'OpenAI' }).click();
   const codex = await looks(page);
   assert.equal(await chosen(page), 'codex');
   assert.equal(codex.placeholder, 'sk-proj-…');
@@ -83,7 +84,7 @@ test('a drive with Claude and Codex asks once, for either, starting on Claude', 
 test('a pasted key picks the agent it belongs to', async () => {
   const { page } = await fresh();
   const field = setup(page).locator('input[name="key"]');
-  await setup(page).locator('label', { hasText: 'Codex' }).click();
+  await setup(page).locator('.agent-choice label', { hasText: 'OpenAI' }).click();
   await field.fill('sk-ant-api03-something');
   assert.equal(await chosen(page), 'claude');
   await field.fill('sk-proj-something');

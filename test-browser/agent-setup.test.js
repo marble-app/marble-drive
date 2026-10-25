@@ -1,6 +1,7 @@
-// The first visit to a drive whose Claude has no login and no key: a popup
-// asks for an API key right there, checks it with Anthropic, and gets out of
-// the way. "Not now" is kept for the drive; a page inside another asks nothing.
+// The first visit to a drive whose Claude has no login and no key: the
+// connect sheet opens by itself, offers Claude's own sign-in and an API key,
+// checks a key with Anthropic, and gets out of the way. "Not now" is kept for
+// the drive; a page inside another asks nothing.
 
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -58,11 +59,15 @@ async function fresh() {
 const dialogOpen = (page) => page.evaluate(() => Boolean(document.querySelector('marble-agent-setup')?.shadowRoot.querySelector('dialog')?.open));
 const setup = (page) => page.locator('marble-agent-setup');
 
-test('the first page of a visit asks for a key, with the field ready to paste into', async () => {
+test('the first page of a visit offers Claude\'s own sign-in, and a key, with the field ready to paste into', async () => {
   const { page, errors } = await fresh();
   await page.goto(`${host.base}/a/garden`);
-  await setup(page).locator('h2', { hasText: 'Connect Claude' }).waitFor();
+  await setup(page).locator('h2', { hasText: 'Connect an agent' }).waitFor();
   assert.equal(await dialogOpen(page), true);
+  // A drive with only Claude says only Claude.
+  assert.equal(await setup(page).locator('.lede').textContent(), 'Agents on this drive run on your own Claude plan. You sign in on Anthropic\u2019s page, so nobody else sees your password.');
+  assert.deepEqual(await setup(page).locator('.choice:visible .name').allTextContents(), ['Claude']);
+  await setup(page).getByRole('button', { name: 'Use an API key instead' }).click();
   assert.equal(await page.evaluate(() => document.querySelector('marble-agent-setup').shadowRoot.activeElement?.name), 'key', 'focus is in the key field');
   assert.equal(await setup(page).locator('input[name="key"]').getAttribute('type'), 'password');
   assert.deepEqual(errors, []);
@@ -71,6 +76,7 @@ test('the first page of a visit asks for a key, with the field ready to paste in
 test('a wrong key is refused in place; a right one connects Claude and closes', async () => {
   const { page } = await fresh();
   await page.goto(`${host.base}/a/garden`);
+  await setup(page).getByRole('button', { name: 'Use an API key instead' }).click();
   const field = setup(page).locator('input[name="key"]');
   await field.waitFor();
 
@@ -126,7 +132,7 @@ test('Not now is kept for the drive: another page, and a new tab, are not asked 
 test('Escape is Not now', async () => {
   const { page } = await fresh();
   await page.goto(`${host.base}/a/garden`);
-  await setup(page).locator('input[name="key"]').waitFor();
+  await setup(page).locator('h2', { hasText: 'Connect an agent' }).waitFor();
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('marble-agent-setup').shadowRoot.querySelector('dialog').open);
   assert.equal(await page.evaluate(() => sessionStorage.getItem('marble-agent-setup-dismissed')), '1');
@@ -135,7 +141,7 @@ test('Escape is Not now', async () => {
 test('a page shown inside another asks nothing; only the page you opened does', async () => {
   const { page } = await fresh();
   await page.goto(`${host.base}/a/framed`);
-  await setup(page).locator('h2', { hasText: 'Connect Claude' }).waitFor();
+  await setup(page).locator('h2', { hasText: 'Connect an agent' }).waitFor();
   const frame = page.frameLocator('iframe');
   await frame.locator('h1').waitFor();
   await page.waitForTimeout(400);
