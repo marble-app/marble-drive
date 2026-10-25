@@ -1,0 +1,19 @@
+# marble-host's Cloudflare tunnel on this PC: pc-host.marbledrive.app to the
+# router on loopback, for the front door to reach the drives the PC hosts.
+# Rendered by linux/pc-host/tunnel.sh into ~/.config/systemd/user/.
+[Unit]
+Description=marble-host: the Cloudflare tunnel to its router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@CLOUDFLARED@ tunnel --config @CONFIG@ run
+Restart=always
+RestartSec=10
+Environment="HOME=@HOME@"
+StandardOutput=append:@STATE@/host-tunnel.log
+StandardError=append:@STATE@/host-tunnel.log
+
+[Install]
+WantedBy=default.target

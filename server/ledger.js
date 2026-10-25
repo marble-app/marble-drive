@@ -15,6 +15,11 @@
 //   used   GB in use by programs (MemTotal − MemAvailable); which of the two Fly
 //          bills is settled by comparing with a real bill
 //   total  GB the machine has (MemTotal); a sprite's may grow under load
+//
+// A drive in a service of its own with a memory limit (one of other people's
+// drives on the owner's PC, server/cgroup.js) counts that service instead of
+// the machine: cpu and mem are its cgroup's, used is what its programs hold
+// (less the cache the kernel can drop), and total is its limit.
 //   procs  MB held at the minute's end by the host, the agents' turns, the
 //          browsers among those, and everything else (server/memory-guard.js)
 //   disk   GB used on the drive's filesystem
@@ -32,6 +37,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
+import { cgroupMemory, ownCgroup } from './cgroup.js';
+
 const GiB = 2 ** 30;
 const DAY = 24 * 60 * 60 * 1000;
 const FILE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/;
@@ -41,8 +48,11 @@ const FRESH_BOOT_S = 300;
 const round = (n, places = 3) => (n === null || n === undefined || !Number.isFinite(n) ? null : Number(n.toFixed(places)));
 const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
 
-/** What the machine can say about itself, each null where it cannot. */
-export function systemReaders({ cgroup = '/sys/fs/cgroup', proc = '/proc', disk = '/', read = (f) => fs.readFileSync(f, 'utf8') } = {}) {
+/** What the machine can say about itself, each null where it cannot. `own`
+ *  is the drive's own cgroup when it has a limit (found unless `cgroup` is
+ *  named), and then the numbers are that cgroup's. */
+export function systemReaders({ cgroup = null, proc = '/proc', disk = '/', read = (f) => fs.readFileSync(f, 'utf8'), own = cgroup ? null : ownCgroup({ proc }) } = {}) {
+  const dir = own ?? cgroup ?? '/sys/fs/cgroup';
   const attempt = (fn) => {
     try {
       const v = fn();
@@ -58,11 +68,15 @@ export function systemReaders({ cgroup = '/sys/fs/cgroup', proc = '/proc', disk 
   };
   return {
     cpuSeconds: () => attempt(() => {
-      const m = /^usage_usec\s+(\d+)/m.exec(read(path.join(cgroup, 'cpu.stat')));
+      const m = /^usage_usec\s+(\d+)/m.exec(read(path.join(dir, 'cpu.stat')));
       return m ? Number(m[1]) / 1e6 : null;
     }),
-    memGB: () => attempt(() => Number(read(path.join(cgroup, 'memory.current')).trim()) / GiB),
+    memGB: () => attempt(() => Number(read(path.join(dir, 'memory.current')).trim()) / GiB),
     usedGB: () => attempt(() => {
+      if (own) {
+        const m = cgroupMemory(own, (f) => attempt(() => read(f)));
+        return m ? m.used / GiB : null;
+      }
       const { total, available } = meminfo();
       return total && Number.isFinite(available) ? (total - available) / 2 ** 20 : null;
     }),

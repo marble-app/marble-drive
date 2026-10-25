@@ -1,0 +1,26 @@
+# marble-host: the drives this PC hosts for other people (docs/HOSTING.md,
+# "marble-host and the sandbox"). Rendered by linux/pc-host/host.sh into
+# ~/.config/systemd/user/. It runs whatever tools/home-release.sh made
+# current, and reads its settings from ~/.config/marble-drive/host.env
+# itself. The drives are services of their own, so stopping or restarting
+# this leaves them running; starting it starts every drive that should be.
+[Unit]
+Description=marble-host: the drives this PC hosts for other people
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@APP@/current/marble-drive
+ExecStart=@NODE@ bin/marble-drive.js host
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+Environment="HOME=@HOME@"
+Environment="PATH=@NODE_DIR@:/usr/local/bin:/usr/bin:/bin"
+Environment="NODE_ENV=production"
+StandardOutput=append:@STATE@/host.log
+StandardError=append:@STATE@/host.log
+
+[Install]
+WantedBy=default.target

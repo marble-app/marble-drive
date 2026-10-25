@@ -46,6 +46,7 @@ import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
 import { createLedger } from './ledger.js';
 import { createMemoryGuard } from './memory-guard.js';
+import { createDeepHealth } from './health-deep.js';
 import { createStreams } from './streams.js';
 import { consoleAllowed, createConsole } from './console/index.js';
 import { createGit, gitAllowed } from './git.js';
@@ -262,7 +263,7 @@ export const rootRemoved = (priorSource, ops) => {
   return roots.size > 0 && (ops ?? []).some((op) => op?.type === 'remove' && roots.has(op.id));
 };
 
-export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, genui: genuiOpts = null, agentSandbox = null, drawSummary = null } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, genui: genuiOpts = null, agentSandbox = null, drawSummary = null, deepHealth: deepHealthOpts = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
@@ -366,6 +367,9 @@ export async function createDrive(config, { log = console, agentProviders = null
   // Before the machine runs out of memory and stalls, stop the heaviest thing
   // an agent is running (server/memory-guard.js). Inert where there is no /proc.
   const memoryGuard = config.memoryGuard ? createMemoryGuard({ log, onRelief: () => ledger.count('relieved') }) : null;
+  // What marble-host and the owner's Console ask a drive on the PC: its
+  // release, its agent CLIs and whether one can run (server/health-deep.js).
+  const deepHealth = createDeepHealth({ store, keysFile: config.agentKeysFile, ...(deepHealthOpts ?? {}) });
   const typesafe = createTypesafeHandler({
     apiKey: config.typesafeApiKey,
     maxBodyBytes: config.maxBodyBytes,
@@ -883,7 +887,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       // The gate, and the two things that have to be reachable through it: the
       // form itself, and a health check a load balancer runs before anybody has
       // a cookie.
-      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts, streams: streams.count, working: work().length, memory: memoryGuard?.reading() ?? null });
+      // `release` is the one a drive on the owner's PC was started from
+      // (run-guest; docs/HOSTING.md, "Other people's drives on the PC").
+      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts, streams: streams.count, working: work().length, memory: memoryGuard?.reading() ?? null, release: process.env.MARBLE_GUEST_RELEASE ?? null });
       // The mark, for the two pages that cannot carry it in their own head: a
       // document written before this host had one, and the gate. Everything
       // made here has it inline and never asks — which is why this is a
@@ -946,6 +952,13 @@ export async function createDrive(config, { log = console, agentProviders = null
           return json(res, 401, { error: 'this drive is closed', hint: 'POST /gate with the secret' });
         }
         visit = asked.grant;
+      }
+      // marble-host's look inside a drive on the PC: the owner's, asked on
+      // this machine. Through a tunnel, the edge or marble-host's router (each
+      // adds a forwarded header) it is not there at all.
+      if (route === '/health/deep' && req.method === 'GET') {
+        if (visit || !isLocal(req)) return json(res, 404, { error: 'not found' });
+        return json(res, 200, await deepHealth.read());
       }
       // The owner's: the Allow page and Connected apps. Never a share link's.
       if (connector && !visit && (await connector.handleOwner(req, res, url))) return;

@@ -1,0 +1,12 @@
+# The parent of marble-guests.slice (a dash in a slice's name is a level in
+# the tree), and so the one that sits beside user.slice, where the owner's
+# own drive runs, and system.slice (docs/HOSTING.md, "marble-host and the
+# sandbox"). A CPU weight counts only against siblings, so the guests' half
+# share is set here: when the PC is busy, the owner's drive comes first.
+# Installed by linux/pc-host/install.sh.
+[Unit]
+Description=Marble: what this PC runs for other people
+Before=slices.target
+
+[Slice]
+CPUWeight=50

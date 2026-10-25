@@ -19,9 +19,18 @@
 // whole. The host is never a candidate, nor anything that is not an agent's.
 //
 // Where there is no /proc (a Mac), it does nothing.
+//
+// A drive in a service of its own with a memory limit (one of other people's
+// drives on the owner's PC, server/cgroup.js) watches that service, not the
+// machine: the room left is its limit less what its programs use, the
+// pressure is its own, and it acts at 90% of its limit, or with its tasks
+// waiting on memory once it is near where the service is slowed (MemoryHigh).
+// Another drive busy on the same machine is none of its business.
 
 import fs from 'node:fs';
 import path from 'node:path';
+
+import { cgroupMemory, ownCgroup } from './cgroup.js';
 
 const PAGE = 4096;
 const MB = 2 ** 20;
@@ -144,8 +153,18 @@ export function breakdown(procs, host = process.pid) {
   return { host: mb(hostMB), agents: mb(agents), browsers: mb(browsers), other: mb(other) };
 }
 
+/** The memory a drive in its own cgroup has, in readMemory's terms: its
+ *  limit, its limit less what its programs use, and its own pressure. */
+export function readCgroupMemory(dir) {
+  const m = cgroupMemory(dir);
+  return m ? { total: m.max, available: Math.max(0, m.max - m.used), pressure: m.pressure } : null;
+}
+
 export function createMemoryGuard({
   proc = '/proc',
+  // The drive's own cgroup, when it has a limit (server/cgroup.js); null is
+  // the machine.
+  cgroup = ownCgroup({ proc }),
   host = process.pid,
   tickMs = 2000,
   // Act when less than `lowMB` is available, or when tasks spent at least
@@ -154,10 +173,12 @@ export function createMemoryGuard({
   // of which about 8 GB is never its to use (the rest of Fly's autoscaled
   // memory), so MemAvailable is the real room left: about 6 GB idle, and
   // about 0.3 GB when admin-p2 froze. A hog on t-bryan stalled the machine
-  // at 6.75 GB (pressure 46% over a minute).
-  lowMB = 1536,
+  // at 6.75 GB (pressure 46% over a minute). In a cgroup of its own the two
+  // follow its limits instead: 10% of MemoryMax left, and with pressure, past
+  // 90% of MemoryHigh (1536 MB and 1 GB on the PC: about 150 MB and 610 MB).
+  lowMB = null,
   pressure = 10,
-  pressuredMB = 3072,
+  pressuredMB = null,
   cooldownMs = 10_000,
   now = Date.now,
   kill = (pid) => process.kill(pid, 'SIGKILL'),
@@ -166,12 +187,21 @@ export function createMemoryGuard({
   onRelief = () => {},
 } = {}) {
   const inert = { check: () => null, snapshot: () => null, reading: () => null, stop() {} };
-  if (!readMemory(proc)) return inert;
+  const own = cgroup ? cgroupMemory(cgroup) : null;
+  const measure = own ? () => readCgroupMemory(cgroup) : () => readMemory(proc);
+  if (!measure()) return inert;
+  if (own) {
+    const slowsAt = own.high !== null && own.high < own.max ? own.high : own.max;
+    lowMB ??= Math.round((0.1 * own.max) / MB);
+    pressuredMB ??= Math.round((own.max - 0.9 * slowsAt) / MB);
+  }
+  lowMB ??= 1536;
+  pressuredMB ??= 3072;
   let quietUntil = 0;
   let saidNothing = -Infinity;
 
   function check() {
-    const mem = readMemory(proc);
+    const mem = measure();
     if (!mem || !mem.total) return null;
     const left = mem.available / MB;
     const tight = left < lowMB || (mem.pressure >= pressure && left < pressuredMB);
@@ -203,12 +233,12 @@ export function createMemoryGuard({
   return {
     check,
     snapshot: () => {
-      const mem = readMemory(proc);
+      const mem = measure();
       return mem ? { totalGB: mem.total / 2 ** 30, ...breakdown(readProcesses(proc), host) } : null;
     },
     /** The two numbers it acts on, as the host sees them: MB left, and pressure. */
     reading: () => {
-      const mem = readMemory(proc);
+      const mem = measure();
       return mem ? { availableMB: Math.round(mem.available / MB), totalMB: Math.round(mem.total / MB), pressure: mem.pressure } : null;
     },
     stop: () => timer && clearInterval(timer),

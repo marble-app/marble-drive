@@ -1,0 +1,75 @@
+# One drive the PC hosts for someone else, in a sandbox of its own: its own
+# Linux user, folder and home, and nothing else of the PC (docs/HOSTING.md,
+# "marble-host and the sandbox"). Installed by linux/pc-host/install.sh.
+# marble-host, the owner's user service, starts, stops and restarts its
+# instances through the polkit rule installed beside it, and never enables
+# them: it starts every running drive itself when it starts.
+#
+# The drive's settings are /etc/marble-guests/%i.env, which marble-host
+# writes and systemd reads before the walls close; the folder holding every
+# drive's file is then hidden from it. Nothing here depends on the owner's
+# home: the release, Chromium and run-guest are read-only in /opt/marble.
+[Unit]
+Description=Marble drive %i (hosted on this PC)
+After=network-online.target
+Wants=network-online.target
+# Started again however often it fails: marble-host may start a failed unit
+# but not reset one, so a start limit would leave a drive down for good.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# bash, not run-guest itself, is what systemd checks for: it stays the
+# sandbox's first process and supervises node (linux/pc-host/run-guest).
+ExecStart=/bin/bash /opt/marble/bin/run-guest %i
+EnvironmentFile=/etc/marble-guests/%i.env
+DynamicUser=yes
+# /var/lib/private/marble-guests/%i, as $STATE_DIRECTORY: the drive and its home.
+StateDirectory=marble-guests/%i
+StateDirectoryMode=0700
+UMask=0077
+Slice=marble-guests.slice
+Restart=always
+RestartSec=5
+# TERM to run-guest alone, which passes it to node so the drive closes
+# cleanly; anything left after 25 s is killed.
+KillMode=mixed
+TimeoutStopSec=25
+LimitNOFILE=65536
+
+# Its share of the PC. It slows at 1 GB and stops at 1.5 GB; every guest
+# together is capped by marble-guests.slice.
+MemoryHigh=1G
+MemoryMax=1536M
+TasksMax=512
+
+# The walls. Its own user and process namespace: it cannot see or signal
+# anything outside. Chromium and Claude Code's own sandbox make user
+# namespaces of their own, so RestrictNamespaces is not set.
+PrivateUsers=yes
+PrivatePIDs=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Windows' drives (/mnt) and WSL's interop sockets (/run/WSL), through which
+# a process could run Windows programs as the owner; Tailscale's and Docker's
+# sockets; and every drive's settings.
+InaccessiblePaths=/mnt -/run/WSL -/run/tailscale -/run/docker.sock /etc/marble-guests
+# The home network, link-local addresses and the tailnet are closed; the
+# internet is open. Tailscale's DNS (100.100.100.100, and fd7a:115c:a1e0::53
+# inside the closed fc00::/7) is how the PC resolves names, so it stays open.
+IPAddressDeny=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10
+IPAddressAllow=100.100.100.100 fd7a:115c:a1e0::53
