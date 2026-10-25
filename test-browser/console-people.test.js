@@ -63,6 +63,11 @@ test('a person’s pane: sign-up, study, health and release, never an Open drive
   assert.match(pane, /4 hours from invite to first document/);
   assert.match(pane, /Form 2026-11-irb-v1/);
   assert.match(pane, /Prompts 41/);
+  // Each of /health/study's counts in words, as the drive names them.
+  assert.match(pane, /Days active 3/);
+  assert.match(pane, /Buttons 5/);
+  assert.match(pane, /One-prompt conversations 2/);
+  assert.match(pane, /Prompts while another worked 4/);
   assert.match(pane, /Memory 412 MB/);
   assert.match(pane, /Restarts 2/);
   assert.match(pane, /Last backup 20m ago/);

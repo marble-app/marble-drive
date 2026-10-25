@@ -98,7 +98,7 @@ export function drives() {
     ...extra,
   });
   return [
-    row('ana', { owner: 'a000000000000001', cohort: 'study', agent: 'claude', memoryBytes: 412_000_000, restarts: 2, health: { ok: true, working: 1, release: '20261025T161133Z-4b2103a', at: ago(0.2) }, turnsToday: 12, lastActive: ago(4), study: { counts: { daysActive: 3, prompts: 41, builds: 9, marks: 6, conversations: 7, singlePrompt: 2, whileWorking: 4, note: 'never shown' }, at: ago(3) }, heldBack: ['Start here'] }),
+    row('ana', { owner: 'a000000000000001', cohort: 'study', agent: 'claude', memoryBytes: 412_000_000, restarts: 2, health: { ok: true, working: 1, release: '20261025T161133Z-4b2103a', at: ago(0.2) }, turnsToday: 12, lastActive: ago(4), study: { counts: { days: 3, prompts: 41, builds: 9, marks: 6, buttons: 5, conversations: 7, singlePromptConversations: 2, promptsWhileAnotherWorked: 4, note: 'never shown' }, at: ago(3) }, heldBack: ['Start here'] }),
     row('ben', { owner: 'b000000000000002', agent: 'chatgpt', turnsToday: 3, lastActive: ago(60) }),
     row('cho', { owner: 'c000000000000003', agent: null }),
     row('hal', { channel: 'canary' }),

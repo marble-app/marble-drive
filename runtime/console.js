@@ -1266,13 +1266,19 @@
       p.stage === 'invited' && p.invite?.expires ? h('p.soft', { style: { margin: '.6rem 0 0', 'font-size': '.85rem' }, text: `The link works until ${dayOf(p.invite.expires)}, for one person.` }) : null);
   }
 
+  // The words for /health/study's counts, as a drive answers them
+  // (server/health-study.js) and marble-host passes them on unchanged.
   const COUNTS = {
+    days: 'Days active',
     daysActive: 'Days active',
     prompts: 'Prompts',
     builds: 'Builds',
     marks: 'Marks',
+    buttons: 'Buttons',
     conversations: 'Conversations',
+    singlePromptConversations: 'One-prompt conversations',
     singlePrompt: 'One-prompt conversations',
+    promptsWhileAnotherWorked: 'Prompts while another worked',
     whileWorking: 'Prompts while another worked',
   };
   const countWord = (k) => COUNTS[k] ?? sentence(k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase());

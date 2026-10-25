@@ -88,7 +88,7 @@ test('the door’s people, marble-host’s drives and the backups join into one 
   assert.equal(ana.person, 'Ana');
   assert.equal(ana.study.inStudy, true);
   assert.equal(ana.study.consent.version, '2026-11-irb-v1');
-  assert.deepEqual(ana.study.counts, { daysActive: 3, prompts: 41, builds: 9, marks: 6, conversations: 7, singlePrompt: 2, whileWorking: 4 }, 'counts only: a word is dropped');
+  assert.deepEqual(ana.study.counts, { days: 3, prompts: 41, builds: 9, marks: 6, buttons: 5, conversations: 7, singlePromptConversations: 2, promptsWhileAnotherWorked: 4 }, 'counts only, under the drive\'s own names: a word is dropped');
   assert.equal(ana.host.memoryBytes, 412_000_000);
   assert.equal(ana.host.restarts, 2);
   assert.equal(ana.host.release, '20261025T161133Z-4b2103a');
