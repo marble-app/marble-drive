@@ -9,14 +9,12 @@
 // checks the rule again against what is really there before anything moves,
 // and anything this cannot say as one rule goes to the agent as it was asked.
 //
-// The same plumbing as the callout's offer (server/agent/offer.js): the
-// installed CLI on the login, never a key, no tools, a hard timeout, and no
-// answer is not an error. The reply is untrusted input: one selector and only
-// the properties below, or no rule at all.
+// The same plumbing as the callout's offer (server/agent/offer.js): whichever
+// CLI this drive has connected (server/agent/side-model.js), no tools, a hard
+// timeout, and no answer is not an error. The reply is untrusted input: one
+// selector and only the properties below, or no rule at all.
 
-import { pickEnv } from '../agent/env.js';
-import { scratch } from '../agent/namer.js';
-import { runCommand } from '../agent/providers/exec.js';
+import { claudeOnLogin } from '../agent/side-model.js';
 
 const WORDS_MAX = 300;
 const OUTLINE_MAX = 40;
@@ -126,14 +124,17 @@ export function verbOf(declarations) {
   return verbs.size === 1 ? [...verbs][0] : 'Restyling';
 }
 
-/** Ask the installed CLI. Returns null — never throws — without a rule. */
+/** Ask the connected CLI. Returns null — never throws — without a rule.
+ *  `side` is the drive's helper; without one, Claude on its login, run by
+ *  `exec` in `env`. */
 export async function readIntent({
   words = '',
   outline = [],
   ids = [],
   model = 'haiku',
-  exec = runCommand,
-  env = process.env,
+  side = null,
+  exec,
+  env,
   timeout = TIMEOUT,
   signal,
   log = console,
@@ -141,10 +142,7 @@ export async function readIntent({
   if (!String(words).trim()) return null;
   try {
     const ask = intentPrompt({ words, outline, ids });
-    const cwd = await scratch();
-    const result = await exec('claude', ['-p', '--model', model, '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
-      timeout, env: pickEnv(env), cwd, signal,
-    });
+    const result = await (side ?? claudeOnLogin({ exec, env })).run({ job: 'change intent', prompt: ask, model, timeout, signal });
     if (!result || result.aborted || result.missing) return null;
     if (result.timedOut || result.code) {
       log.error?.(`[agents] change intent failed: ${result.timedOut ? 'timed out' : result.stderr?.trim() || `exit ${result.code}`}`);

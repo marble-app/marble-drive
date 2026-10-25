@@ -30,8 +30,8 @@
       });
       const answer = await response.json().catch(() => ({}));
       // The status rides on the error: a caller can tell "not possible" (409)
-      // from "the host failed".
-      if (!response.ok) throw Object.assign(new Error(answer.error ?? `${route} answered ${response.status}`), { status: response.status });
+      // from "the host failed", and "try that again" (`retry`) from "start over".
+      if (!response.ok) throw Object.assign(new Error(answer.error ?? `${route} answered ${response.status}`), { status: response.status, ...(answer.retry ? { retry: true } : {}) });
       return answer;
     };
 
@@ -298,11 +298,21 @@
       setupLater: () => ask('/agent/setup/later', { method: 'POST' }),
       connectClaude: (key) => ask('/agent/setup', { method: 'POST', body: { key } }),
       connectAgent: (provider, key) => ask('/agent/setup', { method: 'POST', body: { provider, key } }),
-      // Connect your Claude: the host runs `claude setup-token` and answers
-      // its sign-in address; the code Claude's page shows goes back to it.
+      // Connect your Claude: the host runs Claude Code's own `claude auth
+      // login` and answers its sign-in address; the code Claude's page shows
+      // goes back to it. Disconnect is the CLI's own logout.
       claudeSignIn: () => ask('/agent/claude/sign-in', { method: 'POST' }),
       claudeSignInCode: (code) => ask('/agent/claude/sign-in/code', { method: 'POST', body: { code } }),
       claudeSignInCancel: () => ask('/agent/claude/sign-in', { method: 'DELETE' }),
+      claudeSignInStatus: () => ask('/agent/claude/sign-in'),
+      claudeSignOut: () => ask('/agent/claude/sign-out', { method: 'POST' }),
+      // Connect your ChatGPT: the host runs Codex's `codex login
+      // --device-auth` and answers OpenAI's page and a one-time code, which
+      // the person types there; the status says when the login has landed.
+      codexSignIn: () => ask('/agent/codex/sign-in', { method: 'POST' }),
+      codexSignInStatus: () => ask('/agent/codex/sign-in'),
+      codexSignInCancel: () => ask('/agent/codex/sign-in', { method: 'DELETE' }),
+      codexSignOut: () => ask('/agent/codex/sign-out', { method: 'POST' }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
       // Starter credit: whose, how much is used. `fresh` asks the proxy now.

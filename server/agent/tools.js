@@ -285,7 +285,7 @@ export const TOOL_SCHEMAS = [
 // names them by the attribute it wrote, not by where they are kept.
 const STATE_KINDS = new Set(['toggle', 'choose', 'expand', 'step', 'note']);
 
-export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null, building = null, exec, log = console }) {
+export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null, building = null, exec, side = null, log = console }) {
   // conversationId → docPath → Map<id, hash>
   const ledgers = new Map();
 
@@ -639,6 +639,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         note,
         shards: input.shards,
         model: input.model,
+        side,
         exec,
         signal,
         log,
@@ -686,7 +687,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
 
       if (result.error) return { error: result.error };
       if (result.missing && !result.applied) {
-        return { error: 'the claude CLI is not installed on this host, so no workers can run: make these edits yourself with apply_ops' };
+        return { error: 'no agent CLI is connected on this host, so no workers can run: make these edits yourself with apply_ops' };
       }
       return { applied: result.applied, shards: result.shards };
     },

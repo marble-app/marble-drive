@@ -1,5 +1,5 @@
 // Start here: written first into a new drive and nowhere else, and opened by /
-// until it is deleted or all three of its rows are ticked. The Drive stays
+// until it is deleted or all four of its rows are ticked. The Drive stays
 // one click away the whole time.
 
 import assert from 'node:assert/strict';
@@ -38,7 +38,7 @@ async function seedAll(store) {
 
 const tick = (source, step) => source.replace(new RegExp(`(data-step="${step}")`), '$1 data-done="yes"');
 
-test('a new drive gets Start here first, with its three rows and what they need', async () => {
+test('a new drive gets Start here first, with its four rows and what they need', async () => {
   const { store } = await fresh();
   const made = await seedStartHere(store);
   assert.deepEqual(made, { seeded: true, path: START_HERE });
@@ -47,10 +47,19 @@ test('a new drive gets Start here first, with its three rows and what they need'
   const source = await store.read(START_HERE);
   assert.match(source, /<title>Start here<\/title>/);
   assert.doesNotMatch(source, /__(ID|TITLE|ICON|SCRIPT)__/);
-  // The three rows, in one list with its own id.
-  assert.deepEqual([...source.matchAll(/data-step="(\w+)"/g)].map((m) => m[1]), ['write', 'ask', 'keep']);
+  // The four rows, in one list with its own id.
+  assert.deepEqual([...source.matchAll(/<li[^>]*data-step="(\w+)"/g)].map((m) => m[1]), ['connect', 'write', 'ask', 'keep']);
   assert.match(source, /<ol class="steps" data-marble-id="sh-steps">/);
-  // 1: a box to write in. 2: the key. 3: chips that choose, and Make it.
+  // 1: an agent to connect, which opens the drive's connect sheet; Make it
+  // waits for one and says why.
+  assert.match(source, /<h2 data-marble-id="[^"]+">Connect Claude or ChatGPT<\/h2>/);
+  assert.match(source, /data-marble-id="sh-connect-go">Connect</);
+  assert.match(source, /new CustomEvent\('marble:connect-agent'/);
+  assert.match(source, /Make it runs on your Claude or ChatGPT\. Connect one above first\./);
+  // The agent is the agent: Claude or ChatGPT's, whichever is connected.
+  assert.match(source, /Ask the agent to change this page/);
+  assert.doesNotMatch(source.replace(/<script>[\s\S]*?<\/script>/g, ''), /Ask Claude|Claude makes/);
+  // 2: a box to write in. 3: the key. 4: chips that choose, and Make it.
   assert.match(source, /data-marble-id="sh-box" data-marble-editable/);
   assert.match(source, /<kbd>⌘J<\/kbd> \(<kbd>Ctrl J<\/kbd> on Windows\)/);
   assert.match(source, /data-marble-choose="data-kind"/);
@@ -177,12 +186,12 @@ test('/ opens Start here on a new drive, and the Drive is still there', async ()
   assert.equal(await landing({ Referer: `${base}/gate?to=%2F` }), `/a/${START_HERE}`);
 });
 
-test('/ goes back to the Drive once all three rows are ticked', async () => {
+test('/ goes back to the Drive once all four rows are ticked', async () => {
   const before = await drive.store.read(START_HERE);
   try {
-    await drive.putDocument(START_HERE, tick(tick(before, 'write'), 'ask'), { label: 'test' });
-    assert.equal(await landing(), `/a/${START_HERE}`, 'two of three is not done');
     await drive.putDocument(START_HERE, tick(tick(tick(before, 'write'), 'ask'), 'keep'), { label: 'test' });
+    assert.equal(await landing(), `/a/${START_HERE}`, 'three of four is not done: no agent is connected');
+    await drive.putDocument(START_HERE, tick(tick(tick(tick(before, 'connect'), 'write'), 'ask'), 'keep'), { label: 'test' });
     assert.equal(await landing(), '/a/drive');
   } finally {
     await drive.putDocument(START_HERE, before, { label: 'test' });

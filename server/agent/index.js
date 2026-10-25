@@ -18,17 +18,19 @@ import { createVoiceUsage, voiceSettings } from './voice/settings.js';
 import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { createClaudeSignIn } from './claude-signin.js';
+import { createCodexSignIn } from './codex-signin.js';
 import { nameConversation } from './namer.js';
 import { drawWithCli } from './drawer.js';
 import { shootSketches } from '../build/shots.js';
 import { writeOffer } from './offer.js';
 import { readIntent } from '../change/intent.js';
 import { createRunner } from './runner.js';
+import { createSideModel } from './side-model.js';
 import { listSkills, skillDirs } from './skills.js';
 import { createAgentStore } from './store.js';
 import { createTools } from './tools.js';
 import { builtInProviders } from './providers/index.js';
-import { collectUsage, createUsageReader } from './usage.js';
+import { collectUsage, collectUsageFromCli, createUsageReader } from './usage.js';
 import { createUsageHistory } from './usage-history.js';
 import { createBuilds } from '../build/index.js';
 import { createBuildRoutes } from '../build/routes.js';
@@ -44,6 +46,20 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const ANY_HOST = new Set(['0.0.0.0', '::']);
 
 const READS = new Set(['list_documents', 'read_document']);
+
+// What a CLI reads as a key or a plan, when it is in the environment. On a
+// drive hosted for someone else every one of them comes from that drive's own
+// key file (MARBLE_DRIVE_AGENT_KEYS), never from the host's environment, and
+// starter credit is not theirs to run on (docs/HOSTING.md, "Other people's
+// drives on the PC").
+export const KEY_VARIABLES = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENAI_API_KEY', 'CURSOR_API_KEY', 'MARBLE_CREDIT_URL', 'MARBLE_CREDIT_TOKEN'];
+
+/** The host's environment as the agents see it: all of it on the owner's
+ *  own drive (its .env.local may hold a key), none of the keys on a guest. */
+export function agentHostEnv(config, env = process.env) {
+  if (!config.guest) return env;
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !KEY_VARIABLES.includes(name)));
+}
 const CONNECTOR_READER = Object.freeze({ id: 'connector', conversationId: 'connector', quiet: true });
 
 export function agentsAllowed(config) {
@@ -137,7 +153,12 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const keys = createKeyStore({ file: config.agentKeysFile });
-  const liveProviders = providers ?? builtInProviders({ env: process.env, secrets: () => keys.asEnv() });
+  const hostEnv = agentHostEnv(config);
+  const liveProviders = providers ?? builtInProviders({ env: hostEnv, secrets: () => keys.asEnv() });
+  // The small jobs beside a turn (titles, drawings, suggestions, fan_out's
+  // workers) run on whichever CLI this drive has connected, on its own login
+  // or key (side-model.js).
+  const side = createSideModel({ env: hostEnv, secrets: () => keys.asEnv(), log });
   const skills = await listSkills(skillDirs({ home: os.homedir(), root: config.root }));
   const hub = createHub();
 
@@ -180,6 +201,7 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     onLook: look,
     messaging,
     building,
+    side,
     log,
   });
   const projects = { find: async (id) => findProject({ settings: await agentStore.settings(), root: config.root }, id) };
@@ -227,17 +249,16 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     // Who names a new chat once its first turn is over. Null switches naming
     // off entirely — a host running fabricated providers should not be
     // spawning a real CLI to write labels.
-    // Naming always runs on the login, never on a key: pickEnv hands the CLI
-    // the same bare environment a subscription turn gets, so a label can
-    // never be billed to somebody's API account.
+    // Naming runs on whichever CLI this drive has connected, on the login
+    // when there is one, then a key (side-model.js).
     nameConversation: config.agentNaming
-      ? (input) => nameConversation({ ...input, model: config.agentNamingModel })
+      ? (input) => nameConversation({ ...input, model: config.agentNamingModel, side })
       : null,
-    // Who draws a turn's progress widget: a small model on the login, told
-    // how by the drawing-progress skill. Null switches it off, and the card
-    // keeps its own views.
+    // Who draws a turn's progress widget: a small model, told how by the
+    // drawing-progress skill. Null switches it off, and the card keeps its
+    // own views.
     drawProgress: config.agentDrawing
-      ? (input) => drawWithCli({ ...input, model: config.agentDrawingModel, log })
+      ? (input) => drawWithCli({ ...input, model: config.agentDrawingModel, side, log })
       : null,
     // A turn's ops were filed as `agent:<id>` and its undo as `agent-undo:<id>`;
     // both are that conversation, and both are done when the turn is.
@@ -301,8 +322,11 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     // cadence keeps the limit tripped while the sliders read Unavailable. The
     // reader backs off and keeps serving the last good reading, on disk so a
     // restart mid-limit still has numbers.
+    // On a drive hosted for someone else the meter never opens their login.
+    // It shows nothing for Claude until Claude Code's own /usage can say the
+    // plan's limits (usage.js, collectUsageFromCli; config.cliUsage says why).
     usage: usage ?? createUsageReader({
-      collect: () => collectUsage(),
+      collect: () => (config.guest ? (config.cliUsage ? collectUsageFromCli({ env: hostEnv }) : { meters: [] }) : collectUsage()),
       file: path.join(store.marbleDir, 'usage-last.json'),
     }),
     usageHistory: usageHistory ?? createUsageHistory(),
@@ -310,10 +334,10 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     streams,
     // The callout's suggestions for one element, on the same terms as
     // naming: the login's small model, and off where naming is off.
-    offer: config.agentNaming ? (input) => writeOffer({ ...input, model: config.agentNamingModel }) : null,
+    offer: config.agentNaming ? (input) => writeOffer({ ...input, model: config.agentNamingModel, side }) : null,
     // A few words about the look of the page, as one rule (change-line.js),
     // on the same terms: the login's small model, off where naming is off.
-    intent: config.agentNaming ? (input) => readIntent({ ...input, model: config.agentNamingModel }) : null,
+    intent: config.agentNaming ? (input) => readIntent({ ...input, model: config.agentNamingModel, side }) : null,
     readSource: (docPath) => store.read(docPath),
     onLook: look,
     voice,
@@ -321,6 +345,11 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     voiceTitles,
     voiceMaxSeconds: config.voiceMaxSeconds ?? 120,
     claudeSignIn: createClaudeSignIn({ waitMs: (config.claudeSignInSeconds ?? 600) * 1000, log }),
+    codexSignIn: (options) => createCodexSignIn({ ...options, waitMs: (config.codexSignInSeconds ?? 900) * 1000 }),
+    hostOwner: config.hostOwner ?? null,
+    guest: Boolean(config.guest),
+    // A sign-in, a sign-out or a key changes which CLI the side jobs run on.
+    onAgentsChanged: () => side.forget(),
     log,
   });
 
@@ -339,14 +368,14 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     freePath,
     // A comment is answered by the quick model, or by the one chosen on the
     // note it was sent from.
-    reply: config.agentNaming ? (input) => writeReply({ ...input, model: /claude|opus|sonnet|haiku|fable/i.test(input.model ?? '') ? input.model : config.agentNamingModel, log }) : null,
-    suggest: config.agentNaming ? (input) => suggestPieces({ ...input, model: config.agentNamingModel, log }) : null,
+    reply: config.agentNaming ? (input) => writeReply({ ...input, model: /claude|opus|sonnet|haiku|fable/i.test(input.model ?? '') ? input.model : config.agentNamingModel, side, log }) : null,
+    suggest: config.agentNaming ? (input) => suggestPieces({ ...input, model: config.agentNamingModel, side, log }) : null,
     driveRegions: createDriveIndex({ store }),
     // A build's sketches, photographed over the app for its brief.
     shoot: config.buildSketchShots ? (input) => shootSketches({ ...input, origin: origin(), cookie: browserPass?.() ?? null, log }) : null,
     // An ended build's summary is drawn once, by the drawer's skill, with a
     // larger model and longer to answer than a running drawing gets.
-    drawSummary: drawSummary ?? (config.agentDrawing ? (input) => drawWithCli({ ...input, model: config.agentSummaryModel, timeout: 120_000, log }) : null),
+    drawSummary: drawSummary ?? (config.agentDrawing ? (input) => drawWithCli({ ...input, model: config.agentSummaryModel, timeout: 120_000, side, log }) : null),
     // Take back one build's own turns, op by op, leaving any other build's
     // work on the same app where it is (Stop, with builds side by side).
     undoTurns: async (turnIds) => {
