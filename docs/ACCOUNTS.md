@@ -441,6 +441,10 @@ When the form changes, change both in the same deploy. Someone who had the
 old form open and answers is shown the new one again, and their answer to the
 old one is not kept.
 
+If someone's invite runs out before they name a drive, send them a new one.
+It replaces the old one when they sign in with it, and its consent screen
+asks again.
+
 ### What its people can do
 
 The account page has Leave the study while they are in it. Leaving is logged
