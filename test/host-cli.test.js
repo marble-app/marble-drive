@@ -143,7 +143,7 @@ async function withSettings() {
   return h;
 }
 
-const ANA = { name: 'ana', port: 4500, owner: 'acct_1', channel: 'everyone', release: '20261025T161133Z-4b2103a', state: 'running', active: 'active', memoryBytes: 150 * 2 ** 20, health: { ok: true, working: 1, release: '20261025T161133Z-4b2103a', at: '2026-10-25T12:00:00Z' }, restarts: 0, created: '2026-10-25T11:00:00Z', cohort: null };
+const ANA = { name: 'ana', port: 4500, owner: 'acct_1', channel: 'everyone', release: '20261025T161133Z-4b2103a', state: 'running', active: 'active', memoryBytes: 150 * 2 ** 20, health: { ok: true, working: 1, release: '20261025T161133Z-4b2103a', at: '2026-10-25T12:00:00Z' }, restarts: 0, created: '2026-10-25T11:00:00Z', cohort: null, agent: 'claude', study: null, backup: { at: '2026-10-25T17:00:03Z', ok: true, lastGood: '2026-10-25T17:00:03Z' } };
 
 test('status: up, the release new drives get, and how many run', async () => {
   const h = await withSettings();
@@ -175,13 +175,15 @@ test('drives, make, restart, suspend, resume, remove and events ask the API', as
     'POST /drives/ana/restart': [200, { drive: ANA }],
     'POST /drives/ana/suspend': [200, { drive: { ...ANA, state: 'suspended' } }],
     'POST /drives/ana/resume': [200, { drive: ANA }],
-    'POST /drives/ana/remove': [200, { drive: { ...ANA, state: 'removed' } }],
+    'POST /drives/ana/remove': [200, { drive: { ...ANA, state: 'removed' }, removal: { by: 'owner', claude: 'signed-out', codex: 'was-not-signed-in', folder: 'deleted', door: 'told' } }],
+    'POST /drives/ana/export': [202, { drive: ANA, started: 'marble-guest-export@ana.service' }],
+    'POST /drives/ana/backup': [202, { drive: ANA, started: 'marble-guest-backup@ana.service' }],
     'GET /events': [200, { events: [{ at: '2026-10-25T12:00:00Z', drive: 'ana', kind: 'made', detail: { port: 4500 } }] }],
   });
   const opts = { home: h.home, fetchImpl: api.fetchImpl };
   const listed = await run(['drives'], opts);
   assert.match(listed.out, /^name +state +service +port/);
-  assert.match(listed.out, /ana +running +active +4500 +20261025T161133Z-4b2103a +150 MB +ok, 1 working/);
+  assert.match(listed.out, /ana +running +active +4500 +20261025T161133Z-4b2103a +150 MB +ok, 1 working +0 +claude +2026-10-25 17:00 +acct_1/);
   assert.equal((await run(['make', 'ana', '--owner', 'acct_1', '--cohort', 'study'], opts)).code, 0);
   assert.deepEqual(api.asked.at(-1).body, { name: 'ana', owner: 'acct_1', cohort: 'study' });
   const noOwner = await run(['make', 'ana'], opts);
@@ -200,6 +202,16 @@ test('drives, make, restart, suspend, resume, remove and events ask the API', as
   const removed = await run(['remove', 'ana', '--confirm', 'ana'], opts);
   assert.equal(removed.code, 0);
   assert.deepEqual(api.asked.at(-1).body, { confirm: 'ana' });
+  assert.match(removed.out, /ana is removed: its folder is deleted from the PC, and the door knows\. Its encrypted backup stays until you forget it\./);
+  const exported = await run(['export', 'ana'], opts);
+  assert.equal(exported.code, 0, exported.err);
+  assert.equal(api.asked.at(-1).route, '/drives/ana/export');
+  assert.match(exported.out, /marble-guest-export@ana\.service is copying ana's study data into Research\/Probe study\/ana\//);
+  const backedUp = await run(['backup', 'ana'], opts);
+  assert.equal(backedUp.code, 0, backedUp.err);
+  assert.equal(api.asked.at(-1).route, '/drives/ana/backup');
+  assert.match(backedUp.out, /marble-guest-backup@ana\.service is backing ana up/);
+  assert.equal((await run(['export'], opts)).code, 1, 'which drive?');
   const events = await run(['events', '--limit', '5'], opts);
   assert.equal(api.asked.at(-1).route, '/events?limit=5');
   assert.match(events.out, /made +ana +\{"port":4500\}/);

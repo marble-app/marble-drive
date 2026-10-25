@@ -11,7 +11,7 @@ import { openRegistry } from '../server/host/registry.js';
 import { createWatcher } from '../server/host/watcher.js';
 import { fakeUnits, quiet, scratchPc } from './fixtures/host.js';
 
-async function rig({ drives = { ana: 4500, ben: 4501 }, memory = 200, disk = 0.5 } = {}) {
+async function rig({ drives = { ana: 4500, ben: 4501 }, memory = 200, disk = 0.5, busy = () => false } = {}) {
   const pc = await scratchPc();
   const registry = await openRegistry({ dir: pc.state });
   await registry.update((r) => {
@@ -28,8 +28,12 @@ async function rig({ drives = { ana: 4500, ben: 4501 }, memory = 200, disk = 0.5
     return new Response('ok');
   } });
   const notify = notifier({ alerts, registry });
-  const watcher = createWatcher({ registry, units, probe, notify, now: () => t, statfs: () => ({ blocks: 100, bavail: 100 * (1 - disk) }), log: quiet });
-  return { pc, registry, units, probe, well, watcher, sent, advance: (ms) => (t += ms) };
+  const restarted = [];
+  const onRestart = async (name, restarts) => {
+    restarted.push([name, restarts]);
+  };
+  const watcher = createWatcher({ registry, units, probe, notify, busy, onRestart, now: () => t, statfs: () => ({ blocks: 100, bavail: 100 * (1 - disk) }), log: quiet });
+  return { pc, registry, units, probe, well, watcher, sent, restarted, advance: (ms) => (t += ms) };
 }
 
 test('one missed /health is a busy drive; two in a row restart it, count it, and tell the owner', async (t) => {
@@ -132,4 +136,34 @@ test('alerts: without a URL nothing is sent and the hour still counts; a refused
   assert.deepEqual(await broken.send({ kind: 'disk', message: 'x' }), { due: true, sent: false });
   assert.equal(errors.length, 2);
   assert.ok(errors.every((e) => !e.includes('ntfy.test/t')), 'the topic is the secret, never logged');
+});
+
+test('each restart the watcher makes is told on (to the door, by marble-host), with the count so far', async (t) => {
+  const r = await rig({ drives: { ana: 4500 } });
+  t.after(r.pc.cleanup);
+  r.well.clear();
+  await r.watcher.tick();
+  await r.watcher.tick();
+  assert.deepEqual(r.restarted, [['ana', 1]]);
+  await r.watcher.tick();
+  await r.watcher.tick();
+  assert.deepEqual(r.restarted, [['ana', 1], ['ana', 2]]);
+});
+
+test('a drive that began to be removed while it was looked at is not restarted', async (t) => {
+  const removing = new Set();
+  const r = await rig({ drives: { ana: 4500 }, busy: (name) => removing.has(name) });
+  t.after(r.pc.cleanup);
+  r.well.clear();
+  await r.watcher.tick();
+  // Between the first miss and the second, its removal begins.
+  const health = r.probe.health;
+  r.probe.health = async (port) => {
+    removing.add('ana');
+    return health(port);
+  };
+  await r.watcher.tick();
+  assert.deepEqual(r.units.calls, []);
+  assert.deepEqual(r.restarted, []);
+  assert.equal((await r.registry.events()).filter((e) => e.kind === 'unhealthy').length, 0);
 });

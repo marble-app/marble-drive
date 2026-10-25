@@ -228,10 +228,12 @@ const ADMIN = [
   ['DELETE', /^\/spares\/d-spare-[0-9a-f]{6,16}$/],
   // The PC host's people (the Console, marble-host's look every five
   // minutes, tools/door.mjs): who is where, removing a drive, ending an
-  // account's sessions, and marble-host's reports.
+  // account's sessions, taking someone out of the study, and marble-host's
+  // reports.
   ['GET', /^\/people$/],
   ['POST', /^\/drives\/[a-z0-9-]{1,40}\/remove$/],
   ['POST', /^\/accounts\/[0-9a-f]{16}\/revoke$/],
+  ['POST', /^\/accounts\/[0-9a-f]{16}\/withdraw$/],
   ['POST', /^\/events$/],
 ];
 

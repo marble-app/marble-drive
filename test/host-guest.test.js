@@ -10,7 +10,7 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 
 import { cgroupMemory, ownCgroup } from '../server/cgroup.js';
-import { createDeepHealth, madeDocs } from '../server/health-deep.js';
+import { createActivity, createDeepHealth, madeDocs } from '../server/health-deep.js';
 import { systemReaders } from '../server/ledger.js';
 import { createMemoryGuard } from '../server/memory-guard.js';
 import { tempDirs } from './fixtures/host.js';
@@ -207,9 +207,55 @@ test('a drive: /health names its release; /health/deep answers only the owner, o
   assert.equal(body.codex.version, '0.159.3');
   assert.equal(body.docs, 0);
   assert.equal(body.agentConnected, false);
+  assert.equal(body.turnsToday, 0, 'a new drive has run no turn');
+  assert.equal(body.lastActive, null);
   for (const forwarded of [{ 'x-forwarded-for': '203.0.113.9' }, { 'x-forwarded-host': 'ana.marbledrive.app' }, { 'cf-ray': 'abc' }]) {
     const res = await fetch(`${base}/health/deep`, { headers: { ...bearer, ...forwarded } });
     assert.equal(res.status, 404, `through ${Object.keys(forwarded)[0]} it is not there`);
   }
   assert.equal((await fetch(`${base}/health/deep`, { method: 'POST', headers: bearer })).status !== 200, true);
+});
+
+test('/health/deep\'s activity: the turns its agents began today by this machine\'s clock, and the last turn or page opened, from the agents\' records and the ledger alone', async () => {
+  const dir = await temp.make('deep-usage-');
+  const now = new Date(2026, 9, 25, 15, 0, 0).getTime();
+  const midnight = new Date(2026, 9, 25, 0, 0, 0).getTime();
+  const turns = [
+    { status: 'done', startedAt: midnight + 60_000, finishedAt: midnight + 120_000 },
+    { status: 'failed', startedAt: midnight + 3_600_000, finishedAt: midnight + 3_700_000 },
+    { status: 'done', startedAt: midnight - 60_000, finishedAt: midnight + 30_000 },
+    { status: 'queued', createdAt: now - 1000 },
+  ];
+  let asked = null;
+  const activity = createActivity({ turnsSince: async (since) => ((asked = since), turns), usageDir: dir, now: () => now });
+  assert.deepEqual(await activity.read(), { turnsToday: 2, lastActive: new Date(midnight + 3_700_000).toISOString() });
+  assert.equal(asked, now - 90 * 24 * 60 * 60 * 1000, 'the last ninety days of turns, as the ledger keeps');
+
+  // A page opened later than any turn ended, in the ledger's line for that minute.
+  const opened = Math.round((midnight + 5 * 3_600_000) / 1000);
+  const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+  await fsp.writeFile(path.join(dir, `${day(opened * 1000)}.jsonl`), `${JSON.stringify({ t: opened - 60, turns: 0, opens: 0 })}\n${JSON.stringify({ t: opened, turns: 0, opens: 2 })}\n${JSON.stringify({ t: opened + 60, turns: 0, opens: 0 })}\nnot a line\n`);
+  assert.equal((await activity.read()).lastActive, new Date(opened * 1000).toISOString());
+
+  // A turn running now is now; turns from other days are not today's.
+  turns.push({ status: 'running', startedAt: now - 5000 });
+  assert.deepEqual(await activity.read(), { turnsToday: 3, lastActive: new Date(now).toISOString() });
+
+  // No turns and no ledger: never used. Turns that cannot be read are none.
+  assert.deepEqual(await createActivity({ usageDir: path.join(dir, 'none'), now: () => now }).read(), { turnsToday: 0, lastActive: null });
+  const broken = createActivity({ turnsSince: () => { throw new Error('agents not made yet'); }, usageDir: dir, now: () => now });
+  assert.deepEqual(await broken.read(), { turnsToday: 0, lastActive: new Date(opened * 1000).toISOString() });
+
+  // An older day is read when today's has no page opened; a day's file is read again once it changes.
+  const older = path.join(dir, '2026-10-01.jsonl');
+  await fsp.writeFile(older, `${JSON.stringify({ t: 1_790_000_000, opens: 1 })}\n`);
+  await fsp.writeFile(path.join(dir, `${day(opened * 1000)}.jsonl`), `${JSON.stringify({ t: opened, opens: 0 })}\n`);
+  const onlyPages = createActivity({ usageDir: dir, now: () => now });
+  assert.equal((await onlyPages.read()).lastActive, new Date(1_790_000_000 * 1000).toISOString());
+
+  // It rides on /health/deep, kept with the rest of the answer.
+  const store = await fakeStore([]);
+  const deep = await createDeepHealth({ store, keysFile: null, env: {}, run: fakeCli().run, activity }).read();
+  assert.equal(deep.turnsToday, 3);
+  assert.equal(deep.lastActive, new Date(now).toISOString());
 });

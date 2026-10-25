@@ -14,7 +14,12 @@
 // only in `system` mode. Its folder is <guestStateDir>/<name>, made here
 // because StateDirectory= would put it in the owner's home.
 //
-// Anything else (a test) passes its own object with the same five calls.
+// Beside each drive are root's helpers, `marble-guest-backup@`,
+// `marble-guest-export@` and `marble-guest-remove@`, which the polkit rule
+// lets marble-host start and nothing more (helper). They exist only in
+// `system` mode, where install.sh put them.
+//
+// Anything else (a test) passes its own object with the same calls.
 
 import { execFile } from 'node:child_process';
 import fsp from 'node:fs/promises';
@@ -27,11 +32,22 @@ export const unitOf = (name) => {
   return `marble-guest@${name}.service`;
 };
 
+export const HELPERS = ['backup', 'export', 'remove'];
+/** A root helper's unit for a drive: marble-guest-<kind>@<name>.service. */
+export const helperOf = (kind, name) => {
+  if (!HELPERS.includes(kind)) throw new Error(`there is no helper "${kind}"`);
+  if (!NAME.test(name ?? '')) throw new Error(`"${name}" is not a drive's name`);
+  return `marble-guest-${kind}@${name}.service`;
+};
+// How long a start waits for a helper to end. remove-guest waits up to 15
+// minutes for a backup of the same drive to finish first.
+const HELPER_WAIT_MS = 20 * 60 * 1000;
+
 /** Runs a command and resolves with its exit code and output; never throws. */
 export function commandRunner({ timeoutMs = 90_000 } = {}) {
-  return (command, args, { env = process.env } = {}) =>
+  return (command, args, { env = process.env, timeoutMs: limit = timeoutMs } = {}) =>
     new Promise((resolve) => {
-      execFile(command, args, { env, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile(command, args, { env, timeout: limit, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
         const code = err ? (typeof err.code === 'number' ? err.code : 127) : 0;
         resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
       });
@@ -129,6 +145,15 @@ export function createUnits({ mode = 'system', run = commandRunner(), opt = '/op
       stop: async (name) => void (await must(`systemctl stop ${unitOf(name)}`, sc('stop', unitOf(name)))),
       restart: async (name) => void (await must(`systemctl restart ${unitOf(name)}`, sc('restart', unitOf(name)))),
       show: async (name) => parseShow((await sc('show', unitOf(name), `--property=${SHOW.join(',')}`)).stdout),
+      /** Start one of root's helpers for a drive: waiting for it to end (a
+       *  oneshot's start returns when it has, failing if it failed), or with
+       *  `wait: false` only asking systemd to start it. Resolves its unit. */
+      async helper(kind, name, { wait = true } = {}) {
+        const unit = helperOf(kind, name);
+        const args = ['--no-ask-password', 'start', ...(wait ? [] : ['--no-block']), unit];
+        await must(`systemctl start ${unit}`, run('systemctl', args, wait ? { timeoutMs: HELPER_WAIT_MS } : {}));
+        return unit;
+      },
     };
   }
 
@@ -177,6 +202,10 @@ export function createUnits({ mode = 'system', run = commandRunner(), opt = '/op
         await launch(name);
       },
       show,
+      // Root's helpers are installed by install.sh, which a trial skips.
+      async helper(kind, name) {
+        throw Object.assign(new Error(`${helperOf(kind, name)} is one of root's helpers, which only linux/pc-host/install.sh puts in place; HOST_MODE=user has none`), { status: 501 });
+      },
     };
   }
 

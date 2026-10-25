@@ -50,7 +50,7 @@ import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
 import { createLedger } from './ledger.js';
 import { createMemoryGuard } from './memory-guard.js';
-import { createDeepHealth } from './health-deep.js';
+import { createActivity, createDeepHealth } from './health-deep.js';
 import { signOutClis } from './health-logout.js';
 import { createStudyHealth } from './health-study.js';
 import { createStreams } from './streams.js';
@@ -384,8 +384,15 @@ export async function createDrive(config, { log = console, agentProviders = null
   // an agent is running (server/memory-guard.js). Inert where there is no /proc.
   const memoryGuard = config.memoryGuard ? createMemoryGuard({ log, onRelief: () => ledger.count('relieved') }) : null;
   // What marble-host and the owner's Console ask a drive on the PC: its
-  // release, its agent CLIs and whether one can run (server/health-deep.js).
-  const deepHealth = createDeepHealth({ store, keysFile: config.agentKeysFile, ...(deepHealthOpts ?? {}) });
+  // release, its agent CLIs and whether one can run, and how much it has
+  // been used, from the agents' turns and the ledger (server/health-deep.js).
+  // `agents` is made further down; it is asked for only once a request comes.
+  const deepHealth = createDeepHealth({
+    store,
+    keysFile: config.agentKeysFile,
+    activity: createActivity({ turnsSince: (since) => agents?.store.turnsSince(since) ?? [], usageDir: path.join(store.marbleDir, 'usage') }),
+    ...(deepHealthOpts ?? {}),
+  });
   // The probe study's counts of a study drive, from its own logs, numbers
   // only, kept five minutes (server/health-study.js).
   const studyHealth = createStudyHealth({ root: config.root, zone: config.dayZone });

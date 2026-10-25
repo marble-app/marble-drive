@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
-import { createUnits, parseShow, unitOf, userProperties } from '../server/host/units.js';
+import { commandRunner, createUnits, helperOf, parseShow, unitOf, userProperties } from '../server/host/units.js';
 import { tempDirs, quiet } from './fixtures/host.js';
 
 const temp = tempDirs();
@@ -121,6 +121,44 @@ test('user mode writes the network walls as the system template does, 127.0.0.1 
     assert.ok(props.includes(line), `${key} as in the template: ${line}`);
   }
   assert.ok(props.find((p) => p.startsWith('IPAddressDeny=')).split('=')[1].split(' ').slice(0, 2).join(' ') === '127.0.0.1/32 ::1/128');
+});
+
+test('root\'s helpers: started through polkit, waited for (a oneshot\'s start returns when it has run) or not; none in user mode', async () => {
+  const f = fakeRun();
+  const seen = [];
+  const run = async (command, args, opts = {}) => {
+    seen.push(opts.timeoutMs ?? null);
+    return f.run(command, args, opts);
+  };
+  const units = createUnits({ mode: 'system', run, log: quiet });
+  assert.equal(await units.helper('remove', 'ana'), 'marble-guest-remove@ana.service');
+  assert.equal(await units.helper('export', 'ana', { wait: false }), 'marble-guest-export@ana.service');
+  assert.equal(await units.helper('backup', 'ana-b', { wait: false }), 'marble-guest-backup@ana-b.service');
+  assert.deepEqual(f.calls, [
+    'systemctl --no-ask-password start marble-guest-remove@ana.service',
+    'systemctl --no-ask-password start --no-block marble-guest-export@ana.service',
+    'systemctl --no-ask-password start --no-block marble-guest-backup@ana-b.service',
+  ]);
+  assert.equal(seen[0], 20 * 60 * 1000, 'the removal may wait for a backup of the drive to end');
+  assert.equal(seen[1], null);
+  for (const [kind, name] of [['restore', 'ana'], ['remove', '../x'], ['backup', 'Ana']]) await assert.rejects(units.helper(kind, name), /there is no helper|not a drive's name/);
+  assert.equal(f.calls.length, 3, 'nothing asked for those');
+  assert.deepEqual(helperOf('export', 'ana'), 'marble-guest-export@ana.service');
+
+  const failing = createUnits({ mode: 'system', run: fakeRun({ 'marble-guest-remove@': { code: 1, stderr: 'Job for marble-guest-remove@ana.service failed because the control process exited with error code.\n' } }).run, log: quiet });
+  await assert.rejects(failing.helper('remove', 'ana'), /systemctl start marble-guest-remove@ana\.service failed \(exit 1\): Job for/);
+
+  const root = await temp.make('units-');
+  const user = createUnits({ mode: 'user', run: fakeRun().run, opt: path.join(root, 'opt'), guestEnvDir: path.join(root, 'etc'), guestStateDir: path.join(root, 'guests'), log: quiet });
+  await assert.rejects(user.helper('export', 'ana'), (err) => err.status === 501 && /HOST_MODE=user has none/.test(err.message));
+});
+
+test('a command\'s own time limit wins over the runner\'s', async () => {
+  const run = commandRunner({ timeoutMs: 50 });
+  const slow = await run('sleep', ['1']);
+  assert.notEqual(slow.code, 0, 'killed at the runner\'s limit');
+  const waited = await run('sleep', ['0.2'], { timeoutMs: 5000 });
+  assert.equal(waited.code, 0);
 });
 
 test('user mode: a failed systemd-run is an error', async () => {

@@ -5,7 +5,10 @@
 // makes them one at a time, and reports each step back, ending with
 // `{ state: 'ready', home: 'pchost' }`. The door pokes it through the router
 // (POST /_host/poke); it also looks once at start and every five minutes, for
-// anything asked while it was not listening.
+// anything asked while it was not listening. Once the door is ending a drive
+// (`removing` or `deleting`), it refuses every step but `removed` with a 409:
+// the maker stops making it there, and the reconcile takes it off the PC
+// (server/host/reconcile.js).
 //
 // A name the registry already knows, in any state, is refused, and so is one
 // whose folder is already on the PC: a removed drive keeps its folder until
@@ -20,6 +23,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import { checkDrive } from './check.js';
+import { createDoor } from './door.js';
 import { guestEntries, newSecret as makeSecret } from './guest-env.js';
 import { pickPort } from './ports.js';
 import { onDisk, releaseForNewDrives } from './releases.js';
@@ -36,6 +40,9 @@ class Refusal extends Error {
   }
 }
 
+/** The door refused a step with a 409: it is ending the drive. */
+class Ending extends Error {}
+
 export function createMaker({
   settings,
   registry,
@@ -44,6 +51,7 @@ export function createMaker({
   probe,
   notify = async () => {},
   fetchImpl = fetch,
+  door: given = null,
   log = console,
   newSecret = makeSecret,
   inUse,
@@ -123,6 +131,19 @@ export function createMaker({
       log.log?.(`[host] made ${name} on :${port} (${release})`);
       return { ok: true, drive: registry.drive(name) };
     } catch (err) {
+      if (err instanceof Ending) {
+        // Removed or deleted at the door while it was being made: no alert,
+        // and the reconcile takes what was made off the PC.
+        if (started) await units.stop(name).catch(() => {});
+        if (registry.drive(name)) {
+          await registry.update((r) => {
+            Object.assign(r.drives[name], { state: 'failed', failed: { step, why: err.message } });
+          });
+          await registry.event(name, 'failed', { step, why: err.message });
+        }
+        log.log?.(`[host] stopped making ${name} at ${step}: ${err.message}`);
+        return { ok: false, status: 409, step, why: err.message, ending: true };
+      }
       const status = err instanceof Refusal ? err.status : 500;
       if (status !== 500) return { ok: false, status, step, why: err.message };
       if (started) await units.stop(name).catch(() => {});
@@ -170,35 +191,37 @@ export function createMaker({
 
   // ------------------------------------------------------------- the door
 
-  const door = settings.doorAdminToken ? { url: settings.doorUrl, token: settings.doorAdminToken } : null;
-  async function api(method, route, body) {
-    const res = await fetchImpl(new URL(`/_door${route}`, door.url).href, {
-      method,
-      headers: { authorization: `Bearer ${door.token}`, 'content-type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) throw new Error(`the door answered ${method} ${route} with ${res.status}`);
-    return res.json();
-  }
+  const client = given ?? (settings.doorAdminToken ? createDoor({ url: settings.doorUrl, token: settings.doorAdminToken, fetchImpl }) : null);
 
-  /** Tell the Directory a drive is ready on the PC; remembered until it hears. */
+  /** Tell the Directory a drive is ready on the PC; remembered until it hears,
+   *  or until it says it is ending the drive, which no word of ours changes. */
   async function reportReady(name) {
     try {
-      await api('POST', `/drives/${name}/step`, { state: 'ready', home: 'pchost' });
+      await client.step(name, { state: 'ready', home: 'pchost' });
       await registry.update((r) => {
         if (r.drives[name]?.door) r.drives[name].door.reported = true;
       });
       return true;
     } catch (err) {
+      if (err.status === 409) {
+        await registry.update((r) => {
+          if (r.drives[name]?.door) Object.assign(r.drives[name].door, { reported: true, ending: true });
+        });
+        log.log?.(`[host] the door is ending ${name} (${err.message}); it is taken off the PC at the next look`);
+        return false;
+      }
       log.error?.(`[host] could not tell the door ${name} is ready: ${err.message}; telling it at the next look`);
       return false;
     }
   }
 
   async function fromDoor(job) {
+    // A 409 is the door ending the drive: making it stops at that step.
     const report = (step, state) =>
-      api('POST', `/drives/${job.name}/step`, { step, state }).catch((err) => log.error?.(`[host] ${job.name}: could not report ${step} ${state}: ${err.message}`));
+      client.step(job.name, { step, state }).catch((err) => {
+        if (err.status === 409) throw new Ending(err.message);
+        log.error?.(`[host] ${job.name}: could not report ${step} ${state}: ${err.message}`);
+      });
     const have = registry.drive(job.name);
     if (have && have.owner === job.owner && have.state === 'running') {
       // Made already, and the door did not hear: tell it again.
@@ -210,14 +233,14 @@ export function createMaker({
     log.log?.(`[host] the door asked for ${job.name}`);
     const r = await make({ name: job.name, owner: job.owner, cohort: job.cohort ?? null }, { onStep: report, door: true });
     if (r.ok) return reportReady(job.name);
-    await report(r.step, 'failed');
+    if (!r.ending) await report(r.step, 'failed').catch(() => {});
     return false;
   }
 
   let draining = false;
   /** Every drive the door has queued for the PC, one after another. */
   async function drain() {
-    if (!door) return { off: true };
+    if (!client?.on) return { off: true };
     if (draining) return { skipped: true };
     draining = true;
     try {
@@ -226,7 +249,7 @@ export function createMaker({
       }
       const tried = new Set();
       for (let i = 0; i < 50; i += 1) {
-        const { drives = [] } = await api('GET', '/queue?home=pchost');
+        const drives = await client.queue();
         const job = drives.find((d) => d.home === 'pchost' && !tried.has(d.name));
         if (!job) return { idle: true, made: tried.size };
         tried.add(job.name);
@@ -249,7 +272,7 @@ export function createMaker({
       drain().catch((err) => log.error?.(`[host] the door's queue: ${err.message}`));
     },
     start() {
-      if (!door) {
+      if (!client?.on) {
         log.log?.('[host] no DOOR_ADMIN_TOKEN: drives are made only through the admin API');
         return;
       }

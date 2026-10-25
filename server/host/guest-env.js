@@ -93,30 +93,44 @@ export function createGuestEnvs({ dir }) {
       throw err;
     }
   }
-  async function write(name, entries) {
+  async function writeNow(name, entries) {
     const file = fileOf(name);
     await atomicWrite(file, renderEnv(entries, { comment: `${name}: written by marble-host; systemd reads it for marble-guest@${name}.service` }), 0o600);
     await fsp.chmod(file, 0o600);
   }
+  // One change to a drive's file at a time, in the order asked: a change that
+  // read the file before it was deleted must not write it back.
+  const chains = new Map();
+  const serial = (name, fn) => {
+    const run = (chains.get(name) ?? Promise.resolve()).then(fn, fn);
+    const tail = run.catch(() => {});
+    chains.set(name, tail);
+    tail.then(() => {
+      if (chains.get(name) === tail) chains.delete(name);
+    });
+    return run;
+  };
   return {
     dir,
     file: fileOf,
     read,
-    write,
-    /** Change some settings and keep the rest, in their order. */
-    async update(name, patch) {
-      const text = await fsp.readFile(fileOf(name), 'utf8');
-      const entries = parseEntries(text);
-      const seen = new Set();
-      const next = entries.map(([key, value]) => {
-        seen.add(key);
-        return Object.hasOwn(patch, key) ? [key, String(patch[key])] : [key, value];
-      });
-      for (const [key, value] of Object.entries(patch)) if (!seen.has(key)) next.push([key, String(value)]);
-      await write(name, next);
-    },
-    async remove(name) {
-      await fsp.rm(fileOf(name), { force: true });
-    },
+    write: (name, entries) => serial(name, () => writeNow(name, entries)),
+    /** Change some settings and keep the rest, in their order. A setting
+     *  given as null is taken out. A file that is not there stays not there. */
+    update: (name, patch) =>
+      serial(name, async () => {
+        const text = await fsp.readFile(fileOf(name), 'utf8');
+        const entries = parseEntries(text);
+        const seen = new Set();
+        const next = [];
+        for (const [key, value] of entries) {
+          seen.add(key);
+          if (!Object.hasOwn(patch, key)) next.push([key, value]);
+          else if (patch[key] !== null && patch[key] !== undefined) next.push([key, String(patch[key])]);
+        }
+        for (const [key, value] of Object.entries(patch)) if (!seen.has(key) && value !== null && value !== undefined) next.push([key, String(value)]);
+        await writeNow(name, next);
+      }),
+    remove: (name) => serial(name, () => fsp.rm(fileOf(name), { force: true })),
   };
 }

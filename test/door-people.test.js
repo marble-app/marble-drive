@@ -1,7 +1,8 @@
 // test/door-people.test.js
 // The owner's side of the PC host's people (worker/src/door/apex.js's admin
 // routes, tools/door.mjs): GET /_door/people, removing a drive, revoking an
-// account, marble-host's events and its `removed`, each behind
+// account, withdrawing someone from the study, marble-host's events and its
+// `removed`, each behind
 // DOOR_ADMIN_TOKEN and none of them handing out a secret; then the same from
 // the terminal. The door is the real Worker code over a Directory in memory;
 // the sign-in providers and the PC host are fakes.
@@ -75,6 +76,7 @@ test('each new admin route wants the admin token, and the person’s own routes 
     ['GET', '/people'],
     ['POST', '/drives/ana/remove', { confirm: 'ana' }],
     ['POST', `/accounts/${'a'.repeat(16)}/revoke`],
+    ['POST', `/accounts/${'a'.repeat(16)}/withdraw`],
     ['POST', '/events', { drive: 'ana', kind: 'drive-updated' }],
   ]) {
     assert.equal((await w.call(method, p, body, null)).status, 401, `${p} with no token`);
@@ -86,6 +88,7 @@ test('each new admin route wants the admin token, and the person’s own routes 
     assert.equal(r.data.why, 'no such route');
   }
   assert.equal((await w.call('GET', `/accounts/${'a'.repeat(16)}/revoke`)).status, 404, 'revoke is a POST');
+  assert.equal((await w.call('GET', `/accounts/${'a'.repeat(16)}/withdraw`)).status, 404, 'withdraw is a POST');
   assert.equal((await w.call('POST', '/people')).status, 404, 'people is a GET');
 });
 
@@ -163,6 +166,24 @@ test('POST /_door/accounts/<id>/revoke: every session of the account ends; an un
   assert.deepEqual(r.data, { ok: true, count: 2 });
   for (const b of [person, other]) assert.equal((await b.go('/account')).headers.get('location'), '/', 'signed out in both browsers');
   assert.equal((await w.call('GET', '/drives')).data.drives[0].state, 'ready', 'her drive is left as it is');
+});
+
+test('POST /_door/accounts/<id>/withdraw: the Console’s Withdraw takes her out of the study as her own Leave would, logged as the owner’s', async () => {
+  const w = world();
+  const { person } = await ana(w);
+  const id = (await w.call('GET', '/people')).data.people[0].account.id;
+  assert.equal((await w.call('POST', `/accounts/${'f'.repeat(16)}/withdraw`)).status, 404);
+  const r = await w.call('POST', `/accounts/${id}/withdraw`);
+  assert.equal(r.status, 200, r.raw);
+  assert.match(r.data.study.withdrawn, /^\d{4}-\d{2}-\d{2}T/);
+  const row = (await w.call('GET', '/people')).data.people[0];
+  assert.equal(row.study.withdrawn, r.data.study.withdrawn, 'out of the study for marble-host’s next look');
+  assert.equal(row.study.consent.choice, 'given');
+  const line = (await w.call('GET', '/log')).data.lines.find((l) => l.kind === 'consent-withdrawn');
+  assert.equal(line.detail.by, 'owner');
+  assert.equal((await w.call('POST', `/accounts/${id}/withdraw`)).data.already, true);
+  assert.equal((await person.go('/account')).status, 200, 'she is still signed in, and her drive is hers');
+  assert.equal((await w.call('GET', '/drives')).data.drives[0].state, 'ready');
 });
 
 test('POST /_door/events: marble-host’s reports land in the log under the drive’s owner and in her timeline; anything else is refused in words', async () => {

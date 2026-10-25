@@ -1266,13 +1266,19 @@
       p.stage === 'invited' && p.invite?.expires ? h('p.soft', { style: { margin: '.6rem 0 0', 'font-size': '.85rem' }, text: `The link works until ${dayOf(p.invite.expires)}, for one person.` }) : null);
   }
 
+  // The words for /health/study's counts, as a drive answers them
+  // (server/health-study.js) and marble-host passes them on unchanged.
   const COUNTS = {
+    days: 'Days active',
     daysActive: 'Days active',
     prompts: 'Prompts',
     builds: 'Builds',
     marks: 'Marks',
+    buttons: 'Buttons',
     conversations: 'Conversations',
+    singlePromptConversations: 'One-prompt conversations',
     singlePrompt: 'One-prompt conversations',
+    promptsWhileAnotherWorked: 'Prompts while another worked',
     whileWorking: 'Prompts while another worked',
   };
   const countWord = (k) => COUNTS[k] ?? sentence(k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase());
@@ -1396,7 +1402,7 @@
     return section('Remove', null,
       h('p.soft', { style: { margin: '0 0 .6rem', 'font-size': '.85rem' }, text: viaDoor
         ? `Ends ${p.drive} at the door for good and signs its person out everywhere. marble-host then signs its agents out and deletes it from the PC. Its encrypted backup stays until you forget it, and the name is never given out again.`
-        : `The door doesn't know ${p.drive}, so marble-host stops it and deletes its settings. Its folder stays on the PC until the root helper deletes it.` }),
+        : `The door doesn't know ${p.drive}, so marble-host alone removes it: it signs its agents out and deletes it from the PC. Its encrypted backup stays until you forget it.` }),
       jobButton({ key: `pcremove:${p.drive}`, target: pcTarget(p), kind: 'pc-remove', cls: 'danger', onclick: (e) => confirmTyped(e.currentTarget, {
         title: `Remove ${p.drive}?`,
         body: viaDoor ? `${who} can't open it again, and marble-host deletes it from the PC.` : `${p.drive} stops for good.`,

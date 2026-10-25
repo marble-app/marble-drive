@@ -63,6 +63,9 @@ export function hostPaths(env = process.env) {
     guestEnvDir: env.HOST_GUEST_ENV_DIR || '/etc/marble-guests',
     // StateDirectory=marble-guests/%i: each drive's own folder and home
     guestStateDir: env.HOST_GUEST_STATE_DIR || '/var/lib/marble-guests',
+    // <name>.json, each drive's last backup, which root's backup writes and
+    // anyone may read (docs/HOSTING.md, "Backups of PC drives")
+    backupStatusDir: env.HOST_BACKUP_STATUS_DIR || '/var/lib/marble-backup/status',
   };
 }
 

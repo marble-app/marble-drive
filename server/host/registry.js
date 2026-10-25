@@ -8,10 +8,13 @@
 // given a port one of them holds.
 //
 // A drive: { name, port, owner, channel: canary|everyone, release, previous,
-// state: making|running|suspended|failed|removed, created, cohort, restarts,
-// heldFrom (a release it was rolled back from, so it is not moved there
-// again), checking (a release it was moved to whose check has not passed),
-// door: { reported } for a drive the door asked for }.
+// state: making|running|suspended|failed|removing|removed, created, cohort,
+// restarts, heldFrom (a release it was rolled back from, so it is not moved
+// there again), checking (a release it was moved to whose check has not
+// passed), door: { reported, ending } for a drive the door asked for,
+// removing: { at, by, door, was } while it is being taken off the PC
+// (server/host/remover.js), removed (when it was), told: { agent-connected,
+// first-document } for the firsts the door has heard (server/host/looks.js) }.
 //
 // events.jsonl is one line per thing that happened ({ at, drive, kind,
 // detail }), the newest last, trimmed to the last few thousand.

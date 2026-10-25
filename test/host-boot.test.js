@@ -12,7 +12,7 @@ import { bootDrives } from '../server/host/boot.js';
 import { createGuestEnvs, guestEntries } from '../server/host/guest-env.js';
 import { startHost } from '../server/host/index.js';
 import { openRegistry } from '../server/host/registry.js';
-import { fakeUnits, freePort, quiet, scratchPc } from './fixtures/host.js';
+import { fakeDoor, fakeProbe, fakeUnits, freePort, quiet, scratchPc } from './fixtures/host.js';
 
 const RELEASE = '20261025T161133Z-4b2103a';
 
@@ -132,4 +132,33 @@ test('startHost refuses to start without its keys, naming the setting and not a 
   await assert.rejects(startHost({ env, log: quiet, units: fakeUnits() }), (err) => /HOST_KEY is not set/.test(err.message) && !err.message.includes('only-this'));
   await fsp.writeFile(settingsFile, 'HOST_KEY=k\n', { mode: 0o600 });
   await assert.rejects(startHost({ env, log: quiet, units: fakeUnits() }), /HOST_ADMIN_TOKEN is not set/);
+});
+
+test('startHost: the door\'s people are read at start, and a restart the watcher makes of a drive the door made is told to it', async (t) => {
+  const pc = await scratchPc();
+  t.after(pc.cleanup);
+  const { registry, envs } = await withDrives(pc, [['ana', 'running', 4500]]);
+  await registry.update((r) => {
+    Object.assign(r.drives.ana, { cohort: 'study', door: { reported: true } });
+  });
+  const door = fakeDoor({
+    drives: [{ name: 'ana', owner: 'acct_1', home: 'pchost', state: 'ready' }],
+    people: [{ account: { id: 'acct_1' }, drive: { name: 'ana', state: 'ready', home: 'pchost' }, study: { cohort: 'study', consent: { version: 'v1', at: '2026-10-25T11:00:00.000Z', choice: 'given' }, withdrawn: null } }],
+  });
+  const settingsFile = path.join(pc.root, 'host.env');
+  await fsp.writeFile(settingsFile, `HOST_KEY=router-key\nHOST_ADMIN_TOKEN=admin-token\nHOST_ROUTER_PORT=${await freePort()}\nHOST_ADMIN_PORT=${await freePort()}\nHOST_MODE=user\nDOOR_URL=https://door.test\nDOOR_ADMIN_TOKEN=door-token\n`, { mode: 0o600 });
+  const env = { HOME: pc.root, MARBLE_HOST_ENV: settingsFile, HOST_STATE_DIR: pc.state, HOST_OPT: pc.opt, HOST_GUEST_ENV_DIR: pc.guestEnvDir, HOST_GUEST_STATE_DIR: pc.guestStateDir, HOST_BACKUP_STATUS_DIR: pc.settings.backupStatusDir };
+  const probe = fakeProbe();
+  probe.set(4500);
+  const host = await startHost({ env, log: quiet, units: fakeUnits(), probe, fetchImpl: door.fetchImpl, watchEveryMs: 60_000 });
+  t.after(() => host.stop());
+  for (let i = 0; i < 200 && !(await envs.read('ana')).MARBLE_CONSENT; i += 1) await new Promise((r) => setTimeout(r, 10));
+  assert.equal((await envs.read('ana')).MARBLE_CONSENT, 'v1@2026-10-25T11:00:00.000Z', 'in the study from the first look');
+  assert.ok(door.heard.some((h) => h.path === '/_door/people'));
+  assert.ok(probe.asked.some(([route]) => route === '/health/deep'), 'and looked at');
+
+  probe.set(4500, { ok: false });
+  await host.watcher.tick();
+  await host.watcher.tick();
+  assert.deepEqual(door.events.filter((e) => e.kind === 'drive-restarted'), [{ drive: 'ana', kind: 'drive-restarted', detail: { by: 'watcher', restarts: 1 } }]);
 });
