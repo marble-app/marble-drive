@@ -677,6 +677,61 @@ which no other drive can plant, and only that name counts there. Plain http
 Someone who signed in with the passphrase over https signs in once more. The
 third guard, the Public Suffix List entry, is the owner's to submit.
 
+### People sign in to their own Claude or ChatGPT
+
+Built 2026-10-25. A person on a PC drive connects their own Claude or ChatGPT
+in the browser. Each CLI signs itself in on its company's own page: `claude
+auth login --claudeai` or `codex login --device-auth`, run inside the drive's
+sandbox with its own HOME. The login stays in that home
+(`~/.claude`, `~/.codex/auth.json`). Marble starts the command, types the
+one-time code the person pastes into Claude's prompt, and never reads, copies
+or keeps the login. An API key for either is still offered, because
+Anthropic's terms for hosting Claude Code say a host may not remove a sign-in
+method. The sheet, its routes and what the commands print are in
+[AGENTS.md](AGENTS.md), "Connect an agent".
+
+A new drive opens on Start here with the connect sheet over it. The sheet's
+line names the host from `MARBLE_HOST_OWNER`: "You sign in on their page, so
+Bryan never sees your password." Start here's first row is "Connect Claude or
+ChatGPT". It ticks itself once an agent works, and until then Make it waits
+and says why under it.
+
+A drive with `MARBLE_GUEST=1` differs from the owner's in four ways:
+
+- The usage meter never opens the login file to ask Anthropic, as the owner's
+  drive does, so it shows nothing for Claude. Claude Code 2.1.281 answers
+  `claude -p /usage` with a breakdown of what used the plan, not its limits;
+  once a version prints the limits, `MARBLE_DRIVE_CLI_USAGE=1` has the meter
+  read them from there (`collectUsageFromCli`). Codex has no meter.
+- Every key an agent gets comes from the drive's own key file. The agents'
+  environment drops any key or starter-credit setting the host's environment
+  holds, and without `MARBLE_DRIVE_AGENT_KEYS` the file is
+  `$HOME/.config/marble-drive/agent-keys`, never one beside the shared release.
+- There is no starter credit, since the person's own account has to pay.
+- Settings offers Disconnect for any login, because the CLI's logout touches
+  only that person's home. On the owner's drive it is offered only for a login
+  the drive made from the sheet.
+
+The small jobs beside a turn run on whichever CLI the person connected
+(`server/agent/side-model.js`), so they spend a little of the person's plan.
+They are chat titles, progress drawings, callout suggestions, build picks and
+replies, a look read as one rule, and fan_out's workers. Before, every one but
+titles called `claude` and failed quietly on a drive with only ChatGPT.
+
+marble-host's `/health/deep` should ask the same two commands the drive asks,
+with the guest's HOME and no key in the environment. `claude auth status
+--json` means signed in when it exits 0 with `loggedIn: true`. `codex login
+status` means signed in when it exits 0 with "Logged in using ChatGPT", which
+it prints on stderr. Neither needs a login file opened. Leaving runs `claude
+auth logout` and `codex logout`, as `POST /agent/claude/sign-out` and `POST
+/agent/codex/sign-out` do.
+
+No real account has signed in through it yet. To try it on a test guest:
+
+1. Connect Claude from the sheet and send a chat.
+2. Check that Agents › Usage shows the plan's limits, then press Disconnect.
+3. Do the same with ChatGPT.
+
 ### Backups of PC drives
 
 Built 2026-10-25. Each hour, every PC drive that changed since its last backup

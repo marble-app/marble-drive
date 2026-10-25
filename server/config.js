@@ -258,8 +258,14 @@ export function loadConfig(env = process.env) {
     // 0 is no cap: a person stops a turn, a timer does not.
     agentMaxMinutes: num('MARBLE_DRIVE_AGENT_MAX_MINUTES', 0),
     // API keys the settings panel writes. Gitignored, and not under the drive
-    // root, so a backup of `.marble/` does not take them.
-    agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', path.join(process.cwd(), '.agent-keys.local'))),
+    // root, so a backup of `.marble/` does not take them. Every key an agent
+    // reads or is given goes through this one file. A drive hosted for
+    // someone else is always told where its own is (run-guest); were it not,
+    // it would still keep it in its own home, never beside the release that
+    // every such drive shares.
+    agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', str('MARBLE_GUEST', '') === '1'
+      ? path.join(str('HOME', os.homedir()), '.config', 'marble-drive', 'agent-keys')
+      : path.join(process.cwd(), '.agent-keys.local'))),
     // Where a pasted API key is checked before it is kept (server/agent/key-check.js).
     anthropicBase: str('MARBLE_DRIVE_ANTHROPIC_BASE', 'https://api.anthropic.com'),
     openaiBase: str('MARBLE_DRIVE_OPENAI_BASE', 'https://api.openai.com'),
@@ -268,6 +274,28 @@ export function loadConfig(env = process.env) {
     // How long Connect your Claude waits for the code from Claude's page
     // before it ends the sign-in it started (server/agent/claude-signin.js).
     claudeSignInSeconds: num('MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS', 600),
+    // How long ChatGPT's device sign-in waits for the person on OpenAI's page:
+    // the life of its one-time code (server/agent/codex-signin.js).
+    codexSignInSeconds: num('MARBLE_DRIVE_CODEX_SIGNIN_SECONDS', 900),
+    // A drive hosted for someone else on the owner's PC (docs/HOSTING.md,
+    // "Other people's drives on the PC"): run-guest sets MARBLE_GUEST=1. Such
+    // a drive reads nothing of its agent's login (the usage meter waits for
+    // the CLI to say), has no starter credit, and keeps its keys only in its
+    // own file.
+    guest: str('MARBLE_GUEST', '') === '1',
+    // Whether a guest's usage meter asks Claude Code's own `/usage`. Off: in
+    // print mode Claude Code 2.1.281 answers `/usage` with a breakdown of what
+    // used the plan, not its limits, so there is nothing for the meter to read,
+    // and each ask starts a whole Claude Code (about 6 s and 9 s of CPU, seen on
+    // the PC on Oct 25). Until a version prints the limits, a guest shows no
+    // Claude meter, which locks nothing: an unknown meter never greys a model.
+    cliUsage: bool('MARBLE_DRIVE_CLI_USAGE', false),
+    // Who hosts this drive, for words like "Bryan never sees your password".
+    // A plain name or nothing: it is shown on the page as it is.
+    hostOwner: (() => {
+      const name = str('MARBLE_HOST_OWNER', '').replace(/\s+/g, ' ').trim();
+      return /^[\p{L}\p{M}][\p{L}\p{M}' .-]{0,39}$/u.test(name) ? name : null;
+    })(),
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),

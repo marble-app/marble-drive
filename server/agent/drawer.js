@@ -18,9 +18,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-import { pickEnv } from './env.js';
-import { scratch } from './namer.js';
-import { runCommand } from './providers/exec.js';
+import { claudeOnLogin } from './side-model.js';
 import { PLUGIN_DIR } from './skills.js';
 
 export const SKILL_PATH = path.join(PLUGIN_DIR, 'skills', 'drawing-progress', 'SKILL.md');
@@ -215,22 +213,15 @@ const ran = (ms) => {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
 };
 
-/** Ask the CLI for a drawing. Null — never a throw — when there is none. */
-export async function drawWithCli({ system, prompt, model = 'haiku', exec = runCommand, env = process.env, timeout = 45_000, log = console } = {}) {
-  const cwd = await scratch();
-  const args = [
-    '-p',
-    '--model', model,
-    '--tools', '',
-    '--setting-sources', 'project',
-    '--system-prompt', system,
-    '--output-format', 'text',
-    '--', prompt,
-  ];
+/** Ask the connected CLI for a drawing (side-model.js). Null — never a
+ *  throw — when there is none. `side` is the drive's helper; without one,
+ *  Claude on its login. */
+export async function drawWithCli({ system, prompt, model = 'haiku', side = null, exec, env, timeout = 45_000, log = console } = {}) {
   // No extended thinking: with it a drawing took fifty seconds and five
   // thousand tokens; without, seven seconds and a few hundred, and it looks
   // the same. A widget that arrives after the moment it shows is no widget.
-  const result = await exec('claude', args, { timeout, env: { ...pickEnv(env), MAX_THINKING_TOKENS: '0' }, cwd });
+  // (On Codex, the low effort its table gives a small model does the same.)
+  const result = await (side ?? claudeOnLogin({ exec, env })).run({ job: 'drawing progress', system, prompt, model, timeout, env: { MAX_THINKING_TOKENS: '0' } });
   if (result.missing || result.aborted) return null;
   if (result.timedOut || result.code) {
     log.error?.(`[agents] drawing progress failed: ${result.timedOut ? 'timed out' : result.stderr?.trim() || `exit ${result.code}`}`);

@@ -48,7 +48,9 @@ for (const line of (read(path.join(CONFIG, 'sprite.env')) ?? '').split('\n')) {
 }
 const provider = env.find((e) => e.key === 'MARBLE_DRIVE_AGENT_PROVIDER')?.value;
 const settings = json(path.join(DRIVE, '.marble', 'agents', 'settings.json')) ?? {};
-const saved = json(path.join(CONFIG, 'agent-keys')) ?? {};
+// Where the drive keeps its keys: MARBLE_DRIVE_AGENT_KEYS when set, else
+// where a sprite's release points it.
+const saved = json(process.env.MARBLE_DRIVE_AGENT_KEYS || path.join(CONFIG, 'agent-keys')) ?? {};
 
 // Documents and bytes, walking the drive but not its bookkeeping; capped so a
 // huge drive costs a bounded look.

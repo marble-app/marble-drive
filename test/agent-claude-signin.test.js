@@ -1,8 +1,10 @@
-// Connect your Claude, the host half: `claude setup-token` run in a
-// pseudo-terminal, its sign-in address read, the pasted code handed back, the
-// token read. The command here is a fake drawn from what Claude Code 2.1.281
-// really prints (test/fixtures/fake-claude-setup-token.mjs); the pseudo-
-// terminal is the real `script`.
+// Connect your Claude, the host half: `claude auth login --claudeai` run in a
+// pseudo-terminal, its sign-in address read, the pasted code typed into its
+// prompt, and the sign-in counted done when the command exits 0 and `claude
+// auth status` says signed in. No token is read or kept here. The command is
+// a fake drawn from what Claude Code 2.1.281 really prints
+// (test/fixtures/fake-claude-auth.mjs); the pseudo-terminal is the real
+// `script`.
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -14,12 +16,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
-  createClaudeSignIn, findSignInError, findSignInUrl, findToken, ptyCommand, stripTerminal,
+  claudeLogout, claudeStatus, createClaudeSignIn, findExit, findLoginOutcome, findSignInError, findSignInUrl, ptyCommand, stripTerminal,
 } from '../server/agent/claude-signin.js';
 
-const FAKE = fileURLToPath(new URL('./fixtures/fake-claude-setup-token.mjs', import.meta.url));
-const URL_SHOWN = 'https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=FAKEchallengeFAKEchallengeFAKEchallenge0123&code_challenge_method=S256&state=FAKEstateFAKEstateFAKEstate-0123456789_ab';
-const TOKEN = 'sk-ant-oat01-FAKEfakeFAKEfake_0123456789-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-AA';
+const FAKE = fileURLToPath(new URL('./fixtures/fake-claude-auth.mjs', import.meta.url));
+const URL_SHOWN = 'https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3Amcp_servers+user%3Afile_upload+user%3Aplugins&code_challenge=FAKEchallengeFAKEchallengeFAKEchallenge0123&code_challenge_method=S256&state=FAKEstateFAKEstateFAKEstate-0123456789_ab';
 
 let hasScript = true;
 try {
@@ -29,19 +30,27 @@ try {
 }
 const needsPty = { skip: hasScript ? false : 'no `script` on this machine' };
 
-/** A `claude` on its own PATH that is the fake, in one mode, logging to a file. */
+/** A `claude` on its own PATH that is the fake, in one mode, logging to a
+ *  file, with a HOME of its own where its "login" lands. */
 async function fakeClaude(mode = 'normal') {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'fake-claude-'));
+  const home = path.join(dir, 'home');
+  await fsp.mkdir(home);
   const log = path.join(dir, 'log');
   const bin = path.join(dir, 'claude');
   await fsp.writeFile(bin, `#!/bin/sh\nexec "${process.execPath}" "${FAKE}" "$@" --log "${log}" --mode ${mode}\n`, { mode: 0o755 });
   const entries = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
   return {
     dir,
-    env: () => ({ PATH: `${dir}:${process.env.PATH}`, HOME: dir }),
+    home,
+    // Keys in the host's environment, as on a drive that has them: none may
+    // reach the sign-in.
+    env: () => ({ PATH: `${dir}:${process.env.PATH}`, HOME: home, ANTHROPIC_API_KEY: 'sk-ant-api03-host', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-host', MARBLE_DRIVE_SECRET: 'hush' }),
     entries,
-    pid: () => entries().find((e) => e.pid)?.pid ?? null,
+    runs: () => entries().filter((e) => e.pid && e.args[0] === 'auth' && e.args[1] === 'login'),
+    pid: () => entries().filter((e) => e.pid && e.args[1] === 'login').at(-1)?.pid ?? null,
     codes: () => entries().filter((e) => e.code).map((e) => e.code),
+    signedIn: () => fs.existsSync(path.join(home, '.claude', 'fake-login.json')),
   };
 }
 
@@ -61,138 +70,177 @@ const until = async (check, ms = 5_000) => {
   }
   return false;
 };
+const quiet = { error() {} };
 
 // ---------------------------------------------------------------- reading it
 
-test('the address is read from the terminal hyperlink, even when the text is cut at 80 columns', () => {
-  // Real bytes from Claude Code 2.1.281 at 80 columns, the PKCE values swapped.
-  const real = '\u001b[1C\u001b[1A\u001b[38;5;246mBrowser didn\'t open? Use the url below to sign in (c to copy)\u001b[39m\r\r\n\r\r\n'
-    + `\u001b]8;id=1qh2pnt;${URL_SHOWN}\u0007\u001b[38;5;246m${URL_SHOWN.slice(0, 80)}\u001b[39m\u001b]8;;\u0007\r\r\n`
-    + `\u001b]8;id=1qh2pnt;${URL_SHOWN}\u0007\u001b[38;5;246m${URL_SHOWN.slice(80, 160)}\u001b[39m\u001b]8;;\u0007\r\r\n`
-    + '\r\r\n\u001b[2GPaste\u001b[8Gcode\u001b[13Ghere\u001b[18Gif\u001b[21Gprompted\u001b[30G>\r\r\n';
+test('the address is read from what Claude Code 2.1.281 prints: a terminal hyperlink, then the text', () => {
+  // The bytes `claude auth login --claudeai` printed on 2026-10-25 in a
+  // pseudo-terminal with an empty HOME, the PKCE values swapped.
+  const real = 'Opening browser to sign in…\r\n'
+    + `If the browser didn't open, visit: \u001b]8;;${URL_SHOWN}\u0007\u001b[94m${URL_SHOWN}\u001b[39m\u001b]8;;\u0007\r\n`
+    + 'Paste code here if prompted > ';
   assert.equal(findSignInUrl(real), URL_SHOWN);
-  assert.match(stripTerminal(real), /Paste code here if prompted >/, 'a cursor move to a column reads as a space');
+  assert.match(stripTerminal(real), /Paste code here if prompted > $/);
+  // The text alone, cut at 80 columns by a narrow terminal, is joined back.
+  const cut = `Opening browser to sign in…\r\nIf the browser didn't open, visit:\r\n${URL_SHOWN.match(/.{1,80}/g).map((l) => `\u001b[94m${l}\u001b[39m\r\n`).join('')}Paste code here if prompted > `;
+  assert.equal(findSignInUrl(cut), URL_SHOWN);
+  assert.equal(findSignInUrl('Opening browser to sign in…'), null, 'no address yet');
+  assert.equal(findSignInUrl('See https://docs.claude.com/en/docs for help\r\n'), null, 'a link that is not a sign-in');
+  // Only Anthropic's own page is opened for the person.
+  assert.equal(findSignInUrl('visit: https://evil.example/oauth/authorize?x=1\r\nPaste code here if prompted > '), null);
 });
 
-test('with no hyperlink, an address cut across lines is joined back together', () => {
-  const lines = URL_SHOWN.match(/.{1,80}/g);
-  const plain = `Browser didn't open? Use the url below to sign in\r\n\r\n${lines.map((l) => `\u001b[38;5;246m${l}\u001b[39m\r\n`).join('')}\r\n\r\n Paste code here if prompted >\r\n`;
-  assert.equal(findSignInUrl(plain), URL_SHOWN);
-  assert.equal(findSignInUrl('Welcome to Claude Code\r\nOpening browser to sign in…'), null, 'no address yet');
-  assert.equal(findSignInUrl('See https://docs.claude.com/en/docs for help'), null, 'a link that is not a sign-in');
+test('what came of a code is read from its own words, and the shell says the exit', () => {
+  assert.deepEqual(findLoginOutcome('\r\nLogin successful.\r\n'), { ok: true });
+  assert.deepEqual(findLoginOutcome('Invalid code. Please make sure the full code was copied.\r\n'), { invalid: true });
+  assert.deepEqual(findLoginOutcome('\r\nLogin failed: Request failed with status code 400\r\n'), { error: 'Request failed with status code 400' });
+  assert.deepEqual(findLoginOutcome('\r\nmarble-exit:1\r\n'), { error: 'it exited 1' }, 'an exit with nothing said is a failure');
+  assert.equal(findLoginOutcome('Login fai'), null, 'not until the line is whole');
+  assert.equal(findLoginOutcome('Paste code here if prompted > '), null);
+  assert.equal(findExit('marble-pid:12\r\n…\r\nmarble-exit:0\r\n'), 0);
+  assert.equal(findExit('still going'), null);
+  assert.equal(findSignInError('Managed settings on this machine configure a Cloud gateway sign-in; run interactive /login to authenticate.\n'), 'Managed settings on this machine configure a Cloud gateway sign-in; run interactive /login to authenticate.');
 });
 
-test('the token is read whole, on one line or cut across several, and errors are named', () => {
-  const one = `\u001b[38;5;114m✓ Long-lived authentication token created successfully!\u001b[39m\r\r\n\r\r\nYour OAuth token (valid for 1 year):\r\r\n\r\r\n\u001b[38;5;220m${TOKEN}\u001b[39m\r\r\n\r\r\nStore this token securely.`;
-  assert.equal(findToken(one), TOKEN);
-  const cut = `Your OAuth token (valid for 1 year):\r\n\r\n${TOKEN.match(/.{1,80}/g).join('\r\n')}\r\n\r\nStore this token securely. You won't be able to see it again.`;
-  assert.equal(findToken(cut), TOKEN);
-  const cutNoGap = `${TOKEN.match(/.{1,80}/g).join('\r\n')}\r\nStore this token securely.`;
-  assert.equal(findToken(cutNoGap), TOKEN, 'a line with spaces ends it');
-  assert.equal(findToken('Use this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>'), null);
-
-  assert.equal(findSignInError('\u001b[38;5;211mOAuth error: Request failed with status code 400\u001b[39m\u001b[K\r\nPress Enter to retry.'), 'Request failed with status code 400');
-  assert.match(findSignInError('setup-token creates a long-lived Claude.ai subscription token, which this policy does not permit.\r\n'), /does not permit/);
-  assert.equal(findSignInError('\u001b[38;5;211mOAuth error: Request fai'), null, 'not until the line is whole');
-  assert.equal(findSignInError('Paste code here if prompted >'), null);
-});
-
-test('the pseudo-terminal is script on Linux (util-linux or busybox) and BSD script on a Mac, 1000 columns wide', () => {
-  const linux = ptyCommand(['claude', 'setup-token'], 'linux');
+test('the pseudo-terminal is script on Linux and BSD script on a Mac, 1000 columns wide, echo off', () => {
+  const linux = ptyCommand(['claude', 'auth', 'login', '--claudeai'], 'linux', { watch: true });
   assert.equal(linux.command, 'script');
   assert.deepEqual(linux.args.slice(0, 3), ['-q', '-f', '-c']);
-  assert.match(linux.args[3], /^stty cols 1000 rows 50 2>\/dev\/null; exec 'claude' 'setup-token'$/);
+  assert.match(linux.args[3], /^stty cols 1000 rows 50 -echo 2>\/dev\/null; echo "marble-pid:\$\$"; 'claude' 'auth' 'login' '--claudeai'; printf/);
+  assert.match(linux.args[3], /marble-exit:%s/);
   assert.equal(linux.args[4], '/dev/null');
-  const mac = ptyCommand(['/opt/my claude', 'setup-token'], 'darwin');
+  const mac = ptyCommand(['/opt/my claude', 'auth', 'login'], 'darwin', { watch: true });
   assert.deepEqual(mac.args.slice(0, 4), ['-q', '/dev/null', 'sh', '-c']);
-  assert.match(mac.args[4], /exec '\/opt\/my claude' 'setup-token'$/);
+  assert.match(mac.args[4], /'\/opt\/my claude' 'auth' 'login'/);
+  assert.match(ptyCommand(['claude', 'x'], 'linux').args[3], /exec 'claude' 'x'$/, 'without watch, the command is the shell');
+});
+
+test('claude auth status is read for whether it is signed in, and nothing about the account', async () => {
+  const calls = [];
+  const exec = (answer) => async (command, args, options) => { calls.push({ command, args, env: options.env }); return answer; };
+  const on = await claudeStatus({ exec: exec({ code: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email: 'a@b.c', orgName: 'Org' }) }), env: { PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'sk-ant-x' } });
+  assert.deepEqual(on, { installed: true, signedIn: true, method: 'claude.ai' });
+  assert.deepEqual(calls[0].args, ['auth', 'status', '--json']);
+  assert.equal(calls[0].env.ANTHROPIC_API_KEY, undefined, 'asked about the login, not a key');
+  assert.deepEqual(await claudeStatus({ exec: exec({ code: 1, stdout: '{"loggedIn": false, "authMethod": "none"}' }) }), { installed: true, signedIn: false, method: null });
+  assert.deepEqual(await claudeStatus({ exec: exec({ code: 0, stdout: 'not json' }) }), { installed: true, signedIn: false, method: null });
+  assert.deepEqual(await claudeStatus({ exec: exec({ missing: true }) }), { installed: false, signedIn: false, method: null });
+  const out = await claudeLogout({ exec: exec({ code: 0, stdout: 'Successfully logged out from your Anthropic account.\n' }) });
+  assert.equal(out.ok, true);
+  assert.deepEqual(calls.at(-1).args, ['auth', 'logout']);
 });
 
 // ------------------------------------------------------------- running it
 
-test('start reads the address; the code reaches the command; the token comes back; nothing is left running', needsPty, async (t) => {
+test('start reads the address; the code reaches the prompt; it signs in; nothing is kept here or left running', needsPty, async (t) => {
   const fake = await fakeClaude();
-  const signIn = createClaudeSignIn({ env: fake.env, log: { error() {} } });
+  const signIn = createClaudeSignIn({ env: fake.env, log: quiet });
   t.after(() => signIn.close());
   const { url } = await signIn.start();
   assert.equal(url, URL_SHOWN);
   assert.equal(signIn.waiting(), true);
   const pid = fake.pid();
   assert.ok(pid && alive(pid), 'the command is waiting for its code');
-  assert.deepEqual(fake.entries()[0].args, ['setup-token']);
+  assert.deepEqual(fake.runs()[0].args, ['auth', 'login', '--claudeai']);
+  assert.deepEqual(fake.runs()[0].keys, [], 'no key and no token reaches the sign-in');
 
-  const { token } = await signIn.finish('  good-code-from-claude#FAKEstate  ');
-  assert.equal(token, TOKEN);
+  const done = await signIn.finish('  good-code-from-claude#FAKEstate  ');
+  assert.deepEqual(done, { signedIn: true, method: 'claude.ai' });
+  assert.equal(JSON.stringify(done).includes('sk-ant'), false, 'nothing like a token comes back');
   assert.deepEqual(fake.codes(), ['good-code-from-claude#FAKEstate'], 'the code, trimmed, and only once');
+  assert.equal(fake.signedIn(), true, 'the login is the CLI\'s own, under its home');
   assert.equal(signIn.waiting(), false);
   assert.ok(await until(() => !alive(pid)), 'the command is gone');
-  await assert.rejects(signIn.finish('good-again'), { status: 409 });
+  await assert.rejects(signIn.finish('good-again#x'), { status: 409 });
+
+  assert.equal((await signIn.status()).signedIn, true);
+  assert.equal((await signIn.signOut()).ok, true);
+  assert.equal(fake.signedIn(), false, 'Disconnect is the CLI\'s own logout');
+  assert.equal((await signIn.status()).signedIn, false);
 });
 
-test('an address and token the terminal cut across lines still come through', needsPty, async (t) => {
+test('an address the terminal cut across lines still comes through', needsPty, async (t) => {
   const fake = await fakeClaude('wrap');
-  const signIn = createClaudeSignIn({ env: fake.env, log: { error() {} } });
+  const signIn = createClaudeSignIn({ env: fake.env, log: quiet });
   t.after(() => signIn.close());
   assert.equal((await signIn.start()).url, URL_SHOWN);
-  assert.equal((await signIn.finish('good-wrapped')).token, TOKEN);
+  assert.equal((await signIn.finish('good-wrapped#s')).signedIn, true);
 });
 
-test('a code Claude refuses is a 400 that says to start again, and ends the run', needsPty, async (t) => {
+test('half a code is a 400 the same sign-in can take again; a refused one ends it', needsPty, async (t) => {
   const fake = await fakeClaude();
-  const signIn = createClaudeSignIn({ env: fake.env, log: { error() {} } });
+  const signIn = createClaudeSignIn({ env: fake.env, log: quiet });
   t.after(() => signIn.close());
   await signIn.start();
   const pid = fake.pid();
-  await assert.rejects(signIn.finish('not-a-real-code'), (err) => {
+  await assert.rejects(signIn.finish('good-but-no-state'), (err) => err.status === 400 && err.retry === true && /isn't the whole code/.test(err.message));
+  assert.equal(signIn.waiting(), true, 'still waiting at its prompt');
+  assert.ok(alive(pid));
+  assert.equal((await signIn.finish('good-whole#state')).signedIn, true, 'the whole code, pasted again, signs in');
+
+  await signIn.start();
+  const second = fake.pid();
+  await assert.rejects(signIn.finish('wrong-code#state'), (err) => {
     assert.equal(err.status, 400);
     assert.match(err.message, /didn't accept that code/);
     assert.equal(err.detail, 'Request failed with status code 400');
     return true;
   });
-  assert.ok(await until(() => !alive(pid)), 'the command is gone');
+  assert.equal(signIn.waiting(), false);
+  assert.ok(await until(() => !alive(second)), 'the command is gone');
+});
+
+test('a sign-in that says it worked but left no login is not taken for one', needsPty, async (t) => {
+  const fake = await fakeClaude('unsaved');
+  const signIn = createClaudeSignIn({ env: fake.env, log: quiet });
+  t.after(() => signIn.close());
+  await signIn.start();
+  await assert.rejects(signIn.finish('good-code#s'), (err) => err.status === 502 && /didn't finish/.test(err.message));
 });
 
 test('a sign-in that gets no code in time is ended and its command killed', needsPty, async (t) => {
   const fake = await fakeClaude();
-  const signIn = createClaudeSignIn({ env: fake.env, waitMs: 400, log: { error() {} } });
+  const signIn = createClaudeSignIn({ env: fake.env, waitMs: 400, log: quiet });
   t.after(() => signIn.close());
   await signIn.start();
   const pid = fake.pid();
   assert.ok(alive(pid));
   assert.ok(await until(() => !alive(pid), 3_000), 'killed after its wait');
   assert.equal(signIn.waiting(), false);
-  await assert.rejects(signIn.finish('good-late'), (err) => err.status === 409 && /ended/.test(err.message));
+  await assert.rejects(signIn.finish('good-late#s'), (err) => err.status === 409 && /ended/.test(err.message));
   assert.deepEqual(fake.codes(), [], 'the late code never reached anything');
 });
 
 test('starting again ends the first run; cancel ends the second', needsPty, async (t) => {
   const fake = await fakeClaude();
-  const signIn = createClaudeSignIn({ env: fake.env, log: { error() {} } });
+  const signIn = createClaudeSignIn({ env: fake.env, log: quiet });
   t.after(() => signIn.close());
   await signIn.start();
   const first = fake.pid();
   await signIn.start();
-  const second = fake.entries().filter((e) => e.pid).at(-1).pid;
+  const second = fake.pid();
   assert.notEqual(first, second);
   assert.ok(await until(() => !alive(first)), 'the first is gone');
   assert.ok(alive(second));
   signIn.cancel();
   assert.ok(await until(() => !alive(second)), 'the second is gone');
+  assert.equal(signIn.waiting(), false);
 });
 
 test('a command that never shows an address, or refuses, fails start and is not left running', needsPty, async (t) => {
   const silent = await fakeClaude('silent');
-  const quiet = createClaudeSignIn({ env: silent.env, urlWaitMs: 600, log: { error() {} } });
-  t.after(() => quiet.close());
-  await assert.rejects(quiet.start(), (err) => err.status === 502 && /didn't start/.test(err.message));
+  const quietRun = createClaudeSignIn({ env: silent.env, urlWaitMs: 600, log: quiet });
+  t.after(() => quietRun.close());
+  await assert.rejects(quietRun.start(), (err) => err.status === 502 && /didn't start/.test(err.message));
   assert.ok(await until(() => !alive(silent.pid())), 'the silent one is gone');
 
-  const policy = await fakeClaude('policy');
-  const refused = createClaudeSignIn({ env: policy.env, log: { error() {} } });
+  const managed = await fakeClaude('managed');
+  const refused = createClaudeSignIn({ env: managed.env, log: quiet });
   t.after(() => refused.close());
-  await assert.rejects(refused.start(), /does not permit/);
+  await assert.rejects(refused.start(), /Managed settings/);
 
-  const none = createClaudeSignIn({ env: { PATH: '/nonexistent' }, urlWaitMs: 2_000, log: { error() {} } });
+  const none = createClaudeSignIn({ env: { PATH: '/nonexistent' }, urlWaitMs: 2_000, log: quiet });
   await assert.rejects(none.start(), { status: 502 });
 });
 
@@ -200,5 +248,5 @@ test('a code is asked for whole before anything is sent', async () => {
   const signIn = createClaudeSignIn({ env: { PATH: '/nonexistent' } });
   await assert.rejects(signIn.finish(''), { status: 400 });
   await assert.rejects(signIn.finish('two words'), { status: 400 });
-  await assert.rejects(signIn.finish('good-but-nothing-waiting'), { status: 409 });
+  await assert.rejects(signIn.finish('good-but-nothing-waiting#s'), { status: 409 });
 });
