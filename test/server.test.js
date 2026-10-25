@@ -692,8 +692,8 @@ test('a drive with a studio draws each new app its own mark; the glass marble is
   const { path: one } = await asJson(await post('/drive/new', { path: 'Marks/first app', from: 'doc' }));
   const { path: two } = await asJson(await post('/drive/new', { path: 'Marks/second app', from: 'sheet' }));
   const first = iconOf(await drive.store.read(one));
-  assert.equal(first, linkFor(tidy(warm), one), 'drawn from the space in use, at its own path');
-  assert.equal(iconOf(await drive.store.read(two)), linkFor(tidy(warm), two));
+  assert.equal(first, linkFor(tidy(warm), one, 'doc'), 'drawn from the space in use, at its own path, as what it is');
+  assert.equal(iconOf(await drive.store.read(two)), linkFor(tidy(warm), two, 'sheet'));
   assert.notEqual(first, iconOf(await drive.store.read(two)), 'siblings, not twins');
   // A copy is a copy, mark and all.
   const { path: copied } = await asJson(await post('/drive/new', { path: 'Marks/first app again', copy: one }));
