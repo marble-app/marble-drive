@@ -258,8 +258,14 @@ export function loadConfig(env = process.env) {
     // 0 is no cap: a person stops a turn, a timer does not.
     agentMaxMinutes: num('MARBLE_DRIVE_AGENT_MAX_MINUTES', 0),
     // API keys the settings panel writes. Gitignored, and not under the drive
-    // root, so a backup of `.marble/` does not take them.
-    agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', path.join(process.cwd(), '.agent-keys.local'))),
+    // root, so a backup of `.marble/` does not take them. Every key an agent
+    // reads or is given goes through this one file. A drive hosted for
+    // someone else is always told where its own is (run-guest); were it not,
+    // it would still keep it in its own home, never beside the release that
+    // every such drive shares.
+    agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', str('MARBLE_GUEST', '') === '1'
+      ? path.join(str('HOME', os.homedir()), '.config', 'marble-drive', 'agent-keys')
+      : path.join(process.cwd(), '.agent-keys.local'))),
     // Where a pasted API key is checked before it is kept (server/agent/key-check.js).
     anthropicBase: str('MARBLE_DRIVE_ANTHROPIC_BASE', 'https://api.anthropic.com'),
     openaiBase: str('MARBLE_DRIVE_OPENAI_BASE', 'https://api.openai.com'),

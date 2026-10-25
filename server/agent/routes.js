@@ -122,8 +122,14 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, credit = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, codexSignIn = null, hostOwner = null, log = console }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, credit = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, codexSignIn = null, hostOwner = null, onAgentsChanged = null, log = console }) {
   let detected = null;
+  // What can run changed (a key, a sign-in, a sign-out): the next look at the
+  // agents asks again, and so do the side jobs (side-model.js).
+  const changed = () => {
+    detected = null;
+    onAgentsChanged?.();
+  };
   // The person's own Claude and ChatGPT, each through its CLI's own sign-in,
   // one at a time (claude-signin.js, codex-signin.js). Made on first use.
   let signIn = claudeSignIn;
@@ -243,7 +249,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
    *  is fresh, the first visit stops asking, and Codex becomes the agent new
    *  chats start on when the one they start on now cannot run. */
   async function codexSignedIn() {
-    detected = null;
+    changed();
     const settings = await store.settings();
     const current = isClaude(settings.defaultProvider) ? await activeClaude(settings) : settings.defaultProvider;
     const runs = (await detectAll()).find((p) => p.id === current)?.signedIn;
@@ -261,7 +267,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     if (verdict === 'rejected') return [400, { error: "OpenAI didn't accept that key. Check that it was copied whole." }];
     // Kept even when OpenAI could not be asked, as a Claude key is.
     await keys.write({ openai: key });
-    detected = null;
+    changed();
     const settings = await store.settings();
     const current = isClaude(settings.defaultProvider) ? await activeClaude(settings) : settings.defaultProvider;
     const runs = (await detectAll()).find((p) => p.id === current)?.signedIn;
@@ -628,7 +634,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       // Kept even when Anthropic could not be asked: an outage is not a
       // wrong key, and the page says it went unchecked.
       await keys.write({ anthropic: key });
-      detected = null;
+      changed();
       const current = (await store.settings()).defaultProvider;
       // Connected: should it ever stop running, the first visit asks again.
       await store.saveSettings({ claudeAuth: 'api', setupLater: null, ...(isClaude(current) ? { defaultProvider: CLAUDE.api } : {}) });
@@ -673,7 +679,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       // default of Claude (on a key or on credit) follows it. A token an
       // older Connect kept would win over the CLI's own login, so it goes.
       if (keys) await keys.write({ claude: '' });
-      detected = null;
+      changed();
       const current = (await store.settings()).defaultProvider;
       const claudeDefault = !current || String(current).startsWith('claude');
       await store.saveSettings({ claudeAuth: 'login', setupLater: null, ...(claudeDefault ? { defaultProvider: CLAUDE.login } : {}) });
@@ -685,7 +691,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       if (!providers.has(CLAUDE.login)) return json(res, 400, { error: "This drive doesn't have Claude." });
       const out = await claudeSignInRun().signOut();
       if (keys) await keys.write({ claude: '' });
-      detected = null;
+      changed();
       if (!out.ok && !out.missing) {
         log.error?.(`[claude sign-in] logout failed: ${out.detail}`);
         return json(res, 502, { error: "Claude Code couldn't sign out. Try again." });
@@ -716,7 +722,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     if (route === '/agent/codex/sign-out' && method === 'POST') {
       if (!providers.has(CODEX)) return json(res, 400, { error: "This drive doesn't have Codex." });
       const out = await codexSignInRun().signOut();
-      detected = null;
+      changed();
       if (!out.ok && !out.missing) {
         log.error?.(`[codex sign-in] logout failed: ${out.detail}`);
         return json(res, 502, { error: "Codex couldn't sign out. Try again." });
@@ -768,7 +774,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (Object.keys(patch).length) await store.saveSettings(patch);
         if (keys && body.keys && typeof body.keys === 'object') {
           await keys.write(body.keys);
-          detected = null;
+          changed();
         }
         return json(res, 200, await publicSettings());
       }
@@ -865,7 +871,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       const verdict = await checkOpenAIKey(key, { baseURL: openaiBase });
       if (verdict === 'rejected') return json(res, 400, { error: "OpenAI didn't accept that key. Check that it was copied whole." });
       await keys.write({ openai: key });
-      detected = null;
+      changed();
       return json(res, 200, { checked: verdict === 'ok', available: true });
     }
 

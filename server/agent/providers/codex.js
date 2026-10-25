@@ -51,9 +51,9 @@ const PASS_FILE = 'browser-pass';
 // "not approved"), after the model reached for them instead of Marble's
 // browser. Off, with -c rather than --disable: an unknown --disable is a hard
 // error, so a Codex that drops one of these would otherwise fail every turn.
-const HEADLESS_OFF = ['browser_use', 'browser_use_external', 'computer_use', 'in_app_browser'];
-const NO_SHELL = ['shell_tool', 'unified_exec'];
-const featuresOff = (names) => names.flatMap((name) => ['-c', `features.${name}=false`]);
+export const HEADLESS_OFF = ['browser_use', 'browser_use_external', 'computer_use', 'in_app_browser'];
+export const NO_SHELL = ['shell_tool', 'unified_exec'];
+export const featuresOff = (names) => names.flatMap((name) => ['-c', `features.${name}=false`]);
 
 /** A TOML basic string. JSON's escapes are TOML's, except that TOML refuses a
  *  raw DEL and an escaped lone surrogate, so neither is left to reach it. */
