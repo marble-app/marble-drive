@@ -15,9 +15,10 @@
 // A drive that keeps a Favicon Studio has a space of marks, and each document
 // made from a starter gets one point in it, drawn from its path
 // (server/favicon-space.js). Siblings rather than strangers: the space says
-// what they share and how far apart they may be. A drive without one draws
-// from the family every drive starts with (DEFAULTS); a studio with no space
-// in use makes the bare marble.
+// what they share and how far apart they may be, and a document says what it
+// is (a note, a deck, a sheet) in its own colour from the space. A drive
+// without a studio draws from the family every drive starts with (DEFAULTS);
+// a studio with no space in use makes the bare marble.
 //
 // It is drawn at 32 and lives at 16, so everything in it is one of three
 // shapes: the disc, the ribbon, the dot. The colours are written into the mark
@@ -27,15 +28,16 @@
 // have to ask a host for: a .mrbl is one file, and one file includes the thing
 // in the tab.
 
-import { DEFAULTS, draw, mark, tidy, uri } from './favicon-space.js';
+import { DEFAULTS, draw, markOf, tidy, uri } from './favicon-space.js';
 
 // The marble's own point in the space: the system's dusty blue (--accent-ink
-// and the Drive's "marble" folder sit either side of it), the ribbon rising to
-// the right the way the glass one's did, and the light in the top left.
+// and the Drive's "marble" folder sit either side of it) and the ribbon rising
+// to the right the way the glass one's did. No light on it: the white dot that
+// stood for one read as shine at 16, and the marks are flat.
 const HOME = {
   hue: 246, chroma: 0.048, light: 0.63, contrast: 0.24,
   angle: -27, bend: 0.48, width: 0.27, shift: 0, size: 15,
-  form: 'wave', ribbon: 'tint', glint: 'dot', depth: 'none', rim: 'none', frame: 'none',
+  form: 'wave', ribbon: 'tint', glint: 'none', depth: 'none', rim: 'none', frame: 'none',
 };
 
 // A data URI's body: percent-encoded only where a URI needs it, so the bytes
@@ -45,8 +47,16 @@ const body = (svgSource) => uri(svgSource).slice('data:image/svg+xml,'.length);
 /** A document. The marble, on nothing. */
 export const MARBLE = body(draw(HOME));
 
-/** The Drive. The same marble, set in the tile the topbar already wears. */
+/** The Drive. The same marble, set in the tile the topbar already wears. The
+ *  tile is the Drive's alone: a document's mark is never in one. */
 export const DRIVE = body(draw({ ...HOME, frame: 'tile' }));
+
+// The flat marks as they first shipped, with a white dot for the light. Every
+// document made in between carries one, and is served the dotless one.
+const DOTTED = {
+  doc: body(draw({ ...HOME, glint: 'dot' })),
+  drive: body(draw({ ...HOME, glint: 'dot', frame: 'tile' })),
+};
 
 // The glass marble this replaced, kept for the documents that still carry it in
 // their heads, which is every document made before. Each is still the host's
@@ -90,18 +100,20 @@ export const link = (kind = 'doc') => `<link rel="icon" href="${dataUri(kind)}">
 
 /** Every mark the host has handed out as its own, now and before: what a
  *  document carries without having chosen it. */
-export const HOST_MARKS = new Set([...Object.values(SVG), ...Object.values(GLASS)].map((b) => `data:image/svg+xml,${b}`));
+export const HOST_MARKS = new Set([...Object.values(SVG), ...Object.values(GLASS), ...Object.values(DOTTED)].map((b) => `data:image/svg+xml,${b}`));
 
-/** A document as it should be served: the glass marble, where it still sits
- *  in the head, swapped for the flat one of the same kind. Nothing else is
- *  touched, and a mark somebody chose is never the glass marble. */
+/** A document as it should be served: a mark the host handed out before (the
+ *  glass marble, or the flat one with its dot), where it still sits in the
+ *  head, swapped for today's of the same kind. Nothing else is touched, and a
+ *  mark somebody chose is never one of these. */
 export function refreshed(source) {
-  if (!source.includes(GLASS.doc) && !source.includes(GLASS.drive)) return source;
+  const old = Object.entries({ GLASS, DOTTED }).flatMap(([, set]) => Object.entries(set));
+  if (!old.some(([, b]) => source.includes(b))) return source;
   const end = source.search(/<\/head>/i);
   const cut = end < 0 ? Math.min(source.length, 65536) : end;
   let head = source.slice(0, cut);
-  for (const kind of ['doc', 'drive']) {
-    head = head.replaceAll(`href="data:image/svg+xml,${GLASS[kind]}"`, () => `href="${dataUri(kind)}"`);
+  for (const [kind, b] of old) {
+    head = head.replaceAll(`href="data:image/svg+xml,${b}"`, () => `href="${dataUri(kind)}"`);
   }
   return head + source.slice(cut);
 }
@@ -145,34 +157,36 @@ export function spaceIn(source) {
   return null;
 }
 
-/** A new document's own mark, drawn from a space at its path. */
-export const linkFor = (space, seed) => `<link rel="icon" href="${uri(mark(space, seed))}">`;
+/** A new document's own mark, drawn from a space at its path: its kind's
+ *  glyph when it is a kind that has one, else the space's marble. */
+export const linkFor = (space, seed, kind = null) => `<link rel="icon" href="${uri(markOf(space, seed, kind))}">`;
 
 /**
- * The mark a document about to be made at `docPath` starts with: its own
- * point in the drive's space when the drive keeps one, else its point in the
- * family every drive starts with. A studio that has no space in use is a
- * choice too, and it makes the bare marble.
+ * The mark a document about to be made at `docPath` from the starter `kind`
+ * starts with: what it is (a note, a deck, a sheet) in the colours of the
+ * drive's space, at its path, or in the family every drive starts with when
+ * the drive keeps no studio. A studio that has no space in use is a choice
+ * too, and it makes the bare marble.
  *
  * The studio is found by what it says about itself, not by its name, so it can
  * be renamed or filed in a folder. If there are two, the one changed last is
  * the one somebody is tuning.
  */
-export async function markFor(store, docPath) {
+export async function markFor(store, docPath, kind = null) {
   let entries = [];
   try {
     entries = await store.list({ recursive: true });
   } catch {
-    return linkFor(DEFAULTS, docPath);
+    return linkFor(DEFAULTS, docPath, kind);
   }
   let studios = 0;
   for (const entry of entries) {
     if (entry.kind !== 'doc' || !entry.favicons) continue;
     studios += 1;
     const space = spaceIn((await store.read(entry.path)) ?? '');
-    if (space) return linkFor(space, docPath);
+    if (space) return linkFor(space, docPath, kind);
   }
-  return studios ? link('doc') : linkFor(DEFAULTS, docPath);
+  return studios ? link('doc') : linkFor(DEFAULTS, docPath, kind);
 }
 
 // ------------------------------------------------------------ old documents

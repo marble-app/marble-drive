@@ -1265,7 +1265,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         // drive's space, picked by the path it is about to have. A copy keeps
         // the one it was copied with, because it is a copy.
         const source = body.from
-          ? await buildStarter(body.from, { name: splitPath(docPath).name, mark: await markFor(store, docPath) })
+          ? await buildStarter(body.from, { name: splitPath(docPath).name, mark: await markFor(store, docPath, body.from) })
           : await copyOf(body.copy, docPath);
         await putDocument(docPath, source, { label: 'created', client: body.client ?? null });
         return json(res, 200, { ok: true, path: docPath, href: `/a/${encodeURIComponent(docPath)}` });
@@ -1351,7 +1351,7 @@ export async function createDrive(config, { log = console, agentProviders = null
           return `data-marble-blob="${hash}" data-marble-type="${type}" src="${PLACEHOLDER}"`;
         };
         const deck = await pptxToDeck(file.at, {
-          starter: await buildStarter('slides', { name: splitPath(docPath).name, mark: await markFor(store, docPath) }),
+          starter: await buildStarter('slides', { name: splitPath(docPath).name, mark: await markFor(store, docPath, 'slides') }),
           fileName: file.name,
           putBlob,
         });

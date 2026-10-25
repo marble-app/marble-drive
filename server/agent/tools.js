@@ -695,7 +695,8 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       const docPath = parsePath(String(input.path ?? ''), { allowRoot: false });
       if (await store.has(docPath)) return { error: `"${docPath}" already exists` };
       // Its own mark, from the drive's space, the same as one made with New.
-      const source = await buildStarter(String(input.from ?? 'doc'), { name: splitPath(docPath).name, mark: await markFor(store, docPath) });
+      const from = String(input.from ?? 'doc');
+      const source = await buildStarter(from, { name: splitPath(docPath).name, mark: await markFor(store, docPath, from) });
       await createDocument(docPath, source, { label: `agent:${turn.conversationId}` });
       turn.writable.add(docPath);
       return { path: docPath };

@@ -132,6 +132,7 @@ export function buildBrief({ path, n, marks, context = [], pieces = new Map(), i
     '- Build in the open: the person is watching the page. Put the plan down first as stubs of the parts to come, drawn with apply_ops marks as "ahead", then fill each part in, coarse to fine, with the part you are on drawn "now". Follow the growing-the-open-page and drawing-the-change skills.',
     '- When the marks fall in separate parts of the app, work the parts with fan_out side by side rather than one after another; check what the workers made before you finish.',
     '- What you make must work: anything a person does in the app (ticking, typing, choosing, adding) changes the page and files the same change with window.marble.op, so it is saved (read_guide "Persistence"). Follow the drive\'s Design System for anything you draw.',
+    '- When the app is its own thing (a tool, a tracker, a studio, not a plain note or deck) and its tab icon is still the marble or a starter\'s glyph, draw it its own: replace the <link rel="icon"> in its head with a 32×32 SVG data URI of what the app is, flat, in two tones of one colour from the Design System plus white. No gradient, shine or shadow, and no tile around it: the tile is the Drive\'s mark.',
     '- Look things up when the marks need data (the person\'s other documents, their calendar, the web). Say nothing about the marks on the page itself: they are not part of the app.',
     '- When the build is done, reply in one or two plain sentences saying what you built. Ask nothing: the person answers on the app.',
   );

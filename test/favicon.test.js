@@ -241,3 +241,30 @@ test('a new document is drawn from the space its drive keeps, by its path', asyn
 
   await fsp.rm(root, { recursive: true, force: true });
 });
+
+test('a document made from a starter says what it is, flat, and never in a tile', async () => {
+  const { createStore } = await import('../server/store/index.js');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-kinds-'));
+  const store = createStore({ root });
+  await store.ready();
+  const note = await markFor(store, 'Notes/plan', 'note');
+  const deck = await markFor(store, 'Notes/plan', 'slides');
+  assert.equal(note, linkFor(space.DEFAULTS, 'Notes/plan', 'note'));
+  assert.notEqual(note, deck, 'a note and a deck are told apart');
+  assert.notEqual(note, await markFor(store, 'Notes/other', 'note'), 'two notes are siblings, not twins');
+  for (const kind of [...space.KINDS, 'app', null]) {
+    const svg = decodeURIComponent(/href="data:image\/svg\+xml,([^"]*)"/.exec(await markFor(store, `k/${kind}`, kind))[1]);
+    assert.doesNotMatch(svg, /Gradient|fill='#fff' fill-opacity='\.9'/, `${kind}: no shine`);
+    assert.doesNotMatch(svg, /<rect width='32' height='32'/, `${kind}: no tile`);
+  }
+  await fsp.rm(root, { recursive: true, force: true });
+});
+
+test('a mark the host handed out with a dot is served flat', async () => {
+  const { refreshed } = await import('../server/favicon.js');
+  const dotted = space.draw({ hue: 246, chroma: 0.048, light: 0.63, contrast: 0.24, angle: -27, bend: 0.48, width: 0.27, shift: 0, size: 15, form: 'wave', ribbon: 'tint', glint: 'dot', depth: 'none', rim: 'none', frame: 'none' });
+  const page = `<!doctype html><html><head><title>Old</title><link rel="icon" href="${space.uri(dotted)}"></head><body></body></html>`;
+  assert.ok(refreshed(page).includes(`href="${dataUri('doc')}"`));
+  assert.doesNotMatch(decodeURIComponent(dataUri('doc')), /fill='#fff'/, 'the mark served has no dot');
+  assert.doesNotMatch(decodeURIComponent(dataUri('drive')), /fill='#fff'/);
+});

@@ -331,6 +331,54 @@ export const uri = (svgSource) => `data:image/svg+xml,${svgSource.replace(/#/g, 
 /** A seed's mark in a space: the one call a host makes for a new document. */
 export const mark = (space, seed) => draw(genome(space, seed));
 
+// ---- what an app is. A document made from a starter says what it is in its
+// tab: a note is a page, a deck is slides, a sheet is a grid. The space still
+// gives the colours, so a drive's notes are siblings of its decks, and the
+// path still picks which of the space's colours each one gets. Flat, like
+// everything else here: two tones of one colour and white, no tile (the tile
+// is the Drive's own mark) and no light on it.
+const R = (x, y, w, h, r, fill, extra = '') => `<rect x='${x}' y='${y}' width='${w}' height='${h}' rx='${r}' fill='${fill}'${extra}/>`;
+const LINES = (x, ys, ws, h = 2.4) => ys.map((y, i) => R(x, y, ws[i], h, h / 2, '#fff')).join('');
+
+const GLYPHS = {
+  // A page with its corner turned, and three lines on it.
+  note: (c) => `<path d='M10 3H19L26 10V25A4 4 0 0 1 22 29H10A4 4 0 0 1 6 25V7A4 4 0 0 1 10 3Z' fill='${c.body}'/><path d='M19 3L26 10H22A3 3 0 0 1 19 7Z' fill='${c.ribbon}'/>${LINES(10, [14, 19, 24], [12, 12, 7])}`,
+  // A page with a heading and lines.
+  doc: (c) => `${R(6, 3, 20, 26, 4, c.body)}${R(10, 8, 12, 3.4, 1.7, c.ribbon)}${LINES(10, [15, 20, 24.5], [12, 12, 8], 2.2)}`,
+  // Two slides, the one behind lighter.
+  slides: (c) => `${R(8, 3, 22, 15, 3, c.ribbon)}${R(2, 11, 24, 17, 3.2, c.body)}${R(6, 16, 11, 2.6, 1.3, '#fff')}${R(6, 21.2, 15, 2.2, 1.1, '#fff', " fill-opacity='.7'")}`,
+  // A grid with its header row lighter.
+  sheet: (c) => `${R(4, 5, 24, 22, 4, c.body)}<path d='M4 9A4 4 0 0 1 8 5H24A4 4 0 0 1 28 9V12H4Z' fill='${c.ribbon}'/><path d='M12.5 12V27M20 12V27M4 19.5H28' stroke='#fff' stroke-width='1.6'/>`,
+  // Two cards pinned up, overlapping.
+  board: (c) => `${R(3, 4, 15, 14, 3, c.ribbon)}${R(13, 13, 16, 15, 3, c.body)}${LINES(17, [18, 22.5], [8, 5], 2.2)}`,
+  // A board with a line drawn across it.
+  whiteboard: (c) => `${R(3, 5, 26, 20, 4, c.ribbon)}<path d='M8 19C11 12 14 21 17 14S23 11 24 16' fill='none' stroke='${c.body}' stroke-width='2.6' stroke-linecap='round'/>${R(12, 26, 8, 3, 1.5, c.body)}`,
+  // Shapes laid out freely.
+  canvas: (c) => `<circle cx='12' cy='12' r='8' fill='${c.ribbon}'/>${R(13, 13, 16, 16, 3.5, c.body)}`,
+  // A speech bubble with two lines in it.
+  chat: (c) => `<path d='M9 5H23A6 6 0 0 1 29 11V18A6 6 0 0 1 23 24H14L8 29V24A6 6 0 0 1 3 18V11A6 6 0 0 1 9 5Z' fill='${c.body}'/>${LINES(9, [11, 16], [14, 9], 2.4)}`,
+  // A paper: a title over two columns.
+  paper: (c) => `${R(5, 3, 22, 26, 3.5, c.body)}${R(9, 7, 14, 3, 1.5, c.ribbon)}${LINES(9, [13, 17, 21], [6, 6, 6], 2)}${LINES(17, [13, 17, 21], [6, 6, 4], 2)}`,
+};
+GLYPHS.latex = GLYPHS.paper;
+
+/** The kinds that are drawn as what they are. Anything else (a blank app, a
+ *  page somebody built) is drawn as the space's own marble, bare. */
+export const KINDS = Object.keys(GLYPHS);
+
+/** A kind's glyph in a point of the space, as SVG source. */
+export function glyph(kind, g) {
+  const draw1 = GLYPHS[kind];
+  return draw1 ? `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${draw1(paint(g))}</svg>` : null;
+}
+
+/** A new document's mark: its kind's glyph, or the marble. Either way bare,
+ *  because the tile is the Drive's. */
+export function markOf(space, seed, kind = null) {
+  const g = { ...genome(space, seed), frame: 'none' };
+  return glyph(kind, g) ?? draw(g);
+}
+
 // The family a drive starts with, before anyone tunes it, and the one a drive
 // with no studio draws from: six dusty colours at one lightness, so no app's
 // mark is louder than another's, round the wheel from rose to blue and never
