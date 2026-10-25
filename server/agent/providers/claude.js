@@ -11,8 +11,8 @@
 // answer them from the drawer.
 //
 // The providers differ only in billing: the subscription gets no API key in
-// its environment, so the CLI uses the login (or the long-lived token of a
-// plan connected from the browser, CLAUDE_CODE_OAUTH_TOKEN); the API provider
+// its environment, so the CLI uses its own login (or the long-lived token an
+// older Connect your Claude kept, CLAUDE_CODE_OAUTH_TOKEN); the API provider
 // hands it one; and starter credit (claude-credit) hands it the drive's own
 // credit token with ANTHROPIC_BASE_URL pointed at the credit proxy
 // (worker/src/credit.js), which adds the owner's key on the way to Anthropic.
@@ -241,8 +241,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       const current = live();
       const probeEnv = pickEnv(current);
       if (api && current.ANTHROPIC_API_KEY) probeEnv.ANTHROPIC_API_KEY = current.ANTHROPIC_API_KEY;
-      // The person's own plan, connected from the browser (claude-signin.js):
-      // the CLI reads the token from its environment and answers as signed in.
+      // A plan token an older Connect kept: the CLI reads it from its
+      // environment and answers as signed in. A login made from the browser
+      // now is the CLI's own (claude-signin.js) and needs nothing here.
       if (!api && current.CLAUDE_CODE_OAUTH_TOKEN) probeEnv.CLAUDE_CODE_OAUTH_TOKEN = current.CLAUDE_CODE_OAUTH_TOKEN;
       const probe = await exec('claude', ['auth', 'status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'claude is not installed' };

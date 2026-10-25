@@ -11,13 +11,13 @@
 // only such a name is ever replaced — a title the person typed is theirs.
 // And naming never blocks or fails a turn: no CLI, no answer, no network,
 // the placeholder simply stays.
-
-import fsp from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+//
+// The model is whichever CLI the drive has connected (side-model.js), on the
+// person's own login or key, like every small job beside a turn.
 
 import { pickEnv } from './env.js';
 import { runCommand } from './providers/exec.js';
+import { claudeOnLogin, scratch } from './side-model.js';
 
 /** Long enough for five words, short enough for a pane's title bar. */
 export const TITLE_MAX = 48;
@@ -92,33 +92,20 @@ export function cleanTitle(raw) {
   return (space > 12 ? cut.slice(0, space) : cut).replace(/[\s\-–—:,]+$/, '');
 }
 
-/** The CLIs are asked from an empty directory with `--setting-sources project`
- *  (claude), a throwaway workspace (cursor) or `--ignore-user-config` (codex):
- *  naming a chat must not run the person's hooks, skills or memory, and must
- *  not touch their project. */
-export async function scratch() {
-  const dir = path.join(os.tmpdir(), 'marble-agent-namer');
-  await fsp.mkdir(dir, { recursive: true });
-  return dir;
-}
+/** Where the CLIs are asked from (side-model.js): naming a chat must not run
+ *  the person's hooks, skills or memory, and must not touch their project. */
+export { scratch };
 
-function claudeArgs(model, prompt) {
-  return [
-    '-p',
-    '--model', model,
-    '--tools', '',
-    '--setting-sources', 'project',
-    '--output-format', 'text',
-    '--', prompt,
-  ];
-}
-
-/** Ask whichever CLI is installed for a title. Returns null — never throws —
- *  when there is no answer to be had. */
+/** Ask whichever CLI this drive has connected for a title (side-model.js:
+ *  Claude when it works, else Codex), and Cursor's agent last, for a drive
+ *  that has neither. Returns null — never throws — when there is no answer
+ *  to be had. `side` is the drive's helper; without one, Claude on its
+ *  login, run by `exec` in `env`. */
 export async function nameConversation({
   prompt,
   reply = '',
   model = 'haiku',
+  side = null,
   exec = runCommand,
   env = process.env,
   timeout = 45_000,
@@ -127,42 +114,24 @@ export async function nameConversation({
 } = {}) {
   if (!String(prompt ?? '').trim() && !String(reply ?? '').trim()) return null;
   const ask = titlePrompt({ prompt, reply });
-  const cwd = await scratch();
-  const clean = pickEnv(env);
-  // Haiku over the login, the same way a subscription turn runs: no key in
-  // the environment, so naming never bills an API account by accident. The
-  // same holds for Codex: a drive whose Codex runs on a key keeps the
-  // placeholder rather than pay for a title.
-  const attempts = [
-    { command: 'claude', args: claudeArgs(model, ask) },
-    { command: 'cursor-agent', args: ['-p', '--mode', 'ask', '--trust', '--workspace', cwd, '--output-format', 'text', '--', ask] },
-    // Codex last, so a drive that has only Codex still gets names. Its own
-    // default model at low effort, read-only, none of the person's config,
-    // nothing kept; plain exec prints only the answer on stdout. Asked only
-    // when its login answers: without one it spends fifteen seconds on 401s.
-    {
-      command: 'codex',
-      args: ['exec', '--skip-git-repo-check', '--ephemeral', '--ignore-user-config', '-s', 'read-only', '-c', 'model_reasoning_effort="low"', '--', ask],
-      ready: async () => {
-        const status = await exec('codex', ['login', 'status'], { timeout: 5_000, env: clean, cwd, signal });
-        // The ChatGPT login only: `codex login --with-api-key` is a key too.
-        const text = `${status.stdout ?? ''}${status.stderr ?? ''}`;
-        return status.code === 0 && /using chatgpt/i.test(text);
-      },
-    },
-  ];
-  for (const attempt of attempts) {
-    if (attempt.ready && !(await attempt.ready())) continue;
-    const result = await exec(attempt.command, attempt.args, { timeout, env: clean, cwd, signal });
-    if (result.aborted) return null;
-    if (result.missing) continue; // that CLI is not installed; try the next
-    if (result.timedOut || result.code) {
+  const result = await (side ?? claudeOnLogin({ exec, env })).run({ job: 'naming', prompt: ask, model, timeout, signal });
+  if (result.aborted) return null;
+  if (!result.missing) {
+    if (!result.timedOut && !result.code) {
+      const title = cleanTitle(result.stdout);
+      if (title) return title;
+    } else {
       const why = result.timedOut ? 'timed out' : result.stderr?.trim() || `exit ${result.code}`;
-      log.error?.(`[agents] naming with ${attempt.command} failed: ${why}`);
-      continue;
+      log.error?.(`[agents] naming with ${result.cli ?? 'claude'} failed: ${why}`);
     }
-    const title = cleanTitle(result.stdout);
-    if (title) return title;
   }
-  return null;
+  // Cursor's agent on its own login, in a throwaway workspace.
+  const cwd = await scratch();
+  const cursor = await exec('cursor-agent', ['-p', '--mode', 'ask', '--trust', '--workspace', cwd, '--output-format', 'text', '--', ask], { timeout, env: pickEnv(env), cwd, signal });
+  if (cursor.aborted || cursor.missing) return null;
+  if (cursor.timedOut || cursor.code) {
+    log.error?.(`[agents] naming with cursor-agent failed: ${cursor.timedOut ? 'timed out' : cursor.stderr?.trim() || `exit ${cursor.code}`}`);
+    return null;
+  }
+  return cleanTitle(cursor.stdout);
 }

@@ -18,23 +18,38 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-import { pickEnv } from './env.js';
-import { scratch } from './namer.js';
-import { runCommand } from './providers/exec.js';
+import { claudeOnLogin } from './side-model.js';
 import { PLUGIN_DIR } from './skills.js';
 
 export const SKILL_PATH = path.join(PLUGIN_DIR, 'skills', 'drawing-progress', 'SKILL.md');
 
 /** How often a running turn is redrawn. The first drawing waits for there to
  *  be something to draw; after that, a moment worth seeing (a test result, a
- *  change landing, a question) redraws sooner than a run of reads does. */
+ *  change landing, a question) redraws sooner than a run of reads does.
+ *
+ *  Each wait is `growth` times the one before it, up to `maxGapMs`. A turn's
+ *  first minutes change its picture most; after that a redraw every twenty
+ *  seconds mostly spends the person's usage. In the week to 25 October these
+ *  drawings were nineteen in twenty of the small model's calls, and one long
+ *  build was drawn 133 times. Spaced out like this, the first two minutes
+ *  look the same and the week would have drawn about a third as often. */
 export const PACE = {
   firstMs: 4_000,
   gapMs: 20_000,
   momentMs: 8_000,
+  growth: 1.5,
+  maxGapMs: 300_000,
   /** Draws in flight across every chat on the host. */
   concurrent: 2,
 };
+
+/** How long a turn that has been drawn `draws` times waits for its next
+ *  drawing: the moment's or the gap's wait, stretched by every drawing since
+ *  the first. */
+export function nextWait(pace, draws, moment = false) {
+  const base = moment ? pace.momentMs : pace.gapMs;
+  return Math.min(base * (pace.growth ?? 1) ** Math.max(0, draws - 1), pace.maxGapMs ?? Infinity);
+}
 
 const LOG_LINES = 70;
 const ASK_MAX = 1_500;
@@ -198,22 +213,15 @@ const ran = (ms) => {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
 };
 
-/** Ask the CLI for a drawing. Null — never a throw — when there is none. */
-export async function drawWithCli({ system, prompt, model = 'haiku', exec = runCommand, env = process.env, timeout = 45_000, log = console } = {}) {
-  const cwd = await scratch();
-  const args = [
-    '-p',
-    '--model', model,
-    '--tools', '',
-    '--setting-sources', 'project',
-    '--system-prompt', system,
-    '--output-format', 'text',
-    '--', prompt,
-  ];
+/** Ask the connected CLI for a drawing (side-model.js). Null — never a
+ *  throw — when there is none. `side` is the drive's helper; without one,
+ *  Claude on its login. */
+export async function drawWithCli({ system, prompt, model = 'haiku', side = null, exec, env, timeout = 45_000, log = console } = {}) {
   // No extended thinking: with it a drawing took fifty seconds and five
   // thousand tokens; without, seven seconds and a few hundred, and it looks
   // the same. A widget that arrives after the moment it shows is no widget.
-  const result = await exec('claude', args, { timeout, env: { ...pickEnv(env), MAX_THINKING_TOKENS: '0' }, cwd });
+  // (On Codex, the low effort its table gives a small model does the same.)
+  const result = await (side ?? claudeOnLogin({ exec, env })).run({ job: 'drawing progress', system, prompt, model, timeout, env: { MAX_THINKING_TOKENS: '0' } });
   if (result.missing || result.aborted) return null;
   if (result.timedOut || result.code) {
     log.error?.(`[agents] drawing progress failed: ${result.timedOut ? 'timed out' : result.stderr?.trim() || `exit ${result.code}`}`);
@@ -244,7 +252,7 @@ export function createDrawer({ draw, emit, skill = readSkill, pace = PACE, now =
   function stateOf(turn) {
     let s = turns.get(turn.id);
     if (!s) {
-      s = { turn, lines: [], skipped: 0, calls: 0, html: null, timer: null, drawing: null, dirty: false, lastAt: 0, asking: false, ended: null, started: now() };
+      s = { turn, lines: [], skipped: 0, calls: 0, draws: 0, html: null, timer: null, drawing: null, dirty: false, lastAt: 0, asking: false, ended: null, started: now() };
       turns.set(turn.id, s);
     }
     return s;
@@ -263,6 +271,7 @@ export function createDrawer({ draw, emit, skill = readSkill, pace = PACE, now =
 
   async function run(s, final) {
     s.dirty = false;
+    if (!final) s.draws += 1;
     const state = final ? s.ended : s.asking ? 'asking' : 'working';
     const task = (async () => {
       await slot();
@@ -287,7 +296,7 @@ export function createDrawer({ draw, emit, skill = readSkill, pace = PACE, now =
     await task;
     s.drawing = null;
     s.lastAt = now();
-    if (s.dirty && !s.ended) schedule(s, pace.gapMs);
+    if (s.dirty && !s.ended) schedule(s, nextWait(pace, s.draws));
   }
 
   return {
@@ -305,7 +314,9 @@ export function createDrawer({ draw, emit, skill = readSkill, pace = PACE, now =
       if (!s.calls) return;
       const since = now() - s.lastAt;
       if (!s.lastAt && !s.html) schedule(s, pace.firstMs);
-      else schedule(s, (isMoment(event, line) ? pace.momentMs : pace.gapMs) - since);
+      // A question waits for the person, so it is drawn at a moment's pace however long the turn has run.
+      else if (event.type === 'ask') schedule(s, pace.momentMs - since);
+      else schedule(s, nextWait(pace, s.draws, isMoment(event, line)) - since);
     },
     /** The turn is over: one last drawing, of how it ended. */
     async end(turn, status) {

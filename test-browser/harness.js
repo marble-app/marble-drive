@@ -60,7 +60,7 @@ export const usageHistoryStub = (weeks = 26) => {
 // `launchOptions` reach Chromium as they are: a voice test launches it with a
 // fake microphone. `keys` are written to the drive's key file before it
 // starts, as Settings would have kept them.
-export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [], signedOut = [], env = {}, launchOptions = {}, keys = null } = {}) {
+export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [], signedOut = [], detect = {}, env = {}, launchOptions = {}, keys = null } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-work-'));
   const keysFile = path.join(workdir, 'agent-keys.local');
@@ -88,10 +88,12 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     // `providers` adds scripted stand-ins under real ids (claude-subscription,
     // claude-api, cursor) for tests of what the page does with those ids.
     // `signedOut` names the ones among them that report no sign-in, `fake`
-    // too, for a drive with nothing set up to run.
+    // too, for a drive with nothing set up to run; `detect` gives one an
+    // answer of its own (a sign-in the test makes as it goes).
     agentProviders: new Map(['fake', ...providers].map((id) => {
       const provider = createFakeProvider({ scripts, id });
       if (signedOut.includes(id)) provider.detect = async () => ({ installed: true, signedIn: false, detail: 'signed out' });
+      if (detect[id]) provider.detect = detect[id];
       return [id, provider];
     })),
     genui,

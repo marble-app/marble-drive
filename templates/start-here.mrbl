@@ -13,10 +13,10 @@ __ICON__
   /* ------------------------------------------------------------------ tokens
 
      The first page a new drive opens on (server/seed.js, the / route in
-     server/app.js). It is an ordinary document: three things to try, each a
-     row that ticks itself in the file when it has been tried, and a question
-     whose answer becomes the person's first real document. The tokens are the
-     Design System's, written once as light-dark() pairs. */
+     server/app.js). It is an ordinary document: an agent to connect and three
+     things to try, each a row that ticks itself in the file when it is done,
+     and a question whose answer becomes the person's first real document.
+     The tokens are the Design System's, written once as light-dark() pairs. */
   :root {
     color-scheme: light dark;
     --ink: light-dark(#111111, #e8e6e1);
@@ -63,7 +63,7 @@ __ICON__
 
   /* ------------------------------------------------------------------ rows
 
-     The three are one list, with hairlines between them and no card around
+     The four are one list, with hairlines between them and no card around
      each: a card is for a thing you move, and these stay where they are. The
      number is the row's state. Done, it fills with ink and becomes a tick,
      the state dot's "review" (Design System, Components). Whether a row is
@@ -91,6 +91,17 @@ __ICON__
     content: ", done"; position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }
   .note { margin: .15rem 0 0; color: var(--muted); font-size: .9rem; text-wrap: pretty; }
+  /* Connect opens the drive's connect sheet (runtime/agent-ui.js). An outline,
+     not ink: the page's one filled action is Make it. Once an agent works the
+     row is ticked and has nothing left to press. */
+  .connect {
+    margin: .75rem 0 0; min-height: 2.25rem; padding: 0 1rem;
+    appearance: none; border: 1px solid var(--line); background: none; color: var(--ink);
+    border-radius: var(--pill); cursor: pointer; font-size: .9rem; font-weight: 500;
+    transition: background var(--t) var(--ease), border-color var(--t) var(--ease);
+  }
+  .connect:hover { background: var(--paper-3); }
+  .step[data-done="yes"] .connect { display: none; }
   kbd {
     display: inline-block; min-width: 1.5em; text-align: center; padding: 0 .3em;
     font: .86em/1.4 var(--mono); color: var(--muted);
@@ -135,6 +146,10 @@ __ICON__
   }
   .go:hover { box-shadow: var(--shadow); }
   .go[aria-busy="true"] { cursor: progress; opacity: .7; }
+  /* No agent yet: Make it has nothing to run on, and the line under it says
+     so. Both are drawn by the page's script, never written to the file. */
+  .go.marble-needs-agent { opacity: .45; cursor: not-allowed; box-shadow: none; }
+  .needs { margin: .5rem 0 0; color: var(--muted); font-size: .85rem; text-wrap: pretty; }
   /* A press answers on the way down, in colour. Nothing here scales. */
   button:active { filter: brightness(.9); }
   button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
@@ -150,7 +165,7 @@ __ICON__
      not zoom the page to show it. */
   @media (pointer: coarse) {
     .chip { min-height: 2.75rem; padding: 0 1rem; }
-    .go { min-height: 2.75rem; }
+    .go, .connect { min-height: 2.75rem; }
     .field { font-size: 16px; }
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
@@ -159,11 +174,20 @@ __ICON__
 <body data-marble-id="__ID__">
 <main class="page" data-marble-id="sh-page">
   <h1 data-marble-id="sh-title" data-marble-editable>Start here</h1>
-  <p class="lede" data-marble-id="sh-lede" data-marble-editable>Every page here is a document that works like an app. You change one by using it, or by asking Claude to change it.</p>
+  <p class="lede" data-marble-id="sh-lede" data-marble-editable>Every page here is a document that works like an app. You change one by using it, or by asking the agent to change it.</p>
 
   <ol class="steps" data-marble-id="sh-steps">
-    <li class="step" data-step="write" data-marble-id="sh-write">
+    <li class="step" data-step="connect" data-marble-id="sh-connect">
       <span class="num" aria-hidden="true"><span class="digit">1</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
+      <div data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__">Connect Claude or ChatGPT</h2>
+        <p class="note" data-marble-id="__ID__">The agent runs on your own plan. You sign in on Anthropic’s or OpenAI’s page.</p>
+        <button type="button" class="connect" data-marble-id="sh-connect-go">Connect</button>
+      </div>
+    </li>
+
+    <li class="step" data-step="write" data-marble-id="sh-write">
+      <span class="num" aria-hidden="true"><span class="digit">2</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
       <div data-marble-id="__ID__">
         <h2 data-marble-id="__ID__">Write something here</h2>
         <p class="note" data-marble-id="__ID__">It's saved as you type. Close the tab and it's still here.</p>
@@ -172,18 +196,18 @@ __ICON__
     </li>
 
     <li class="step" data-step="ask" data-marble-id="sh-ask">
-      <span class="num" aria-hidden="true"><span class="digit">2</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
+      <span class="num" aria-hidden="true"><span class="digit">3</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
       <div data-marble-id="__ID__">
-        <h2 data-marble-id="__ID__">Ask Claude to change this page</h2>
-        <p class="note" data-marble-id="__ID__">Press <kbd>⌘J</kbd> (<kbd>Ctrl J</kbd> on Windows) and try “put these three in a row”.</p>
+        <h2 data-marble-id="__ID__">Ask the agent to change this page</h2>
+        <p class="note" data-marble-id="__ID__">Press <kbd>⌘J</kbd> (<kbd>Ctrl J</kbd> on Windows) and try “put these four in a row”.</p>
       </div>
     </li>
 
     <li class="step" data-step="keep" data-marble-id="sh-keep">
-      <span class="num" aria-hidden="true"><span class="digit">3</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
+      <span class="num" aria-hidden="true"><span class="digit">4</span><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4.4"/></svg></span>
       <div data-marble-id="__ID__">
         <h2 data-marble-id="__ID__">What do you want to keep here?</h2>
-        <p class="note" data-marble-id="__ID__">Claude makes your first document from your answer.</p>
+        <p class="note" data-marble-id="__ID__">The agent makes your first document from your answer.</p>
         <div class="chips" data-marble-id="sh-chips" data-marble-choose="data-kind" data-marble-of=".step" data-marble-look="off" aria-label="Start from">
           <button type="button" class="chip" data-marble-id="__ID__" data-marble-value="A class">A class</button>
           <button type="button" class="chip" data-marble-id="__ID__" data-marble-value="A trip">A trip</button>
@@ -206,16 +230,19 @@ __ICON__
 __SCRIPT__
 <script>
 // The page's own behaviour: each row ticks itself the first time it has been
-// tried, and the tick is an op, so it is in the file (data-done="yes") and
-// the host can tell when all three are done and / goes back to the Drive.
+// done, and the tick is an op, so it is in the file (data-done="yes") and the
+// host can tell when all four are done and / goes back to the Drive.
 //
-//   1  the first input in the box under it;
-//   2  the list of rows changing from outside the page, which is what an
+//   1  an agent that works: the person's own Claude or ChatGPT, or a key
+//      (Connect opens the drive's connect sheet);
+//   2  the first input in the box under it;
+//   3  the list of rows changing from outside the page, which is what an
 //      agent's op looks like when it lands;
-//   3  the agent Make it starts, which ticks the row itself (its brief says so).
+//   4  the agent Make it starts, which ticks the row itself (its brief says so).
 //
 // A chip fills the answer with a start the person finishes. Make it with an
-// empty answer puts the caret there instead of starting an agent.
+// empty answer puts the caret there instead of starting an agent, and with no
+// agent to run on it says so instead.
 (() => {
   const begin = (marble) => {
     const steps = document.querySelector('[data-marble-id="sh-steps"]');
@@ -231,13 +258,49 @@ __SCRIPT__
       marble.op({ type: 'setAttr', id, name: 'data-done', value: 'yes' }, { immediate: true });
     }
 
-    // ---- 1: written in
+    // ---- 1: an agent to ask. Until one works, Make it waits and the line
+    // under it says why; whether one does is the host's answer, asked when the
+    // page opens and again when the connect sheet says it saved something.
+    let agentReady = null;
+    const make = document.querySelector('[data-marble-id="sh-make"]');
+    function needsAgent(needs) {
+      if (!make) return;
+      make.classList.toggle('marble-needs-agent', needs);
+      if (needs) make.setAttribute('aria-disabled', 'true');
+      else make.removeAttribute('aria-disabled');
+      const ask = make.closest('.ask');
+      let line = ask?.parentElement?.querySelector(':scope > .needs');
+      if (needs && ask && !line) {
+        line = document.createElement('p');
+        line.className = 'needs';
+        line.setAttribute('data-marble-transient', '');
+        line.textContent = 'Make it runs on your Claude or ChatGPT. Connect one above first.';
+        ask.after(line);
+      }
+      if (!needs) line?.remove();
+    }
+    async function readiness() {
+      const state = await marble.agent?.setup?.().catch(() => null);
+      if (!state) return;
+      agentReady = Boolean(state.ready);
+      needsAgent(!agentReady);
+      if (agentReady) tick(row('connect'));
+    }
+    if (marble.agent) readiness();
+    else addEventListener('marble:agent', readiness, { once: true });
+    addEventListener('marble:agent-settings-saved', () => { readiness(); });
+    document.addEventListener('click', (event) => {
+      if (!event.target?.closest?.('[data-marble-id="sh-connect-go"]')) return;
+      document.dispatchEvent(new CustomEvent('marble:connect-agent', { cancelable: true }));
+    });
+
+    // ---- 2: written in
     document.addEventListener('input', (event) => {
       const box = event.target?.closest?.('[data-marble-id="sh-box"]');
       if (box) tick(box.closest('[data-step]'));
     });
 
-    // ---- 2: changed by asking
+    // ---- 3: changed by asking
     const ask = row('ask');
     if (ask && !done(ask)) {
       const fields = ['sh-box', 'sh-answer'];
@@ -279,7 +342,7 @@ __SCRIPT__
       watch.observe(steps, { childList: true, attributes: true, attributeOldValue: true });
     }
 
-    // ---- 3: the question
+    // ---- 4: the question
     const answer = () => document.querySelector('[data-marble-id="sh-answer"]');
     const starts = () => [...document.querySelectorAll('[data-marble-id="sh-chips"] [data-marble-value]')]
       .map((chip) => `${chip.getAttribute('data-marble-value')}: `);
@@ -306,10 +369,16 @@ __SCRIPT__
       selection.removeAllRanges();
       selection.addRange(range);
     });
-    // Before the automation's own listener on the document: nothing to make
-    // from yet, so the press goes to the answer.
-    const make = document.querySelector('[data-marble-id="sh-make"]');
+    // Before the automation's own listener on the document: no agent to run
+    // on, or nothing to make from yet, so the press goes to the reason or to
+    // the answer.
     make?.addEventListener('click', async (event) => {
+      if (agentReady === false) {
+        event.stopPropagation();
+        event.preventDefault();
+        needsAgent(true);
+        return;
+      }
       const field = answer();
       const said = (field?.textContent ?? '').trim();
       if (!said || starts().some((start) => start.trim() === said)) {

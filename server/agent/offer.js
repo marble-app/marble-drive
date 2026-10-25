@@ -8,13 +8,11 @@
 // Make it alive, Make it interactive and Make it visual actions should start
 // from, and what Try variations should vary.
 //
-// The same plumbing as the chat namer (namer.js): the installed CLI on the
-// login, never a key, a hard timeout, and no answer is not an error. The page
-// keeps its defaults.
+// The same plumbing as the chat namer (namer.js): whichever CLI this drive
+// has connected (side-model.js), a hard timeout, and no answer is not an
+// error. The page keeps its defaults.
 
-import { pickEnv } from './env.js';
-import { runCommand } from './providers/exec.js';
-import { scratch } from './namer.js';
+import { claudeOnLogin } from './side-model.js';
 
 const HTML_MAX = 4_000;
 const WORDS_MAX = 400;
@@ -85,24 +83,24 @@ export function readOffer(raw) {
   return read;
 }
 
-/** Ask the installed CLI. Returns null — never throws — without an answer. */
+/** Ask the connected CLI. Returns null — never throws — without an answer.
+ *  `side` is the drive's helper; without one, Claude on its login, run by
+ *  `exec` in `env`. */
 export async function writeOffer({
   title = '',
   html = '',
   words = '',
   model = 'haiku',
-  exec = runCommand,
-  env = process.env,
+  side = null,
+  exec,
+  env,
   timeout = 20_000,
   signal,
   log = console,
 } = {}) {
   if (!readable(html) && !String(words).trim()) return null;
   const ask = offerPrompt({ title, html, words });
-  const cwd = await scratch();
-  const result = await exec('claude', ['-p', '--model', model, '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
-    timeout, env: pickEnv(env), cwd, signal,
-  });
+  const result = await (side ?? claudeOnLogin({ exec, env })).run({ job: 'offer', prompt: ask, model, timeout, signal });
   if (result.aborted || result.missing) return null;
   if (result.timedOut || result.code) {
     log.error?.(`[agents] offer failed: ${result.timedOut ? 'timed out' : result.stderr?.trim() || `exit ${result.code}`}`);

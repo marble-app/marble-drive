@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { cleanTitle, fallbackTitle, nameConversation, titlePrompt } from '../server/agent/namer.js';
+import { createSideModel } from '../server/agent/side-model.js';
 
 test('the placeholder is the prompt, without the composer’s markup', () => {
   assert.equal(fallbackTitle('  Fix the focus   view  '), 'Fix the focus view');
@@ -107,22 +108,25 @@ test('a prompt with nothing in it is not worth a model call', async () => {
   assert.equal(called, false);
 });
 
+// The drive's helper (side-model.js) picks the CLI: these hand it the same
+// fake machine the naming runs on.
+const sideOn = (exec, env = { PATH: '/bin', HOME: '/home/me' }) => createSideModel({ exec, env, log: { error() {} } });
+
 test('a drive with only Codex still gets a title, from Codex on its login', async () => {
   const tried = [];
   let codexCall = null;
-  const title = await nameConversation({
-    prompt: 'make the board readable',
-    reply: 'renamed every chat',
-    env: { PATH: '/bin', HOME: '/home/me', CODEX_API_KEY: 'sk-proj-k', OPENAI_API_KEY: 'sk-o' },
-    exec: async (command, args, options) => {
-      tried.push(command);
-      if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
-      if (args[0] === 'login') return { missing: false, code: 0, stdout: '', stderr: 'Logged in using ChatGPT\n' };
-      codexCall = { args, env: options.env };
-      return { missing: false, code: 0, stdout: 'Readable Agent Board\n', stderr: '' };
-    },
-  });
-  assert.deepEqual(tried, ['claude', 'cursor-agent', 'codex', 'codex']);
+  const env = { PATH: '/bin', HOME: '/home/me', CODEX_API_KEY: 'sk-proj-k', OPENAI_API_KEY: 'sk-o' };
+  const exec = async (command, args, options) => {
+    tried.push(`${command} ${args[0]}`);
+    if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
+    if (args[0] === 'login') return { missing: false, code: 0, stdout: '', stderr: 'Logged in using ChatGPT\n' };
+    codexCall = { args, env: options.env };
+    return { missing: false, code: 0, stdout: 'Readable Agent Board\n', stderr: '' };
+  };
+  // The helper is told about the drive's key the way index.js tells it: by
+  // its secrets. Here there is none, only the login.
+  const title = await nameConversation({ prompt: 'make the board readable', reply: 'renamed every chat', exec, env, side: sideOn(exec, { PATH: '/bin', HOME: '/home/me' }) });
+  assert.deepEqual(tried, ['claude auth', 'codex login', 'codex exec']);
   assert.equal(title, 'Readable Agent Board');
   // Read-only, none of the person's Codex config, nothing kept, and the
   // question after `--` so it can never be read as a flag.
@@ -131,7 +135,7 @@ test('a drive with only Codex still gets a title, from Codex on its login', asyn
   assert.equal(codexCall.args[codexCall.args.indexOf('-s') + 1], 'read-only');
   assert.equal(codexCall.args.at(-2), '--');
   assert.match(codexCall.args.at(-1), /make the board readable/);
-  // Naming never bills a key by accident.
+  // On the login, no key goes with it.
   assert.ok(!('CODEX_API_KEY' in codexCall.env));
   assert.ok(!('OPENAI_API_KEY' in codexCall.env));
 });
@@ -139,32 +143,38 @@ test('a drive with only Codex still gets a title, from Codex on its login', asyn
 test('a Codex with no login is not asked: it would spend its retries on a 401', async () => {
   const ran = [];
   const errors = [];
-  const title = await nameConversation({
-    prompt: 'anything',
-    exec: async (command, args) => {
-      ran.push(`${command} ${args[0]}`);
-      if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
-      if (args[0] === 'login') return { missing: false, code: 1, stdout: '', stderr: 'Not logged in\n' };
-      return { missing: false, code: 0, stdout: 'Should Not Run\n', stderr: '' };
-    },
-    log: { error: (message) => errors.push(message) },
-  });
+  const exec = async (command, args) => {
+    ran.push(`${command} ${args[0]}`);
+    if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
+    if (args[0] === 'login') return { missing: false, code: 1, stdout: '', stderr: 'Not logged in\n' };
+    return { missing: false, code: 0, stdout: 'Should Not Run\n', stderr: '' };
+  };
+  const title = await nameConversation({ prompt: 'anything', exec, side: sideOn(exec), log: { error: (message) => errors.push(message) } });
   assert.equal(title, null);
   assert.deepEqual(ran.filter((r) => r.startsWith('codex')), ['codex login']);
   assert.deepEqual(errors, []);
 });
 
-test('a Codex signed in with an API key is a key, and naming does not bill it', async () => {
+test('a Codex that keeps an API key of its own is not run: only a key the drive keeps counts', async () => {
   const ran = [];
-  const title = await nameConversation({
-    prompt: 'anything',
-    exec: async (command, args) => {
-      ran.push(`${command} ${args[0]}`);
-      if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
-      if (args[0] === 'login') return { missing: false, code: 0, stdout: '', stderr: 'Logged in using an API key - sk-proj-***\n' };
-      return { missing: false, code: 0, stdout: 'Billed Title\n', stderr: '' };
-    },
-  });
+  const exec = async (command, args) => {
+    ran.push(`${command} ${args[0]}`);
+    if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
+    if (args[0] === 'login') return { missing: false, code: 0, stdout: '', stderr: 'Logged in using an API key - sk-proj-***\n' };
+    return { missing: false, code: 0, stdout: 'Billed Title\n', stderr: '' };
+  };
+  const title = await nameConversation({ prompt: 'anything', exec, side: sideOn(exec) });
   assert.equal(title, null);
   assert.deepEqual(ran.filter((r) => r.startsWith('codex')), ['codex login']);
+});
+
+test('Cursor\'s agent is the last resort, for a drive with neither Claude nor Codex', async () => {
+  const tried = [];
+  const exec = async (command, args) => {
+    tried.push(command);
+    if (command === 'cursor-agent') return { missing: false, code: 0, stdout: 'From Cursor\n', stderr: '' };
+    return { missing: true, code: null, stdout: '', stderr: '' };
+  };
+  assert.equal(await nameConversation({ prompt: 'anything', exec, side: sideOn(exec) }), 'From Cursor');
+  assert.deepEqual(tried, ['claude', 'codex', 'cursor-agent']);
 });

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { cleanDrawing, createDrawer, drawPrompt, hasFingernail, readSkill, SKILL_PATH, stepLine, unfingernail } from '../server/agent/drawer.js';
+import { cleanDrawing, createDrawer, drawPrompt, hasFingernail, nextWait, PACE as HOST_PACE, readSkill, SKILL_PATH, stepLine, unfingernail } from '../server/agent/drawer.js';
 
 const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const PACE = { firstMs: 10, gapMs: 60, momentMs: 20, concurrent: 2 };
@@ -140,4 +140,61 @@ test('a drawing that fails or repeats itself is not sent', async () => {
   assert.equal(drawn.length, 1);
   await drawer.end(turn, 'completed');
   assert.equal(drawn.length, 1, 'the same drawing twice is one');
+});
+
+test('each redraw of a turn waits longer than the last, up to a ceiling', () => {
+  assert.equal(nextWait(HOST_PACE, 1), 20_000);
+  assert.equal(nextWait(HOST_PACE, 2), 30_000);
+  assert.equal(nextWait(HOST_PACE, 1, true), 8_000, 'a moment still comes sooner');
+  assert.equal(nextWait(HOST_PACE, 3, true), 18_000);
+  assert.equal(nextWait(HOST_PACE, 40), 300_000);
+  assert.equal(nextWait(HOST_PACE, 40, true), 300_000);
+  // A pace without growth keeps the old even gaps.
+  assert.equal(nextWait(PACE, 9), 60);
+});
+
+test('a long run of steps is drawn less and less often', async () => {
+  const drawn = [];
+  const drawer = createDrawer({
+    pace: { firstMs: 5, gapMs: 20, momentMs: 20, growth: 2, maxGapMs: 80, concurrent: 2 },
+    skill: async () => '',
+    draw: async () => `<div>${drawn.length}</div>`,
+    emit: async (t, e) => drawn.push(e),
+  });
+  const turn = { id: 't4', prompt: 'Read everything' };
+  const at = [];
+  const started = Date.now();
+  for (let i = 0; i < 70; i += 1) {
+    const before = drawn.length;
+    drawer.note(turn, { type: 'tool.call', name: 'Read', input: { file_path: `/a/${i}` } });
+    await tick(5);
+    if (drawn.length > before) at.push(Date.now() - started);
+  }
+  await drawer.end(turn, 'completed');
+  // Even gaps of 20 would draw about 17 times in these 350 ms.
+  assert.ok(at.length >= 3 && at.length <= 7, `drawn ${at.length} times`);
+  const gaps = at.slice(1).map((t, i) => t - at[i]);
+  assert.ok(gaps.at(-1) > gaps[0], `gaps ${gaps.join(', ')} grow`);
+});
+
+test('a question late in a long turn is drawn at a moment\'s pace', async () => {
+  const drawn = [];
+  const drawer = createDrawer({
+    pace: { firstMs: 5, gapMs: 20, momentMs: 20, growth: 10, maxGapMs: 5_000, concurrent: 2 },
+    skill: async () => '',
+    draw: async () => `<div>${drawn.length}</div>`,
+    emit: async (t, e) => drawn.push(e),
+  });
+  const turn = { id: 't5', prompt: 'Ask me' };
+  drawer.note(turn, { type: 'tool.call', name: 'Read', input: { file_path: '/a' } });
+  await tick(20);
+  drawer.note(turn, { type: 'tool.call', name: 'Read', input: { file_path: '/b' } });
+  await tick(40);
+  assert.equal(drawn.length, 2);
+  // The third drawing's gap is now 200 ms; the question does not wait for it.
+  drawer.note(turn, { type: 'ask', question: 'Which one?' });
+  await tick(60);
+  assert.equal(drawn.length, 3);
+  assert.equal(drawn[2].state, 'asking');
+  await drawer.end(turn, 'completed');
 });

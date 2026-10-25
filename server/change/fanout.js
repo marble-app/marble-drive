@@ -16,16 +16,15 @@
 // for undo, said on the page. A shard that fails lands none of its ops and
 // says why; the others still land, each as soon as its worker is done.
 //
-// The same plumbing as the callout's offer (server/agent/offer.js): the
-// installed CLI on the login, never a key, a hard timeout for each worker,
-// and the turn's own signal to stop all of them. Started the way a turn is
-// (server/agent/first-to-go.js): four workers at once are an agent's load,
-// and go before the host does.
+// The same plumbing as the callout's offer (server/agent/offer.js): whichever
+// CLI this drive has connected (server/agent/side-model.js), a hard timeout
+// for each worker, and the turn's own signal to stop all of them. Started the
+// way a turn is (server/agent/first-to-go.js): four workers at once are an
+// agent's load, and go before the host does.
 
 import { firstToGo } from '../agent/first-to-go.js';
-import { pickEnv } from '../agent/env.js';
-import { scratch } from '../agent/namer.js';
 import { runCommand } from '../agent/providers/exec.js';
+import { claudeOnLogin, scratch } from '../agent/side-model.js';
 import { subtreesOf } from '../agent/source.js';
 import { parseSource } from '../engine.js';
 
@@ -200,7 +199,7 @@ function writesScript(op, parts) {
 /** Run one worker like a turn: through `firstToGo`, so the kernel takes it
  *  before the host when memory runs out and the memory guard
  *  (server/memory-guard.js) counts it among the agents' processes. Through
- *  the shell, a `claude` that is not installed is its exit 127, not ENOENT:
+ *  the shell, a CLI that is not installed is its exit 127, not ENOENT:
  *  either way it is `missing`. `can` is whether there is a score to raise
  *  (first-to-go.js's own answer unless given). */
 export async function launchWorker(command, args, options, { run = runCommand, can } = {}) {
@@ -222,8 +221,10 @@ const firstLine = (text) => String(text ?? '').split('\n').map((line) => line.tr
  * ids at or inside it. Never throws.
  *
  * Returns `{ applied, shards: [{ ids, applied, error? }] }`; `error` alone
- * when the shards are not a fan out; `missing: true` when there is no
- * `claude` to run.
+ * when the shards are not a fan out; `missing: true` when no agent CLI is
+ * connected here to run them. `side` is the drive's helper
+ * (server/agent/side-model.js); without one, Claude on its login. `exec`
+ * starts each worker's process.
  */
 export async function runFanOut({
   source,
@@ -232,8 +233,9 @@ export async function runFanOut({
   note = '',
   shards,
   model,
+  side = null,
   exec = launchWorker,
-  env = process.env,
+  env,
   signal,
   apply,
   onFailed = null,
@@ -258,6 +260,7 @@ export async function runFanOut({
   }
   const results = lists.map((ids) => ({ ids, applied: 0 }));
   const stopped = () => Boolean(signal?.aborted);
+  const via = side ?? claudeOnLogin({ env });
   let missing = false;
 
   const fail = (k, error, { said = true } = {}) => {
@@ -273,7 +276,7 @@ export async function runFanOut({
   async function work(k) {
     const ids = lists[k];
     if (stopped()) return fail(k, 'stopped', { said: false });
-    if (missing) return fail(k, 'the claude CLI is not installed here', { said: false });
+    if (missing) return fail(k, 'no agent CLI is connected here', { said: false });
 
     // Only the shard's own elements, and only whole: a worker shown an
     // outline would be rewriting what it never read.
@@ -287,15 +290,13 @@ export async function runFanOut({
     try {
       // No tools, and no MCP server of the login's either: a worker can only
       // answer.
-      result = await exec('claude', ['-p', '--model', model ?? 'sonnet', '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
-        timeout, env: pickEnv(env), cwd, signal,
-      });
+      result = await via.run({ job: `fan out worker for ${docPath}`, prompt: ask, model: model ?? 'sonnet', timeout, signal, cwd, launch: exec });
     } catch (err) {
       result = { code: null, error: err.message };
     }
     if (result?.missing) {
       missing = true;
-      return fail(k, 'the claude CLI is not installed here', { said: false });
+      return fail(k, 'no agent CLI is connected here', { said: false });
     }
     if (result?.aborted || stopped()) return fail(k, 'stopped', { said: false });
     if (result?.timedOut) return fail(k, `took longer than ${Math.round(timeout / 1000)} s`);

@@ -8,9 +8,7 @@
 // picks for the app open now (`suggestPieces`).
 
 import { parseSource, indexIds } from '../engine.js';
-import { pickEnv } from '../agent/env.js';
-import { runCommand } from '../agent/providers/exec.js';
-import { scratch } from '../agent/namer.js';
+import { claudeOnLogin } from '../agent/side-model.js';
 import { shaOf } from './store.js';
 
 const ID = 'data-marble-id';
@@ -218,14 +216,13 @@ export function readPicks(raw, candidates) {
     .slice(0, 3);
 }
 
-/** Ask the installed CLI for picks. Returns [] — never throws — without one. */
-export async function suggestPieces({ title, outline, marks, candidates, model = 'haiku', exec = runCommand, env = process.env, timeout = 25_000, log = console }) {
+/** Ask the connected CLI for picks (server/agent/side-model.js). Returns []
+ *  — never throws — without one. `side` is the drive's helper; without one,
+ *  Claude on its login. */
+export async function suggestPieces({ title, outline, marks, candidates, model = 'haiku', side = null, exec, env, timeout = 25_000, log = console }) {
   if (!candidates?.length) return [];
   const ask = suggestPrompt({ title, outline, marks, candidates });
-  const cwd = await scratch();
-  const result = await exec('claude', ['-p', '--model', model, '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
-    timeout, env: pickEnv(env), cwd,
-  });
+  const result = await (side ?? claudeOnLogin({ exec, env })).run({ job: 'build suggestions', prompt: ask, model, timeout });
   if (result.aborted || result.missing) return [];
   if (result.timedOut || result.code) {
     log.error?.(`[builds] suggestions failed: ${result.timedOut ? 'timed out' : result.stderr?.trim() || `exit ${result.code}`}`);

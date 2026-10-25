@@ -447,6 +447,9 @@ deploy. New drives are made on Fly again; drives already on the PC stay there.
 | drive `sprite.env` | `MARBLE_CREDIT_URL`, `MARBLE_CREDIT_TOKEN` | the credit proxy (`https://marbledrive.app/_credit`) and the drive's own token for it |
 | door sprite `sprite.env` | `MARBLE_SERVE_COMMAND=provisioner`, `DOOR_URL`, `DOOR_ADMIN_TOKEN`, `MARBLE_DOOR_KEYS`, `MARBLE_PROVISION_SCRIPT` | above |
 | door sprite `sprite.env` | `MARBLE_SPARE_DRIVES` | `1` keeps one drive made ahead ("The spare drive"); unset, none |
+| PC drive `/etc/marble-guests/<name>.env` | `MARBLE_HOST_OWNER` | who hosts the drive, for the connect sheet's "so Bryan never sees your password". Unset, it says "nobody else" |
+| PC drive, set by run-guest | `MARBLE_GUEST` | `1`: the usage meter asks Claude Code's `/usage` and never opens the login, agents take keys only from the drive's own key file, and starter credit is off (HOSTING.md, "People sign in to their own Claude or ChatGPT") |
+| any drive | `MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS`, `MARBLE_DRIVE_CODEX_SIGNIN_SECONDS` | how long a Claude sign-in waits for its code (600) and a ChatGPT one for the person on OpenAI's page (900, the life of its code) |
 
 ## Not in phase 1
 
