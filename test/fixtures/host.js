@@ -38,6 +38,7 @@ export async function scratchPc({ releases = ['20261025T161133Z-4b2103a'], ...mo
     guestEnvDir: path.join(root, 'etc', 'marble-guests'),
     guestStateDir: path.join(root, 'var', 'lib', 'marble-guests'),
     state: path.join(root, 'state', 'marble-host'),
+    backupStatusDir: path.join(root, 'var', 'lib', 'marble-backup', 'status'),
   };
   await fsp.mkdir(dirs.guestEnvDir, { recursive: true, mode: 0o700 });
   await fsp.mkdir(path.join(dirs.opt, 'releases'), { recursive: true });
@@ -68,8 +69,10 @@ export async function addRelease(opt, release) {
 }
 
 /** systemd, as marble-host's units object sees it: what was asked, and an
- *  answer for show(). `fail` makes a verb throw. */
-export function fakeUnits({ fail = {} } = {}) {
+ *  answer for show(). `fail` makes a verb throw. Root's helpers are
+ *  `helper` calls, `remove ana` or `export ana --no-block`; in user mode
+ *  there are none. */
+export function fakeUnits({ fail = {}, mode = 'system' } = {}) {
   const calls = [];
   const active = new Map();
   const act = (verb, state) => async (name) => {
@@ -78,53 +81,103 @@ export function fakeUnits({ fail = {} } = {}) {
     if (state) active.set(name, state);
   };
   return {
+    mode,
     calls,
     active,
     start: act('start', 'active'),
     stop: act('stop', 'inactive'),
     restart: act('restart', 'active'),
     show: async (name) => ({ active: active.get(name) ?? 'inactive', sub: null, pid: null, memoryBytes: active.get(name) === 'active' ? 200 * 2 ** 20 : null, memoryMax: 1536 * 2 ** 20, restarts: 0, invocation: null }),
-  };
-}
-
-/** A probe whose answers a test sets per port. */
-export function fakeProbe() {
-  const health = new Map();
-  const deep = new Map();
-  const page = new Map();
-  return {
-    health: async (port) => health.get(port) ?? null,
-    deep: async (port) => deep.get(port) ?? null,
-    page: async (port) => page.get(port) ?? null,
-    get: async () => null,
-    set(port, { release = '20261025T161133Z-4b2103a', ok = true } = {}) {
-      if (!ok) {
-        health.delete(port);
-        deep.delete(port);
-        page.delete(port);
-        return;
-      }
-      health.set(port, { ok: true, working: 0, release });
-      deep.set(port, { ok: true, release, claude: { version: '2.1.281', signedIn: false }, codex: { version: '0.159.3', signedIn: false }, docs: 0, agentConnected: false });
-      page.set(port, 302);
+    async helper(kind, name, { wait = true } = {}) {
+      if (mode === 'user') throw Object.assign(new Error(`marble-guest-${kind}@${name}.service is one of root's helpers; HOST_MODE=user has none`), { status: 501 });
+      calls.push(`${kind} ${name}${wait ? '' : ' --no-block'}`);
+      if (fail.helper || fail[kind]) throw new Error(`systemctl start marble-guest-${kind}@${name}.service failed (exit 1)`);
+      return `marble-guest-${kind}@${name}.service`;
     },
   };
 }
 
-/** The door's admin API: a queue the test fills, and every report it hears. */
-export function fakeDoor({ queue = [], failReady = 0 } = {}) {
+/** A probe whose answers a test sets per port. Every passphrase it was
+ *  asked with is in `asked`, as [route, port, secret]. */
+export function fakeProbe() {
+  const health = new Map();
+  const deep = new Map();
+  const page = new Map();
+  const study = new Map();
+  const logout = new Map();
+  const asked = [];
+  return {
+    asked,
+    health: async (port) => health.get(port) ?? null,
+    deep: async (port, secret) => (asked.push(['/health/deep', port, secret]), deep.get(port) ?? null),
+    page: async (port) => page.get(port) ?? null,
+    study: async (port, secret) => (asked.push(['/health/study', port, secret]), study.get(port) ?? null),
+    logout: async (port, secret) => (asked.push(['/health/logout', port, secret]), logout.get(port) ?? null),
+    get: async () => null,
+    set(port, { release = '20261025T161133Z-4b2103a', ok = true, deep: more = {}, study: counts = null, logout: out = { claude: 'signed-out', codex: 'was-not-signed-in' } } = {}) {
+      if (!ok) {
+        for (const map of [health, deep, page, study, logout]) map.delete(port);
+        return;
+      }
+      health.set(port, { ok: true, working: 0, release });
+      deep.set(port, { ok: true, release, claude: { version: '2.1.281', signedIn: false }, codex: { version: '0.159.3', signedIn: false }, docs: 0, agentConnected: false, ...more });
+      page.set(port, 302);
+      if (counts) study.set(port, { ok: true, ...counts });
+      else study.delete(port);
+      logout.set(port, out);
+    },
+  };
+}
+
+/** The door's admin API: a queue the test fills, and every report it hears.
+ *  `drives` are its records ({ name, owner, home, state }), which it ends
+ *  and removes as the real door does: once one is `removing` or `deleting`
+ *  it refuses every step but `removed` with a 409. `people` is what GET
+ *  /_door/people answers; `down` makes every call fail. */
+export function fakeDoor({ queue = [], failReady = 0, drives = [], people = [] } = {}) {
   const heard = [];
+  const events = [];
   let readyFailures = failReady;
+  const state = { down: false };
+  const ENDING = new Set(['removing', 'deleting']);
+  const refuse = (status, why) => Response.json({ why }, { status });
   const fetchImpl = async (url, init = {}) => {
     const u = new URL(url);
     const body = init.body ? JSON.parse(init.body) : null;
     heard.push({ method: init.method ?? 'GET', path: u.pathname + u.search, body, auth: init.headers?.authorization });
+    if (state.down) throw new TypeError('fetch failed');
     if (u.pathname === '/_door/queue') {
       const home = u.searchParams.get('home');
-      return Response.json({ drives: queue.filter((d) => d.state === 'queued' && (!home || d.home === home)) });
+      // One record, one state: a drive the door is ending is queued no more.
+      const ending = (name) => ENDING.has(drives.find((x) => x.name === name)?.state);
+      return Response.json({ drives: queue.filter((d) => d.state === 'queued' && (!home || d.home === home) && !ending(d.name)) });
+    }
+    if (u.pathname === '/_door/people') return Response.json({ people });
+    if (u.pathname === '/_door/drives' && (init.method ?? 'GET') === 'GET') return Response.json({ drives });
+    if (u.pathname === '/_door/events') {
+      if (!drives.some((d) => d.name === body?.drive) && !queue.some((d) => d.name === body?.drive)) return refuse(404, 'No such drive.');
+      events.push(body);
+      return Response.json({ ok: true });
+    }
+    const remove = /^\/_door\/drives\/([a-z0-9-]+)\/remove$/.exec(u.pathname);
+    if (remove) {
+      const d = drives.find((x) => x.name === remove[1]);
+      if (!d) return refuse(404, 'No such drive.');
+      if (ENDING.has(d.state) || d.state === 'removed') return Response.json({ drive: d, sessions: 0, already: true });
+      d.state = 'removing';
+      return Response.json({ drive: d, sessions: 1 });
     }
     const step = /^\/_door\/drives\/([a-z0-9-]+)\/step$/.exec(u.pathname);
     if (step) {
+      const record = drives.find((x) => x.name === step[1]);
+      if (body?.state === 'removed') {
+        if (!record) return refuse(404, 'No such drive.');
+        if (record.state === 'removed') return Response.json({ ok: true, already: true });
+        if (!ENDING.has(record.state)) return refuse(409, `${record.name} isn’t being removed or deleted.`);
+        record.state = 'removed';
+        return Response.json({ ok: true });
+      }
+      if (record && ENDING.has(record.state)) return refuse(409, `${record.name} is being removed.`);
       if (body?.state === 'ready' && readyFailures > 0) {
         readyFailures -= 1;
         return new Response('{"why":"down"}', { status: 503 });
@@ -136,7 +189,7 @@ export function fakeDoor({ queue = [], failReady = 0 } = {}) {
     }
     return new Response('{}', { status: 404 });
   };
-  return { heard, fetchImpl, queue, steps: () => heard.filter((h) => h.path.endsWith('/step')).map((h) => h.body) };
+  return { heard, events, state, fetchImpl, queue, drives, people, steps: () => heard.filter((h) => h.path.endsWith('/step')).map((h) => h.body) };
 }
 
 const closer = (server) => () =>

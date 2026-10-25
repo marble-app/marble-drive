@@ -229,3 +229,52 @@ test('without the door\'s admin token nothing is asked of the door', async (t) =
   r.maker.start();
   r.maker.stop();
 });
+
+test('a drive the door ends while it is being made: making stops at that step, unannounced, and nothing more is reported', async (t) => {
+  const door = fakeDoor({ queue: [{ name: 'ana', owner: 'acct_1', home: 'pchost', state: 'queued' }], drives: [{ name: 'ana', owner: 'acct_1', home: 'pchost', state: 'queued' }] });
+  const r = await rig({ door });
+  t.after(r.pc.cleanup);
+  const start = r.units.start;
+  r.units.start = async (name) => {
+    // Its person deletes it from the account page as it starts.
+    door.drives[0].state = 'deleting';
+    return start(name);
+  };
+  await r.maker.drain();
+  const d = r.registry.drive('ana');
+  assert.equal(d.state, 'failed');
+  assert.equal(d.failed.step, 'install');
+  assert.match(d.failed.why, /409/);
+  assert.deepEqual(r.units.calls, ['start ana', 'stop ana'], 'what was started is stopped; the reconcile takes the rest off the PC');
+  assert.deepEqual(r.told, [], 'no alert: nothing went wrong');
+  assert.deepEqual(door.steps(), [
+    { step: 'machine', state: 'now' },
+    { step: 'machine', state: 'done' },
+    { step: 'install', state: 'now' },
+    { step: 'install', state: 'done' },
+  ], 'the refused step is the last, and no failed is sent after it');
+});
+
+test('a ready report the door refuses because it is ending the drive is not told again', async (t) => {
+  const door = fakeDoor({ queue: [{ name: 'ana', owner: 'acct_1', home: 'pchost', state: 'queued' }], drives: [{ name: 'ana', owner: 'acct_1', home: 'pchost', state: 'queued' }] });
+  const r = await rig({ door });
+  t.after(r.pc.cleanup);
+  const deep = r.probe.deep;
+  r.probe.deep = async (port) => {
+    door.drives[0].state = 'removing';
+    return deep(port);
+  };
+  await r.maker.drain();
+  assert.equal(r.registry.drive('ana').state, 'failed', 'check done was refused');
+  r.probe.deep = deep;
+  // One made already, whose ready the door refuses: marked, and left.
+  await r.registry.update((x) => {
+    Object.assign(x.drives.ana, { state: 'running', door: { reported: false } });
+    delete x.drives.ana.failed;
+  });
+  assert.equal(await r.maker.reportReady('ana'), false);
+  assert.deepEqual(r.registry.drive('ana').door, { reported: true, ending: true });
+  const asked = door.heard.length;
+  await r.maker.drain();
+  assert.equal(door.heard.filter((h) => h.path.endsWith('/step')).length, door.heard.slice(0, asked).filter((h) => h.path.endsWith('/step')).length, 'not told again');
+});
