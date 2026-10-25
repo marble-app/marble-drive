@@ -27,11 +27,16 @@
 # --force swaps in a copy that does not match its file list, which happens only
 # for --from a time whose old versions a lifecycle rule has since deleted.
 #
-# Ownership is systemd's. On the drive's next start DynamicUser= hands every
-# file under its state folder to the drive's user, except that it skips the
-# walk when the folder itself already has the right owner (systemd.exec(5),
-# "As an optimization..."). The restored files are root's, so the folder's top
-# is given to root here: the next start then walks all of it.
+# Ownership is systemd's. On the drive's next start, DynamicUser= hands its
+# state folder to the drive's user, and since systemd 257, where the disk
+# allows ID-mapped mounts (ext4 under WSL2 does), it does so by owning the
+# files as nobody on disk and mapping nobody to the drive's user, not by
+# chowning. Either way it decides from the folder's top alone: a top owned by
+# nobody (or by the drive's user) is taken to mean everything below is too,
+# and nothing is walked (systemd.exec(5), "As an optimization..."; v259's
+# setup_exec_directory() and path_chown_recursive()). The restored files are
+# root's, so the folder's top is given to root here: from a root-owned top
+# the next start chowns the whole tree, on either path.
 set -euo pipefail
 umask 077
 
