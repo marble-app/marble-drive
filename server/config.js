@@ -304,6 +304,11 @@ export function loadConfig(env = process.env) {
       const name = str('MARBLE_HOST_OWNER', '').replace(/\s+/g, ' ').trim();
       return /^[\p{L}\p{M}][\p{L}\p{M}' .-]{0,39}$/u.test(name) ? name : null;
     })(),
+    // A drive whose person is taking part in the probe study, with their
+    // consent on file: marble-host writes MARBLE_STUDY=1 then, and takes it
+    // away once they leave (docs/HOSTING.md, "The study on each drive"). It
+    // seeds the Study page and answers GET /health/study.
+    study: str('MARBLE_STUDY', '') === '1',
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),

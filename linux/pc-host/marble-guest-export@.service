@@ -1,0 +1,62 @@
+# The probe study's full logs of the PC drive %i, copied into the owner's
+# Research folder (export-guest; docs/HOSTING.md, "The study on each drive").
+# Installed into /etc/systemd/system by install.d/30-export.sh, which writes
+# in the owner's user name for @OWNER@ and his Research folder for @EXPORTS@.
+# marble-host starts it for the Console's Export study data, through its
+# polkit rule; the unit and its script are root's, so neither marble-host nor
+# any drive can change what it does. It refuses unless the drive's settings
+# hold the person's consent.
+[Unit]
+Description=Copy the study logs of the PC drive %i to the Research folder
+Documentation=https://github.com/marble-app/marble-drive/blob/main/docs/HOSTING.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/marble-guests/export-guest %i
+# As the owner, not root: it writes into his home, where a link in the way
+# would send a root writer anywhere on the PC, and what it makes is his.
+# Reading another user's files is the one power it has beyond his.
+User=@OWNER@
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+Environment="MARBLE_EXPORT_DIR=@EXPORTS@"
+UMask=0077
+TimeoutStartSec=1h
+Nice=10
+IOSchedulingClass=idle
+
+# A sandbox as tight as the backup's. Everything is read-only, and of the
+# owner's home only the Research folder is there, writable. Of
+# /var/lib/private only this drive's state folder is there, read-only: no
+# other drive, and the walker never goes into this drive's home. The
+# backups' key and state, the password files, Windows' drives and WSL's
+# interop are hidden. /etc/marble-guests stays readable, for the drive's
+# settings, which are the owner's own.
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=-"@EXPORTS@"
+PrivateTmp=yes
+PrivateDevices=yes
+TemporaryFileSystem=/var/lib/private:ro
+# The state folder, not its drive/: the folder is systemd's, in a folder of
+# root's, while drive/ is the drive's own and could be a link.
+BindReadOnlyPaths=-/var/lib/private/marble-guests/%i
+InaccessiblePaths=-/etc/marble-backup -/var/lib/marble-backup -/etc/shadow -/etc/gshadow -/etc/ssh -/mnt -/run/WSL -/run/tailscale -/run/docker.sock
+# It needs no network at all.
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

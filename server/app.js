@@ -18,6 +18,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 import { agentsAllowed, createAgents } from './agent/index.js';
@@ -25,6 +27,8 @@ import { backupNow, scheduleBackups } from './backup.js';
 import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
 import { dataUri as iconUri, markFor, refreshed, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten, PLACEHOLDER } from './flatten.js';
+import { attachment, exportEntries, exportName } from './export.js';
+import { zipStream } from './zip-write.js';
 import { createTouched } from './touched.js';
 import { createDoor } from './door.js';
 import { createGate, isLocal, overHttps, returnPath } from './gate.js';
@@ -47,6 +51,8 @@ import { createKeepAwake } from './keep-awake.js';
 import { createLedger } from './ledger.js';
 import { createMemoryGuard } from './memory-guard.js';
 import { createDeepHealth } from './health-deep.js';
+import { signOutClis } from './health-logout.js';
+import { createStudyHealth } from './health-study.js';
 import { createStreams } from './streams.js';
 import { consoleAllowed, createConsole } from './console/index.js';
 import { createGit, gitAllowed } from './git.js';
@@ -370,6 +376,9 @@ export async function createDrive(config, { log = console, agentProviders = null
   // What marble-host and the owner's Console ask a drive on the PC: its
   // release, its agent CLIs and whether one can run (server/health-deep.js).
   const deepHealth = createDeepHealth({ store, keysFile: config.agentKeysFile, ...(deepHealthOpts ?? {}) });
+  // The probe study's counts of a study drive, from its own logs, numbers
+  // only, kept five minutes (server/health-study.js).
+  const studyHealth = createStudyHealth({ root: config.root, zone: config.dayZone });
   const typesafe = createTypesafeHandler({
     apiKey: config.typesafeApiKey,
     maxBodyBytes: config.maxBodyBytes,
@@ -911,6 +920,21 @@ export async function createDrive(config, { log = console, agentProviders = null
       // open to any origin by design, and judged by their own tokens.
       if (!SAFE_METHODS.has(req.method) && !(connector && CONNECTOR_PUBLIC.has(route)) && !fromOwnPage(req)) {
         return json(res, 403, { error: 'a change has to come from this drive’s own pages' });
+      }
+      // What marble-host asks a drive on the PC about its person: the study's
+      // counts (server/health-study.js) and, before it removes the drive, both
+      // CLIs' logout (server/health-logout.js). Asked on this machine with the
+      // drive's own passphrase as the bearer. Every drive on the PC shares its
+      // loopback, so being asked locally is not enough: without the
+      // passphrase, through anything that forwards, or by another method, the
+      // route is not there at all. Counts come only from a study drive, and
+      // the logout only on a drive hosted for someone else, where the CLIs'
+      // logins are that person's alone.
+      if (route === '/health/study' || route === '/health/logout') {
+        const host = isLocal(req) && gate.allows(req, { cookie: false });
+        if (host && route === '/health/study' && req.method === 'GET' && config.study) return json(res, 200, await studyHealth.read());
+        if (host && route === '/health/logout' && req.method === 'POST' && config.guest) return json(res, 200, await signOutClis({ log }));
+        return json(res, 404, { error: 'not found' });
       }
       if (route === '/gate') return gateRoute(req, res, url);
       // A share link: in front of the gate, because the person holding one
@@ -1589,6 +1613,31 @@ export async function createDrive(config, { log = console, agentProviders = null
           'Content-Disposition': `attachment; filename="${name}.mrbl"`,
           'X-Marble-Blobs-Inlined': String(whole.inlined),
         });
+      }
+
+      // The same, for the whole drive: one zip of every document, flattened,
+      // and every file, to take away (server/export.js). The door's account
+      // page links here as Download my drive. Sent as it is made, so a big
+      // drive never sits in memory.
+      if (route === '/drive/export.zip' && req.method === 'GET') {
+        const name = exportName({ doorName: config.doorName, root: config.root });
+        res.writeHead(200, {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': attachment(`${name}.zip`),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        try {
+          const entries = exportEntries({ root: config.root, blobs: store.blobs, top: name });
+          await pipeline(Readable.from(zipStream(entries), { objectMode: false, highWaterMark: 1 << 18 }), res);
+        } catch (err) {
+          // Half a zip must not pass for a whole one: the connection is cut,
+          // and the browser says the download failed. Someone who closed the
+          // tab is not a failure worth a line.
+          if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') log.error(`[drive] the export stopped: ${err.message}`);
+          res.destroy();
+        }
+        return;
       }
 
       if (route === '/drive/weigh' && req.method === 'GET') {

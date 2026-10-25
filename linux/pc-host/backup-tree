@@ -3,6 +3,8 @@
 # backup-check.sh, beside this file; docs/HOSTING.md, "Backups of PC drives"):
 # listing a drive, copying what changed out of it, checking a restored copy
 # against the list it was made from, and the status file the Console reads.
+# And the study export's (export-guest; "The study on each drive"): reading a
+# drive's settings for its consent, and copying its study logs out.
 #
 # It runs as root over a folder the drive's own agents can write to while it
 # runs. So it never follows a symbolic link, at any depth: every folder is
@@ -20,6 +22,8 @@
 #   backup-tree compare <drive> <copy> <manifest.json>
 #   backup-tree counts <manifest.json>
 #   backup-tree status <file> <name> <ok|fail> <why> <files> <bytes> <changed> <lastGood> <at>
+#   backup-tree consent <settings.env>
+#   backup-tree export <drive> <out> <name> <at> <consent>
 #
 # A file list is {"seq", "at", "files": {path: [size, mtimeMs]}, "count",
 # "bytes", "documents"}, the shape server/hub/sync.js keeps for the hub, plus
@@ -28,6 +32,7 @@
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
 
@@ -79,6 +84,10 @@ def open_root(root):
         return os.open(root, O_DIR)
     except FileNotFoundError:
         raise Refusal('missing')
+    except PermissionError:
+        # Run without the right to read another user's files: export-guest
+        # started by hand rather than by its unit.
+        raise Refusal('unreadable')
     except OSError:
         # ELOOP for a link, ENOTDIR for a file: either way not a drive to read.
         raise Refusal('not-a-folder')
@@ -454,6 +463,155 @@ def cmd_status(file, name, ok, why, files, nbytes, changed, last_good, at):
     return 0
 
 
+# The study export (export-guest). marble-host writes a drive's settings as
+# KEY=value lines; MARBLE_CONSENT is <form version>@<when>, the version in the
+# letters the door allows for it and the time as the door wrote it.
+SETTING = re.compile(r'^\s*(MARBLE_STUDY|MARBLE_CONSENT)\s*=\s*(.*?)\s*$')
+CONSENT = re.compile(r'^[A-Za-z0-9._-]{1,80}@[0-9A-Za-z:.+-]{1,40}$')
+SETTINGS_MAX = 64 * 1024
+
+
+def cmd_consent(file):
+    """What a drive's settings file says about the study: study=<0|1> and
+    consent=<version>@<when>, or nothing after the =. Read without following
+    a link, and only from a regular file that belongs to whoever runs this,
+    which in its unit is the owner, who writes the settings through
+    marble-host: a link, or a hard link to a file of root's, is refused
+    rather than read."""
+    try:
+        fd = os.open(file, O_FILE)
+    except FileNotFoundError:
+        print('refused=missing')
+        return 3
+    except OSError:
+        print('refused=unreadable')
+        return 3
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
+            print('refused=not-theirs')
+            return 3
+        data = os.read(fd, SETTINGS_MAX)
+    finally:
+        os.close(fd)
+    values = {}
+    for line in data.decode('utf-8', 'replace').splitlines():
+        m = SETTING.match(line)
+        if m:
+            value = m.group(2)
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+                value = value[1:-1]
+            values[m.group(1)] = value
+    consent = values.get('MARBLE_CONSENT', '')
+    if consent and not CONSENT.match(consent):
+        print('refused=consent-unreadable')
+        return 3
+    print(f"study={'1' if values.get('MARBLE_STUDY') == '1' else '0'} consent={consent}")
+    return 0
+
+
+def open_dir(parent_fd, name):
+    """name, a folder in parent_fd, opened without following a link; None
+    when it is not there or is not a folder. A folder this may not read is
+    an error, so an export never passes for an empty one."""
+    try:
+        return os.open(name, O_DIR, dir_fd=parent_fd)
+    except PermissionError:
+        raise
+    except OSError:
+        return None
+
+
+def study_logs(root_fd):
+    """The study's logs in the drive open at root_fd, as {path: [size,
+    mtimeMs]}: each conversation's events.jsonl and all of its turns/ and
+    raw/, and the op logs at the top of .marble/. Nothing else: no document,
+    no history, no blob, no chat's pictures or settings, and never the
+    drive's home, which is beside the drive rather than in it."""
+    files = {}
+
+    def regular(dfd, name, rel):
+        try:
+            st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+        except OSError:
+            return
+        if stat.S_ISREG(st.st_mode):
+            files[rel] = [st.st_size, ms(st.st_mtime_ns)]
+
+    marble = open_dir(root_fd, '.marble')
+    if marble is None:
+        return files
+    try:
+        for name in sorted(os.listdir(marble)):
+            if name.endswith('.ops.jsonl'):
+                regular(marble, name, f'.marble/{name}')
+        agents = open_dir(marble, 'agents')
+        if agents is None:
+            return files
+        try:
+            for conversation in sorted(os.listdir(agents)):
+                cfd = open_dir(agents, conversation)
+                if cfd is None:
+                    continue
+                try:
+                    regular(cfd, 'events.jsonl', f'.marble/agents/{conversation}/events.jsonl')
+                    for part in ('turns', 'raw'):
+                        pfd = open_dir(cfd, part)
+                        if pfd is None:
+                            continue
+                        try:
+                            inside, _deep = walk(pfd)
+                            for rel, entry in inside.items():
+                                files[f'.marble/agents/{conversation}/{part}/{rel}'] = entry
+                        finally:
+                            os.close(pfd)
+                finally:
+                    os.close(cfd)
+        finally:
+            os.close(agents)
+    finally:
+        os.close(marble)
+    return files
+
+
+def cmd_export(root, out, name, at, consent):
+    """The study's logs, copied from a drive into out, a folder this makes,
+    as they lie under the drive (.marble/...), with export.json beside them:
+    {name, at, consent, files, bytes}. Every file is read as copy_out reads a
+    backup's, so a link planted anywhere in the drive is never followed."""
+    try:
+        fd = open_root(root)
+    except Refusal as why:
+        print(f'refused={why}')
+        return 3
+    try:
+        try:
+            files = study_logs(fd)
+        except PermissionError:
+            print('refused=unreadable')
+            return 3
+        need = sum(entry[0] for entry in files.values())
+        parent = os.path.dirname(os.path.abspath(out))
+        vfs = os.statvfs(parent)
+        free = vfs.f_bavail * vfs.f_frsize
+        if need + (1 << 30) > free:
+            print(f'refused=no-room need={need} free={free}')
+            return 3
+        os.mkdir(out, 0o700)
+        tmp = os.path.join(parent, f'.{os.path.basename(out)}.copying')
+        copied = {}
+        for rel in sorted(files):
+            got = copy_out(fd, rel, out, tmp)
+            if got is not None:
+                copied[rel] = got
+    finally:
+        os.close(fd)
+    nbytes = sum(entry[0] for entry in copied.values())
+    write_json(os.path.join(out, 'export.json'), {'name': name, 'at': at, 'consent': consent, 'files': len(copied), 'bytes': nbytes})
+    print(f'files={len(copied)} bytes={nbytes}')
+    return 0
+
+
 COMMANDS = {
     'scan': (cmd_scan, 2),
     'same': (cmd_same, 2),
@@ -463,6 +621,8 @@ COMMANDS = {
     'compare': (cmd_compare, 3),
     'counts': (cmd_counts, 1),
     'status': (cmd_status, 9),
+    'consent': (cmd_consent, 1),
+    'export': (cmd_export, 5),
 }
 
 if __name__ == '__main__':

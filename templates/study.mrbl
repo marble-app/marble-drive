@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<!-- A page to read: it opens as a page, not in Build mode. -->
+<meta name="marble-build" content="off">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* A study drive's page about the study (server/seed.js, seedStudy): what
+     the drive records, who sees what, where it is kept and how to leave.
+     Written once, when the drive is first in the study, and from then on the
+     person's own page like any other. Nothing rewrites it.
+
+     It is drawn the way the doc starter draws a page, because it is one: the
+     drive's tokens as light-dark() pairs, white to the edge, one hairline
+     round the page and the machine's own sans. Nothing on it moves or is
+     translucent, so it needs neither motion block. */
+  :root {
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --line: light-dark(#e6e2d8, #272c30);
+    /* A document is white to the edge: the system's --paper is the Drive's. */
+    --paper: light-dark(#ffffff, #1c1f22);
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --select: light-dark(#d2e2f0, #2c4459);
+    --r-sm: 8px;
+    --f-system: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  /* Width answers are asked of the root, not the window: a chat docked
+     beside the page shrinks <html> and leaves the viewport alone. A root
+     that is a container keeps the body's background off the canvas, so the
+     paper is on <html> too, or the margins round the page show the
+     browser's own grey after dark. */
+  html { container: doc / inline-size; background: var(--paper); }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 14px/1.5 var(--f-system); -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--select); }
+
+  /* The doc starter's page: a sheet's width, an inch of margin, one hairline. */
+  .page {
+    width: 8.5in; max-width: calc(100% - 2rem); margin: 1.5rem auto 4rem;
+    padding: .9in 1in 1in; border: 1px solid var(--line); border-radius: var(--r-sm);
+  }
+
+  /* Its paragraph styles, in its points. */
+  h1 { margin: 0; padding-bottom: 4pt; font-size: 23pt; line-height: 1.2; font-weight: 500; letter-spacing: -.015em; }
+  .lede { padding-bottom: 4pt; font-size: 13pt; color: var(--muted); }
+  h2 { margin: 0; padding: 18pt 0 5pt; font-size: 17pt; line-height: 1.25; font-weight: 500; letter-spacing: -.01em; }
+  p, li, td, th { font-size: 10.5pt; line-height: 1.55; }
+  p { margin: 0; text-wrap: pretty; }
+  p + p { padding-top: 7pt; }
+  ul { margin: 0; padding: 4pt 0 0 .5in; }
+  li + li { padding-top: 2pt; }
+  li::marker { color: var(--faint); }
+
+  /* What is kept where: two columns and hairlines between the rows, no box
+     round it and no fill, as a table in a document is. */
+  table { width: 100%; margin-top: 4pt; border-collapse: collapse; }
+  th, td { padding: 6pt 12pt 6pt 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--muted); }
+  td:first-child { width: 44%; }
+  td:last-child, th:last-child { padding-right: 0; }
+
+  a { color: var(--accent-ink); text-underline-offset: .15em; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  /* A phone: the page takes the screen, as the doc starter's does, and
+     reading text is 17px. */
+  @container doc (max-width: 34rem) {
+    .page { width: auto; max-width: none; margin: 0; padding: 1.1rem 1.15rem calc(2.5rem + env(safe-area-inset-bottom, 0px)); border: 0; border-radius: 0; }
+    h1 { font-size: 1.65rem; }
+    .lede { font-size: 1.1rem; }
+    h2 { font-size: 1.35rem; padding-top: 1.5rem; }
+    p, li { font-size: 17px; }
+    td, th { font-size: 15px; }
+    ul { padding-left: 1.4rem; }
+  }
+</style>
+</head>
+<body data-marble-id="st-body">
+<main class="page" data-marble-id="st-page">
+  <h1 data-marble-id="st-title">Taking part in the study</h1>
+  <p class="lede" data-marble-id="st-lede">__HOST_START__ is studying how people make their own tools by asking an AI. You agreed to take part when you made this drive, and you can leave at any time.</p>
+
+  <section data-marble-id="st-recorded">
+    <h2 data-marble-id="st-recorded-h">What is recorded</h2>
+    <p data-marble-id="st-recorded-p">This drive keeps its own logs of how you use it:</p>
+    <ul data-marble-id="st-recorded-list">
+      <li data-marble-id="st-recorded-1">the pages you open</li>
+      <li data-marble-id="st-recorded-2">what you ask the agent, and what it does to answer</li>
+      <li data-marble-id="st-recorded-3">what the agent makes, and the changes you make to your pages</li>
+    </ul>
+  </section>
+
+  <section data-marble-id="st-never">
+    <h2 data-marble-id="st-never-h">What is never recorded</h2>
+    <ul data-marble-id="st-never-list">
+      <li data-marble-id="st-never-1">Your Claude or ChatGPT password. You sign in on Anthropic’s or OpenAI’s own page, and Marble never reads the sign-in that Claude Code or Codex keeps.</li>
+      <li data-marble-id="st-never-2">Anything outside this drive.</li>
+    </ul>
+  </section>
+
+  <section data-marble-id="st-sees">
+    <h2 data-marble-id="st-sees-h">What __HOST__ sees</h2>
+    <p data-marble-id="st-sees-1">Counts and states, in __HOST__’s Console: the days you used this drive, how many times you asked the agent or built something, and whether your agent is connected. Never what you wrote.</p>
+    <p data-marble-id="st-sees-2">The full logs leave this drive only when __HOST__ exports them for the study, and only while your consent is on file. They go to a research folder on __HOST__’s PC.</p>
+    <p data-marble-id="st-sees-3">Your drive and your agent’s sign-in are files on __HOST__’s PC. __HOST_START__ doesn’t open them, and nothing in the Console opens your drive.</p>
+  </section>
+
+  <section data-marble-id="st-kept">
+    <h2 data-marble-id="st-kept-h">Where things are kept</h2>
+    <table data-marble-id="st-kept-table">
+      <thead data-marble-id="st-kept-head">
+        <tr data-marble-id="st-kept-head-r"><th data-marble-id="st-kept-what">What</th><th data-marble-id="st-kept-where">Where</th></tr>
+      </thead>
+      <tbody data-marble-id="st-kept-body">
+        <tr data-marble-id="st-kept-1"><td data-marble-id="st-kept-1a">Your pages, their history and your chats</td><td data-marble-id="st-kept-1b">This drive, on __HOST__’s PC</td></tr>
+        <tr data-marble-id="st-kept-2"><td data-marble-id="st-kept-2a">Your Claude or ChatGPT sign-in</td><td data-marble-id="st-kept-2b">This drive’s own home folder, on __HOST__’s PC. Marble never reads it</td></tr>
+        <tr data-marble-id="st-kept-3"><td data-marble-id="st-kept-3a">Backups of this drive</td><td data-marble-id="st-kept-3b">Encrypted, every hour, in cloud storage only __HOST__ holds the key to</td></tr>
+        <tr data-marble-id="st-kept-4"><td data-marble-id="st-kept-4a">What you ask the agent, and what it reads to answer</td><td data-marble-id="st-kept-4b">Anthropic or OpenAI, under your own account</td></tr>
+        <tr data-marble-id="st-kept-5"><td data-marble-id="st-kept-5a">Your account and your consent</td><td data-marble-id="st-kept-5b">__APEX__</td></tr>
+        <tr data-marble-id="st-kept-6"><td data-marble-id="st-kept-6a">The study’s counts</td><td data-marble-id="st-kept-6b">__HOST__’s Console</td></tr>
+        <tr data-marble-id="st-kept-7"><td data-marble-id="st-kept-7a">The full logs, once exported</td><td data-marble-id="st-kept-7b">__HOST__’s research folder, with your consent on file</td></tr>
+        <tr data-marble-id="st-kept-8"><td data-marble-id="st-kept-8a">A copy of this drive</td><td data-marble-id="st-kept-8b">Your computer, if you download one</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section data-marble-id="st-prompts">
+    <h2 data-marble-id="st-prompts-h">Where your prompts go</h2>
+    <p data-marble-id="st-prompts-p">The agent here runs on your own Claude or ChatGPT plan. What you ask it, and what it reads to answer, goes to Anthropic or OpenAI under your account and their terms, as it does when you use Claude or ChatGPT anywhere else.</p>
+  </section>
+
+  <section data-marble-id="st-leave">
+    <h2 data-marble-id="st-leave-h">How to leave</h2>
+    <p data-marble-id="st-leave-1">Open your account page at <a href="__ACCOUNT__" data-marble-id="st-leave-a">__ACCOUNT_TEXT__</a> and choose Leave the study. Nothing more from this drive goes to the study after that, and you can then ask for what was collected to be deleted.</p>
+    <p data-marble-id="st-leave-2">Your drive stays yours either way. You can download it or delete it from the same page.</p>
+  </section>
+</main>
+</body>
+</html>

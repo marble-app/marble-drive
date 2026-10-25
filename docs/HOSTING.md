@@ -1187,6 +1187,148 @@ pass's session only once the pass is an hour old, so a drive its person
 already has open keeps working for up to an hour. To stop a drive now, hold
 it or remove it.
 
+### The study on each drive
+
+Built 2026-10-25. A drive on the PC answers two questions marble-host asks
+about its person. `GET /health/study` gives the study's counts, and
+`POST /health/logout` signs both agent CLIs out before marble-host removes the
+drive. A study drive also holds a page that tells its person what the study
+records, and its full logs leave the PC drive only through
+`marble-guest-export@<name>.service`, with consent on file. Every drive, in
+the study or not, gives its person the whole drive as one zip at
+`GET /drive/export.zip`, which the door's account page links as Download my
+drive.
+
+Both `/health` routes answer only marble-host. That is a request made on this
+machine (loopback with no forwarded header, `isLocal` in `server/gate.js`)
+carrying the drive's own passphrase as a bearer, `MARBLE_DRIVE_SECRET` from
+its settings file. Every guest shares the PC's loopback, so being asked
+locally is not enough: another drive could ask, and sign this one out.
+Anything else gets `404 {"error":"not found"}`, the same as a request through
+the router, and it gets it before the gate, so to anyone else the routes are
+not there. `/health/study` answers only on a drive with `MARBLE_STUDY=1`, and
+`/health/logout` only on a guest (`MARBLE_GUEST=1`): on the owner's own
+machine a CLI's login is also his terminal's. A plain POST with the bearer
+and no `Origin` passes the origin check.
+
+`GET /health/study` (`server/health-study.js`) counts from the drive's own
+logs and keeps the answer five minutes:
+
+```json
+{"ok":true,"at":"2026-10-25T17:00:03.000Z","days":2,"prompts":9,"builds":1,
+ "marks":5,"buttons":4,"conversations":4,"singlePromptConversations":1,
+ "promptsWhileAnotherWorked":5}
+```
+
+A prompt is a `user` event in `.marble/agents/*/events.jsonl` that the person
+sent. A message another agent sent carries `from`, and is not counted. Nor is
+an automation's scheduled run, which begins "This is a scheduled run", or the
+"Continue" a chat sends itself when its plan runs out, which follows a
+`usage.continued`. `builds` are prompts that begin "Build mode, build N:",
+and `marks` are the marks in them and in marks sent into a build while it
+ran. `buttons` are presses rather than words:
+
+- the brief of a `data-marble-run` element in one of the drive's documents
+- a page's own "The person pressed"
+- Build mode's resume of a paused build
+- an action a selection drafts: "Try 3 variations of", "Automate", "Make … alive", the merge
+
+Every other prompt was typed. `days` is how many days, in
+`MARBLE_DRIVE_DAY_TZ` (America/Los_Angeles unless set), hold a prompt. A turn
+runs from its `turn.started` to its end, so `promptsWhileAnotherWorked`
+counts prompts sent while a turn of another conversation ran. The answer
+holds numbers only, never a word anyone wrote.
+
+`POST /health/logout` (`server/health-logout.js`) runs what Settings'
+Disconnect runs, `claude auth logout` and `codex logout`, under the drive's
+own home with no key in the environment. Each CLI is asked whether it is
+signed in before and after, so the answer says what is true now:
+
+```json
+{"claude":"signed-out","codex":"was-not-signed-in"}
+```
+
+Each value is `signed-out`, `was-not-signed-in` or `failed`. A CLI that isn't
+installed was not signed in, and only `failed` leaves a login behind. Each
+CLI may take 35 s at worst (two 10 s status checks and a 15 s logout), side by
+side, so marble-host should wait a minute. A sign-in left waiting on the
+connect sheet ends when marble-host stops the drive, which it does next.
+
+The Study page is a document called "Taking part in the study". It is
+written at the top of a drive the first time it starts with `MARBLE_STUDY=1`,
+by `seedStudy` in `server/seed.js` from `templates/study.mrbl`. It says what
+the drive records and never records, what the host sees, and where things are
+kept. It also says that prompts go to Anthropic or OpenAI under the person's
+own account, and how to leave from the account page at the door. The host is
+named from `MARBLE_HOST_OWNER`, and the door's domain comes from
+`MARBLE_DRIVE_PUBLIC_URL`. `.marble/apps.json` records it as `seeded.study`,
+so it is written once: a page its person changed stays changed, and one they
+deleted stays gone. It is not an app page, so no update merges into it, and
+`/health/deep` doesn't count it among the documents the person made. Its
+words are not the consent form, which is `CONSENT_FORM` at the door. If the
+approved form says something different about what is recorded, change
+`templates/study.mrbl` to match; only drives that join after that get the new
+page.
+
+`GET /drive/export.zip` (`server/export.js`) is behind the gate like every
+page of the drive. The zip is called `<name>.zip`, after `MARBLE_DOOR_NAME`
+or else the drive's folder, and holds one folder of that name. In it is
+every document flattened, its pictures and recordings back inside it as
+`/drive/download` gives one, every other file as it is, and every folder.
+Nothing whose name starts with a dot goes in, so none of `.marble/` (history,
+chats, logs, blobs, trash), and no link is followed. It is sent as it is
+made, by a zip writer of the repo's own (`server/zip-write.js`), with zip64
+when an entry or the whole may pass 4 GB. Every entry that streams is
+deflated, at level 0 for a picture or a recording. The Finder's unzip reads
+front to back, and can't find where a stored entry ends when its size comes
+after it.
+
+The study export copies a drive's full logs into the owner's Research folder.
+marble-host's `POST /drives/<name>/export` starts it, and so does this, which
+the polkit rule allows the owner:
+
+1. `systemctl start marble-guest-export@ana.service`
+2. `journalctl -u marble-guest-export@ana` says what it did, or why it
+   refused. A refusal fails the unit and copies nothing.
+
+The unit runs `/usr/local/lib/marble-guests/export-guest ana`. It refuses
+unless `/etc/marble-guests/ana.env` says `MARBLE_STUDY=1` and holds a
+`MARBLE_CONSENT` of `<version>@<time>`, read without following a link and
+only from a file of the owner's. Then it copies `.marble/agents/*/events.jsonl`,
+`.marble/agents/*/turns/`, `.marble/agents/*/raw/` and `.marble/*.ops.jsonl`
+into `~/Marble Drive/Research/Probe study/ana/<utc>/`. They are laid out as in
+the drive, so a script written for a drive's logs reads an export the same
+way. Beside them is `export.json`:
+
+```json
+{"name":"ana","at":"2026-11-09T17:00:03Z","consent":"2026-11-irb-v1@2026-11-02T17:00:03.123Z","files":214,"bytes":5813302}
+```
+
+No document, picture, history or anything of the drive's home is copied.
+`backup-tree` reads the drive (its `consent` and `export` commands), so a
+link planted anywhere in it is never followed. An export is made under a
+hidden name and renamed once whole, so the Drive never shows half of one; it
+shows `export.json` and hides the `.marble` folder beside it. The Research
+folder is part of the owner's drive, so the exports are backed up with it and
+his agents can read them.
+
+The unit runs the export as the owner with one extra power,
+`CAP_DAC_READ_SEARCH`, to read the drive's files, rather than as root. It
+writes into his home, where a link his user left in the way could send a
+root writer anywhere on the PC. As the owner, a link can only lead where he
+could write anyway, and everything it makes is his. Its sandbox is as tight
+as the backup's. Of the owner's home it sees only the Research folder, and of
+`/var/lib/private` only that drive's state folder, read-only. It has no
+network. `install.sh` runs `install.d/30-export.sh`, which installs the
+helper with the `backup-tree` and `backup-lib.sh` it shares with the backups.
+It writes the owner's name and folder into the unit, and makes the folder as
+the owner. `--uninstall` takes the helper and the unit away and keeps the
+exports.
+
+`test/drive-export.test.js`, `test/health-study.test.js`,
+`test/health-logout.test.js`, `test/study-page.test.js` and
+`test/host-export.test.js` try all of it without root or real CLIs.
+
 ### People in the Console
 
 Built 2026-10-25. The Console's Drives view shows the people on the PC under
