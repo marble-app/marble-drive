@@ -108,7 +108,7 @@ export function userProperties({ name, opt, guestEnvDir, guestStateDir }) {
   return props;
 }
 
-export function createUnits({ mode = 'system', run = commandRunner(), opt = '/opt/marble', guestEnvDir = '/etc/marble-guests', guestStateDir = '/var/lib/marble-guests', slice = 'marble-guests.slice', log = console } = {}) {
+export function createUnits({ mode = 'system', run = commandRunner(), opt = '/opt/marble', guestEnvDir = '/etc/marble-guests', guestStateDir = '/var/lib/marble-guests', slice = 'marble-guests.slice', parentSlice = 'marble.slice', log = console } = {}) {
   const must = async (what, promise) => {
     const r = await promise;
     if (r.code !== 0) {
@@ -138,9 +138,13 @@ export function createUnits({ mode = 'system', run = commandRunner(), opt = '/op
       const state = path.join(guestStateDir, name);
       await fsp.mkdir(state, { recursive: true, mode: 0o700 });
       if (!sliced) {
-        // All of them together, as marble-guests.slice is on the PC.
-        const r = await sc('set-property', '--runtime', slice, 'MemoryHigh=5G', 'MemoryMax=6G', 'CPUWeight=50');
+        // All of them together, as marble-guests.slice is on the PC, and
+        // their CPU weight on marble.slice, the level beside app.slice where
+        // the owner's own drive runs (a weight counts only against siblings).
+        const r = await sc('set-property', '--runtime', slice, 'MemoryHigh=5G', 'MemoryMax=6G', 'TasksMax=4096');
         if (r.code !== 0) log.error?.(`[host] could not cap ${slice}: ${r.stderr.trim()}`);
+        const w = await sc('set-property', '--runtime', parentSlice, 'CPUWeight=50');
+        if (w.code !== 0) log.error?.(`[host] could not weigh ${parentSlice}: ${w.stderr.trim()}`);
         sliced = true;
       }
       const props = userProperties({ name, opt, guestEnvDir, guestStateDir }).flatMap((p) => ['-p', p]);

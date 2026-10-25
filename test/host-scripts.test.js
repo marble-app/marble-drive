@@ -69,6 +69,8 @@ test('install.sh: the units, the slice, the polkit rule for the owner, run-guest
   assert.equal(mode(at('etc/systemd/system/marble-guest@.service')), 0o644);
   assert.equal(fs.readFileSync(at('etc/systemd/system/marble-guest@.service'), 'utf8'), fs.readFileSync(path.join(DIR, 'marble-guest@.service'), 'utf8'));
   assert.equal(mode(at('etc/systemd/system/marble-guests.slice')), 0o644);
+  assert.match(fs.readFileSync(at('etc/systemd/system/marble.slice'), 'utf8'), /^CPUWeight=50$/m);
+  assert.doesNotMatch(fs.readFileSync(at('etc/systemd/system/marble-guests.slice'), 'utf8'), /CPUWeight/, 'a weight there would count against nothing');
   const rule = fs.readFileSync(at('etc/polkit-1/rules.d/50-marble-host.rules'), 'utf8');
   assert.equal(mode(at('etc/polkit-1/rules.d/50-marble-host.rules')), 0o644);
   assert.ok(rule.includes(`subject.user !== "${ME}"`));
@@ -104,7 +106,7 @@ test('install.sh --uninstall: the guests stopped, install.d in reverse, everythi
   await fsp.writeFile(path.join(r.root, 'etc/marble-guests/ana.env'), 'PORT=4500\n');
   const res = await sh(path.join(DIR, 'install.sh'), ['--uninstall', ME], r.env);
   assert.equal(res.status, 0, res.stderr);
-  for (const gone of ['etc/systemd/system/marble-guest@.service', 'etc/systemd/system/marble-guests.slice', 'etc/polkit-1/rules.d/50-marble-host.rules', 'opt/marble', 'etc/marble-guests']) {
+  for (const gone of ['etc/systemd/system/marble-guest@.service', 'etc/systemd/system/marble.slice', 'etc/systemd/system/marble-guests.slice', 'etc/polkit-1/rules.d/50-marble-host.rules', 'opt/marble', 'etc/marble-guests']) {
     assert.ok(!fs.existsSync(path.join(r.root, gone)), gone);
   }
   assert.equal(fs.readFileSync(path.join(kept, 'Notes.mrbl'), 'utf8'), 'hers');

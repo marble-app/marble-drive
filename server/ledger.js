@@ -18,8 +18,8 @@
 //
 // A drive in a service of its own with a memory limit (one of other people's
 // drives on the owner's PC, server/cgroup.js) counts that service instead of
-// the machine: cpu and mem are its cgroup's, used is its working set, and
-// total is its limit.
+// the machine: cpu and mem are its cgroup's, used is what its programs hold
+// (less the cache the kernel can drop), and total is its limit.
 //   procs  MB held at the minute's end by the host, the agents' turns, the
 //          browsers among those, and everything else (server/memory-guard.js)
 //   disk   GB used on the drive's filesystem

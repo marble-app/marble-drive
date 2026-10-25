@@ -6,8 +6,9 @@
 #   sudo bash linux/pc-host/install.sh --uninstall [<owner>]   take it away again
 #
 # The owner is the user marble-host runs as: $SUDO_USER unless named. This
-# installs the guest unit template (marble-guest@.service) and the slice they
-# share into /etc/systemd/system, the polkit rule that lets the owner's user
+# installs the guest unit template (marble-guest@.service) and the slices
+# they share (marble-guests.slice, inside marble.slice) into
+# /etc/systemd/system, the polkit rule that lets the owner's user
 # (and so marble-host) start, stop and restart those units and nothing else,
 # and run-guest into /opt/marble/bin. It makes /opt/marble with bin, releases
 # and ms-playwright in it (the owner's, 755) and /etc/marble-guests (the
@@ -36,7 +37,7 @@ UNITS="$ROOT/etc/systemd/system"
 RULES="$ROOT/etc/polkit-1/rules.d"
 OPT="$ROOT/opt/marble"
 ETC="$ROOT/etc/marble-guests"
-UNIT_FILES=(marble-guest@.service marble-guests.slice)
+UNIT_FILES=(marble-guest@.service marble.slice marble-guests.slice)
 RULE=50-marble-host.rules
 
 say() { printf 'install: %s\n' "$*"; }
@@ -95,7 +96,7 @@ if ((uninstall)); then
   for unit in "${UNIT_FILES[@]}"; do rm -f "$UNITS/$unit"; done
   "$SYSTEMCTL" daemon-reload || true
   rm -rf "$OPT" "$ETC"
-  say "removed the guest units, the slice, the polkit rule, $OPT and $ETC"
+  say "removed the guest units, the slices, the polkit rule, $OPT and $ETC"
   say "kept the drives' own folders in $ROOT/var/lib/private/marble-guests"
   exit 0
 fi
@@ -135,7 +136,7 @@ chmod 700 "$ETC"
 "$SYSTEMCTL" daemon-reload
 run_pieces forward
 
-say "installed marble-guest@.service, marble-guests.slice, the polkit rule for $owner, and $OPT/bin/run-guest"
+say "installed marble-guest@.service, marble.slice and marble-guests.slice, the polkit rule for $owner, and $OPT/bin/run-guest"
 say "$OPT and $ETC are $owner's"
 say "next, as $owner and without sudo:"
 say "  the escape check, yours to write: a throwaway drive that tries every wall from inside (docs/HOSTING.md)"

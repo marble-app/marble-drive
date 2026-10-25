@@ -19,7 +19,7 @@ const GiB = 2 ** 30;
 const UNIT = '/system.slice/marble-guests.slice/marble-guest@ana.service';
 
 /** A /proc and a /sys/fs/cgroup for one process in marble-guest@ana.service. */
-async function fakeMachine({ cgroupLine = `0::${UNIT}`, max = String(1536 * MB), high = String(1024 * MB), currentMB = 300, inactiveMB = 50, pressure = 0, procs = [], meminfo = { totalMB: 12_000, availableMB: 200 } } = {}) {
+async function fakeMachine({ cgroupLine = `0::${UNIT}`, max = String(1536 * MB), high = String(1024 * MB), currentMB = 300, inactiveMB = 50, activeMB = 0, slabMB = 0, pressure = 0, procs = [], meminfo = { totalMB: 12_000, availableMB: 200 } } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'guest-cg-'));
   const proc = path.join(root, 'proc');
   const cg = path.join(root, 'cgroup');
@@ -33,7 +33,7 @@ async function fakeMachine({ cgroupLine = `0::${UNIT}`, max = String(1536 * MB),
   await fsp.writeFile(path.join(dir, 'memory.max'), `${max}\n`);
   await fsp.writeFile(path.join(dir, 'memory.high'), `${high}\n`);
   await fsp.writeFile(path.join(dir, 'memory.current'), `${currentMB * MB}\n`);
-  await fsp.writeFile(path.join(dir, 'memory.stat'), `anon ${(currentMB - inactiveMB) * MB}\nfile ${inactiveMB * MB}\nactive_file 0\ninactive_file ${inactiveMB * MB}\n`);
+  await fsp.writeFile(path.join(dir, 'memory.stat'), `anon ${(currentMB - inactiveMB - activeMB - slabMB) * MB}\nfile ${(inactiveMB + activeMB) * MB}\nshmem 0\nactive_file ${activeMB * MB}\ninactive_file ${inactiveMB * MB}\nslab_reclaimable ${slabMB * MB}\nslab_unreclaimable 1048576\n`);
   await fsp.writeFile(path.join(dir, 'memory.pressure'), `some avg10=${pressure.toFixed(2)} avg60=0.00 avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1\n`);
   await fsp.writeFile(path.join(dir, 'cpu.stat'), 'usage_usec 42000000\nuser_usec 1\n');
   for (const p of procs) {
@@ -65,6 +65,10 @@ test('a drive in a service with a memory limit is measured by that service; anyw
   assert.equal(ownCgroup({ proc: sly.proc, root: sly.cg }), null);
   assert.equal(ownCgroup({ proc: path.join(m.root, 'nope'), root: m.cg }), null, 'a Mac has no /proc');
   assert.deepEqual(cgroupMemory(m.dir), { max: 1536 * MB, high: 1024 * MB, current: 300 * MB, used: 250 * MB, pressure: 0 });
+  // The first drive to read a release holds its files in its cache, which
+  // the kernel can drop: measured on the PC, 476 MB held, 96 MB its own.
+  const first = await fakeMachine({ currentMB: 476, activeMB: 287, inactiveMB: 88, slabMB: 2 });
+  assert.equal(cgroupMemory(first.dir).used, 99 * MB);
 });
 
 test('the ledger counts the drive\'s own CPU, memory and working set', async () => {

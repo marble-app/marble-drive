@@ -37,16 +37,23 @@ export function ownCgroup({ proc = '/proc', root = '/sys/fs/cgroup', read = read
 
 /** A cgroup's memory in bytes: its hard limit (`max`), where it starts to be
  *  slowed (`high`, or null), what it holds (`current`, file cache included),
- *  what its programs use (`used`: less the inactive file cache it can drop,
- *  as a container's working set is counted), and the share of the last 10 s
- *  its tasks spent waiting on memory (`pressure`, 0–100). Null without a
- *  numeric limit. */
+ *  what its programs use (`used`: less the file cache and the slab the
+ *  kernel can drop, as MemTotal − MemAvailable counts the machine), and the
+ *  share of the last 10 s its tasks spent waiting on memory (`pressure`,
+ *  0–100). Null without a numeric limit.
+ *
+ *  The first drive on the PC to read a release holds its files in its cache
+ *  (a few hundred MB of Claude Code, Codex and node_modules): counted as
+ *  used, an idle drive would look four times its size. tmpfs and shared
+ *  memory are on the kernel's anonymous lists, so they stay counted. */
 export function cgroupMemory(dir, read = readText) {
   const max = bytes(read(path.join(dir, 'memory.max')));
   if (max === null) return null;
   const high = bytes(read(path.join(dir, 'memory.high')));
   const current = bytes(read(path.join(dir, 'memory.current'))) ?? 0;
-  const inactive = Number(/^inactive_file (\d+)$/m.exec(read(path.join(dir, 'memory.stat')) ?? '')?.[1] ?? 0);
+  const stat = read(path.join(dir, 'memory.stat')) ?? '';
+  const of = (name) => Number(new RegExp(`^${name} (\\d+)$`, 'm').exec(stat)?.[1] ?? 0);
+  const droppable = of('active_file') + of('inactive_file') + of('slab_reclaimable');
   const some = /^some avg10=([\d.]+)/m.exec(read(path.join(dir, 'memory.pressure')) ?? '');
-  return { max, high, current, used: Math.max(0, current - inactive), pressure: some ? Number(some[1]) : 0 };
+  return { max, high, current, used: Math.max(0, current - droppable), pressure: some ? Number(some[1]) : 0 };
 }

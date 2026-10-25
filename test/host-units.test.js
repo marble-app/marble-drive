@@ -84,6 +84,7 @@ test('user mode: a transient unit in marble-guests.slice, its walls, its setting
   assert.ok(launch.includes(`-p InaccessiblePaths=-/mnt -/run/WSL -/run/tailscale -/run/docker.sock -${guestEnvDir}`));
   assert.ok(!/RestrictNamespaces/.test(launch), 'Chromium and Claude Code make namespaces of their own');
   assert.ok(f.calls.some((c) => c.startsWith('systemctl --user set-property --runtime marble-guests.slice MemoryHigh=5G MemoryMax=6G')));
+  assert.ok(f.calls.includes('systemctl --user set-property --runtime marble.slice CPUWeight=50'), 'the weight on the level beside the owner\'s drive');
   assert.equal((await fsp.stat(path.join(guestStateDir, 'ana'))).mode & 0o777, 0o700, 'its folder is made, its own');
 
   // Already running: started again, nothing happens.
