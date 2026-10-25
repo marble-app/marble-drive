@@ -219,8 +219,11 @@ test('a new document is drawn from the space its drive keeps, by its path', asyn
   const store = createStore({ root });
   await store.ready();
 
-  // No studio: the bare marble, as before.
-  assert.equal(await markFor(store, 'Notes/plan'), link('doc'));
+  // No studio: its own point in the family every drive starts with.
+  const first = await markFor(store, 'Notes/plan');
+  assert.equal(first, linkFor(space.DEFAULTS, 'Notes/plan'));
+  assert.notEqual(first, link('doc'));
+  assert.notEqual(await markFor(store, 'Notes/other'), first, 'siblings, not twins');
 
   const warm = { hue: { lo: 20, hi: 60 }, form: ['split'] };
   await store.write('System/Favicon Studio', studio({ warm }, 'warm'));
