@@ -245,11 +245,17 @@ export class DirectoryCore {
         if (!acct) refuse(500, 'that sign-in names an account that is gone');
         acct.seen = this.iso();
         // A signed-in person who opens another invite keeps it for their next
-        // step: a claim invite for a drive, or a first drive.
-        if (invite && !acct.held) {
+        // step: a claim invite for a drive, or a first drive. One they held
+        // that has lapsed or been used up gives way to it, as Bryan's second
+        // invite to someone who let the first run out. An answer they gave
+        // its consent screen goes with it, since no drive was made from it:
+        // the new invite asks for itself.
+        const lapsed = acct.held ? !(await this.inviteByHash(acct.held)).ok : false;
+        if (invite && (!acct.held || lapsed)) {
           const inv = await this.inviteFor(invite);
           const hasRoom = acct.role === 'owner' || (acct.drives ?? []).length === 0;
           if (inv.ok && !inv.invite.owner && (inv.invite.drive || hasRoom)) {
+            if (lapsed && (acct.drives ?? []).length === 0) delete acct.study;
             acct.held = inv.hash;
             acct.invite = inv.invite.id;
           }

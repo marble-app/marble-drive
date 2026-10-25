@@ -483,3 +483,33 @@ test('people: a removed drive keeps its row, as removed; an older account finds 
   assert.match(row.invite.id, /^[0-9a-f]{8}$/);
   assert.match(row.timeline.ready, /^2026-/);
 });
+
+test('a study invite that lapsed before a drive was named gives way to a new one, and the new one asks again', async () => {
+  const d = dir();
+  const first = await invited(d, 'ana', { study: true, days: 1 });
+  await d.call('POST', '/consent', { account: first.account.id, version: 'v1', choice: 'given' });
+  d.tick(2 * 24 * 60);
+  const gone = (await d.call('GET', `/accounts/${first.account.id}`)).data;
+  assert.equal(gone.mayMake, false, 'the first has expired');
+  assert.equal((await d.call('POST', '/drive', { account: first.account.id, name: 'ana', home: 'pchost' })).status, 403);
+
+  const again = (await d.call('POST', '/invite', { study: true, note: 'Ana, again' })).data;
+  const back = await d.call('POST', '/identity', { provider: 'google', subject: 'sub-ana', email: 'ana@example.com', name: 'ana', invite: again.code });
+  assert.equal(back.data.account.id, first.account.id, 'the same account');
+  assert.equal(back.data.account.mayMake, true);
+  assert.equal(back.data.account.askConsent, true, 'the new invite asks for itself');
+  assert.deepEqual(back.data.account.study, { consent: null, withdrawn: null, deleteAsked: null });
+  assert.ok((await d.call('GET', '/log')).data.lines.some((l) => l.kind === 'consent-given' && l.account === first.account.id), 'the first answer stays in the log');
+  await d.call('POST', '/consent', { account: first.account.id, version: 'v2', choice: 'given' });
+  assert.equal((await d.call('POST', '/drive', { account: first.account.id, name: 'ana', home: 'pchost' })).status, 200);
+  const row = (await d.call('GET', '/people')).data.people.find((p) => p.account?.id === first.account.id);
+  assert.equal(row.invite.id, again.invite.id, 'the row names the invite she made her drive with');
+  assert.equal(row.study.consent.version, 'v2');
+
+  // A live invite is never swapped for another.
+  const bob = await invited(d, 'bob');
+  const other = (await d.call('POST', '/invite', { study: true })).data;
+  const still = await d.call('POST', '/identity', { provider: 'google', subject: 'sub-bob', email: 'bob@example.com', name: 'bob', invite: other.code });
+  assert.equal(still.data.account.studyInvite, false, 'he keeps the invite he came in on');
+  assert.equal((await d.call('POST', '/invite/peek', { code: bob.code })).data.ok, true);
+});
