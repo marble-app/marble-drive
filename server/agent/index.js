@@ -322,10 +322,11 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     // cadence keeps the limit tripped while the sliders read Unavailable. The
     // reader backs off and keeps serving the last good reading, on disk so a
     // restart mid-limit still has numbers.
-    // On a drive hosted for someone else the meter never opens their login:
-    // it asks Claude Code's own /usage instead (usage.js).
+    // On a drive hosted for someone else the meter never opens their login.
+    // It shows nothing for Claude until Claude Code's own /usage can say the
+    // plan's limits (usage.js, collectUsageFromCli; config.cliUsage says why).
     usage: usage ?? createUsageReader({
-      collect: () => (config.guest ? collectUsageFromCli({ env: hostEnv }) : collectUsage()),
+      collect: () => (config.guest ? (config.cliUsage ? collectUsageFromCli({ env: hostEnv }) : { meters: [] }) : collectUsage()),
       file: path.join(store.marbleDir, 'usage-last.json'),
     }),
     usageHistory: usageHistory ?? createUsageHistory(),

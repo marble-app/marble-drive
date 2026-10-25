@@ -698,9 +698,11 @@ and says why under it.
 
 A drive with `MARBLE_GUEST=1` differs from the owner's in four ways:
 
-- The usage meter runs `claude -p /usage`, a command of Claude Code's own, and
-  reads the plan's limits from what it prints. It never opens the login file
-  to ask Anthropic, as the owner's drive does. Codex has no meter.
+- The usage meter never opens the login file to ask Anthropic, as the owner's
+  drive does, so it shows nothing for Claude. Claude Code 2.1.281 answers
+  `claude -p /usage` with a breakdown of what used the plan, not its limits;
+  once a version prints the limits, `MARBLE_DRIVE_CLI_USAGE=1` has the meter
+  read them from there (`collectUsageFromCli`). Codex has no meter.
 - Every key an agent gets comes from the drive's own key file. The agents'
   environment drops any key or starter-credit setting the host's environment
   holds, and without `MARBLE_DRIVE_AGENT_KEYS` the file is

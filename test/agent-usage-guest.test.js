@@ -136,8 +136,18 @@ async function host(env) {
   return `http://127.0.0.1:${port}`;
 }
 
-test('on a guest the meter comes from Claude Code, and the login file is never used to ask Anthropic', async () => {
+test('on a guest there is no Claude meter by default, and the login file is never used to ask Anthropic', async () => {
+  // Claude Code 2.1.281 answers `claude -p /usage` with a breakdown, not the
+  // plan's limits (config.cliUsage), so a guest asks nothing and shows nothing.
   const base = await host({ MARBLE_GUEST: '1' });
+  const { meters } = await (await fetch(`${base}/agent/usage`)).json();
+  assert.deepEqual(meters, []);
+  assert.deepEqual(toAnthropic, [], 'no request with their token');
+  assert.ok(fs.existsSync(path.join(HOME, '.claude', '.credentials.json')), 'and the file is left where it was');
+});
+
+test('on a guest with MARBLE_DRIVE_CLI_USAGE=1 the meter comes from Claude Code, and the login file is never used to ask Anthropic', async () => {
+  const base = await host({ MARBLE_GUEST: '1', MARBLE_DRIVE_CLI_USAGE: '1' });
   const { meters } = await (await fetch(`${base}/agent/usage`)).json();
   assert.equal(meters.length, 1);
   assert.equal(meters[0].id, 'claude-subscription');
@@ -151,4 +161,21 @@ test('off a guest the meter is what it was: the login, asked of Anthropic', asyn
   const base = await host({ MARBLE_GUEST: '' });
   await (await fetch(`${base}/agent/usage`)).json();
   assert.ok(toAnthropic.some((call) => call.url.endsWith('/api/oauth/usage') && call.authorization === 'Bearer sk-ant-oat01-THEIRS'));
+});
+
+test('what Claude Code 2.1.281 prints for `claude -p /usage` has no limits in it to read', () => {
+  // Seen on the PC on Oct 25: print mode answers with a breakdown of what used
+  // the plan, so the meter can only say it doesn't know (config.cliUsage).
+  const said = [
+    'You are currently using your subscription to power your Claude Code usage',
+    '',
+    "What's contributing to your limits usage?",
+    'Approximate, based on local sessions on this machine — does not include other devices or claude.ai.',
+    '',
+    'Last 24h · 7768 requests · 2250 sessions',
+    '  100% of your usage was while 4+ sessions ran in parallel',
+  ].join('\n');
+  const meter = parseCliUsage(said);
+  assert.equal(meter.available, false);
+  assert.equal(meter.used, null);
 });

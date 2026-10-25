@@ -283,6 +283,13 @@ export function loadConfig(env = process.env) {
     // the CLI to say), has no starter credit, and keeps its keys only in its
     // own file.
     guest: str('MARBLE_GUEST', '') === '1',
+    // Whether a guest's usage meter asks Claude Code's own `/usage`. Off: in
+    // print mode Claude Code 2.1.281 answers `/usage` with a breakdown of what
+    // used the plan, not its limits, so there is nothing for the meter to read,
+    // and each ask starts a whole Claude Code (about 6 s and 9 s of CPU, seen on
+    // the PC on Oct 25). Until a version prints the limits, a guest shows no
+    // Claude meter, which locks nothing: an unknown meter never greys a model.
+    cliUsage: bool('MARBLE_DRIVE_CLI_USAGE', false),
     // Who hosts this drive, for words like "Bryan never sees your password".
     // A plain name or nothing: it is shown on the page as it is.
     hostOwner: (() => {
