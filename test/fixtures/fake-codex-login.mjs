@@ -24,6 +24,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +40,14 @@ const note = (entry) => { if (logFile) fs.appendFileSync(logFile, `${JSON.string
 
 const home = process.env.HOME || '/nonexistent';
 const LOGIN = path.join(home, '.codex', 'fake-login.json');
+// A fake login is only ever written under a temporary HOME: a test that
+// forgot to give it one must never touch a real ~/.claude or ~/.codex.
+const tmp = fs.realpathSync(os.tmpdir());
+const real = (() => { try { return fs.realpathSync(home); } catch { return home; } })();
+if (!real.startsWith(`${tmp}${path.sep}`)) {
+  process.stderr.write(`fake CLI: HOME ${home} is not under ${tmp}; refusing to run\n`);
+  process.exit(3);
+}
 const APPROVE = path.join(home, 'fake-approve');
 
 if (args[0] === '--version') {

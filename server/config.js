@@ -268,6 +268,21 @@ export function loadConfig(env = process.env) {
     // How long Connect your Claude waits for the code from Claude's page
     // before it ends the sign-in it started (server/agent/claude-signin.js).
     claudeSignInSeconds: num('MARBLE_DRIVE_CLAUDE_SIGNIN_SECONDS', 600),
+    // How long ChatGPT's device sign-in waits for the person on OpenAI's page:
+    // the life of its one-time code (server/agent/codex-signin.js).
+    codexSignInSeconds: num('MARBLE_DRIVE_CODEX_SIGNIN_SECONDS', 900),
+    // A drive hosted for someone else on the owner's PC (docs/HOSTING.md,
+    // "Other people's drives on the PC"): run-guest sets MARBLE_GUEST=1. Such
+    // a drive reads nothing of its agent's login (the usage meter waits for
+    // the CLI to say), has no starter credit, and keeps its keys only in its
+    // own file.
+    guest: str('MARBLE_GUEST', '') === '1',
+    // Who hosts this drive, for words like "Bryan never sees your password".
+    // A plain name or nothing: it is shown on the page as it is.
+    hostOwner: (() => {
+      const name = str('MARBLE_HOST_OWNER', '').replace(/\s+/g, ' ').trim();
+      return /^[\p{L}\p{M}][\p{L}\p{M}' .-]{0,39}$/u.test(name) ? name : null;
+    })(),
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),

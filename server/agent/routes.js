@@ -22,6 +22,7 @@ import { sameOrigin } from '../sessions.js';
 import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
 import { creditView } from './credit.js';
 import { createClaudeSignIn } from './claude-signin.js';
+import { createCodexSignIn } from './codex-signin.js';
 import { checkAnthropicKey, checkOpenAIKey } from './key-check.js';
 import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
@@ -121,12 +122,16 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, credit = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, log = console }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, credit = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, codexSignIn = null, hostOwner = null, log = console }) {
   let detected = null;
-  // Connect your Claude: `claude setup-token` run for the page, one at a time
-  // (server/agent/claude-signin.js). Made on first use.
+  // The person's own Claude and ChatGPT, each through its CLI's own sign-in,
+  // one at a time (claude-signin.js, codex-signin.js). Made on first use.
   let signIn = claudeSignIn;
   const claudeSignInRun = () => (signIn ??= createClaudeSignIn({ log }));
+  // ChatGPT's is made by `codexSignIn(options)` when given (the host's, with
+  // its wait), so the routes can say what happens when its login lands.
+  let chatgpt = null;
+  const codexSignInRun = () => (chatgpt ??= (codexSignIn ?? createCodexSignIn)({ onSignedIn: () => codexSignedIn(), log }));
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
   const undoing = new Set();
@@ -217,16 +222,33 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       key: openai,
     };
     const offers = [...(hasClaude ? ['claude'] : []), ...(codex.installed ? ['codex'] : [])];
+    // Which of them sign in on their own company's page (the connect sheet's
+    // Claude and ChatGPT); either can take a key instead.
+    const signIns = [...(providers.has(CLAUDE.login) ? ['claude'] : []), ...(codex.installed ? ['codex'] : [])];
     // Starter credit runs Claude until it is used up; a reading that could
     // not be made is not used up.
     const onCredit = await creditState(settings);
     const creditRuns = Boolean(onCredit?.active && !onCredit.usedUp);
-    const ready = (hasClaude && (key || login || creditRuns)) || codex.signedIn;
+    const ready = Boolean((hasClaude && (key || login || creditRuns)) || codex.signedIn);
     // `later`: someone on this drive said Not now to the first-visit popup.
     // Kept for the drive, so a new tab or another device does not ask again;
     // the popup still opens when someone asks for it (runtime/agent-ui.js).
-    return { needed: offers.length > 0 && !ready, later: Boolean(settings.setupLater), login, key, claudeAuth: await claudeAuth(settings), offers, codex, ...(onCredit ? { credit: onCredit } : {}) };
+    // `host`: whose machine the drive runs on, when that is someone else's
+    // (MARBLE_HOST_OWNER on a drive hosted for a person), for "Bryan never
+    // sees your password".
+    return { needed: offers.length > 0 && !ready, ready, later: Boolean(settings.setupLater), login, key, claudeAuth: await claudeAuth(settings), offers, signIns, codex, host: hostOwner || null, ...(onCredit ? { credit: onCredit } : {}) };
   };
+
+  /** The ChatGPT login landed (codex-signin.js): the next look at the agents
+   *  is fresh, the first visit stops asking, and Codex becomes the agent new
+   *  chats start on when the one they start on now cannot run. */
+  async function codexSignedIn() {
+    detected = null;
+    const settings = await store.settings();
+    const current = isClaude(settings.defaultProvider) ? await activeClaude(settings) : settings.defaultProvider;
+    const runs = (await detectAll()).find((p) => p.id === current)?.signedIn;
+    await store.saveSettings({ setupLater: null, ...(runs ? {} : { defaultProvider: CODEX }) });
+  }
 
   /** POST /agent/setup for Codex: the key checked with OpenAI and kept, and
    *  Codex made the agent new chats start on when the one they start on now
@@ -613,42 +635,93 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       return json(res, 200, { ...(await setupState()), checked: verdict === 'ok' });
     }
 
-    // Connect your Claude (the sheet in runtime/agent-ui.js). Starting runs
-    // `claude setup-token` and answers the sign-in address it prints; the
-    // code Claude's page shows comes back to the same run, and the long-lived
-    // token it prints is kept like an API key. Claude then runs on that plan:
-    // the switch goes to the login, and a default of Claude (on a key or on
-    // credit) follows it. Like every /agent route these are the owner's: the
-    // gate is in front of them, a share link never reaches them, and a change
-    // has to come from this drive's own pages.
-    if (route === '/agent/claude/sign-in' && (method === 'POST' || method === 'DELETE')) {
+    // Signing in to the person's own Claude or ChatGPT (the connect sheet in
+    // runtime/agent-ui.js), through each CLI's own sign-in: Claude Code's
+    // `claude auth login` and Codex's `codex login --device-auth`
+    // (claude-signin.js, codex-signin.js). The login is the CLI's, kept under
+    // the drive's home; these routes start the command, hand Claude its code,
+    // say how a sign-in stands, end one, and sign out with the CLI's own
+    // logout. None of them reads or answers a token. Like every /agent route
+    // they are the owner's: the gate is in front of them, a share link never
+    // reaches them, and a change has to come from this drive's own pages.
+    if (route === '/agent/claude/sign-in') {
       if (method === 'DELETE') {
         signIn?.cancel();
         return json(res, 200, { ok: true });
       }
-      if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
       if (!providers.has(CLAUDE.login)) return json(res, 400, { error: "This drive doesn't have Claude." });
-      try {
-        return json(res, 200, await claudeSignInRun().start());
-      } catch (err) {
-        return json(res, err.status ?? 502, { error: err.message });
+      if (method === 'GET') {
+        const status = await claudeSignInRun().status();
+        return json(res, 200, { waiting: claudeSignInRun().waiting(), signedIn: status.signedIn });
+      }
+      if (method === 'POST') {
+        try {
+          return json(res, 200, await claudeSignInRun().start());
+        } catch (err) {
+          return json(res, err.status ?? 502, { error: err.message });
+        }
       }
     }
     if (route === '/agent/claude/sign-in/code' && method === 'POST') {
-      if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
       const body = await readJson(req, maxBody);
-      let token = null;
       try {
-        ({ token } = await claudeSignInRun().finish(body.code));
+        await claudeSignInRun().finish(body.code);
       } catch (err) {
-        return json(res, err.status ?? 502, { error: err.message });
+        return json(res, err.status ?? 502, { error: err.message, ...(err.retry ? { retry: true } : {}) });
       }
-      await keys.write({ claude: token });
+      // Claude runs on the plan now: the switch goes to the login, and a
+      // default of Claude (on a key or on credit) follows it. A token an
+      // older Connect kept would win over the CLI's own login, so it goes.
+      if (keys) await keys.write({ claude: '' });
       detected = null;
       const current = (await store.settings()).defaultProvider;
       const claudeDefault = !current || String(current).startsWith('claude');
       await store.saveSettings({ claudeAuth: 'login', setupLater: null, ...(claudeDefault ? { defaultProvider: CLAUDE.login } : {}) });
       return json(res, 200, { ...(await setupState()), connected: true });
+    }
+    // Disconnect: Claude Code's own `claude auth logout`, and a token an
+    // older Connect kept, both gone.
+    if (route === '/agent/claude/sign-out' && method === 'POST') {
+      if (!providers.has(CLAUDE.login)) return json(res, 400, { error: "This drive doesn't have Claude." });
+      const out = await claudeSignInRun().signOut();
+      if (keys) await keys.write({ claude: '' });
+      detected = null;
+      if (!out.ok && !out.missing) {
+        log.error?.(`[claude sign-in] logout failed: ${out.detail}`);
+        return json(res, 502, { error: "Claude Code couldn't sign out. Try again." });
+      }
+      return json(res, 200, await setupState());
+    }
+
+    if (route === '/agent/codex/sign-in') {
+      if (method === 'DELETE') {
+        chatgpt?.cancel();
+        return json(res, 200, { ok: true });
+      }
+      if (!providers.has(CODEX)) return json(res, 400, { error: "This drive doesn't have Codex." });
+      if (method === 'GET') {
+        const status = codexSignInRun().status();
+        return json(res, 200, status.state === 'signed-in' ? { ...status, ...(await setupState()), connected: true } : status);
+      }
+      if (method === 'POST') {
+        try {
+          return json(res, 200, { state: 'waiting', ...(await codexSignInRun().start()) });
+        } catch (err) {
+          return json(res, err.status ?? 502, { error: err.message });
+        }
+      }
+    }
+    // Disconnect: Codex's own `codex logout`. A key kept for Codex is the key
+    // field's to clear.
+    if (route === '/agent/codex/sign-out' && method === 'POST') {
+      if (!providers.has(CODEX)) return json(res, 400, { error: "This drive doesn't have Codex." });
+      const out = await codexSignInRun().signOut();
+      detected = null;
+      if (!out.ok && !out.missing) {
+        log.error?.(`[codex sign-in] logout failed: ${out.detail}`);
+        return json(res, 502, { error: "Codex couldn't sign out. Try again." });
+      }
+      return json(res, 200, await setupState());
     }
 
     if (route === '/agent/settings') {
@@ -1236,6 +1309,6 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     /** Build mode's routes (server/build/routes.js), behind these same checks. */
     useBuilds(routes) { buildRoutes = routes; },
     /** Ends a Claude sign-in still waiting for its code. */
-    close() { signIn?.close(); },
+    close() { signIn?.close(); chatgpt?.close(); },
   };
 }

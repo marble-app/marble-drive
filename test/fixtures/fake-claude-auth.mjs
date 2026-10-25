@@ -28,6 +28,7 @@
 // address is made up in the CLI's own shape.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -46,6 +47,14 @@ note({ pid: process.pid, args, keys: KEYS.filter((k) => process.env[k] !== undef
 
 const home = process.env.HOME || '/nonexistent';
 const LOGIN = path.join(home, '.claude', 'fake-login.json');
+// A fake login is only ever written under a temporary HOME: a test that
+// forgot to give it one must never touch a real ~/.claude or ~/.codex.
+const tmp = fs.realpathSync(os.tmpdir());
+const real = (() => { try { return fs.realpathSync(home); } catch { return home; } })();
+if (!real.startsWith(`${tmp}${path.sep}`)) {
+  process.stderr.write(`fake CLI: HOME ${home} is not under ${tmp}; refusing to run\n`);
+  process.exit(3);
+}
 const signedIn = () => fs.existsSync(LOGIN);
 
 const URL = 'https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3Amcp_servers+user%3Afile_upload+user%3Aplugins&code_challenge=FAKEchallengeFAKEchallengeFAKEchallenge0123&code_challenge_method=S256&state=FAKEstateFAKEstateFAKEstate-0123456789_ab';

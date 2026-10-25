@@ -18,6 +18,7 @@ import { createVoiceUsage, voiceSettings } from './voice/settings.js';
 import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { createClaudeSignIn } from './claude-signin.js';
+import { createCodexSignIn } from './codex-signin.js';
 import { nameConversation } from './namer.js';
 import { drawWithCli } from './drawer.js';
 import { shootSketches } from '../build/shots.js';
@@ -321,6 +322,8 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     voiceTitles,
     voiceMaxSeconds: config.voiceMaxSeconds ?? 120,
     claudeSignIn: createClaudeSignIn({ waitMs: (config.claudeSignInSeconds ?? 600) * 1000, log }),
+    codexSignIn: (options) => createCodexSignIn({ ...options, waitMs: (config.codexSignInSeconds ?? 900) * 1000 }),
+    hostOwner: config.hostOwner ?? null,
     log,
   });
 
