@@ -102,18 +102,20 @@ export function createProbe({ timeoutMs = 5000, from = HOST_SIDE } = {}) {
       const r = await get(port, '/health');
       return r?.status === 200 && r.body?.ok ? r.body : null;
     },
-    /** /health/deep's answer; the drive's passphrase is the bearer it asks for. */
+    /** /health/deep's answer; the drive's passphrase is the bearer it asks
+     *  for. A fresh one waits on both CLIs, each given ten seconds. */
     async deep(port, secret) {
-      const r = await get(port, '/health/deep', { bearer: secret });
+      const r = await get(port, '/health/deep', { bearer: secret, timeoutMs: Math.max(timeoutMs, 20_000) });
       return r?.status === 200 && r.body?.ok ? r.body : null;
     },
     /** The status of the drive's first page, as a browser would ask for it. */
     async page(port) {
       return (await get(port, '/', { accept: 'text/html', statusOnly: true }))?.status ?? null;
     },
-    /** /health/study's answer, counts and times only, or null. */
+    /** /health/study's answer, counts and times only, or null. A fresh one
+     *  reads through the drive's logs. */
     async study(port, secret) {
-      const r = await get(port, '/health/study', { bearer: secret });
+      const r = await get(port, '/health/study', { bearer: secret, timeoutMs: Math.max(timeoutMs, 20_000) });
       return r?.status === 200 && r.body?.ok ? r.body : null;
     },
     /** The drive signs both its CLIs out: { claude, codex }, each
