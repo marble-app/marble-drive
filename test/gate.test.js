@@ -105,3 +105,56 @@ test('where the gate sends you after signing in is a path on this host, or /', a
   assert.equal(returnPath('/a/My%20Notes#top'), '/a/My%20Notes#top');
   assert.equal(returnPath('/'), '/');
 });
+
+// The passphrase cookie is __Host- over https, so another drive under
+// marbledrive.app can't plant one for this drive (server/gate.js).
+const withCookie = (req, cookie) => ({ ...req, headers: { ...req.headers, cookie } });
+
+test('over https the cookie is __Host-: Secure, Path=/ and no Domain, and only that name counts there', () => {
+  const gate = createGate({ secret: 'x' });
+  const https = arriving('127.0.0.1', { 'x-forwarded-proto': 'https' });
+  const header = gate.cookieHeader(https);
+  assert.match(header, /^__Host-marble_drive=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+; Secure$/);
+  assert.doesNotMatch(header, /Domain=/i);
+  const token = header.slice('__Host-marble_drive='.length, header.indexOf(';'));
+  assert.equal(gate.allows(withCookie(https, `__Host-marble_drive=${token}`)), true);
+  assert.equal(gate.allows(withCookie(https, `marble_drive=${token}`)), false, 'a plain one, planted or old, is not read over https');
+  assert.equal(gate.allows(withCookie(https, `marble_drive=${token}; __Host-marble_drive=junk`)), false);
+  assert.equal(gate.cookieNameFor(https), '__Host-marble_drive');
+  assert.equal(gate.clearHeader(https), '__Host-marble_drive=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure');
+});
+
+test('plain http keeps the plain name, and a __Host- one is not read there', () => {
+  const gate = createGate({ secret: 'x' });
+  const desk = arriving('127.0.0.1');
+  const header = gate.cookieHeader(desk);
+  assert.match(header, /^marble_drive=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+$/);
+  const token = header.slice('marble_drive='.length, header.indexOf(';'));
+  assert.equal(gate.allows(withCookie(desk, `marble_drive=${token}`)), true);
+  assert.equal(gate.allows(withCookie(desk, `__Host-marble_drive=${token}`)), false);
+  assert.equal(gate.cookieNameFor(desk), 'marble_drive');
+  assert.equal(gate.clearHeader(desk), 'marble_drive=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+  assert.equal(gate.cookieNameFor(arriving('192.168.1.20', { 'x-forwarded-proto': 'https' })), 'marble_drive', 'a forwarded-proto from elsewhere is not believed');
+});
+
+test('a host told it is always https: __Host- through a proxy or the edge, the plain name for a request made on the machine itself', () => {
+  const gate = createGate({ secret: 'x', secure: true });
+  for (const req of [
+    arriving('172.16.0.2', { 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'https' }),
+    arriving('127.0.0.1', { 'x-forwarded-host': 'ana.marbledrive.app', 'x-forwarded-proto': 'https' }),
+    arriving('127.0.0.1', { 'cf-ray': '8c1234567890-SJC' }),
+  ]) {
+    assert.equal(gate.cookieNameFor(req), '__Host-marble_drive');
+    assert.match(gate.cookieHeader(req), /^__Host-marble_drive=.*; Secure$/);
+  }
+  // The agent's browser opens the drive at http://127.0.0.1 with the pass
+  // planted under the plain name (server/agent/browser.js).
+  const agentBrowser = arriving('127.0.0.1');
+  assert.equal(gate.cookieNameFor(agentBrowser), 'marble_drive');
+  assert.equal(gate.allows(withCookie(agentBrowser, `${gate.cookieName}=${gate.issue(60_000)}`)), true);
+});
+
+test('a cookie name that already has the prefix is not given it twice', () => {
+  const gate = createGate({ secret: 'x', cookieName: '__Host-mine' });
+  assert.equal(gate.cookieNameFor(arriving('127.0.0.1', { 'x-forwarded-proto': 'https' })), '__Host-mine');
+});

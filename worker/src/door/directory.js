@@ -33,6 +33,11 @@ const CREDIT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const SPARE_STEPS = ['name', 'start'];
 // A spare's sprite: d-spare-<hex>. No drive name can give that (names.js).
 export const SPARE_SPRITE = /^d-spare-[0-9a-f]{6,16}$/;
+// Where a drive can live: a sprite of its own on Fly, or the PC host, where
+// marble-host runs every drive behind one tunnel (worker/src/pc-host.js).
+// A record with no `home` is on Fly, as every drive was before.
+export const PCHOST = 'pchost';
+const HOMES = new Set(['fly', PCHOST]);
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -269,7 +274,8 @@ export class DirectoryCore {
     return [...all.values()].filter((d) => d.state !== 'removed' && !d.claimed).length;
   }
 
-  async claimDrive({ account, name }) {
+  async claimDrive({ account, name, home = 'fly' }) {
+    if (!HOMES.has(home)) refuse(400, 'home is fly or pchost');
     return this.exclusive(async () => {
       const acct = account ? await this.storage.get(`acct:${account}`) : null;
       if (!acct) refuse(404, 'No such account.');
@@ -308,6 +314,18 @@ export class DirectoryCore {
       if (await this.storage.get(`drive:${name}`)) refuse(409, `${name} is taken.`);
       if ((await this.liveDriveCount()) >= this.maxDrives) refuse(503, 'Bryan has made as many drives as he can for now. Your invite still works; try again later.');
 
+      // On the PC host marble-host makes it: no sprite, no spare, and no
+      // starter credit whatever the invite says, because Anthropic's terms
+      // don't let Bryan pay for the Claude his drives' people use.
+      if (home === PCHOST) {
+        const drive = { name, owner: acct.id, home: PCHOST, homes: { pchost: true }, sprite: null, state: 'queued', created: this.iso(), steps: {}, credit: 0 };
+        await this.storage.put(`drive:${name}`, drive);
+        if (held?.ok) await this.storage.put(`invite:${held.hash}`, { ...held.invite, uses: held.invite.uses - 1 });
+        await this.storage.put(`acct:${acct.id}`, { ...acct, held: null, approved: false, drives: [...(acct.drives ?? []), name] });
+        await this.audit('drive-asked', { account: acct.id, detail: { drive: name, invite: held?.ok ? held.invite.id : null, spare: null, home: PCHOST } });
+        return { drive: this.driveView(drive) };
+      }
+
       // A spare that is ready becomes this drive: the door sprite only names
       // it, writes its settings and restarts it. Fly can't rename a sprite,
       // so it keeps its own name and this record maps the drive's name to it.
@@ -328,7 +346,7 @@ export class DirectoryCore {
 
   driveView(d) {
     if (!d) return null;
-    return { name: d.name, owner: d.owner, homes: d.homes ?? {}, sprite: d.sprite ?? null, spare: d.spare ?? null, state: d.state, steps: d.steps ?? {}, failed: d.failed ?? null, created: d.created };
+    return { name: d.name, owner: d.owner, home: d.home ?? 'fly', homes: d.homes ?? {}, sprite: d.sprite ?? null, spare: d.spare ?? null, state: d.state, steps: d.steps ?? {}, failed: d.failed ?? null, created: d.created };
   }
 
   async drive(name) {
@@ -340,17 +358,29 @@ export class DirectoryCore {
     return [...all.values()].map((d) => this.driveView(d)).sort((a, b) => a.created.localeCompare(b.created));
   }
 
-  /** The drives the door sprite has to make, oldest first; a drive handed a
-   *  spare carries it as `spare`. Its starter credit is not here: the door
-   *  sprite mints the drive's token itself when it makes or hands it over. */
-  async queued() {
-    return (await this.listDrives()).filter((d) => d.state === 'queued');
+  /** The drives still to be made, oldest first, each saying its `home`; a
+   *  drive handed a spare carries it as `spare`. `home` keeps to one maker's
+   *  share: the door sprite makes Fly's, marble-host the PC host's. Its
+   *  starter credit is not here: the door sprite mints the drive's token
+   *  itself when it makes or hands it over. */
+  async queued({ home = null } = {}) {
+    return (await this.listDrives()).filter((d) => d.state === 'queued' && (!home || d.home === home));
   }
 
-  async step(name, { step, state, url, sprite }) {
+  async step(name, { step, state, url, sprite, home }) {
     return this.exclusive(async () => {
       const d = await this.storage.get(`drive:${name}`);
       if (!d) refuse(404, 'No such drive.');
+      // A drive on the PC host is ready when marble-host says so. It has no
+      // sprite URL: the router sends it to PC_HOST_URL under its own name.
+      if (state === 'ready' && (home === PCHOST || d.home === PCHOST)) {
+        if (d.home !== PCHOST) refuse(409, `${name} was not asked for on the PC host.`);
+        if (home !== PCHOST) refuse(400, `${name} lives on the PC host: ready says home: pchost, not a sprite URL`);
+        const steps = Object.fromEntries(STEPS.map((s) => [s, 'done']));
+        await this.storage.put(`drive:${name}`, { ...d, state: 'ready', homes: { ...(d.homes ?? {}), pchost: true }, steps, failed: null });
+        await this.audit('drive-ready', { account: d.owner, detail: { drive: name, home: PCHOST } });
+        return { ok: true };
+      }
       if (state === 'ready') {
         let origin;
         try {
@@ -653,6 +683,18 @@ export class DirectoryCore {
     });
   }
 
+  /** What the Worker's own check on the PC host last found, and when it last
+   *  told Bryan (worker/src/pc-host.js); null before its first look. */
+  async watch() {
+    return (await this.storage.get('meta:pchost-watch')) ?? null;
+  }
+
+  async setWatch(b = {}) {
+    const when = (v) => (typeof v === 'string' && Number.isFinite(Date.parse(v)) ? new Date(Date.parse(v)).toISOString() : null);
+    await this.storage.put('meta:pchost-watch', { down: b.down === true, since: when(b.since), alerted: when(b.alerted), checked: when(b.checked), detail: b.detail ? str(b.detail, 120) : null });
+    return { ok: true };
+  }
+
   async log({ account = null, limit = 200 } = {}) {
     const all = await this.storage.list({ prefix: 'audit:' });
     const cutoff = new Date(this.now() - AUDIT_DAYS * DAY).toISOString();
@@ -707,7 +749,7 @@ export class Directory {
       if (method === 'GET' && path === '/requests') return json(200, { requests: await c.listRequests() });
       if (method === 'POST' && path === '/drive') return json(200, await c.claimDrive(await body(request)));
       if (method === 'GET' && path === '/drives') return json(200, { drives: await c.listDrives() });
-      if (method === 'GET' && path === '/queue') return json(200, { drives: await c.queued() });
+      if (method === 'GET' && path === '/queue') return json(200, { drives: await c.queued({ home: url.searchParams.get('home') }) });
       if ((m = /^\/drives\/([a-z0-9-]{1,40})$/.exec(path)) && method === 'GET') {
         const d = await c.drive(m[1]);
         return d ? json(200, d) : json(404, { why: 'No such drive.' });
@@ -754,6 +796,11 @@ export class Directory {
         if (method === 'DELETE') return json(200, await c.revokeCredit(m[1]));
       }
       if (method === 'GET' && path === '/log') return json(200, { lines: await c.log({ account: url.searchParams.get('account'), limit: Number(url.searchParams.get('limit')) || 200 }) });
+      // The Worker's own: never behind /_door, so nothing outside reads or sets it.
+      if (path === '/watch/pchost') {
+        if (method === 'GET') return json(200, { watch: await c.watch() });
+        if (method === 'POST') return json(200, await c.setWatch(await body(request)));
+      }
       return json(404, { why: 'no such route' });
     } catch (err) {
       if (err instanceof Refusal) return json(err.status, { why: err.message, ...err.extra });
