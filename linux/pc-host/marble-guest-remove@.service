@@ -1,0 +1,39 @@
+# Deletes the PC drive %i from the PC once marble-host has stopped it and
+# dropped its settings (remove-guest; docs/HOSTING.md, "Backups of PC
+# drives"). marble-host starts it through its polkit rule; the unit and its
+# script are root's. Installed by install.d/20-backup.sh. Its encrypted backup
+# in R2 stays for the owner to delete by hand.
+[Unit]
+Description=Delete the PC drive %i from the PC
+Documentation=https://github.com/marble-app/marble-drive/blob/main/docs/HOSTING.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/marble-guests/remove-guest %i
+UMask=0077
+ProtectSystem=strict
+ReadWritePaths=-/var/lib/private/marble-guests -/var/lib/marble-guests -/var/lib/marble-backup
+ProtectHome=yes
+InaccessiblePaths=-/etc/marble-backup -/mnt -/run/WSL
+ProtectProc=invisible
+PrivateTmp=yes
+PrivateDevices=yes
+# systemctl reaches systemd through a socket on disk, which this keeps.
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+# Deleting files that belong to the drive's own user, in its folders.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

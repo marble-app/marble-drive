@@ -677,6 +677,163 @@ which no other drive can plant, and only that name counts there. Plain http
 Someone who signed in with the passphrase over https signs in once more. The
 third guard, the Public Suffix List entry, is the owner's to submit.
 
+### Backups of PC drives
+
+Built 2026-10-25. Each hour, every PC drive that changed since its last backup
+is copied to R2, encrypted, under `guests/<name>/` in the hub's bucket. A
+root-owned service does it: marble-host can start it but not change it, and
+neither marble-host nor any drive can read its key. It switches on with the
+sandbox's `sudo bash linux/pc-host/install.sh`, which runs
+`linux/pc-host/install.d/20-backup.sh`.
+
+Only the drive is backed up: `/var/lib/private/marble-guests/<name>/drive`,
+with its documents, history, trash, pictures and chat logs. Its home never is.
+That is where the person's Claude or ChatGPT login lives, and the host keeps no
+credentials. A drive restored over its old one keeps its home, so its person
+stays signed in; a drive restored into a new folder signs in again. As the hub
+does, a backup leaves out the host lock (`.marble/agents/host.lock`), the
+usage ledger (`.marble/usage/`) and Console's backup reports
+(`.marble/console/backups/`). It also leaves out the thumbnail maker's scratch
+folders (`.marble/thumbs/.work-*`). Links, pipes and sockets in a drive are
+never followed or sent.
+
+`marble-guests-backup.timer` starts `marble-guests-backup.service` each hour.
+It may be up to five minutes late, so the PC doesn't wake everything at once,
+and an hour the PC missed runs when it comes back. The service starts
+`marble-guest-backup@<name>.service` for each folder in
+`/var/lib/private/marble-guests` that holds a drive, one at a time. Each runs
+`backup-guest <name>` in a sandbox that sees that drive's folder, read-only. It
+sees nothing of the other drives, the owner's home, `/etc/marble-guests` or
+`/etc/marble-backup`. A drive that hasn't changed costs a look at its files and
+no request to R2. A drive that changed sends only the files that differ, and
+whatever it replaces or deletes goes to `trash/<utc>/`. As in
+`server/hub/sync.js`, each run compares the drive with the file list in R2
+(`[size, mtimeMs]` by path). It trusts that list only when its `seq` is the one
+this PC wrote last; otherwise the run is a full sync.
+
+The drive is read by `backup-tree`, which opens every folder from its parent
+without following a link, and rclone reads only root's copies of what it
+found. An agent that swaps a folder for a link to `/etc/marble-backup` mid-run
+gets its own files read, or none.
+
+R2 holds each drive as an rclone `crypt` remote over `guests/<name>/`, with a
+passphrase and salt of the backups' own, never the hub's. Every name and every
+byte under the prefix is ciphertext:
+
+| Under `guests/<name>/` | What |
+|---|---|
+| `drive/` | the drive as the last good run sent it |
+| `trash/<utc>/` | what the run at `<utc>` replaced or deleted |
+| `manifest.json` | the last run's file list |
+| `manifests/<utc>.json` | every run's file list, so a restore can go back to any of them |
+
+Trash is kept until someone removes it. To expire it, add an R2 lifecycle rule
+for each drive, on the prefix that
+`sudo /usr/local/lib/marble-guests/backup-guest <name> --trash-prefix` prints.
+A restore `--from` a time before the rule's age then can't bring back the
+versions the rule removed, and says the copy does not match.
+
+Each run ends by writing `/var/lib/marble-backup/status/<name>.json`. Anyone on
+the PC may read it, marble-host and the Console included:
+
+```json
+{"name":"ana","at":"2026-10-25T17:00:03Z","ok":true,"files":214,"bytes":5813302,"changed":false,"lastGood":"2026-10-25T17:00:03Z"}
+```
+
+`changed` says whether that run sent anything. `lastGood` is when a run of
+that drive last ended well. A failed run has `ok: false` and says why in `why`,
+for example "R2 could not be reached". The file holds counts and times only,
+never a file name or a key. What rclone said goes to the journal:
+`journalctl -u marble-guest-backup@ana`. A run also refuses when the drive has
+lost all its documents or more than half its files since the last good backup,
+or holds more than 10 GB (`GUEST_BACKUP_MAX_BYTES`). It then sends nothing, and
+the last good backup stays as it was. If the loss was meant,
+`sudo /usr/local/lib/marble-guests/backup-guest ana --force` sends it. To back
+a drive up now, run `systemctl start marble-guest-backup@ana.service`, as
+marble-host may.
+
+The tools are root-owned copies in `/usr/local/lib/marble-guests`:
+`backup-guest`, `backup-guests`, `restore-guest`, `remove-guest`,
+`backup-check.sh`, `backup-tree`, `backup-lib.sh` and a copy of the pinned
+rclone. They aren't in `/opt/marble/bin`, because `/opt/marble` is the owner's.
+His user, and marble-host with it, could rename a file there and put another
+in its place for root to run. The units are in `/etc/systemd/system`.
+
+To restore one drive:
+
+1. `sudo /usr/local/lib/marble-guests/restore-guest ana --list` prints the times
+   there are backups of.
+2. `sudo /usr/local/lib/marble-guests/restore-guest ana` puts back the latest.
+   With `--from 20261025T170000Z`, it puts back the drive as the last backup at
+   or before that time saw it.
+3. Once the restored drive is right, delete the drive it replaced,
+   `/var/lib/private/marble-guests/ana/drive.kept-<utc>`.
+
+`restore-guest` downloads first, into `/var/lib/marble-backup/restoring/`, and
+checks every file against the backup's file list. A download that fails or
+doesn't match changes nothing (`--force` swaps it in anyway). Then it masks and
+stops `marble-guest@ana`, so marble-host's watcher can't start it halfway. It
+sets the drive aside as `drive.kept-<utc>`, moves the restored one in, unmasks
+the unit and starts it again if it was running. marble-host may see the drive
+down for that minute. To keep it quiet, run `node tools/pc-host.mjs suspend ana`
+first and `node tools/pc-host.mjs resume ana` after. `--from` works because
+each run moved what it replaced into its own trash. A file's version at that
+time is the first one in a later trash, or else the one in `drive/`.
+`--as <other>` restores ana's backup into another drive's folder and leaves
+ana's as it is.
+
+The restored files are root's until the drive starts, and then systemd hands
+them to the drive's user. Since systemd 257, on a disk that allows ID-mapped
+mounts (ext4 under WSL2 does), a DynamicUser state folder is owned by `nobody`
+on disk and ID-mapped into the service. systemd decides whether to change
+owners from the folder's top alone, and walks nothing below a top it already
+finds right. So `restore-guest` gives `/var/lib/private/marble-guests/ana` to
+root, and the next start chowns the whole tree. This is systemd 259's
+`setup_exec_directory()` and `path_chown_recursive()`, as `systemd.exec(5)`
+describes ("As an optimization…"). `backup-check.sh` checks that a restored
+folder is root's.
+
+The backups are tried once before the study, as the plan asks.
+`sudo /usr/local/lib/marble-guests/backup-check.sh` makes a scratch drive,
+`backup-check--<hex>`. It holds documents with odd names, a folder only its own
+user may read, links, a pipe, the files a backup leaves out, and a login in its
+home. The check backs it up through the real unit to R2 and runs it again
+unchanged. It sends a change, restores both backups `--as` scratch names, and
+compares every file by checksum. It prints `PASS <check>` or
+`FAIL <check>: <why>` for each check, as `escape-check.sh` does. Then it deletes
+the scratch folders, their status and their copies in R2. With a name,
+`backup-check.sh ana` backs up and restores that drive and deletes only the
+copy; run it on the test drive before the study. Files the drive changed after
+its backup are counted, not compared.
+
+A drive marble-host removes is deleted from the PC by
+`marble-guest-remove@<name>.service`, which marble-host starts. It runs
+`remove-guest`, which refuses unless `marble-guest@<name>` is stopped and
+`/etc/marble-guests/<name>.env` is gone. Then it deletes the drive's folder
+(the drive, its home and any `drive.kept-*`), systemd's link to it and its
+backup status. The backup in R2 stays. Deleting it is the owner's call:
+`sudo /usr/local/lib/marble-guests/backup-guest <name> --forget --yes`. That is
+refused while the drive's folder is still on the PC.
+
+The key is `/etc/marble-backup/backup.env`: root's, mode 600, in a folder of
+mode 700. It holds the hub's four R2 settings (`R2_ACCOUNT_ID`,
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET`, from
+`~/.config/marble-drive/hub-bryan.env`) and the backups' own
+`GUEST_BACKUP_PASSPHRASE` and `GUEST_BACKUP_SALT`. `install.d/20-backup.sh`
+draws those two at random the first time, and never writes the file again.
+**Without `GUEST_BACKUP_PASSPHRASE` and `GUEST_BACKUP_SALT` the backups can
+never be read.** The owner keeps both in his password manager; to read them,
+`sudo cat /etc/marble-backup/backup.env`. Uninstalling keeps the file. The
+backup unit gets it through `LoadCredential=`, never through its environment.
+
+The install needs the pinned rclone in `~/.local/bin`, which
+`tools/pc-setup.sh` puts there, and the hub settings file. Its copy of rclone
+is checked against `tools/sprite/rclone-version`.
+`node --test test/host-backup.test.js` runs all of it without root or R2. The
+paths move under a temporary folder, rclone's local backend stands in for R2
+under the same crypt remote, and a stand-in systemctl records what it is
+asked.
+
 ### The study at the door
 
 Built 2026-10-25, and off until the owner sets it up: `CONSENT_FORM` in
