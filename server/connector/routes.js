@@ -28,7 +28,10 @@ const OPEN_CORS = {
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, Mcp-Protocol-Version, Mcp-Session-Id',
   'Access-Control-Expose-Headers': 'WWW-Authenticate, Mcp-Session-Id',
 };
-const PUBLIC = new Set([
+// Open to any origin by design (OPEN_CORS above) and judged by their own
+// tokens, so the host's own-page check on changes (server/app.js) leaves them
+// to these routes.
+export const PUBLIC = new Set([
   '/mcp',
   '/oauth/register',
   '/oauth/token',
