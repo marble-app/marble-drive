@@ -9,7 +9,12 @@
 //
 // A name the registry already knows, in any state, is refused, and so is one
 // whose folder is already on the PC: a removed drive keeps its folder until
-// root deletes it, and a new drive of the same name must never open it.
+// root deletes it, and a new drive of the same name must never open it. (On
+// the PC the folders are under /var/lib/private, which only root can open, so
+// there the registry alone keeps a removed drive's name taken.)
+//
+// A new drive runs the release the registry names for everyone, or the
+// newest in /opt/marble/releases (server/host/releases.js).
 
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -17,6 +22,7 @@ import path from 'node:path';
 import { checkDrive } from './check.js';
 import { guestEntries, newSecret as makeSecret } from './guest-env.js';
 import { pickPort } from './ports.js';
+import { onDisk, releaseForNewDrives } from './releases.js';
 import { NAME, RESERVED } from './settings.js';
 
 const OWNER = /^[A-Za-z0-9_-]{1,64}$/;
@@ -46,8 +52,8 @@ export function createMaker({
   drainEveryMs = 5 * 60 * 1000,
 }) {
   const folderOf = (name) => path.join(settings.guestStateDir, name);
-  const exists = (p) => fsp.lstat(p).then(() => true, () => false);
-  const releaseDir = (release) => path.join(settings.opt, 'releases', release, 'marble-drive');
+  // True, false, or null when it cannot be told (a folder only root may open).
+  const exists = (p) => fsp.lstat(p).then(() => true, (err) => (err.code === 'ENOENT' || err.code === 'ENOTDIR' ? false : null));
 
   // One drive is made at a time, so two asked for at once cannot be given
   // the same port.
@@ -69,11 +75,10 @@ export function createMaker({
       if (!OWNER.test(owner ?? '')) throw new Refusal(400, 'owner is the door account id');
       if (cohort !== null && cohort !== undefined && !COHORT.test(String(cohort))) throw new Refusal(400, 'cohort is letters, digits, dots, dashes and underscores');
       if (registry.drive(name)) throw new Refusal(409, `${name} is already on this PC (${registry.drive(name).state})`);
-      if (await exists(folderOf(name))) throw new Refusal(409, `a folder for ${name} is already on this PC; a drive removed earlier keeps its folder until root deletes it`);
-      const channels = registry.channels();
-      const release = channels.everyone ?? channels.canary;
-      if (!release) throw new Refusal(503, 'there is no release on this PC yet: node tools/pc-host.mjs release');
-      if (!(await exists(path.join(releaseDir(release), 'bin', 'marble-drive.js')))) throw new Refusal(503, `the release ${release} is not in ${settings.opt}/releases`);
+      if ((await exists(folderOf(name))) === true) throw new Refusal(409, `a folder for ${name} is already on this PC; a drive removed earlier keeps its folder until root deletes it`);
+      const { release } = await releaseForNewDrives({ registry, opt: settings.opt });
+      if (!release) throw new Refusal(503, `there is no release in ${settings.opt}/releases yet, so no drive can be made; putting one there is the updater's job`);
+      if (!(await onDisk(settings.opt, release))) throw new Refusal(503, `the release ${release} is not in ${settings.opt}/releases`);
       const taken = new Set(registry.drives().filter((d) => d.state !== 'removed').map((d) => d.port));
       const port = await pickPort({ range: settings.guestPorts, taken, never: [settings.routerPort, settings.adminPort], ...(inUse ? { inUse } : {}) });
       if (!port) throw new Refusal(503, `every port in ${settings.guestPorts.from}-${settings.guestPorts.to} is taken`);
@@ -221,7 +226,7 @@ export function createMaker({
       }
       const tried = new Set();
       for (let i = 0; i < 50; i += 1) {
-        const { drives = [] } = await api('GET', '/queue');
+        const { drives = [] } = await api('GET', '/queue?home=pchost');
         const job = drives.find((d) => d.home === 'pchost' && !tried.has(d.name));
         if (!job) return { idle: true, made: tried.size };
         tried.add(job.name);

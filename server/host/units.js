@@ -86,6 +86,7 @@ export function userProperties({ name, opt, guestEnvDir, guestStateDir }) {
     'RestrictSUIDSGID=yes',
     'LockPersonality=yes',
     'RestrictRealtime=yes',
+    'SystemCallArchitectures=native',
     'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK',
     // Missing paths are fine: a folder under /tmp is already out of sight
     // behind PrivateTmp.

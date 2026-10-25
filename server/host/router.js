@@ -61,7 +61,9 @@ const RESTING = `<!doctype html>
 <body><h1>This drive is resting</h1><p>It isn't running right now. Your documents are safe. Try again in a minute.</p></body></html>
 `;
 
-export function createRouter({ key, lookup, onPoke = () => {}, health = () => ({ ok: true }), log = console }) {
+/** `health()` (or a promise of it) is what GET /_host/health says beside
+ *  `ok`: on the PC, { drives, running, release }. */
+export function createRouter({ key, lookup, onPoke = () => {}, health = () => ({}), log = console }) {
   if (!key) throw new Error('the router needs HOST_KEY');
   const agent = new http.Agent({ keepAlive: true, maxSockets: 256 });
 
@@ -89,7 +91,18 @@ export function createRouter({ key, lookup, onPoke = () => {}, health = () => ({
         onPoke();
         return json(res, 202, { ok: true });
       }
-      if (req.method === 'GET' && route === '/_host/health') return json(res, 200, health());
+      // The Worker's look at the PC every five minutes: anything but a 200
+      // that says ok tells the owner the PC is down, so while marble-host
+      // answers at all, it says ok, with whatever else it could find out.
+      if (req.method === 'GET' && route === '/_host/health') {
+        return Promise.resolve()
+          .then(health)
+          .catch((err) => {
+            log.error?.(`[router] health: ${err.message}`);
+            return {};
+          })
+          .then((body) => json(res, 200, { ...body, ok: true }));
+      }
       return json(res, 404, { error: 'not found' });
     }
     const drive = NAME.test(String(name)) ? lookup(String(name)) : null;

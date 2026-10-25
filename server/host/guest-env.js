@@ -50,7 +50,8 @@ export function guestEntries({ name, release, port, secret, doorKeys, owner, pub
     ['GIT_COMMITTER_NAME', name],
     ['GIT_COMMITTER_EMAIL', email],
   ];
-  if (cohort) entries.push(['MARBLE_STUDY', '1']);
+  // A drive made from a study invite (the door's cohort `study`).
+  if (cohort === 'study') entries.push(['MARBLE_STUDY', '1']);
   if (ownerName) entries.push(['MARBLE_HOST_OWNER', ownerName]);
   for (const [key, value] of entries) checkEntry(key, value);
   return entries;

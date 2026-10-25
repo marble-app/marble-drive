@@ -14,6 +14,7 @@
 //   marble-drive genui space <doc>       is this document an app space? every issue, or ok
 //   marble-drive genui decide <doc>      let Jev position it — --dry to look without writing, --verbose for the distributions
 //   marble-drive provisioner      the door sprite: make the drives people asked for at marbledrive.app
+//   marble-drive host             marble-host: other people's drives on the owner's PC (server/host)
 //
 // Every one of these goes through the same store the host does, which is the
 // point: a command and a request are two callers of one seam, not two
@@ -98,8 +99,34 @@ switch (command) {
   case 'provisioner':
     await provisioner();
     break;
+  case 'host':
+    await host();
+    break;
   default:
-    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui, apps, provisioner`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui, apps, provisioner, host`);
+}
+
+// ----------------------------------------------------------------------- host
+
+/** marble-host (docs/HOSTING.md, "marble-host and the sandbox"): the router,
+ *  the admin API, the maker and the watcher for the drives the owner's PC
+ *  runs for other people. Its settings are ~/.config/marble-drive/host.env
+ *  (node tools/pc-host.mjs init), read by server/host/settings.js itself, so
+ *  none of its keys is in its environment for a child to inherit. */
+async function host() {
+  const { startHost } = await import('../server/host/index.js');
+  let running;
+  try {
+    running = await startHost();
+  } catch (err) {
+    fail(`host: ${err.message}`);
+  }
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.once(signal, () => {
+      console.log('[host] stopping; the drives keep running');
+      running.stop().then(() => process.exit(0), () => process.exit(1));
+    });
+  }
 }
 
 // ---------------------------------------------------------------- provisioner

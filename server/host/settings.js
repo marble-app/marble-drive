@@ -17,7 +17,8 @@ import { parseEnvFile } from '../hub/settings.js';
 export const NAME = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
 /** A release's name, as tools/home-release.sh makes them (20261025T161133Z-4b2103a). */
 export const RELEASE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-/** Never a drive's name: escape-check.sh's throwaway guest is called this. */
+/** Never a drive's name: kept for the owner's escape check, whose throwaway
+ *  guest is to be called this. */
 export const RESERVED = new Set(['escape-check']);
 /** The ports a guest may never have: the dev host, the owner's drive, a
  *  trial drive, and the release script's smoke test. */
@@ -61,10 +62,6 @@ export function hostPaths(env = process.env) {
     guestEnvDir: env.HOST_GUEST_ENV_DIR || '/etc/marble-guests',
     // StateDirectory=marble-guests/%i: each drive's own folder and home
     guestStateDir: env.HOST_GUEST_STATE_DIR || '/var/lib/marble-guests',
-    // the owner's releases (tools/home-release.sh), which marble-host copies from
-    app: env.HOST_APP || path.join(home, '.local', 'share', 'marble-drive', 'app'),
-    // Chromium for the agents' browser, copied to <opt>/ms-playwright
-    browsers: env.HOST_BROWSERS_FROM || path.join(home, '.cache', 'ms-playwright'),
   };
 }
 
