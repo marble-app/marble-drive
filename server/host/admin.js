@@ -4,9 +4,10 @@
 // `Authorization: Bearer <HOST_ADMIN_TOKEN>`; JSON goes in and out, and a
 // refusal is `{ why }` with its status.
 //
-// Every guest shares the PC's loopback, so the token, not the address, is
-// what keeps one out: it lives in host.env, in the owner's home, which no
-// guest can see.
+// No guest can open 127.0.0.1, where this listens: its unit denies it
+// (server/host/addresses.js). The token is the lock all the same, for
+// anything else on the PC: it lives in host.env, in the owner's home, which
+// no guest can see.
 //
 // Moving drives between releases is the updater's, which the owner is writing
 // himself, so its four routes (/release, /promote, /rollback, /pause) answer

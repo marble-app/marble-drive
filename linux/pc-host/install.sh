@@ -6,21 +6,23 @@
 #   sudo bash linux/pc-host/install.sh --uninstall [<owner>]   take it away again
 #
 # The owner is the user marble-host runs as: $SUDO_USER unless named. This
-# installs the guest unit template (marble-guest@.service) and the slices
-# they share (marble-guests.slice, inside marble.slice) into
+# installs the guest unit template (marble-guest@.service), the slices they
+# share (marble-guests.slice, inside marble.slice) and the unit that puts each
+# drive's loopback address on lo (marble-guest-addresses.service) into
 # /etc/systemd/system, the polkit rule that lets the owner's user
 # (and so marble-host) start, stop and restart those units and nothing else,
 # and run-guest into /opt/marble/bin. It makes /opt/marble with bin, releases
 # and ms-playwright in it (the owner's, 755) and /etc/marble-guests (the
-# owner's, 700, hidden from every guest), reloads systemd, and last runs every
-# install.d/*.sh in name order, as root, for the pieces other parts of the
-# build add (install.d/README). It copies no release: putting releases in
-# /opt/marble/releases is the updater's job.
+# owner's, 700, hidden from every guest), reloads systemd, puts the drives'
+# addresses on lo, and last runs every install.d/*.sh in name order, as root,
+# for the pieces other parts of the build add (install.d/README). It copies
+# no release: putting releases in /opt/marble/releases is the updater's job.
 #
 # Safe to run again. --uninstall stops every guest, runs install.d's pieces
-# with --uninstall in the reverse order, and takes away everything above,
-# /opt/marble and /etc/marble-guests included. It never deletes the drives'
-# own folders (/var/lib/private/marble-guests).
+# with --uninstall in the reverse order, takes the drives' addresses off lo,
+# and takes away everything above, /opt/marble and /etc/marble-guests
+# included. It never deletes the drives' own folders
+# (/var/lib/private/marble-guests).
 #
 # MARBLE_INSTALL_ROOT, MARBLE_SYSTEMCTL and MARBLE_INSTALL_D are for
 # test/host-scripts.test.js alone: a folder standing in for /, a stand-in for
@@ -37,7 +39,8 @@ UNITS="$ROOT/etc/systemd/system"
 RULES="$ROOT/etc/polkit-1/rules.d"
 OPT="$ROOT/opt/marble"
 ETC="$ROOT/etc/marble-guests"
-UNIT_FILES=(marble-guest@.service marble.slice marble-guests.slice)
+UNIT_FILES=(marble-guest@.service marble-guest-addresses.service marble.slice marble-guests.slice)
+ADDRESSES=marble-guest-addresses.service
 RULE=50-marble-host.rules
 
 say() { printf 'install: %s\n' "$*"; }
@@ -89,14 +92,16 @@ run_pieces() {
 }
 
 if ((uninstall)); then
-  # The drives first, while their units are still there to stop.
+  # The drives first, while their units are still there to stop; then their
+  # addresses, which stopping that unit takes off lo.
   "$SYSTEMCTL" stop 'marble-guest@*.service' >/dev/null 2>&1 || true
+  "$SYSTEMCTL" stop "$ADDRESSES" >/dev/null 2>&1 || true
   run_pieces reverse --uninstall
   rm -f "$RULES/$RULE"
   for unit in "${UNIT_FILES[@]}"; do rm -f "$UNITS/$unit"; done
   "$SYSTEMCTL" daemon-reload || true
   rm -rf "$OPT" "$ETC"
-  say "removed the guest units, the slices, the polkit rule, $OPT and $ETC"
+  say "removed the guest units, the slices, the drives' addresses, the polkit rule, $OPT and $ETC"
   say "kept the drives' own folders in $ROOT/var/lib/private/marble-guests"
   exit 0
 fi
@@ -134,9 +139,14 @@ chmod 755 "$OPT" "$OPT/bin" "$OPT/releases" "$OPT/ms-playwright"
 chmod 700 "$ETC"
 
 "$SYSTEMCTL" daemon-reload
+# Each drive's loopback address, now rather than at the first drive's start,
+# so that a failure shows here. Started, not restarted: every drive's unit
+# requires it, and a restart would restart them all.
+"$SYSTEMCTL" start "$ADDRESSES" || die "could not put the drives' loopback addresses on lo (journalctl -u $ADDRESSES)"
 run_pieces forward
 
 say "installed marble-guest@.service, marble.slice and marble-guests.slice, the polkit rule for $owner, and $OPT/bin/run-guest"
+say "127.0.0.10 to 127.0.0.109 are on lo, one for each drive ($ADDRESSES)"
 say "$OPT and $ETC are $owner's"
 say "next, as $owner and without sudo:"
 say "  the escape check, yours to write: a throwaway drive that tries every wall from inside (docs/HOSTING.md)"

@@ -1,16 +1,17 @@
 // The router (server/host/router.js), the tunnel's one way in: nothing but a
-// 401 without the Worker's key, its two headers taken off before a drive
-// sees the request, X-Forwarded-For added so no drive takes it for a local
-// one, the Worker's X-Forwarded-Host and -Proto passed on as they came, both
-// directions streamed, a browser that leaves cutting the drive's request too,
-// and a drive that isn't running answered with the resting page.
+// 401 without the Worker's key, a drive reached at its own loopback address
+// from 127.0.0.2, its two headers taken off before a drive sees the request,
+// X-Forwarded-For added so no drive takes it for a local one, the Worker's
+// X-Forwarded-Host and -Proto passed on as they came, both directions
+// streamed, a browser that leaves cutting the drive's request too, and a
+// drive that isn't running answered with the resting page.
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
 
 import { createRouter, forwardHeaders } from '../server/host/router.js';
-import { freePort, listen, quiet } from './fixtures/host.js';
+import { freeGuestPort, listenGuest, quiet } from './fixtures/host.js';
 
 const KEY = 'the-worker-key';
 
@@ -38,7 +39,7 @@ const keyed = (drive, more = {}) => ({ 'x-marble-host-key': KEY, ...(drive ? { '
 
 test('without the Worker\'s key, a 401 and nothing forwarded', async (t) => {
   let reached = 0;
-  const guest = await listen((req, res) => {
+  const guest = await listenGuest((req, res) => {
     reached += 1;
     res.end('ok');
   });
@@ -59,9 +60,47 @@ test('without the Worker\'s key, a 401 and nothing forwarded', async (t) => {
   assert.equal(reached, 0);
 });
 
+test('a drive is reached at its own address, 127.0.0.<10 + port − 4500>, from 127.0.0.2, never from 127.0.0.1', async (t) => {
+  const seen = [];
+  const guest = await listenGuest((req, res) => {
+    seen.push({ remote: req.socket.remoteAddress, local: req.socket.localAddress });
+    res.end('hello');
+  });
+  // Where a drive listened before it had an address of its own: nothing
+  // goes there any more.
+  let old = 0;
+  const legacy = await new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      old += 1;
+      res.end('old');
+    });
+    server.listen(guest.port === 4599 ? 4598 : guest.port + 1, '127.0.0.1', () => resolve(server));
+    server.on('error', () => resolve(null));
+  });
+  const r = await rig({ drives: { ana: { state: 'running', port: guest.port }, old: { state: 'running', port: legacy?.address().port ?? 4599 }, far: { state: 'running', port: 4600 } } });
+  t.after(async () => {
+    await r.close();
+    await guest.close();
+    legacy?.closeAllConnections?.();
+    await new Promise((resolve) => (legacy ? legacy.close(resolve) : resolve()));
+  });
+  assert.equal(guest.address, `127.0.0.${10 + guest.port - 4500}`);
+  const res = await ask(r.port, { headers: keyed('ana') });
+  assert.equal(res.status, 200);
+  assert.equal(res.body, 'hello');
+  assert.deepEqual(seen, [{ remote: '127.0.0.2', local: guest.address }], 'a drive\'s unit drops anything from 127.0.0.1');
+  if (legacy) {
+    const there = await ask(r.port, { headers: keyed('old', { accept: 'text/html' }) });
+    assert.equal(there.status, 503, 'a drive listening on 127.0.0.1 is not one the router reaches');
+    assert.equal(old, 0);
+  }
+  const outside = await ask(r.port, { headers: keyed('far', { accept: 'text/html' }) });
+  assert.equal(outside.status, 503, 'a port outside 4500-4599 has no drive\'s address');
+});
+
 test('the drive gets the request without the two headers, with X-Forwarded-For, and the Worker\'s forwarded host and proto as they came', async (t) => {
   let seen = null;
-  const guest = await listen((req, res) => {
+  const guest = await listenGuest((req, res) => {
     seen = { url: req.url, method: req.method, headers: req.headers };
     res.writeHead(201, { 'x-from': 'ana', connection: 'keep-alive' });
     res.end('made');
@@ -100,7 +139,7 @@ test('the drive gets the request without the two headers, with X-Forwarded-For, 
 
 test('a live update stream reaches the browser as the drive writes it', async (t) => {
   let more = null;
-  const guest = await listen((req, res) => {
+  const guest = await listenGuest((req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
     res.write('data: one\n\n');
     more = () => res.end('data: two\n\n');
@@ -127,7 +166,7 @@ test('a live update stream reaches the browser as the drive writes it', async (t
 test('an upload reaches the drive as the browser sends it', async (t) => {
   let firstPiece = null;
   let all = '';
-  const guest = await listen((req, res) => {
+  const guest = await listenGuest((req, res) => {
     req.setEncoding('utf8');
     req.on('data', (c) => {
       all += c;
@@ -155,7 +194,7 @@ test('an upload reaches the drive as the browser sends it', async (t) => {
 
 test('a browser that goes away cuts the drive\'s request too', async (t) => {
   let closed = null;
-  const guest = await listen((req, res) => {
+  const guest = await listenGuest((req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write('data: hello\n\n');
     req.on('close', () => closed?.());
@@ -175,7 +214,7 @@ test('a browser that goes away cuts the drive\'s request too', async (t) => {
 });
 
 test('a drive that is not running, not here, or not answering is resting: a 503 page that says to try again', async (t) => {
-  const down = await freePort();
+  const down = await freeGuestPort();
   const r = await rig({ drives: { ana: { state: 'suspended', port: 4500 }, ben: { state: 'running', port: down }, cho: { state: 'making', port: null } } });
   t.after(() => r.close());
   for (const name of ['ana', 'ben', 'cho', 'nobody', 'Not-A-Name', '../x']) {

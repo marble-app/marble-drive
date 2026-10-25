@@ -75,6 +75,14 @@ test('a bad port, range or mode is refused by name', async () => {
   assert.deepEqual(parseRange(' 4500 - 4510 '), { from: 4500, to: 4510 });
 });
 
+test('the drives\' ports lie within 4500-4599, since each gives a drive its loopback address', async () => {
+  const h = await home(null);
+  assert.deepEqual(loadHostSettings({ HOME: h.dir, HOST_GUEST_PORTS: '4510-4520' }).guestPorts, { from: 4510, to: 4520 });
+  for (const range of ['4500-4600', '4400-4599', '5000-5010']) {
+    assert.throws(() => loadHostSettings({ HOME: h.dir, HOST_GUEST_PORTS: range }), /HOST_GUEST_PORTS lies within 4500-4599/, range);
+  }
+});
+
 test('a drive\'s name and a release\'s name', () => {
   for (const ok of ['ana', 'ana-b', 'a1b', 'x'.repeat(40)]) assert.ok(NAME.test(ok), ok);
   for (const bad of ['an', 'Ana', '-ana', 'ana-', 'a_b', 'a.b', 'x'.repeat(41), '../x']) assert.ok(!NAME.test(bad), bad);

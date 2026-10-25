@@ -1,14 +1,16 @@
 // What the marble-host tests share: a scratch PC (an opt with releases, an
 // /etc/marble-guests, a folder for the drives' state and one for
 // marble-host's own), stand-ins for systemctl and for a drive answering on
-// loopback, and a door that records what it is told. Nothing here touches
-// systemd, /opt, /etc or the network beyond 127.0.0.1.
+// loopback (at a drive's own address, as on the PC), and a door that records
+// what it is told. Nothing here touches systemd, /opt, /etc or the network
+// beyond 127.0.0.0/8, all of which Linux keeps on lo without root.
 
 import fsp from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
+import { GUEST_PORTS, guestAddress } from '../../server/host/addresses.js';
 import { parseRange } from '../../server/host/settings.js';
 
 export const quiet = { log() {}, error() {}, info() {} };
@@ -137,19 +139,43 @@ export function fakeDoor({ queue = [], failReady = 0 } = {}) {
   return { heard, fetchImpl, queue, steps: () => heard.filter((h) => h.path.endsWith('/step')).map((h) => h.body) };
 }
 
+const closer = (server) => () =>
+  new Promise((resolve) => {
+    server.closeAllConnections?.();
+    server.close(() => resolve());
+  });
+
 /** A server on a free loopback port. */
 export async function listen(handler) {
   const server = http.createServer(handler);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return {
-    server,
-    port: server.address().port,
-    close: () =>
-      new Promise((resolve) => {
-        server.closeAllConnections?.();
-        server.close(() => resolve());
-      }),
-  };
+  return { server, port: server.address().port, close: closer(server) };
+}
+
+/** A drive as the PC runs one: on a free port in 4500-4599, at the loopback
+ *  address that port gives it (127.0.0.<10 + port − 4500>). Tried from a
+ *  random port, since other test files may hold some at the same time. */
+export async function listenGuest(handler) {
+  const span = GUEST_PORTS.to - GUEST_PORTS.from + 1;
+  const first = Math.floor(Math.random() * span);
+  for (let i = 0; i < span; i += 1) {
+    const port = GUEST_PORTS.from + ((first + i) % span);
+    const address = guestAddress(port);
+    const server = http.createServer(handler);
+    const bound = await new Promise((resolve) => {
+      server.once('error', () => resolve(false));
+      server.listen(port, address, () => resolve(true));
+    });
+    if (bound) return { server, port, address, close: closer(server) };
+  }
+  throw new Error(`no port in ${GUEST_PORTS.from}-${GUEST_PORTS.to} is free`);
+}
+
+/** A drive's port nothing answers on at its address, for a moment. */
+export async function freeGuestPort() {
+  const s = await listenGuest(() => {});
+  await s.close();
+  return s.port;
 }
 
 /** A port nothing listens on, for a moment. */

@@ -8,8 +8,12 @@
 //
 // A running drive whose settings file has gone (install.sh --uninstall takes
 // /etc/marble-guests with it) is given a new one from the registry, with a
-// new passphrase nobody is shown, before it is started.
+// new passphrase nobody is shown, before it is started. A settings file
+// written before each drive had a loopback address of its own names none,
+// and run-guest refuses it: it is given its address, which the drive takes
+// up the next time it starts.
 
+import { guestAddress } from './addresses.js';
 import { guestEntries, newSecret as makeSecret } from './guest-env.js';
 
 const UP = new Set(['active', 'activating', 'reloading']);
@@ -17,6 +21,17 @@ const UP = new Set(['active', 'activating', 'reloading']);
 export async function bootDrives({ registry, units, envs, settings, notify = async () => {}, log = console, newSecret = makeSecret }) {
   const result = { started: [], already: [], failed: [], interrupted: [] };
   for (const d of registry.drives()) {
+    if (d.state !== 'removed' && d.state !== 'making') {
+      try {
+        const env = await envs.read(d.name);
+        if (env && env.HOST !== guestAddress(d.port)) {
+          await envs.update(d.name, { HOST: guestAddress(d.port) });
+          log.log?.(`[host] ${d.name}'s settings file had no address of its own; it is ${guestAddress(d.port)} from its next start`);
+        }
+      } catch (err) {
+        log.error?.(`[host] could not give ${d.name} its address: ${err.message}`);
+      }
+    }
     if (d.state === 'making') {
       await registry.update((r) => {
         Object.assign(r.drives[d.name], { state: 'failed', failed: { step: 'machine', why: 'marble-host stopped while it was being made' } });

@@ -1,0 +1,28 @@
+# A loopback address for each drive the PC hosts for someone else, 127.0.0.10
+# to 127.0.0.109, put on lo (docs/HOSTING.md, "marble-host and the sandbox").
+# Installed by linux/pc-host/install.sh. Every marble-guest@ unit requires it,
+# so it runs before the first drive starts after the PC does, and stays up.
+#
+# Each drive listens on the address its port gives it
+# (server/host/addresses.js), and its unit denies it 127.0.0.1, where this
+# machine's own services listen. Linux takes all of 127/8 as this machine's
+# already, but sends a connection to any of it from 127.0.0.1, lo's own
+# address, unless the address it goes to is itself on lo. With these on lo,
+# a drive's connections to itself (its agents' tool calls, its agent's
+# browser) come from the drive's own address, which its unit lets through.
+# Nothing listens on them but the drives. No PrivateNetwork=: the addresses
+# are for this machine's own lo.
+[Unit]
+Description=Marble: a loopback address for each drive hosted on this PC
+Documentation=https://github.com/marble-app/marble-drive/blob/main/docs/HOSTING.md
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'for n in {10..109}; do ip address replace 127.0.0.$${n}/32 dev lo scope host || exit 1; done'
+ExecStop=/bin/bash -c 'for n in {10..109}; do ip address del 127.0.0.$${n}/32 dev lo 2>/dev/null; done; exit 0'
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

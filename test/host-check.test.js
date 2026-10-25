@@ -1,12 +1,13 @@
 // A drive's check (server/host/check.js): within the minute, /health names
 // the release, the first page answers below 500, and /health/deep shows both
 // agent CLIs' versions. The probe asks the way a person's browser never does:
-// on loopback, with no forwarded headers, and the drive's passphrase.
+// on loopback, at the drive's own address and from 127.0.0.2, with no
+// forwarded headers, and the drive's passphrase.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { checkDrive, createProbe } from '../server/host/check.js';
-import { listen } from './fixtures/host.js';
+import { listenGuest } from './fixtures/host.js';
 
 const RELEASE = '20261025T161133Z-4b2103a';
 
@@ -53,14 +54,14 @@ test('each way to fail it says why, once the minute is up', async () => {
   }
 });
 
-test('the probe asks on loopback, sends the passphrase to /health/deep only, and follows no redirect', async (t) => {
+test('the probe asks the drive at its own address from 127.0.0.2, sends the passphrase to /health/deep only, and follows no redirect', async (t) => {
   const seen = [];
-  const drive = await listen((req, res) => {
-    seen.push({ url: req.url, auth: req.headers.authorization ?? null, forwarded: req.headers['x-forwarded-for'] ?? req.headers['x-forwarded-host'] ?? null, accept: req.headers.accept });
+  const drive = await listenGuest((req, res) => {
+    seen.push({ url: req.url, auth: req.headers.authorization ?? null, forwarded: req.headers['x-forwarded-for'] ?? req.headers['x-forwarded-host'] ?? null, accept: req.headers.accept, remote: req.socket.remoteAddress, local: req.socket.localAddress });
     if (req.url === '/health') return res.end(JSON.stringify({ ok: true, working: 0, release: RELEASE }));
     if (req.url === '/health/deep') return res.end(JSON.stringify({ ok: req.headers.authorization === 'Bearer pass', claude: { version: '1' }, codex: { version: '2' } }));
     res.writeHead(302, { location: 'https://marbledrive.app/enter?drive=ana' });
-    res.end();
+    res.end('a page the probe never reads'.repeat(20_000));
   });
   t.after(() => drive.close());
   const p = createProbe();
@@ -70,7 +71,22 @@ test('the probe asks on loopback, sends the passphrase to /health/deep only, and
   assert.equal(await p.page(drive.port), 302);
   assert.deepEqual(seen.map((s) => [s.url, s.auth]), [['/health', null], ['/health/deep', 'Bearer pass'], ['/health/deep', 'Bearer wrong'], ['/', null]]);
   assert.ok(seen.every((s) => s.forwarded === null), 'no forwarded header, so the drive answers it as local');
+  assert.ok(seen.every((s) => s.remote === '127.0.0.2' && s.local === drive.address), 'from 127.0.0.2 to the drive\'s own address, never 127.0.0.1');
   assert.equal(seen[3].accept, 'text/html');
+  assert.equal(await p.health(4600), null, 'a port outside 4500-4599 has no drive\'s address');
   await drive.close();
   assert.equal(await p.health(drive.port), null, 'nothing listening is no answer');
+});
+
+test('an answer bigger than any health answer is no answer, and one that never ends is cut off', async (t) => {
+  const drive = await listenGuest((req, res) => {
+    if (req.url === '/health') return res.end(JSON.stringify({ ok: true, pad: 'x'.repeat(300 * 1024) }));
+    res.write('{');
+  });
+  t.after(() => drive.close());
+  const p = createProbe({ timeoutMs: 300 });
+  assert.equal(await p.health(drive.port), null);
+  const started = Date.now();
+  assert.equal(await p.get(drive.port, '/slow'), null);
+  assert.ok(Date.now() - started < 2000);
 });

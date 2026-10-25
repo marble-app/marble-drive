@@ -59,6 +59,24 @@ test('a running drive whose settings file is gone gets a new one before it start
   assert.deepEqual(units.calls, ['start ana']);
 });
 
+test('a settings file from before drives had addresses of their own gets its drive\'s, keeping the rest', async (t) => {
+  const pc = await scratchPc();
+  t.after(pc.cleanup);
+  const { registry, envs } = await withDrives(pc, [['ana', 'running', 4500], ['ben', 'suspended', 4527], ['cho', 'removed', 4502]]);
+  for (const name of ['ana', 'ben']) {
+    const text = await fsp.readFile(envs.file(name), 'utf8');
+    await fsp.writeFile(envs.file(name), text.replace(/^HOST=.*\n/m, ''), { mode: 0o600 });
+    assert.equal((await envs.read(name)).HOST, undefined);
+  }
+  const units = fakeUnits();
+  await bootDrives({ registry, units, envs, settings: pc.settings, log: quiet });
+  assert.equal((await envs.read('ana')).HOST, '127.0.0.10');
+  assert.equal((await envs.read('ben')).HOST, '127.0.0.37', 'a suspended drive too, for when it is resumed');
+  assert.equal((await envs.read('ana')).MARBLE_DRIVE_SECRET, 'f'.repeat(64), 'its passphrase kept');
+  assert.equal(await envs.read('cho'), null);
+  assert.deepEqual(units.calls, ['start ana']);
+});
+
 test('a drive that cannot be started is said, and the rest still start', async (t) => {
   const pc = await scratchPc();
   t.after(pc.cleanup);
