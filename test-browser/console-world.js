@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import { seedConsole } from '../server/seed.js';
 import { fakeFleet, probe } from '../test/fixtures/console-fleet.js';
+import { fakeDoor, fakeHost, pcFiles } from '../test/fixtures/console-pc.js';
 import { startDrive } from './harness.js';
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'bdhmin', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'bdhmin', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
@@ -22,7 +23,10 @@ echo "==> done: live on $1"
 
 export const SECRET = 'console-test-pass';
 
-export async function consoleWorld({ fleet: fleetState = {} } = {}) {
+// With `pc`, the people on the PC come from a fake door and a fake
+// marble-host (test/fixtures/console-pc.js), through settings files in a
+// temporary folder; without it the Console reads none, as a checkout does.
+export async function consoleWorld({ fleet: fleetState = {}, pc: withPc = false } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'console-world-'));
   const src = path.join(root, 'src');
   await fsp.mkdir(src);
@@ -63,6 +67,12 @@ export async function consoleWorld({ fleet: fleetState = {} } = {}) {
     checkpoints: { 't-sangho': [{ id: 'v6', create_time: '2026-09-24T05:36:33Z', comment: 'before deploy 20260924T053633Z-0dd39ac' }, { id: 'v5', create_time: '2026-09-23T21:02:00Z', comment: 'before deploy 20260923T210200Z-f588657' }] },
     ...fleetState,
   });
+  let pc = null;
+  if (withPc) {
+    const door = await fakeDoor();
+    const pcHost = await fakeHost();
+    pc = { door, host: pcHost, files: await pcFiles({ door, host: pcHost }), close: () => Promise.all([door.close(), pcHost.close()]) };
+  }
   const host = await startDrive({
     documents: {},
     env: {
@@ -71,6 +81,11 @@ export async function consoleWorld({ fleet: fleetState = {} } = {}) {
       MARBLE_DRIVE_CONSOLE_SPRITE: fleet.bin,
       MARBLE_DRIVE_CONSOLE_SRC: src,
       MARBLE_DRIVE_CONSOLE_SELF: 'admin-p1',
+      ...(pc ? {
+        MARBLE_DRIVE_CONSOLE_HOST_ENV: pc.files.hostEnv,
+        MARBLE_DRIVE_CONSOLE_DOOR_ENV: pc.files.doorEnv,
+        MARBLE_DRIVE_CONSOLE_BACKUP_STATUS: pc.files.statusDir,
+      } : {}),
     },
   });
   await seedConsole(host.drive.store);
@@ -94,5 +109,5 @@ export async function consoleWorld({ fleet: fleetState = {} } = {}) {
     }
     return { page, errors };
   }
-  return { host, fleet, src, open, shas };
+  return { host, fleet, src, open, shas, pc };
 }
