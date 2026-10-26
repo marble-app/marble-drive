@@ -1900,17 +1900,22 @@ __ICON__
 
   // ---- the spring the conversation runtime uses, verbatim in shape: a
   // critically damped oscillator stepped per frame, so a new target is a new
-  // spring from wherever the value is and however fast it is moving.
+  // spring from wherever the value is and however fast it is moving. Each
+  // frame is walked in 1ms steps: one step per frame swings a stiff spring
+  // past its target and back on a slow frame.
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   function spring({ from, to, velocity = 0, response = .34, damping = 1, onFrame, onDone }) {
     if (reduced()) { onFrame(to, 0); onDone?.(); return () => {}; }
     const omega = (2 * Math.PI) / response;
     let x = from, v = velocity, last = performance.now();
     let frame = requestAnimationFrame(function step(now) {
-      const dt = Math.min(.032, Math.max(.001, (now - last) / 1000));
+      let dt = Math.min(.032, Math.max(.001, (now - last) / 1000));
       last = now;
-      v += (-omega * omega * (x - to) - 2 * damping * omega * v) * dt;
-      x += v * dt;
+      for (; dt > 0; dt -= .001) {
+        const h = Math.min(.001, dt);
+        v += (-omega * omega * (x - to) - 2 * damping * omega * v) * h;
+        x += v * h;
+      }
       if (Math.abs(x - to) < .05 && Math.abs(v) < 1) { onFrame(to, 0); onDone?.(); return; }
       onFrame(x, v);
       frame = requestAnimationFrame(step);
