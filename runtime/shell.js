@@ -1817,6 +1817,13 @@
       const moving = animate && !this.reduced.matches;
       let style = document.getElementById('marble-shell-dock');
       if (!inset && !style) return;
+      // Where the page already is, its stylesheet stays as it is. apply()
+      // runs on every reach for a side, and rewriting the root's rule
+      // restyles the whole page, now and again when the motion comes off,
+      // in the middle of the chat's slide.
+      const at = inset ? `${top} ${left}` : null;
+      if (at && style && at === this.dockedAt) return;
+      this.dockedAt = at;
       if (!style) {
         style = document.createElement('style');
         style.id = 'marble-shell-dock';

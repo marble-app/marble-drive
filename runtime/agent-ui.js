@@ -434,19 +434,29 @@
 
   /** A critically damped spring on one number. It starts from wherever the
    *  value is now and at whatever velocity it is moving, which is what makes an
-   *  animation interruptible: a new target is a new spring from the present. */
+   *  animation interruptible: a new target is a new spring from the present.
+   *  A frame is walked in steps of a millisecond, whatever it took. One step
+   *  per frame is only stable while the frame is short against the spring:
+   *  the sidebar's 0.16s leave, on a 30ms frame, swung past the edge and back
+   *  every frame (in, out, in) rather than sliding, and its 0.25s arrival
+   *  bounced short of its place and over it. */
   function spring({ from, to, velocity = 0, response = 0.34, damping = 1, onFrame, onDone }) {
     const omega = (2 * Math.PI) / response;
+    const STEP = 0.001;
     let x = from;
     let v = velocity;
     let last = performance.now();
     let frame = requestAnimationFrame(function step(now) {
-      const dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000));
+      let dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000));
       last = now;
       // Damping 1 settles without overshoot; below it, a release that
       // carried momentum is allowed a little bounce.
-      v += (-omega * omega * (x - to) - 2 * damping * omega * v) * dt;
-      x += v * dt;
+      while (dt > 0) {
+        const h = Math.min(STEP, dt);
+        v += (-omega * omega * (x - to) - 2 * damping * omega * v) * h;
+        x += v * h;
+        dt -= h;
+      }
       if (Math.abs(x - to) < 0.0005 && Math.abs(v) < 0.01) {
         onFrame(to, 0);
         onDone?.();
@@ -10885,8 +10895,14 @@
       this.panel.inert = !this.isOpen;
       this.panel.style.visibility = visible ? 'visible' : 'hidden';
       this.launcher.setAttribute('aria-expanded', String(this.isOpen));
-      this.toggleAttribute('data-open-state', false);
-      if (this.isOpen) this.setAttribute('data-open-state', 'open');
+      // Pages style off this (a reader hides the drawer until it is open).
+      // It is in the page, so it is only touched when it changes: render()
+      // runs on every frame of a slide, and each touch of the page
+      // restyles it and wakes everything watching it.
+      if ((this.getAttribute('data-open-state') === 'open') !== this.isOpen) {
+        if (this.isOpen) this.setAttribute('data-open-state', 'open');
+        else this.removeAttribute('data-open-state');
+      }
       if (this.reduced.matches) {
         this.panel.style.transform = 'none';
         this.panel.style.opacity = this.isOpen ? '1' : '0';
@@ -10975,8 +10991,10 @@
         existing?.remove();
         return;
       }
+      // Called on every frame of a slide: rewriting the same rule would
+      // restyle the whole page each time.
       if (existing) {
-        existing.textContent = css;
+        if (existing.textContent !== css) existing.textContent = css;
         return;
       }
       const style = document.createElement('style');
