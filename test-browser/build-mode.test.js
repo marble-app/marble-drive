@@ -238,6 +238,59 @@ test('a Build mode app opens with the drive\'s frame out and the sidebar on Mark
   assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
 });
 
+test('on a page slow to draw, the floating sidebar slides in and out without swinging back, and leaves the page alone while it moves', async () => {
+  const { page, errors } = await open({ defaults: true });
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.viewName === 'marks');
+  await page.locator('marble-shell').evaluate((s) => s.shadowRoot.querySelector('[data-act="dock"]').click());
+  await page.waitForFunction(() => window.marbleShell.layout.pinChat === false);
+  await page.mouse.move(300, 400);
+  // Every frame takes 35ms: the spring is handed its longest step each time.
+  await page.evaluate(() => { const burn = () => { const t = performance.now(); while (performance.now() - t < 35); requestAnimationFrame(burn); }; requestAnimationFrame(burn); });
+  // Where the card's edge is on each frame, and how often the page itself was
+  // touched, while `act` sends it in or out.
+  const slide = (act) => page.evaluate(async (act) => {
+    const drawer = document.querySelector('marble-agent-drawer');
+    const panel = drawer.shadowRoot.querySelector('.panel');
+    let touched = 0;
+    const watch = new MutationObserver((records) => { touched += records.length; });
+    watch.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
+    if (act === 'leave') {
+      // As a hand leaving the card puts it away: the shell's quicker leave.
+      const shell = document.querySelector('marble-shell');
+      shell.shown.chat = false;
+      shell.held.chat = false;
+      shell.apply();
+    } else dispatchEvent(new CustomEvent('marble-build:toggle-comments'));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    touched = 0;
+    const lefts = [];
+    const t0 = performance.now();
+    await new Promise((resolve) => {
+      const look = () => {
+        lefts.push(Math.round(panel.getBoundingClientRect().left));
+        if (performance.now() - t0 < 700) requestAnimationFrame(look); else resolve();
+      };
+      requestAnimationFrame(look);
+    });
+    watch.disconnect();
+    return { open: drawer.isOpen, lefts, touched };
+  }, act);
+  const steady = ({ lefts }, dir) => lefts.every((x, i) => i === 0 || Math.sign(x - lefts[i - 1]) !== -dir);
+  const out = await slide('toggle');
+  assert.equal(out.open, false);
+  assert.ok(steady(out, 1), `out, never back in: ${out.lefts.join(' ')}`);
+  const into = await slide('toggle');
+  assert.equal(into.open, true);
+  assert.ok(steady(into, -1), `in, never back out: ${into.lefts.join(' ')}`);
+  assert.ok(into.lefts.at(-1) < into.lefts[0], 'it came in');
+  assert.equal(into.touched, 0, 'nothing in the page changes on the frames of the slide');
+  const leave = await slide('leave');
+  assert.equal(leave.open, false);
+  assert.ok(steady(leave, 1), `out as the hand leaves, never back in: ${leave.lefts.join(' ')}`);
+  assert.ok(leave.lefts.at(-1) > leave.lefts[0], 'it went');
+  assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
+});
+
 test('a note is kept on the host, survives a reload, and the status mark counts it', async () => {
   const { page } = await open();
   await noteOn(page, 's1', 'Group the overdue ones on top');
