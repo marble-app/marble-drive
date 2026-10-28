@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { INSTRUCTIONS } from '../server/agent/instructions.js';
-import { createClaudeProvider, parseClaudeLine } from '../server/agent/providers/claude.js';
+import { claudeAccountFor, createClaudeProvider, parseClaudeLine } from '../server/agent/providers/claude.js';
 import { PLUGIN_DIR } from '../server/agent/skills.js';
 
 const instructionsModule = await import('../server/agent/instructions.js');
@@ -157,6 +157,33 @@ test('ids, labels, catalog, and the documents spawn', () => {
   assert.equal(opus.args[opus.args.indexOf('--model') + 1], 'claude-opus-5-5[1m]', '2.1.280 and newer can pin Opus 5.5');
   assert.deepEqual(sub.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
   assert.deepEqual(sub.modes.map((m) => m.id), ['auto', 'acceptEdits', 'plan', 'manual', 'bypassPermissions']);
+});
+
+test('a folder with its own login runs its turns under that config dir', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-claude-acct-'));
+  const deep = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-claude-acct-'));
+  const accounts = [
+    { folder: 'Ai2', configDir: dir },
+    { folder: '/Ai2/AstaUI/', configDir: deep },
+    { folder: 'Gone', configDir: '/no/such/dir' },
+    { folder: 'Rel', configDir: 'relative/dir' },
+  ];
+  assert.equal(claudeAccountFor('Ai2/Notes.mrbl', accounts), dir);
+  assert.equal(claudeAccountFor('Ai2/AstaUI/Console.mrbl', accounts), deep, 'the deepest folder wins');
+  assert.equal(claudeAccountFor('Ai2 Notes.mrbl', accounts), null, 'a name that only starts the same is another folder');
+  assert.equal(claudeAccountFor('Chat.mrbl', accounts), null);
+  assert.equal(claudeAccountFor('Gone/x.mrbl', accounts), null, 'a config dir this machine lacks falls back to the default login');
+  assert.equal(claudeAccountFor('Rel/x.mrbl', accounts), null);
+  assert.equal(claudeAccountFor(null, accounts), null);
+  assert.equal(claudeAccountFor('Ai2/x.mrbl', undefined), null);
+
+  const sub = createClaudeProvider({ auth: 'subscription', env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok' } });
+  assert.deepEqual(sub.spawn({ workspace: '/w', prompt: 'x', target: 'Ai2/Notes.mrbl', accounts }).env, { CLAUDE_CONFIG_DIR: dir },
+    'the folder\'s login, not the default one\'s token');
+  assert.deepEqual(sub.spawn({ workspace: '/w', prompt: 'x', target: 'Chat.mrbl', accounts }).env, { CLAUDE_CODE_OAUTH_TOKEN: 'tok' });
+  const api = createClaudeProvider({ auth: 'api', env: { ANTHROPIC_API_KEY: 'sk-test' } });
+  assert.deepEqual(api.spawn({ workspace: '/w', prompt: 'x', target: 'Ai2/Notes.mrbl', accounts }).env, { ANTHROPIC_API_KEY: 'sk-test' },
+    'a key pays the same in every folder');
 });
 
 test('prepare writes the MCP config privately, with the turn\'s bridge', async () => {

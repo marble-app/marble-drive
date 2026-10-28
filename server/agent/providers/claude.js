@@ -17,6 +17,7 @@
 // credit token with ANTHROPIC_BASE_URL pointed at the credit proxy
 // (worker/src/credit.js), which adds the owner's key on the way to Anthropic.
 
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { CLAUDE_MODES } from '../catalog.js';
@@ -219,6 +220,29 @@ export function parseClaudeLine(line, state = {}) {
   }
 }
 
+// A folder of the drive can be worked on under another Claude login (the
+// owner's employer plan, say). Agents settings list them as
+// `claudeAccounts: [{ folder: 'Ai2', configDir: '/home/…/.claude-ai2' }]`,
+// and a turn on a document inside that folder runs with CLAUDE_CONFIG_DIR
+// set to it, so the CLI uses the login kept there. The deepest folder wins.
+// A config dir this machine doesn't have (the drive moved hosts) is skipped,
+// and the turn runs on the default login rather than failing.
+export function claudeAccountFor(target, accounts, exists = fs.existsSync) {
+  if (typeof target !== 'string' || !target || !Array.isArray(accounts)) return null;
+  const doc = target.replace(/^\/+/, '');
+  let best = null;
+  for (const account of accounts) {
+    const folder = String(account?.folder ?? '').replace(/^\/+|\/+$/g, '');
+    const configDir = account?.configDir;
+    if (!folder || typeof configDir !== 'string' || !path.isAbsolute(configDir)) continue;
+    if (!doc.startsWith(`${folder}/`)) continue;
+    if (best && best.folder.length >= folder.length) continue;
+    if (!exists(configDir)) continue;
+    best = { folder, configDir };
+  }
+  return best?.configDir ?? null;
+}
+
 export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env, secrets, version = null } = {}) {
   const api = auth === 'api';
   const credit = auth === 'credit';
@@ -291,8 +315,10 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       await writePrivateFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2));
     },
 
-    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', kind = 'drive', cwd = null }) {
+    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', kind = 'drive', cwd = null, target = null, accounts = null }) {
       const current = live();
+      // Only the login has a folder of its own; a key or starter credit pays the same everywhere.
+      const configDir = !api && !credit ? claudeAccountFor(target, accounts) : null;
       const full = capability === 'full';
       // A conversation from before modes had `auto` stored `default`.
       const permission = !mode || mode === 'default' ? 'auto' : mode;
@@ -349,7 +375,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
           ...(api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {}),
           // The drive's own token, never the owner's key: the proxy holds that.
           ...(onCredit ? { ANTHROPIC_BASE_URL: onCredit.url, ANTHROPIC_API_KEY: onCredit.token } : {}),
-          ...(!api && !onCredit && current.CLAUDE_CODE_OAUTH_TOKEN ? { CLAUDE_CODE_OAUTH_TOKEN: current.CLAUDE_CODE_OAUTH_TOKEN } : {}),
+          // The folder's own login, and not the default one's token, which the CLI would prefer.
+          ...(configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}),
+          ...(!api && !onCredit && !configDir && current.CLAUDE_CODE_OAUTH_TOKEN ? { CLAUDE_CODE_OAUTH_TOKEN: current.CLAUDE_CODE_OAUTH_TOKEN } : {}),
         },
         stdin,
         ...(full ? { stdinOpen: true } : {}),

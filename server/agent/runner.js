@@ -641,6 +641,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (browser) await fsp.rm(profile, { recursive: true, force: true });
       await provider.prepare?.({ workspace, mcp, browser, meta, skills, capability, kind, project });
       const prompt = await composePrompt(turn, meta, project);
+      // Read now, like the project: a folder given its own login in settings takes effect on the next turn.
+      const settings = (await store.settings?.().catch(() => null)) ?? {};
 
       // Cancel (or a host shutdown) can land anywhere in the awaits above,
       // before there is any child to kill. Check here, the last point before
@@ -665,6 +667,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         kind,
         project,
         cwd: capability === 'full' ? project.path : null,
+        // The document this turn works on, and the folders that run under another login.
+        target: turn.target,
+        accounts: settings.claudeAccounts,
       });
 
       // The runner builds the environment, not the provider: a provider that
