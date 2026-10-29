@@ -62,7 +62,7 @@ test('signed out, / shows both ways in and no greeting', async () => {
 test('without the door switched on, the apex is the landing page', async () => {
   const w = world({ DOOR_SIGNING_KEY: '' });
   const body = await text(await w.b().go('/'));
-  assert.match(body, /Make the tools your work needs/);
+  assert.match(body, /Describe the tool you need/);
 });
 
 test('an invite, Google, a name, and the drive is queued; the door sprite is poked', async () => {
@@ -308,7 +308,7 @@ test('www goes to the apex', async () => {
 test('with the door on but no way to sign in set up, the apex is the landing page, and its way in is the PC host\'s sign-up', async () => {
   const w = world({ GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '', GITHUB_CLIENT_ID: '', GITHUB_CLIENT_SECRET: '' });
   const body = await text(await w.b().go('/'));
-  assert.match(body, /Make the tools your work needs/);
+  assert.match(body, /Describe the tool you need/);
   assert.match(body, /href="https:\/\/join\.marbledrive\.app"/);
   assert.doesNotMatch(body, /Continue with/);
 });
