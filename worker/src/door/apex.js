@@ -28,6 +28,7 @@
 // same-site with the apex, so SameSite cookies alone would let a document on
 // a drive post here.
 
+import { landing } from '../landing.js';
 import { newDriveHome, pcHostReady, PCHOST, pokePcHost } from '../pc-host.js';
 import { CONSENT_VERSION_RE, directory, GONE } from './directory.js';
 import { nameProblem, nameSuggestions } from './names.js';
@@ -277,7 +278,13 @@ export async function apex(request, env, { fetchImpl = fetch, now = Date.now(), 
     let m;
     if (path === '/') {
       const session = await sessionOf(request, dir);
-      if (!session) return pages.signIn({ providers: providersOf(env) });
+      // With no way to sign in set up (no Google, no GitHub), there is nothing
+      // to sign in to here yet: the landing page, whose way in is the PC
+      // host's sign-up page (worker/src/landing.js).
+      if (!session) {
+        const providers = providersOf(env);
+        return providers.google || providers.github ? pages.signIn({ providers }) : landing();
+      }
       return await onward(session, dir);
     }
 
