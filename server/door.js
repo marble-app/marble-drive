@@ -10,6 +10,12 @@
 //
 // With no MARBLE_DOOR_* settings it is not configured, allows nobody, and the
 // gate decides everything exactly as before.
+//
+// `direct` (MARBLE_DOOR_DIRECT, a drive on the PC with no door in front of
+// it; docs/HOSTING.md, "Direct mode"): marble-host signs the pass, and the
+// person's own sign-in link carries it here. `/enter` on this drive takes it
+// from the link and sets the cookie the edge would have set, and a browser
+// without one is sent to that page rather than to marbledrive.app.
 
 import crypto from 'node:crypto';
 
@@ -54,14 +60,16 @@ function cookieValue(header, name) {
   return null;
 }
 
-export function createDoor({ keys = new Map(), name = null, owner = null, cookieName = PASS_COOKIE, now = () => Date.now(), origin = DOOR_ORIGIN } = {}) {
+export function createDoor({ keys = new Map(), name = null, owner = null, cookieName = PASS_COOKIE, now = () => Date.now(), origin = DOOR_ORIGIN, direct = false } = {}) {
   const configured = Boolean(keys?.size && name && owner);
 
   /** The pass's payload, when it is a pass for this drive and its owner. */
-  function read(req) {
+  const read = (req) => check(cookieValue(req?.headers?.cookie, cookieName));
+
+  /** The same, for a pass as text: what a direct sign-in link carries. */
+  function check(token) {
     if (!configured) return null;
-    const token = cookieValue(req?.headers?.cookie, cookieName);
-    if (!token || token.length > 4096) return null;
+    if (typeof token !== 'string' || !token || token.length > 4096) return null;
     const parts = token.split('.');
     if (parts.length !== 4 || parts[0] !== 'v1') return null;
     const [, kid, body, sig] = parts;
@@ -87,8 +95,10 @@ export function createDoor({ keys = new Map(), name = null, owner = null, cookie
   }
 
   /** Where a browser without a pass is sent: the door, with a path on this
-   *  drive to come back to. */
+   *  drive to come back to. A direct drive's own /enter, which says to open
+   *  the link that was sent. */
   function enterUrl(req) {
+    if (direct) return `/enter?to=${encodeURIComponent(returnPath(req?.url ?? '/'))}`;
     const url = new URL('/enter', origin);
     url.searchParams.set('drive', name ?? '');
     url.searchParams.set('to', returnPath(req?.url ?? '/'));
@@ -97,7 +107,16 @@ export function createDoor({ keys = new Map(), name = null, owner = null, cookie
 
   /** Where a share page's "Make your own" goes: Ask for access at the door.
    *  Null with no door, so a drive the door does not know offers nothing. */
-  const askUrl = configured ? new URL('/ask', origin).href : null;
+  const askUrl = configured && !direct ? new URL('/ask', origin).href : null;
 
-  return { configured, allows, who, enterUrl, askUrl, cookieName, name };
+  /** The cookie a direct sign-in link sets: the pass itself, for as long as
+   *  it lasts. __Host-, so Secure, Path=/ and no Domain. */
+  function passCookie(token) {
+    const payload = check(token);
+    if (!payload) return null;
+    const seconds = Math.max(0, Math.floor(payload.exp - now() / 1000));
+    return `${cookieName}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;
+  }
+
+  return { configured, direct: configured && direct, allows, who, check, passCookie, enterUrl, askUrl, cookieName, name };
 }

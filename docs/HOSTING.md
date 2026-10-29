@@ -877,6 +877,44 @@ in `system` mode, and run again after any change to the template:
 | Other drives on the PC | only through their own sign-in |
 | Memory and processes | capped per drive, and for all of them together |
 
+### Direct mode: the PC with no door in front
+
+Built 2026-10-29, so the study can start before the door is deployed. With
+`HOST_DIRECT=1` in host.env (init writes it, with a new `HOST_SIGNING_KEY`),
+nothing about a PC drive needs the Worker, Google sign-in or the Cloudflare
+dashboard:
+
+- **Its name.** `node tools/pc-host.mjs invite ana` makes the drive (owner
+  `direct-ana`) and runs `cloudflared tunnel route dns marble-pc-host
+  ana.marbledrive.app`, a CNAME that overrides the zone's `*` record. The
+  host's tunnel, set up in direct mode, has one rule, `*.marbledrive.app`, to
+  the router; only names pointed at it ever arrive. A name the door keeps for
+  machines or itself (`nameProblem`, worker/src/door/names.js) is refused.
+- **The router** takes a request without the key whose Host is
+  `<name>.<suffix>` as one for that drive, drops any `x-marble-drive` the
+  browser sent, and sets `X-Forwarded-Host` to that Host and
+  `X-Forwarded-Proto` to https. `/_host/*` still needs the key, and the
+  Worker's keyed way in still works beside it.
+- **Signing in.** invite (and `link <name>` for a fresh one) prints
+  `https://ana.marbledrive.app/enter#<pass>`: a pass of the door's own kind
+  (`v1.h1.…`, server/host/passes.js), signed with HOST_SIGNING_KEY, for the
+  drive and its owner, good for 90 days (`--days`). Every guest's
+  `MARBLE_DOOR_KEYS` lists the key's public half as `h1` beside the door's.
+  The guest runs with `MARBLE_DOOR_DIRECT=1`: its `/enter` page reads the pass
+  from after the `#`, so no server or log on the way sees it, posts it back,
+  and gets `__Host-md_pass` for as long as the pass lasts. A browser without
+  one is sent to that page, which says to open the link again. The passphrase
+  stays a bearer for scripts, as in `tools` mode.
+- **No door is asked anything.** marble-host's door client is off, so the
+  maker, the reconcile and the looks never call it, and the door's people
+  never decide which drives stay.
+
+Anyone holding a link can open that drive until it runs out; send each
+person theirs alone. Removing the drive ends it. Consent is taken as the lab's
+protocol says, since the door's consent screen isn't in front. Turning the
+door on later: `HOST_DIRECT=0`, restart marble-host, set the tunnel up again,
+and the drives keep their passes from the door.
+
 ### The front door for PC drives
 
 Built 2026-10-25, not switched on: `PC_HOST_KEY` is not set and

@@ -297,7 +297,7 @@ export async function createDrive(config, { log = console, agentProviders = null
   // beside the passphrase. Not configured without its three settings, and then
   // nothing below changes. `strict` is `tools` mode with a door to send people
   // to: the passphrase is then for scripts and the desk, not a browser outside.
-  const door = createDoor({ keys: config.doorKeys, name: config.doorName, owner: config.doorOwner });
+  const door = createDoor({ keys: config.doorKeys, name: config.doorName, owner: config.doorOwner, direct: config.doorDirect });
   const strict = config.gateMode === 'tools' && door.configured && !gate.open;
   if (config.gateMode === 'tools' && !strict) {
     log.info?.('[drive] MARBLE_DRIVE_GATE=tools does nothing without the door settings (MARBLE_DOOR_KEYS, _NAME, _OWNER) and a passphrase');
@@ -954,6 +954,9 @@ export async function createDrive(config, { log = console, agentProviders = null
         return json(res, 404, { error: 'not found' });
       }
       if (route === '/gate') return gateRoute(req, res, url);
+      // A direct drive's sign-in link (server/door.js): in front of the gate,
+      // because whoever opens it has no cookie yet.
+      if (route === '/enter' && door.direct) return enterRoute(req, res, url);
       // A share link: in front of the gate, because the person holding one
       // has no passphrase. It trades the token for a cookie and goes on to
       // the page (server/shares.js).
@@ -1897,6 +1900,30 @@ export async function createDrive(config, { log = console, agentProviders = null
 <style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;padding:0 24px;background:#fafaf7;color:#111111}p{color:#5a5a5a;margin:0}
 @media (prefers-color-scheme: dark){body{background:#161616;color:#ededed}p{color:#a3a3a3}}</style>
 <p>${escapeHtml(words)}</p>`, { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  }
+
+  /** A direct drive's sign-in: /enter#<pass>. The pass rides after the #,
+   *  so no server or log on the way sees it; the page posts it back here and
+   *  gets the cookie the edge would have set. Without one, it says to open
+   *  the link that was sent. */
+  function enterRoute(req, res, url) {
+    if (req.method === 'POST') {
+      return readJson(req, 8192)
+        .then((body) => {
+          const cookie = door.passCookie(body.pass);
+          if (!cookie) return json(res, 401, { error: 'that link has run out or is not for this drive' });
+          return json(res, 200, { ok: true }, { 'Set-Cookie': cookie, 'Cache-Control': 'no-store' });
+        })
+        .catch(() => json(res, 400, { error: 'expected {"pass":"…"}' }));
+    }
+    const to = escapeHtml(returnPath(url.searchParams.get('to')));
+    return html(res, 200, `<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
+<link rel="icon" href="${iconUri('drive')}">
+<style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;padding:0 24px;background:#fafaf7;color:#111111}p{color:#5a5a5a;margin:0;max-width:26rem}
+@media (prefers-color-scheme: dark){body{background:#161616;color:#ededed}p{color:#a3a3a3}}</style>
+<p data-to="${to}">Opening your drive…</p>
+<script>const p=document.querySelector('p');const pass=decodeURIComponent(location.hash.slice(1));history.replaceState(null,'',location.pathname+location.search);const off=()=>{p.textContent='This drive opens with the sign-in link you were sent. Open that link again, or ask the person who sent it for a new one.'};if(!pass)off();else fetch('/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pass})}).then((r)=>r.ok?location.replace(p.dataset.to):off(),off)</script>`, { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
   }
 
   function gateRoute(req, res, url) {

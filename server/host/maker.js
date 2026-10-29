@@ -93,7 +93,7 @@ export function createMaker({
 
       await onStep('machine', 'now');
       const secret = newSecret();
-      const entries = guestEntries({ name, release, port, secret, doorKeys: settings.doorKeys, owner, publicSuffix: settings.publicSuffix, ownerName: settings.ownerName, cohort });
+      const entries = guestEntries({ name, release, port, secret, doorKeys: settings.guestDoorKeys ?? settings.doorKeys, owner, publicSuffix: settings.publicSuffix, ownerName: settings.ownerName, cohort, direct: settings.direct });
       await registry.update((r) => {
         r.drives[name] = {
           name,
@@ -168,7 +168,7 @@ export function createMaker({
       let secret = (await envs.read(name))?.MARBLE_DRIVE_SECRET;
       if (!secret) {
         secret = newSecret();
-        await envs.write(name, guestEntries({ name, release: d.release, port: d.port, secret, doorKeys: settings.doorKeys, owner: d.owner, publicSuffix: settings.publicSuffix, ownerName: settings.ownerName, cohort: d.cohort }));
+        await envs.write(name, guestEntries({ name, release: d.release, port: d.port, secret, doorKeys: settings.guestDoorKeys ?? settings.doorKeys, owner: d.owner, publicSuffix: settings.publicSuffix, ownerName: settings.ownerName, cohort: d.cohort, direct: settings.direct }));
       }
       await units.start(name);
       const checked = await check({ probe, port: d.port, release: d.release, secret, deadlineMs: checkMs });

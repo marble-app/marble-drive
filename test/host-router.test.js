@@ -250,3 +250,57 @@ test('its own paths: a poke drains the door\'s queue, and health always says ok 
   assert.equal((await ask(r.port, { path: '/_host/other', headers: keyed(null) })).status, 404);
   assert.equal((await ask(r.port, { method: 'GET', path: '/_host/poke', headers: keyed(null) })).status, 404);
 });
+
+test('direct mode: a request for <name>.marbledrive.app reaches that drive without the key, as https, and nothing the browser says picks another', async (t) => {
+  const seen = [];
+  const ana = await listenGuest((req, res) => {
+    seen.push({ drive: 'ana', headers: req.headers });
+    res.end('ana');
+  });
+  const bob = await listenGuest((req, res) => {
+    seen.push({ drive: 'bob', headers: req.headers });
+    res.end('bob');
+  });
+  const drives = { ana: { state: 'running', port: ana.port }, bob: { state: 'running', port: bob.port } };
+  const router = createRouter({ key: KEY, lookup: (name) => drives[name] ?? null, direct: { suffix: 'marbledrive.app' }, log: quiet });
+  const port = await router.listen(0);
+  t.after(async () => {
+    await router.close();
+    await ana.close();
+    await bob.close();
+  });
+  const res = await ask(port, { path: '/a/Notes', headers: { host: 'ana.marbledrive.app', 'x-marble-drive': 'bob', 'x-forwarded-host': 'bob.marbledrive.app', 'x-forwarded-proto': 'http' } });
+  assert.equal(res.status, 200);
+  assert.equal(res.body, 'ana');
+  assert.equal(seen[0].headers['x-forwarded-host'], 'ana.marbledrive.app');
+  assert.equal(seen[0].headers['x-forwarded-proto'], 'https');
+  assert.equal(seen[0].headers['x-marble-drive'], undefined);
+  assert.equal(seen[0].headers['x-forwarded-for'], '127.0.0.1');
+
+  // A name no drive has here is resting; one that isn't <name>.<suffix> is refused.
+  assert.equal((await ask(port, { headers: { host: 'carol.marbledrive.app' } })).status, 503);
+  for (const host of ['ana.example.com', 'x.ana.marbledrive.app', 'marbledrive.app', '127.0.0.1']) {
+    assert.equal((await ask(port, { headers: { host } })).status, 401, host);
+  }
+  // Its own paths still need the key, whatever the name.
+  assert.equal((await ask(port, { path: '/_host/health', headers: { host: 'ana.marbledrive.app' } })).status, 401);
+  assert.equal((await ask(port, { path: '/_host/health', headers: keyed(null) })).status, 200);
+  // And the Worker's way in still works beside it.
+  assert.equal((await ask(port, { headers: keyed('bob') })).body, 'bob');
+  assert.equal(seen.length, 2);
+});
+
+test('without direct mode, a drive\'s name alone opens nothing', async (t) => {
+  let reached = 0;
+  const guest = await listenGuest((req, res) => {
+    reached += 1;
+    res.end('ok');
+  });
+  const r = await rig({ drives: { ana: { state: 'running', port: guest.port } } });
+  t.after(async () => {
+    await r.close();
+    await guest.close();
+  });
+  assert.equal((await ask(r.port, { headers: { host: 'ana.marbledrive.app' } })).status, 401);
+  assert.equal(reached, 0);
+});

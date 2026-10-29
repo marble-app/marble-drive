@@ -252,3 +252,32 @@ test('without host.env, or with one others can read, nothing is asked', async ()
   assert.equal((await run([], { home: h.home })).code, 2);
   assert.equal((await run(['frobnicate'], { home: h.home, fetchImpl: api.fetchImpl })).code, 1);
 });
+
+test('direct mode: link signs a pass for the drive\'s owner; invite turns away a name kept for machines or the service; neither works without HOST_DIRECT', async () => {
+  const { newSigningKey } = await import('../server/host/passes.js');
+  const { createDoor, parseDoorKeys } = await import('../server/door.js');
+  const { hostKeyEntry } = await import('../server/host/settings.js');
+  const key = newSigningKey();
+  const h = await withSettings();
+  const plain = fakeApi({ 'GET /drives': [200, { drives: [ANA] }] });
+  const off = await run(['link', 'ana'], { home: h.home, fetchImpl: plain.fetchImpl });
+  assert.equal(off.code, 1);
+  assert.match(off.err, /link is for direct mode: HOST_DIRECT=1/);
+
+  await fsp.appendFile(h.file, `HOST_DIRECT=1\nHOST_SIGNING_KEY=${key}\n`);
+  const api = fakeApi({ 'GET /drives': [200, { drives: [ANA] }] });
+  const res = await run(['link', 'ana', '--days', '30'], { home: h.home, fetchImpl: api.fetchImpl });
+  assert.equal(res.code, 0, res.err);
+  const link = /https:\/\/ana\.marbledrive\.app\/enter#(\S+)/.exec(res.out);
+  assert.ok(link, res.out);
+  const door = createDoor({ keys: parseDoorKeys(hostKeyEntry(key)), name: 'ana', owner: 'acct_1', direct: true });
+  assert.equal(door.check(link[1]).acct, 'acct_1');
+  assert.ok(!res.out.includes(key));
+  assert.match((await run(['link', 'carol'], { home: h.home, fetchImpl: api.fetchImpl })).err, /there is no drive called carol/);
+
+  for (const name of ['pc-ana', 'mac-x', 'www', 'escape-check', 'A']) {
+    const r = await run(['invite', name], { home: h.home, fetchImpl: api.fetchImpl });
+    assert.equal(r.code, 1, name);
+    assert.ok(!api.asked.some((a) => a.method === 'POST'), `${name}: nothing made`);
+  }
+});
