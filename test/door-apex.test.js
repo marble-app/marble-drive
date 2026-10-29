@@ -62,7 +62,7 @@ test('signed out, / shows both ways in and no greeting', async () => {
 test('without the door switched on, the apex is the placeholder', async () => {
   const w = world({ DOOR_SIGNING_KEY: '' });
   const body = await text(await w.b().go('/'));
-  assert.match(body, /Coming soon/);
+  assert.match(body, /Make the tools your work needs/);
 });
 
 test('an invite, Google, a name, and the drive is queued; the door sprite is poked', async () => {

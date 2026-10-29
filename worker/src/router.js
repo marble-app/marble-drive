@@ -23,6 +23,7 @@
 // a stranger's drive.
 
 import { CREDIT_PATH, credit } from './credit.js';
+import { landing } from './landing.js';
 import { apex, clearPass, doorReady, edgeVerifyKeys, mintPass, passCookie, PASS_COOKIE } from './door/apex.js';
 import { directory, GONE } from './door/directory.js';
 import { readCookie } from './door/oauth.js';
@@ -48,7 +49,6 @@ function page(status, title, text, headers = {}) {
   return new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...headers } });
 }
 
-const placeholder = () => page(200, 'Marble Drive', 'Coming soon.');
 const nobody = () => page(404, 'No drive lives here', 'There is no Marble drive at this address.');
 const lost = () => page(503, 'Can’t tell where this drive lives right now', 'Try again in a minute.', { 'retry-after': '30' });
 const MACHINE_NAMES = { mac: 'Mac', pc: 'PC' };
@@ -200,8 +200,8 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
   // whether or not the door is, so a drive made by hand can use it.
   if (host === APEX && (url.pathname === CREDIT_PATH || url.pathname.startsWith(`${CREDIT_PATH}/`))) return credit(request, env, { fetchImpl, ctx });
   // The apex is the door once it is switched on (worker/src/door/apex.js),
-  // and the placeholder until then.
-  if (host === APEX || host === `www.${APEX}`) return doorReady(env) ? apex(request, env, { fetchImpl, now, ctx, ...(consentForm === undefined ? {} : { consentForm }) }) : placeholder();
+  // and the landing page (worker/src/landing.js) until then.
+  if (host === APEX || host === `www.${APEX}`) return doorReady(env) ? apex(request, env, { fetchImpl, now, ctx, ...(consentForm === undefined ? {} : { consentForm }) }) : landing();
 
   const name = host.slice(0, -(APEX.length + 1));
   // A machine's own tunnel (pc-bryan, mac-bryan, and pc-host, the PC host's)

@@ -88,7 +88,7 @@ test('credit works with the door off: a drive made by hand can use it', async ()
   assert.equal(res.status, 200);
   await res.text();
   // The apex is still the placeholder.
-  assert.match(await (await w.call('/')).text(), /Coming soon/);
+  assert.match(await (await w.call('/')).text(), /Make the tools your work needs/);
 });
 
 test('a token that is unknown, malformed or missing is refused before Anthropic is asked', async () => {
