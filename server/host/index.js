@@ -53,7 +53,9 @@ export async function startHost({ env = process.env, log = console, units = null
   const envs = createGuestEnvs({ dir: settings.guestEnvDir });
   const asker = probe ?? createProbe();
   const notify = notifier({ alerts: createAlerts({ url: settings.ntfyUrl, fetchImpl, log }), registry });
-  const door = createDoor({ url: settings.doorUrl, token: settings.doorAdminToken, fetchImpl });
+  // Direct mode has no door: nothing is asked of it, and its people never
+  // decide which drives stay (docs/HOSTING.md, "Direct mode").
+  const door = createDoor({ url: settings.doorUrl, token: settings.direct ? null : settings.doorAdminToken, fetchImpl });
   const maker = createMaker({ settings, registry, units: guestUnits, envs, probe: asker, notify, door, log, drainEveryMs });
   const remover = createRemover({ registry, units: guestUnits, envs, probe: asker, door, log });
   const reconciler = createReconciler({ registry, envs, door, remover, log, everyMs: reconcileEveryMs });
@@ -70,6 +72,7 @@ export async function startHost({ env = process.env, log = console, units = null
   const router = createRouter({
     key: settings.key,
     lookup: (name) => registry.drive(name),
+    direct: settings.direct ? { suffix: settings.publicSuffix } : null,
     onPoke: () => maker.poke(),
     health: async () => {
       const kept = registry.drives().filter((d) => d.state !== 'removed');

@@ -107,6 +107,10 @@ export function loadConfig(env = process.env) {
     doorKeys: parseDoorKeys(str('MARBLE_DOOR_KEYS', null)),
     doorName: str('MARBLE_DOOR_NAME', null),
     doorOwner: str('MARBLE_DOOR_OWNER', null),
+    // A drive on the PC with no door in front of it (docs/HOSTING.md, "Direct
+    // mode"): marble-host signs its pass, and the person's sign-in link brings
+    // it to this drive's /enter.
+    doorDirect: bool('MARBLE_DOOR_DIRECT', false),
     // `on`: the passphrase form and the door, as before. `tools`: browsers come
     // in by the door; the passphrase is still a bearer for scripts and still
     // opens the drive at 127.0.0.1, but not through a tunnel or the edge.

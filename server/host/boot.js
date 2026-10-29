@@ -48,7 +48,7 @@ export async function bootDrives({ registry, units, envs, settings, notify = asy
         continue;
       }
       if (!(await envs.read(d.name))) {
-        await envs.write(d.name, guestEntries({ name: d.name, release: d.release, port: d.port, secret: newSecret(), doorKeys: settings.doorKeys, owner: d.owner, publicSuffix: settings.publicSuffix, ownerName: settings.ownerName, cohort: d.cohort }));
+        await envs.write(d.name, guestEntries({ name: d.name, release: d.release, port: d.port, secret: newSecret(), doorKeys: settings.guestDoorKeys ?? settings.doorKeys, owner: d.owner, publicSuffix: settings.publicSuffix, ownerName: settings.ownerName, cohort: d.cohort, direct: settings.direct }));
         log.log?.(`[host] ${d.name} had no settings file; wrote it again`);
       }
       await units.start(d.name);

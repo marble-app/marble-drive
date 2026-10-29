@@ -7,6 +7,7 @@
 // or the owner's own state. The environment wins over the file, as node's
 // --env-file does.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,23 @@ export const RESERVED = new Set(['escape-check']);
 export const NEVER_PORTS = [4400, 4401, 4402, 4498];
 
 export const MODES = ['system', 'user'];
+
+/** The key id a pass marble-host signs carries (server/host/passes.js). */
+export const HOST_KID = 'h1';
+
+/** HOST_SIGNING_KEY's public half, as a guest's MARBLE_DOOR_KEYS entry, or an
+ *  error naming the setting and never its value. */
+export function hostKeyEntry(pkcs8Base64) {
+  let key;
+  try {
+    key = crypto.createPrivateKey({ key: Buffer.from(String(pkcs8Base64), 'base64'), format: 'der', type: 'pkcs8' });
+  } catch {
+    throw new Error('HOST_SIGNING_KEY is not a private key (PKCS#8, base64)');
+  }
+  if (key.asymmetricKeyType !== 'ed25519') throw new Error('HOST_SIGNING_KEY is not an Ed25519 key');
+  const spki = crypto.createPublicKey(key).export({ format: 'der', type: 'spki' }).toString('base64');
+  return `${HOST_KID}:${spki}`;
+}
 
 /** "4500-4599" as { from, to }, or an error naming the setting. */
 export function parseRange(text) {
@@ -89,6 +107,15 @@ export function loadHostSettings(env = process.env) {
   if (guestPorts.from < GUEST_PORTS.from || guestPorts.to > GUEST_PORTS.to) {
     throw new Error(`HOST_GUEST_PORTS lies within ${GUEST_PORTS.from}-${GUEST_PORTS.to}, where each port gives a drive a loopback address of its own (not "${get('HOST_GUEST_PORTS')}")`);
   }
+  // Direct mode (docs/HOSTING.md, "Direct mode"): no door in front. Each
+  // drive has a name of its own on the tunnel, the router takes the drive
+  // from the name asked for, and marble-host signs the pass a person's
+  // sign-in link carries. The door's own keys, if any, still count.
+  const direct = /^(1|true|yes|on)$/i.test(String(get('HOST_DIRECT', '')));
+  const signingKey = get('HOST_SIGNING_KEY');
+  if (direct && !signingKey) throw new Error('HOST_DIRECT needs HOST_SIGNING_KEY: run node tools/pc-host.mjs init');
+  const hostKey = signingKey ? hostKeyEntry(signingKey) : null;
+  const doorKeys = get('MARBLE_DOOR_KEYS');
   return {
     ...paths,
     settingsFile: paths.hostEnv,
@@ -101,7 +128,11 @@ export function loadHostSettings(env = process.env) {
     publicSuffix: get('HOST_PUBLIC_SUFFIX', 'marbledrive.app'),
     doorUrl: get('DOOR_URL', 'https://marbledrive.app'),
     doorAdminToken: get('DOOR_ADMIN_TOKEN'),
-    doorKeys: get('MARBLE_DOOR_KEYS'),
+    doorKeys,
+    direct,
+    signingKey,
+    // What every guest's MARBLE_DOOR_KEYS says: the door's, and marble-host's own.
+    guestDoorKeys: [doorKeys, hostKey].filter(Boolean).join(' ') || null,
     ntfyUrl: get('HOST_NTFY_URL'),
     mode,
     ownerName: get('HOST_OWNER_NAME', 'Bryan'),

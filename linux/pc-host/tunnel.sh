@@ -11,6 +11,12 @@
 #   linux/pc-host/tunnel.sh install|start        render the user service and start it
 #   linux/pc-host/tunnel.sh stop|status|logs|uninstall
 #
+# Direct mode (HOST_DIRECT=1 in host.env; docs/HOSTING.md, "Direct mode"):
+# no Worker in front. The one rule is then *.marbledrive.app, so each drive's
+# own name reaches the router once `pc-host.mjs invite` points its DNS here;
+# only names pointed here ever arrive, and the router still answers 401 to
+# /_host/* without the key and "resting" to any name it doesn't host.
+#
 # setup needs `cloudflared tunnel login` done first, and makes a DNS record on
 # the marbledrive.app zone. install and start refuse unless the tunnel's
 # config sends its one hostname to the router alone, and what answers there
@@ -32,6 +38,8 @@ state="$HOME/.local/state/marble-drive"
 log="$state/host-tunnel.log"
 port="$(sed -n 's/^HOST_ROUTER_PORT=//p' "$settings" 2>/dev/null | tail -n 1)"
 port="${port:-4460}"
+direct="$(sed -n 's/^HOST_DIRECT=//p' "$settings" 2>/dev/null | tail -n 1)"
+[[ $direct =~ ^(1|true|yes|on)$ ]] && direct=1 || direct=
 
 sc() { systemctl --user "$@"; }
 need_cloudflared() {
@@ -65,7 +73,7 @@ router_keyed() {
   return 1
 }
 
-hostname_of() { awk '/^[[:space:]]*-[[:space:]]*hostname:/{print $NF; exit}' "$config" 2>/dev/null; }
+hostname_of() { awk '/^[[:space:]]*-[[:space:]]*hostname:/{gsub(/"/, "", $NF); print $NF; exit}' "$config" 2>/dev/null; }
 tunnel_id() {
   cloudflared tunnel list --output json --name "$tunnel" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s);if(t[0])console.log(t[0].id)}catch{}})'
 }
@@ -103,11 +111,11 @@ setup() {
   }
   mkdir -p "$cf_dir"
   cat > "$config" <<YML
-# Written by linux/pc-host/tunnel.sh setup $host: marble-host's router, and nothing else
+# Written by linux/pc-host/tunnel.sh setup $host${direct:+ (direct mode: every drive's own name)}: marble-host's router, and nothing else
 tunnel: $id
 credentials-file: $creds
 ingress:
-  - hostname: $host
+  - hostname: $( [[ -n $direct ]] && echo '"*.marbledrive.app"' || echo "$host" )
     service: http://127.0.0.1:$port
   - service: http_status:404
 YML

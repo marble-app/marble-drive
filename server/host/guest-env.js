@@ -32,7 +32,7 @@ export function checkEntry(key, value) {
 }
 
 /** What a drive's settings file says (docs/HOSTING.md, "A guest's settings"). */
-export function guestEntries({ name, release, port, secret, doorKeys, owner, publicSuffix = 'marbledrive.app', ownerName = null, cohort = null }) {
+export function guestEntries({ name, release, port, secret, doorKeys, owner, publicSuffix = 'marbledrive.app', ownerName = null, cohort = null, direct = false }) {
   if (!NAME.test(name ?? '')) throw new Error(`"${name}" is not a drive's name`);
   if (!RELEASE.test(release ?? '')) throw new Error(`"${release}" is not a release's name`);
   const email = `${name}@users.${publicSuffix}`;
@@ -56,6 +56,8 @@ export function guestEntries({ name, release, port, secret, doorKeys, owner, pub
   // A drive made from a study invite (the door's cohort `study`).
   if (cohort === 'study') entries.push(['MARBLE_STUDY', '1']);
   if (ownerName) entries.push(['MARBLE_HOST_OWNER', ownerName]);
+  // No door in front: the pass comes by the person's sign-in link (server/door.js).
+  if (direct) entries.push(['MARBLE_DOOR_DIRECT', '1']);
   for (const [key, value] of entries) checkEntry(key, value);
   return entries;
 }

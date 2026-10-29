@@ -15,6 +15,13 @@
 // does not keep a drive awake. A drive that is stopped, suspended or not here
 // answers 503 "resting".
 //
+// Direct mode (`direct`, docs/HOSTING.md, "Direct mode"): no Worker in front.
+// Each drive has a name of its own on the tunnel, <name>.<suffix>, and a
+// request without the key is for the drive that name says, with the Host and
+// https it came by as X-Forwarded-Host and -Proto. The drive's own pass check
+// is then the only lock, as it is on the owner's drive through its tunnel.
+// /_host/* still needs the key.
+//
 // Every request it forwards carries X-Forwarded-For, so the drive never takes
 // it for one made on this machine (server/gate.js, isLocal), and keeps the
 // Worker's X-Forwarded-Host and X-Forwarded-Proto, which the drive's origin
@@ -66,7 +73,17 @@ const RESTING = `<!doctype html>
 
 /** `health()` (or a promise of it) is what GET /_host/health says beside
  *  `ok`: on the PC, { drives, running, release }. */
-export function createRouter({ key, lookup, onPoke = () => {}, health = () => ({}), log = console }) {
+/** The drive a direct request's Host names: `ana` for ana.marbledrive.app, or
+ *  null for any other name, a port, or a name no drive could have. */
+export function directName(host, suffix) {
+  const h = String(host ?? '').toLowerCase();
+  const tail = `.${String(suffix ?? '').toLowerCase()}`;
+  if (!suffix || !h.endsWith(tail)) return null;
+  const name = h.slice(0, -tail.length);
+  return NAME.test(name) ? name : null;
+}
+
+export function createRouter({ key, lookup, direct = null, onPoke = () => {}, health = () => ({}), log = console }) {
   if (!key) throw new Error('the router needs HOST_KEY');
   const agent = new http.Agent({ keepAlive: true, maxSockets: 256 });
 
@@ -81,13 +98,23 @@ export function createRouter({ key, lookup, onPoke = () => {}, health = () => ({
   };
 
   const server = http.createServer((req, res) => {
-    if (!same(req.headers['x-marble-host-key'], key)) {
+    const keyed = same(req.headers['x-marble-host-key'], key);
+    const asked = !keyed && direct ? directName(req.headers.host, direct.suffix) : null;
+    if (asked && !new URL(req.url, 'http://x').pathname.startsWith('/_host/')) {
+      // Nothing the browser says about which drive, or about the Worker, counts.
+      delete req.headers['x-marble-drive'];
+      req.headers['x-forwarded-host'] = req.headers.host;
+      req.headers['x-forwarded-proto'] = 'https';
+      return forward(req, res, asked);
+    }
+    if (!keyed) {
       // Drain whatever was sent, so the 401 reaches the sender.
       req.resume();
       return json(res, 401, { error: 'unauthorised' });
     }
     const name = req.headers['x-marble-drive'];
-    if (!name) {
+    if (name) return forward(req, res, name);
+    {
       const route = new URL(req.url, 'http://x').pathname;
       req.resume();
       if (req.method === 'POST' && route === '/_host/poke') {
@@ -108,6 +135,9 @@ export function createRouter({ key, lookup, onPoke = () => {}, health = () => ({
       }
       return json(res, 404, { error: 'not found' });
     }
+  });
+
+  function forward(req, res, name) {
     const drive = NAME.test(String(name)) ? lookup(String(name)) : null;
     let address = null;
     try {
@@ -160,7 +190,7 @@ export function createRouter({ key, lookup, onPoke = () => {}, health = () => ({
     });
     req.on('aborted', () => upstream.destroy());
     req.pipe(upstream);
-  });
+  }
 
   // An upload takes as long as it takes, and a stream stays open for hours:
   // no time limit on a request beyond the drive's own.

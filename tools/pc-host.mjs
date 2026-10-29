@@ -7,11 +7,18 @@
 //   node tools/pc-host.mjs status                is marble-host up, which release new drives get, what runs
 //   node tools/pc-host.mjs drives                every drive: state, port, release, memory, health, agent, last backup
 //   node tools/pc-host.mjs make <name> --owner <door account id> [--cohort <cohort>]
+//   node tools/pc-host.mjs invite <name> [--cohort study] [--days 90]   direct mode: make it, give it its name, print its sign-in link
+//   node tools/pc-host.mjs link <name> [--days 90]   direct mode: a new sign-in link for a drive
 //   node tools/pc-host.mjs restart|suspend|resume <name>
 //   node tools/pc-host.mjs remove <name> --confirm <name>    off the PC for good: signed out, stopped, deleted
 //   node tools/pc-host.mjs export <name>         copy its study data into Research/Probe study/<name>/
 //   node tools/pc-host.mjs backup <name>         back it up now
 //   node tools/pc-host.mjs events [--limit <n>]  what happened, newest first
+//
+// Direct mode (HOST_DIRECT=1; docs/HOSTING.md, "Direct mode") is the PC with
+// no door in front: invite makes a drive, points <name>.marbledrive.app at the
+// host's tunnel with cloudflared, and prints the link that signs its person
+// in. Send them that link; they connect their own Claude or ChatGPT inside.
 //
 // release, promote, rollback and pause belong to the updater, which the owner
 // is writing himself; until then they say so and exit 1.
@@ -22,6 +29,7 @@
 // and never prints one. Every other command reads host.env, which must be
 // mode 600.
 
+import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,7 +37,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseDoorKeys } from '../server/door.js';
-import { loadHostSettings } from '../server/host/settings.js';
+import { newSigningKey, PASS_DAYS, signInLink, signPass } from '../server/host/passes.js';
+import { loadHostSettings, NAME, RESERVED } from '../server/host/settings.js';
+import { nameProblem } from '../worker/src/door/names.js';
 
 const UPDATER = new Set(['release', 'promote', 'rollback', 'pause']);
 export const NOT_BUILT = "the updater isn't built yet";
@@ -52,7 +62,20 @@ const DEFAULTS = [
   ['HOST_NTFY_URL', (from) => (from.topic ? [`https://ntfy.sh/${from.topic}`, 'from ntfy-topic'] : [null, 'not set: there is no ntfy-topic'])],
   ['HOST_MODE', () => ['system', 'default']],
   ['HOST_OWNER_NAME', () => ['Bryan', 'default']],
+  ['HOST_SIGNING_KEY', () => [newSigningKey(), 'made']],
+  ['HOST_DIRECT', () => ['1', 'default: no door in front; 0 once the door is on']],
 ];
+
+/** The tunnel every drive's name points at (linux/pc-host/tunnel.sh). */
+export const TUNNEL = 'marble-pc-host';
+
+/** cloudflared, pointing <name>.<suffix> at the host's tunnel. */
+const routeDns = (host) =>
+  new Promise((resolve) => {
+    execFile('cloudflared', ['tunnel', 'route', 'dns', TUNNEL, host], { timeout: 60_000 }, (error, stdout, stderr) =>
+      resolve({ ok: !error, said: `${stdout}${stderr}`.trim().split('\n').filter(Boolean).at(-1) ?? '' }),
+    );
+  });
 
 function parseArgs(argv) {
   const flags = {};
@@ -170,7 +193,7 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
   const { flags, args } = parseArgs(argv);
   const [command, ...rest] = args;
   if (!command || flags.help) {
-    out('node tools/pc-host.mjs init | status | drives | make <name> --owner <id> | restart|suspend|resume <name> | remove <name> --confirm <name> | export|backup <name> | events');
+    out('node tools/pc-host.mjs init | status | drives | make <name> --owner <id> | invite <name> | link <name> | restart|suspend|resume <name> | remove <name> --confirm <name> | export|backup <name> | events');
     return command ? 0 : 2;
   }
 
@@ -251,6 +274,32 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
         out(`${drive.name} is running on port ${drive.port}, release ${drive.release}.`);
         return 0;
       }
+      case 'invite':
+      case 'link': {
+        if (!settings.direct) throw new Error(`${command} is for direct mode: HOST_DIRECT=1 in host.env, then restart marble-host`);
+        const name = rest[0];
+        if (!name) throw new Error(`${command} <name>: the drive's name, which is its address, <name>.${settings.publicSuffix}`);
+        const days = flags.days === undefined ? PASS_DAYS : Number(flags.days);
+        let { drives } = await call('GET', '/drives');
+        let drive = drives.find((d) => d.name === name && d.state !== 'removed');
+        if (command === 'invite') {
+          const problem = !NAME.test(name) ? 'That name can’t be used.' : RESERVED.has(name) ? 'That name is kept for the escape check.' : nameProblem(name);
+          if (problem) throw new Error(`${name}: ${problem}`);
+          if (!drive) {
+            out(`Making ${name}; this waits for its check, about a minute.`);
+            ({ drive } = await call('POST', '/drives', { name, owner: `direct-${name}`, ...(typeof flags.cohort === 'string' ? { cohort: flags.cohort } : {}) }));
+          } else out(`${name} is already here (${drive.state}).`);
+          const host = `${name}.${settings.publicSuffix}`;
+          const dns = await routeDns(host);
+          if (dns.ok) out(`${host} points at the host's tunnel.`);
+          else out(`Couldn't point ${host} at the tunnel (${dns.said || 'cloudflared failed'}). Run: cloudflared tunnel route dns ${TUNNEL} ${host}`);
+        }
+        if (!drive) throw new Error(`there is no drive called ${name}: node tools/pc-host.mjs invite ${name}`);
+        const { pass, expires } = signPass({ signingKey: settings.signingKey, name, account: drive.owner, days });
+        out(`Sign-in link for ${name}, good until ${expires.slice(0, 10)}. Send it to them alone; anyone with it can open the drive:`);
+        out(signInLink({ name, suffix: settings.publicSuffix, pass }));
+        return 0;
+      }
       case 'restart':
       case 'suspend':
       case 'resume': {
@@ -289,7 +338,7 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
         return 0;
       }
       default:
-        err(`pc-host: no command "${command}"; there is init, status, drives, make, restart, suspend, resume, remove, export, backup, events`);
+        err(`pc-host: no command "${command}"; there is init, status, drives, make, invite, link, restart, suspend, resume, remove, export, backup, events`);
         return 2;
     }
   } catch (e) {
