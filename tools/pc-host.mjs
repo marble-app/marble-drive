@@ -9,6 +9,7 @@
 //   node tools/pc-host.mjs make <name> --owner <door account id> [--cohort <cohort>]
 //   node tools/pc-host.mjs invite <name> [--cohort study] [--days 90]   direct mode: make it, give it its name, print its sign-in link
 //   node tools/pc-host.mjs link <name> [--days 90]   direct mode: a new sign-in link for a drive
+//   node tools/pc-host.mjs code [--new]          direct mode: the invite code for join.marbledrive.app; --new replaces it
 //   node tools/pc-host.mjs restart|suspend|resume <name>
 //   node tools/pc-host.mjs remove <name> --confirm <name>    off the PC for good: signed out, stopped, deleted
 //   node tools/pc-host.mjs export <name>         copy its study data into Research/Probe study/<name>/
@@ -29,7 +30,6 @@
 // and never prints one. Every other command reads host.env, which must be
 // mode 600.
 
-import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -37,6 +37,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseDoorKeys } from '../server/door.js';
+import { routeDns, TUNNEL } from '../server/host/dns.js';
+import { newInviteCode } from '../server/host/join.js';
 import { newSigningKey, PASS_DAYS, signInLink, signPass } from '../server/host/passes.js';
 import { loadHostSettings, NAME, RESERVED } from '../server/host/settings.js';
 import { nameProblem } from '../worker/src/door/names.js';
@@ -64,18 +66,11 @@ const DEFAULTS = [
   ['HOST_OWNER_NAME', () => ['Bryan', 'default']],
   ['HOST_SIGNING_KEY', () => [newSigningKey(), 'made']],
   ['HOST_DIRECT', () => ['1', 'default: no door in front; 0 once the door is on']],
+  ['HOST_INVITE_CODE', () => [newInviteCode(), 'made: node tools/pc-host.mjs code shows it']],
+  ['HOST_MAX_DRIVES', () => ['10', 'default']],
 ];
 
-/** The tunnel every drive's name points at (linux/pc-host/tunnel.sh). */
-export const TUNNEL = 'marble-pc-host';
-
-/** cloudflared, pointing <name>.<suffix> at the host's tunnel. */
-const routeDns = (host) =>
-  new Promise((resolve) => {
-    execFile('cloudflared', ['tunnel', 'route', 'dns', TUNNEL, host], { timeout: 60_000 }, (error, stdout, stderr) =>
-      resolve({ ok: !error, said: `${stdout}${stderr}`.trim().split('\n').filter(Boolean).at(-1) ?? '' }),
-    );
-  });
+export { TUNNEL };
 
 function parseArgs(argv) {
   const flags = {};
@@ -193,7 +188,7 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
   const { flags, args } = parseArgs(argv);
   const [command, ...rest] = args;
   if (!command || flags.help) {
-    out('node tools/pc-host.mjs init | status | drives | make <name> --owner <id> | invite <name> | link <name> | restart|suspend|resume <name> | remove <name> --confirm <name> | export|backup <name> | events');
+    out('node tools/pc-host.mjs init | status | drives | make <name> --owner <id> | invite <name> | link <name> | code [--new] | restart|suspend|resume <name> | remove <name> --confirm <name> | export|backup <name> | events');
     return command ? 0 : 2;
   }
 
@@ -274,6 +269,25 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
         out(`${drive.name} is running on port ${drive.port}, release ${drive.release}.`);
         return 0;
       }
+      case 'code': {
+        if (!settings.direct) throw new Error('code is for direct mode: HOST_DIRECT=1 in host.env, then restart marble-host');
+        let code = settings.inviteCode;
+        if (flags.new || !code) {
+          code = newInviteCode();
+          const text = fs.readFileSync(settings.settingsFile, 'utf8').split('\n');
+          const at = text.findIndex((l) => keyOf(l) === 'HOST_INVITE_CODE' && !l.trim().startsWith('#'));
+          if (at >= 0) text[at] = `HOST_INVITE_CODE=${code}`;
+          else text.splice(text.at(-1) === '' ? -1 : text.length, 0, `HOST_INVITE_CODE=${code}`);
+          const tmp = `${settings.settingsFile}.${process.pid}.tmp`;
+          fs.writeFileSync(tmp, text.join('\n'), { mode: 0o600 });
+          fs.chmodSync(tmp, 0o600);
+          fs.renameSync(tmp, settings.settingsFile);
+          out(flags.new ? 'A new invite code; the old one no longer works.' : 'An invite code, made now.');
+        }
+        out(`Invite code: ${code}`);
+        out(`Sign-up page: https://join.${settings.publicSuffix} (${settings.maxDrives} drives at most, HOST_MAX_DRIVES)`);
+        return 0;
+      }
       case 'invite':
       case 'link': {
         if (!settings.direct) throw new Error(`${command} is for direct mode: HOST_DIRECT=1 in host.env, then restart marble-host`);
@@ -338,7 +352,7 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
         return 0;
       }
       default:
-        err(`pc-host: no command "${command}"; there is init, status, drives, make, invite, link, restart, suspend, resume, remove, export, backup, events`);
+        err(`pc-host: no command "${command}"; there is init, status, drives, make, invite, link, code, restart, suspend, resume, remove, export, backup, events`);
         return 2;
     }
   } catch (e) {

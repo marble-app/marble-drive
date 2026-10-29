@@ -32,6 +32,7 @@ import { createProbe } from './check.js';
 import { createDoor } from './door.js';
 import { createGuestEnvs } from './guest-env.js';
 import { createLooks } from './looks.js';
+import { createJoin } from './join.js';
 import { createMaker } from './maker.js';
 import { createReconciler } from './reconcile.js';
 import { openRegistry } from './registry.js';
@@ -69,10 +70,22 @@ export async function startHost({ env = process.env, log = console, units = null
   // open), or wherever a trial keeps them.
   const watcher = createWatcher({ registry, units: guestUnits, probe: asker, notify, diskPath: path.dirname(settings.guestStateDir), busy: (name) => remover.busy(name), onRestart, everyMs: watchEveryMs, log });
 
+  // Direct mode's sign-up page: open only while host.env holds an invite code,
+  // which is read again on every try so a new one takes effect at once.
+  const join = settings.direct
+    ? createJoin({ settings, registry, maker, log, readCode: () => {
+        try {
+          return loadHostSettings(env).inviteCode;
+        } catch {
+          return null;
+        }
+      } })
+    : null;
   const router = createRouter({
     key: settings.key,
     lookup: (name) => registry.drive(name),
     direct: settings.direct ? { suffix: settings.publicSuffix } : null,
+    join,
     onPoke: () => maker.poke(),
     health: async () => {
       const kept = registry.drives().filter((d) => d.state !== 'removed');

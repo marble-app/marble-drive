@@ -124,6 +124,10 @@ ingress:
 YML
   cloudflared tunnel --config "$config" ingress validate >/dev/null || { echo "tunnel: cloudflared does not accept $config" >&2; return 1; }
   cloudflared tunnel route dns "$tunnel" "$host" || { echo "tunnel: could not point $host at $tunnel" >&2; return 1; }
+  # Direct mode's sign-up page (server/host/join.js).
+  if [[ -n $direct ]]; then
+    cloudflared tunnel route dns "$tunnel" join.marbledrive.app || { echo "tunnel: could not point join.marbledrive.app at $tunnel" >&2; return 1; }
+  fi
   echo "$tunnel ($id): $host -> http://127.0.0.1:$port; config $config"
   echo "next: linux/pc-host/tunnel.sh install"
 }

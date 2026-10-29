@@ -911,6 +911,17 @@ dashboard:
   maker, the reconcile and the looks never call it, and the door's people
   never decide which drives stay.
 
+- **Sign-up with one code.** `join.marbledrive.app` (server/host/join.js),
+  routed to the tunnel by `tunnel.sh setup` in direct mode, is a page where
+  anyone holding the owner's invite code (`HOST_INVITE_CODE`; `pc-host.mjs
+  code` shows it, `code --new` replaces it and the old one stops at once)
+  picks a name and gets a drive: marble-host points the name at the tunnel,
+  makes the drive with owner `direct-<name>` and cohort `HOST_INVITE_COHORT`,
+  and the page shows the person their sign-in link. Ten wrong codes from one
+  address (Cloudflare's `CF-Connecting-IP`), or a hundred from everyone, shut
+  sign-up for the hour; it says the study is full at `HOST_MAX_DRIVES` (10).
+  No code in host.env, no sign-up.
+
 Anyone holding a link can open that drive until it runs out; send each
 person theirs alone. Removing the drive ends it. Consent is taken as the lab's
 protocol says, since the door's consent screen isn't in front. Turning the
