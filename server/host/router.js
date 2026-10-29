@@ -83,7 +83,7 @@ export function directName(host, suffix) {
   return NAME.test(name) ? name : null;
 }
 
-export function createRouter({ key, lookup, direct = null, onPoke = () => {}, health = () => ({}), log = console }) {
+export function createRouter({ key, lookup, direct = null, join = null, onPoke = () => {}, health = () => ({}), log = console }) {
   if (!key) throw new Error('the router needs HOST_KEY');
   const agent = new http.Agent({ keepAlive: true, maxSockets: 256 });
 
@@ -99,6 +99,14 @@ export function createRouter({ key, lookup, direct = null, onPoke = () => {}, he
 
   const server = http.createServer((req, res) => {
     const keyed = same(req.headers['x-marble-host-key'], key);
+    // Direct mode's sign-up page (server/host/join.js), at its own name.
+    if (!keyed && join && String(req.headers.host ?? '').toLowerCase() === join.host) {
+      return Promise.resolve(join.handle(req, res)).catch((err) => {
+        log.error?.(`[router] join: ${err.message}`);
+        if (!res.headersSent) json(res, 500, { error: 'Something went wrong. Try again.' });
+        else res.destroy();
+      });
+    }
     const asked = !keyed && direct ? directName(req.headers.host, direct.suffix) : null;
     if (asked && !new URL(req.url, 'http://x').pathname.startsWith('/_host/')) {
       // Nothing the browser says about which drive, or about the Worker, counts.

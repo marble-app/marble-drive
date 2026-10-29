@@ -134,6 +134,12 @@ export function loadHostSettings(env = process.env) {
     // What every guest's MARBLE_DOOR_KEYS says: the door's, and marble-host's own.
     guestDoorKeys: [doorKeys, hostKey].filter(Boolean).join(' ') || null,
     ntfyUrl: get('HOST_NTFY_URL'),
+    // Direct mode's sign-up page, join.<suffix> (server/host/join.js): the one
+    // code the owner shares, the cohort its drives join, and how many drives
+    // the PC holds before it says it's full. No code, no sign-up.
+    inviteCode: get('HOST_INVITE_CODE'),
+    inviteCohort: get('HOST_INVITE_COHORT'),
+    maxDrives: Number(get('HOST_MAX_DRIVES', 10)),
     mode,
     ownerName: get('HOST_OWNER_NAME', 'Bryan'),
   };

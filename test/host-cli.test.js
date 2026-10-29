@@ -281,3 +281,18 @@ test('direct mode: link signs a pass for the drive\'s owner; invite turns away a
     assert.ok(!api.asked.some((a) => a.method === 'POST'), `${name}: nothing made`);
   }
 });
+
+test('direct mode: code shows the invite code, and --new replaces it in host.env', async () => {
+  const { newSigningKey } = await import('../server/host/passes.js');
+  const h = await withSettings();
+  await fsp.appendFile(h.file, `HOST_DIRECT=1\nHOST_SIGNING_KEY=${newSigningKey()}\nHOST_INVITE_CODE=AAAA-BBBB-CCCC\n`);
+  const shown = await run(['code'], { home: h.home });
+  assert.equal(shown.code, 0, shown.err);
+  assert.match(shown.out, /Invite code: AAAA-BBBB-CCCC/);
+  assert.match(shown.out, /https:\/\/join\.marbledrive\.app/);
+  const fresh = await run(['code', '--new'], { home: h.home });
+  const code = /Invite code: (\S+)/.exec(fresh.out)[1];
+  assert.notEqual(code, 'AAAA-BBBB-CCCC');
+  assert.equal((await read(h.file)).HOST_INVITE_CODE, code);
+  assert.equal((await fsp.stat(h.file)).mode & 0o777, 0o600);
+});
