@@ -49,11 +49,15 @@ MemoryHigh=1G
 MemoryMax=1536M
 TasksMax=512
 
-# The walls. Its own user and process namespace: it cannot see or signal
-# anything outside. Chromium and Claude Code's own sandbox make user
-# namespaces of their own, so RestrictNamespaces is not set.
+# The walls. A user of its own (DynamicUser) in a user namespace of its own:
+# it cannot signal anything outside, and ProtectProc hides every process that
+# isn't its own. Not PrivatePIDs: with DynamicUser and StateDirectory, systemd
+# 258 to 262 fail to start the unit at all ("Failed to write UID map",
+# systemd/systemd#41014), as on the PC with systemd 259. Chromium and Claude
+# Code's own sandbox make user namespaces of their own, so RestrictNamespaces
+# is not set.
 PrivateUsers=yes
-PrivatePIDs=yes
+ProtectProc=invisible
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict

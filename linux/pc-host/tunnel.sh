@@ -110,12 +110,15 @@ setup() {
     return 1
   }
   mkdir -p "$cf_dir"
+  # Direct mode: every drive's own name; otherwise the one the Worker sends to.
+  local rule="$host" note=""
+  if [[ -n $direct ]]; then rule='"*.marbledrive.app"'; note=" (direct mode)"; fi
   cat > "$config" <<YML
-# Written by linux/pc-host/tunnel.sh setup $host${direct:+ (direct mode: every drive's own name)}: marble-host's router, and nothing else
+# Written by linux/pc-host/tunnel.sh setup $host$note: marble-host's router, and nothing else
 tunnel: $id
 credentials-file: $creds
 ingress:
-  - hostname: $( [[ -n $direct ]] && echo '"*.marbledrive.app"' || echo "$host" )
+  - hostname: $rule
     service: http://127.0.0.1:$port
   - service: http_status:404
 YML
