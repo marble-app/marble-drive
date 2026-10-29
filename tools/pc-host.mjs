@@ -347,6 +347,15 @@ export async function main(argv, { home = os.homedir(), env = process.env, fetch
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+// Real paths on both sides: the owner runs it through the release's
+// `current` link, which is not the path node loaded.
+const real = (file) => {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+};
+if (process.argv[1] && real(fileURLToPath(import.meta.url)) === real(process.argv[1])) {
   process.exitCode = await main(process.argv.slice(2));
 }

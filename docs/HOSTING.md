@@ -654,7 +654,9 @@ marble-host writes that file, and systemd reads it before the walls close.
 The folder of settings files is then hidden from every drive.
 
 The walls are those of the plan's "A sandbox for each drive". Each drive gets
-its own user and process namespace and a private `/tmp`. The system is
+its own user namespace, sees no process but its own (`ProtectProc=invisible`;
+not `PrivatePIDs`, which systemd 258 to 262 can't start beside DynamicUser
+and StateDirectory, systemd/systemd#41014), and a private `/tmp`. The system is
 read-only. The owner's home, `/mnt`, and WSL's, Tailscale's and Docker's
 sockets are hidden. IP rules close 127.0.0.1 and ::1, the home network,
 link-local addresses and the tailnet, but let Tailscale's DNS through
@@ -869,7 +871,7 @@ in `system` mode, and run again after any change to the template:
 | The owner's drive, settings and keys | no: his home looks empty |
 | Anything on 127.0.0.1 or ::1: his drive at 4401, marble-host's 4460 and 4461, cloudflared's metrics at 20241 | no, through the unit's IP rules, which drop every packet to or from those two addresses |
 | His Claude and ChatGPT logins | no: both CLIs say not logged in |
-| His processes | no, with its own process namespace |
+| His processes | no: a user of its own, and ProtectProc hides them |
 | The Windows C: drive | no, with `/mnt` closed off |
 | Windows programs | no, with `/mnt` and WSL's sockets hidden |
 | His Mac, iPad and iPhone on Tailscale, and his home network | no, through systemd's IP rules, which only a system service has |
