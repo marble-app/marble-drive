@@ -16,6 +16,7 @@
 // handed to it on stdin.
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,21 @@ const excluded = (rel) =>
 const filters = () => EXCLUDES.flatMap((pattern) => ['--exclude', pattern]);
 const stampOf = (date) => date.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 
+// The host rescans every 15 s for as long as it is home. One awaited stat a
+// file cost 11 s of CPU a scan on a drive of 118k files (the PC, 2026-10-30),
+// so the host spent most of a core rescanning; stat-ing synchronously costs
+// 1.5 s. It hands the event loop back after each directory, and every
+// YIELD_EVERY files within one, so a request never waits more than a few ms.
+const YIELD_EVERY = 500;
+const yieldLoop = () => new Promise((resolve) => setImmediate(resolve));
+const statOf = (file) => {
+  try {
+    return fs.statSync(file, { throwIfNoEntry: false });
+  } catch {
+    return null;
+  }
+};
+
 /** What is in a drive, counted the way both machines count it, and each
  *  file's [size, mtimeMs] by its path (`byPath`). */
 export async function scan(root) {
@@ -33,29 +49,33 @@ export async function scan(root) {
   let documents = 0;
   let newest = 0;
   const byPath = {};
-  const walk = async (dir, rel) => {
+  const dirs = [[root, '']];
+  while (dirs.length) {
+    const [dir, rel] = dirs.pop();
     let entries;
     try {
-      entries = await fsp.readdir(dir, { withFileTypes: true });
+      entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
-      return;
+      continue;
     }
+    let statted = 0;
     for (const entry of entries) {
       const r = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        if (!excluded(`${r}/`)) await walk(path.join(dir, entry.name), r);
+        if (!excluded(`${r}/`)) dirs.push([path.join(dir, entry.name), r]);
         continue;
       }
       if (!entry.isFile() || excluded(r)) continue;
       files += 1;
       if (r.endsWith('.mrbl') && !r.startsWith('.marble/')) documents += 1;
-      const stat = await fsp.stat(path.join(dir, entry.name)).catch(() => null);
+      if (++statted % YIELD_EVERY === 0) await yieldLoop();
+      const stat = statOf(path.join(dir, entry.name));
       if (!stat) continue;
       if (stat.mtimeMs > newest) newest = stat.mtimeMs;
       byPath[r] = [stat.size, Math.round(stat.mtimeMs)];
     }
-  };
-  await walk(root, '');
+    await yieldLoop();
+  }
   return { files, documents, newest, byPath };
 }
 
@@ -180,9 +200,11 @@ const unlistable = (paths) => (paths.some((rel) => /[\r\n]/.test(rel)) ? 'a file
 
 // Data, then the list, then state.json: an upload cut off part way leaves the
 // old list, and the next one diffs against it and moves the rest.
-export async function up({ root, settings, epoch, force = false, run = rclone, now = () => new Date() }) {
+// `seen` is a scan the caller just took (the scheduler's), so the drive is not
+// walked twice for one upload.
+export async function up({ root, settings, epoch, force = false, seen = null, run = rclone, now = () => new Date() }) {
   const env = await rcloneEnv(settings, run);
-  const { byPath, ...counts } = await scan(root);
+  const { byPath, ...counts } = seen ?? (await scan(root));
   const last = await readState({ settings, env, run });
   const wrong = looksWrong(counts, last);
   if (wrong && !force) return { ok: false, why: wrong, counts };

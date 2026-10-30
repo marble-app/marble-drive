@@ -476,3 +476,41 @@ test('every rclone call gives up on a stalled request quickly and retries', asyn
     else process.env.MARBLE_RCLONE = before;
   }
 });
+
+test('scan counts every file in a directory larger than one stretch between yields', async () => {
+  const root = await tmp('wide');
+  await Promise.all(Array.from({ length: 1234 }, (_, i) => put(root, `wide/${i}.txt`, 'x')));
+  await put(root, 'a.mrbl', '<html></html>');
+  const { files, documents, byPath } = await scan(root);
+  assert.equal(files, 1235);
+  assert.equal(documents, 1);
+  assert.deepEqual(byPath['wide/7.txt'].slice(0, 1), [1]);
+});
+
+test('scan hands the event loop back while it walks', async () => {
+  const root = await tmp('yields');
+  await Promise.all(Array.from({ length: 1200 }, (_, i) => put(root, `d${i % 6}/${i}.txt`, 'x')));
+  let ran = 0;
+  const ticker = setInterval(() => (ran += 1), 0);
+  const scanning = scan(root);
+  await new Promise((resolve) => setImmediate(resolve));
+  const during = ran;
+  await scanning;
+  clearInterval(ticker);
+  assert.ok(ran > during, 'a timer ran before the scan finished');
+});
+
+test('an upload lists the drive from the scan it is handed', needsRclone, async () => {
+  const s = await settings();
+  const root = await fixture();
+  const seen = await scan(root);
+  await put(root, 'later.mrbl', '<html>later</html>');
+  const result = await up({ root, settings: s, epoch: 0, seen });
+  assert.equal(result.ok, true);
+  assert.equal(result.counts.files, seen.files);
+  const manifest = JSON.parse(await hubCat(s, 'hub:manifest.json'));
+  assert.equal('later.mrbl' in manifest.files, false);
+  // The next upload, from a fresh scan, carries what the handed one missed.
+  const next = await up({ root, settings: s, epoch: 0 });
+  assert.equal(next.changed, 1);
+});

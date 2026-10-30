@@ -317,3 +317,42 @@ test('the refresh runs on its own timer, apart from the uploads', () => {
   assert.deepEqual(timers.sort(), [15_000, 60_000]);
   loop.stop();
 });
+
+test('the upload is handed the scan the tick just took', async () => {
+  const drive = { newest: 1, files: 1, documents: 1, byPath: { 'a.mrbl': [3, 1] } };
+  let scans = 0;
+  const handed = [];
+  const loop = scheduleUploads({
+    root: '/d', settings, client: { get: async () => ({ home: 'mac', epoch: 0 }) },
+    scanImpl: async () => { scans += 1; return drive; },
+    upload: async ({ seen }) => { handed.push(seen); return { ok: true, state: { seq: 1 }, counts: { files: 1 } }; },
+    onLost: () => {}, log: () => {}, schedule: null,
+  });
+  await loop.tick();
+  assert.equal(scans, 1);
+  assert.deepEqual(handed, [drive]);
+});
+
+test('the rescan timer skips a scan the upload timer just made', async () => {
+  let t = 0;
+  let scans = 0;
+  const timers = {};
+  const loop = scheduleUploads({
+    root: '/d', settings, client: { get: async () => ({ home: 'mac', epoch: 0 }) },
+    scanImpl: async () => { scans += 1; return { newest: 1, files: 1, documents: 1 }; },
+    upload: async () => ({ ok: true, state: { seq: 1 }, counts: { files: 1 } }),
+    onLost: () => {}, log: () => {}, everyMs: 60_000, watchMs: 15_000, now: () => t,
+    schedule: (fn, ms) => { timers[ms] = fn; return { unref() {} }; },
+  });
+  await new Promise((resolve) => setImmediate(resolve)); // the first rescan, on start
+  const start = scans;
+  t = 60_000;
+  await loop.tick();
+  t = 70_000;
+  await timers[15_000]();
+  assert.equal(scans, start + 1, 'skipped: the tick scanned 10 s ago');
+  t = 75_000;
+  await timers[15_000]();
+  assert.equal(scans, start + 2, 'ran: the tick scanned 15 s ago');
+  loop.stop();
+});
