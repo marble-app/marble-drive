@@ -172,6 +172,15 @@ test('Claude: half a code is asked for again; a refused one goes back to the sig
   await sheet(page).locator('button.save').click();
   await sheet(page).locator('.status.error', { hasText: "didn't accept that code" }).waitFor();
   assert.equal(await sheet(page).locator('button.save').textContent(), 'Open Claude sign-in');
+
+  // Claude Code refusing in a sentence of its own: that sentence, and back
+  // to the sign-in, since the run that took the code is over.
+  await Promise.all([page.context().waitForEvent('page'), sheet(page).locator('button.save').click()]);
+  await sheet(page).locator('.status', { hasText: 'Paste the code' }).waitFor();
+  await field.fill('held-code#state');
+  await sheet(page).locator('button.save').click();
+  await sheet(page).locator('.status.error', { hasText: 'Your account is on hold' }).waitFor();
+  assert.equal(await sheet(page).locator('button.save').textContent(), 'Open Claude sign-in');
 });
 
 test('ChatGPT: the code is shown large, OpenAI\'s page opens on the press, and the sheet closes when the login lands', async () => {

@@ -23,7 +23,9 @@
 //
 // A code `good…#state` signs in: the "login" is a file under HOME that only
 // this fake reads. A code without a # gets "Invalid code" and the prompt
-// waits on; anything else gets "Login failed". Every code received is
+// waits on; a code `held…#state` gets the sentence Claude Code 2.1.281 prints
+// for an account on hold, and exit 1, with no "Login failed"; anything else
+// gets "Login failed". Every code received is
 // appended to the log, after a first line with this process's pid. The
 // address is made up in the CLI's own shape.
 
@@ -130,6 +132,12 @@ lines.on('line', (line) => {
     }
     out('Login successful.\n');
     setTimeout(() => process.exit(0), 50);
+    return;
+  }
+  if (authorization.startsWith('held')) {
+    out('\n');
+    process.stderr.write("Your account is on hold and can't sign in to Claude Code. View details or appeal: https://claude.ai/settings\n");
+    setTimeout(() => process.exit(1), 50);
     return;
   }
   out('\n');

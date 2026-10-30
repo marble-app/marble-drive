@@ -97,9 +97,11 @@ export function watchRun(child, { waitMs, kill, onEnd = () => {} }) {
 }
 
 /** An error a sign-in route can answer with: `status` and a sentence a
- *  person can act on, and `detail` for the log. */
+ *  person can act on, and `detail` for the log. Not 502: the router, the
+ *  tunnel and the Worker in front of a drive read a 502 as a drive out of
+ *  reach and answer with their own page, so the sentence never arrives. */
 export class SignInError extends Error {
-  constructor(message, { status = 502, detail = '', retry = false } = {}) {
+  constructor(message, { status = 500, detail = '', retry = false } = {}) {
     super(message);
     this.status = status;
     this.detail = detail;

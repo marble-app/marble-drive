@@ -10409,8 +10409,10 @@
         if (err.retry) {
           // Claude Code is still waiting: the whole code, pasted again, goes in.
           this.codeInput.select();
-        } else if (err.status === 409 || err.status === 400) {
-          // The run that would have taken it is over: back to the sign-in.
+        } else if (err.status) {
+          // The drive answered, and the run that would have taken it is
+          // over (a code refused, or Claude Code stopped): back to the
+          // sign-in. Without an answer the run may still be waiting.
           this.started = false;
           this.codeInput.value = '';
           this.label();

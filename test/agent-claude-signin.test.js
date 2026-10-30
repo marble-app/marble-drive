@@ -96,6 +96,15 @@ test('what came of a code is read from its own words, and the shell says the exi
   assert.deepEqual(findLoginOutcome('Invalid code. Please make sure the full code was copied.\r\n'), { invalid: true });
   assert.deepEqual(findLoginOutcome('\r\nLogin failed: Request failed with status code 400\r\n'), { error: 'Request failed with status code 400' });
   assert.deepEqual(findLoginOutcome('\r\nmarble-exit:1\r\n'), { error: 'it exited 1' }, 'an exit with nothing said is a failure');
+  // A refusal in a sentence of its own is passed on in Claude Code's words.
+  assert.deepEqual(
+    findLoginOutcome('\r\nYour organization requires remote managed settings to load, but they could not be loaded.\r\nRun `claude auth login` to re-authenticate.\r\n\r\nmarble-exit:1\r\n'),
+    { error: 'Your organization requires remote managed settings to load, but they could not be loaded. Run `claude auth login` to re-authenticate.' },
+  );
+  assert.deepEqual(
+    findLoginOutcome('Paste code here if prompted > \r\nYour account is on hold and can\'t sign in to Claude Code.\r\nmarble-exit:1\r\n'),
+    { error: 'Your account is on hold and can\'t sign in to Claude Code.' },
+  );
   assert.equal(findLoginOutcome('Login fai'), null, 'not until the line is whole');
   assert.equal(findLoginOutcome('Paste code here if prompted > '), null);
   assert.equal(findExit('marble-pid:12\r\n…\r\nmarble-exit:0\r\n'), 0);
@@ -191,12 +200,25 @@ test('half a code is a 400 the same sign-in can take again; a refused one ends i
   assert.ok(await until(() => !alive(second)), 'the command is gone');
 });
 
+test('a refusal in Claude Code\'s own sentence reaches the person, not a bare exit code', needsPty, async (t) => {
+  const fake = await fakeClaude();
+  const signIn = createClaudeSignIn({ env: fake.env, log: quiet });
+  t.after(() => signIn.close());
+  await signIn.start();
+  await assert.rejects(signIn.finish('held-code#state'), (err) => {
+    assert.equal(err.status, 500, 'not 502, which the proxies in front take for a drive out of reach');
+    assert.equal(err.message, "Claude's sign-in failed: Your account is on hold and can't sign in to Claude Code. View details or appeal: https://claude.ai/settings. Open Claude sign-in again.");
+    return true;
+  });
+  assert.equal(signIn.waiting(), false);
+});
+
 test('a sign-in that says it worked but left no login is not taken for one', needsPty, async (t) => {
   const fake = await fakeClaude('unsaved');
   const signIn = createClaudeSignIn({ env: fake.env, log: quiet });
   t.after(() => signIn.close());
   await signIn.start();
-  await assert.rejects(signIn.finish('good-code#s'), (err) => err.status === 502 && /didn't finish/.test(err.message));
+  await assert.rejects(signIn.finish('good-code#s'), (err) => err.status === 500 && /didn't finish/.test(err.message));
 });
 
 test('a sign-in that gets no code in time is ended and its command killed', needsPty, async (t) => {
@@ -232,7 +254,7 @@ test('a command that never shows an address, or refuses, fails start and is not 
   const silent = await fakeClaude('silent');
   const quietRun = createClaudeSignIn({ env: silent.env, urlWaitMs: 600, log: quiet });
   t.after(() => quietRun.close());
-  await assert.rejects(quietRun.start(), (err) => err.status === 502 && /didn't start/.test(err.message));
+  await assert.rejects(quietRun.start(), (err) => err.status === 500 && /didn't start/.test(err.message));
   assert.ok(await until(() => !alive(silent.pid())), 'the silent one is gone');
 
   const managed = await fakeClaude('managed');
@@ -241,7 +263,7 @@ test('a command that never shows an address, or refuses, fails start and is not 
   await assert.rejects(refused.start(), /Managed settings/);
 
   const none = createClaudeSignIn({ env: { PATH: '/nonexistent' }, urlWaitMs: 2_000, log: quiet });
-  await assert.rejects(none.start(), { status: 502 });
+  await assert.rejects(none.start(), { status: 500 });
 });
 
 test('a code is asked for whole before anything is sent', async () => {
