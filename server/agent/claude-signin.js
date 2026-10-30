@@ -146,7 +146,19 @@ export function findLoginOutcome(raw) {
   const failed = /(?:^|\n)[ \t]*(?:Login failed|OAuth error):?[ \t]*([^\n]+)\n/i.exec(text);
   if (failed) return { error: failed[1].trim() };
   const exit = findExit(text);
-  return exit === null ? null : { error: findSignInError(text) ?? `it exited ${exit}` };
+  return exit === null ? null : { error: findSignInError(text) ?? lastWords(text) ?? `it exited ${exit}` };
+}
+
+/** What Claude Code printed before it exited, when none of it was a line
+ *  this knows: some of its refusals are a sentence of their own (an account
+ *  on hold, an organisation that isn't allowed, settings that would not
+ *  load). Its last few lines, joined, so the person reads its reason. */
+function lastWords(text) {
+  const lines = text.slice(0, text.lastIndexOf(EXIT_MARK)).split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith(PID_MARK) && !/^Paste code here if prompted/i.test(line));
+  const words = lines.slice(-3).join(' ').replace(/\s+/g, ' ').trim();
+  return words ? words.slice(0, 300) : null;
 }
 
 const findPid = (raw) => {
@@ -208,8 +220,9 @@ export async function claudeLogout({ command = 'claude', env = process.env, exec
  *   cancel()                       ends whatever is running
  *
  * Errors carry `status` (400 for a code Claude refused, with `retry` when the
- * same sign-in can take another paste; 409 when no sign-in is waiting; 502
- * when the command itself failed) and a message a person can act on.
+ * same sign-in can take another paste; 409 when no sign-in is waiting; 500
+ * when the command itself failed, never 502, which the proxies in front read
+ * as a drive that can't be reached) and a message a person can act on.
  */
 export function createClaudeSignIn({
   command = 'claude',
@@ -310,7 +323,7 @@ export function createClaudeSignIn({
         const refused = /\b4\d\d\b|invalid|expired|grant|state/i.test(answer.error);
         throw new SignInError(
           refused ? "Claude didn't accept that code. Open Claude sign-in again for a new one." : `Claude's sign-in failed: ${answer.error.replace(/\.$/, '')}. Open Claude sign-in again.`,
-          { status: refused ? 400 : 502, detail: answer.error },
+          { status: refused ? 400 : 500, detail: answer.error },
         );
       }
       throw new SignInError("Claude didn't answer. Open Claude sign-in again.", { detail: 'no answer' });

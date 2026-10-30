@@ -182,7 +182,7 @@ test('a Codex that refuses, exits without a ChatGPT login, or is missing says so
   const refusing = await fakeCodex('refuse');
   const refused = createCodexSignIn({ env: refusing.env, log: quiet });
   t.after(() => refused.close());
-  await assert.rejects(refused.start(), (err) => err.status === 502 && /didn't start: device code login is not enabled/.test(err.message));
+  await assert.rejects(refused.start(), (err) => err.status === 500 && /didn't start: device code login is not enabled/.test(err.message));
 
   const unsaved = await fakeCodex('unsaved');
   const empty = createCodexSignIn({ env: unsaved.env, log: quiet });
@@ -193,5 +193,5 @@ test('a Codex that refuses, exits without a ChatGPT login, or is missing says so
   assert.match(empty.status().error, /isn't signed in to ChatGPT/);
 
   const none = createCodexSignIn({ env: { PATH: '/nonexistent' }, log: quiet });
-  await assert.rejects(none.start(), (err) => err.status === 502 && /can't run/.test(err.message));
+  await assert.rejects(none.start(), (err) => err.status === 500 && /can't run/.test(err.message));
 });

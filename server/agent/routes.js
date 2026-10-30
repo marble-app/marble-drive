@@ -739,7 +739,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         try {
           return json(res, 200, await claudeSignInRun().start());
         } catch (err) {
-          return json(res, err.status ?? 502, { error: err.message });
+          return json(res, err.status ?? 500, { error: err.message });
         }
       }
     }
@@ -748,7 +748,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       try {
         await claudeSignInRun().finish(body.code);
       } catch (err) {
-        return json(res, err.status ?? 502, { error: err.message, ...(err.retry ? { retry: true } : {}) });
+        return json(res, err.status ?? 500, { error: err.message, ...(err.retry ? { retry: true } : {}) });
       }
       // Claude runs on the plan now: the switch goes to the login, and a
       // default of Claude (on a key or on credit) follows it. A token an
@@ -770,7 +770,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       changed();
       if (!out.ok && !out.missing) {
         log.error?.(`[claude sign-in] logout failed: ${out.detail}`);
-        return json(res, 502, { error: "Claude Code couldn't sign out. Try again." });
+        return json(res, 500, { error: "Claude Code couldn't sign out. Try again." });
       }
       return json(res, 200, await setupState());
     }
@@ -789,7 +789,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         try {
           return json(res, 200, { state: 'waiting', ...(await codexSignInRun().start()) });
         } catch (err) {
-          return json(res, err.status ?? 502, { error: err.message });
+          return json(res, err.status ?? 500, { error: err.message });
         }
       }
     }
@@ -802,7 +802,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       changed();
       if (!out.ok && !out.missing) {
         log.error?.(`[codex sign-in] logout failed: ${out.detail}`);
-        return json(res, 502, { error: "Codex couldn't sign out. Try again." });
+        return json(res, 500, { error: "Codex couldn't sign out. Try again." });
       }
       return json(res, 200, await setupState());
     }
