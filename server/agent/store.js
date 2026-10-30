@@ -472,7 +472,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
     saveSettings,
 
-    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = 'drive', failover = 'auto' }) {
+    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = 'drive', failover = 'auto', account = null }) {
       const now = Date.now();
       const meta = {
         id: crypto.randomBytes(6).toString('hex'),
@@ -502,6 +502,10 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         lastInteractedAt: now,
         queueCombine: false,
         failover: failover === 'pause' ? 'pause' : 'auto',
+        // The Claude login picked for this chat; null is the folder's (claude-accounts.js).
+        account,
+        accountUsed: null,
+        accountUsedLabel: null,
       };
       await writeJson(metaFile(meta.id), meta);
       return meta;

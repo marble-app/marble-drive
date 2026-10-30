@@ -26,6 +26,9 @@ import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js'
 import { creditView } from './credit.js';
 import { createClaudeSignIn } from './claude-signin.js';
 import { createCodexSignIn } from './codex-signin.js';
+import { PERSONAL, describeLogin, listClaudeAccounts, publicAccount, sharesSessions } from './claude-accounts.js';
+import { pickEnv } from './env.js';
+import { runCommand } from './providers/exec.js';
 import { checkAnthropicKey, checkOpenAIKey } from './key-check.js';
 import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
@@ -112,6 +115,11 @@ const publicMeter = (meter) => {
     detail: String(meter?.detail ?? ''),
   };
   if (meter?.reason) out.reason = String(meter.reason);
+  // Whose limits these are, when the drive has more than one Claude login.
+  if (meter?.account) {
+    out.account = String(meter.account);
+    out.accountLabel = String(meter.accountLabel ?? '');
+  }
   // A remembered reading and the moment it was true, so the page can show the
   // number it last knew instead of nothing.
   if (meter?.stale) {
@@ -124,7 +132,11 @@ const publicMeter = (meter) => {
   return out;
 };
 
+// Who a login is signed in as changes rarely, and asking spawns the CLI.
+const LOGIN_TTL_MS = 10 * 60_000;
+
 export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, credit = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, voice = null, voiceUsage = null, voiceTitles = null, voiceMaxSeconds = 120, claudeSignIn = null, codexSignIn = null, hostOwner = null, guest = false, onAgentsChanged = null, log = console }) {
+  const loginCache = new Map();
   let detected = null;
   // What can run changed (a key, a sign-in, a sign-out): the next look at the
   // agents asks again, and so do the side jobs (side-model.js).
@@ -389,7 +401,14 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     const projectId = typeof body.project === 'string' && body.project.trim() ? body.project.trim() : settings.defaultProject || 'drive';
     const project = findProject({ settings, root }, projectId);
     if (!project) return { status: 400, error: `no project "${projectId}"` };
+    // A login picked by hand must be one the drive has; a handoff keeps its chat's.
+    let account = typeof body.account === 'string' && body.account ? body.account : (from?.account ?? null);
+    if (account && !listClaudeAccounts(settings.claudeAccounts).some((item) => item.id === account && item.present)) {
+      if (body.account) return { status: 400, error: `no Claude account "${account}"` };
+      account = null;
+    }
     const meta = await store.createConversation({
+      account,
       provider: body.provider,
       model: body.model ?? models[body.provider] ?? null,
       effort: body.effort ?? efforts?.[body.provider] ?? null,
@@ -573,6 +592,40 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       } catch {
         return json(res, 200, { path: String(root), branch: null });
       }
+    }
+
+    // The Claude logins this drive runs on: who each is signed in as, which
+    // folders use it without being asked, and its limits. A drive hosted for
+    // someone else has only its one login, and is not asked about it here.
+    if (route === '/agent/accounts' && method === 'GET') {
+      const settings = (await store.settings?.().catch(() => null)) ?? {};
+      const accounts = listClaudeAccounts(guest ? [] : settings.claudeAccounts);
+      let meters = [];
+      if (!guest && typeof usage === 'function') {
+        try {
+          meters = ((await usage())?.meters ?? []).map(publicMeter);
+        } catch { /* no limits to show */ }
+      }
+      const now = Date.now();
+      const out = await Promise.all(accounts.map(async (account) => {
+        let who = loginCache.get(account.id);
+        if (!guest && (!who || now - who.at > LOGIN_TTL_MS)) {
+          const value = await describeLogin(account, { exec: runCommand, env: pickEnv(process.env) });
+          // A check that could not be made is asked again next time, and the
+          // last answer that could be made stands in for it meanwhile.
+          if (value.signedIn !== null) {
+            who = { at: now, value };
+            loginCache.set(account.id, who);
+          } else if (!who) {
+            who = { at: 0, value };
+          }
+        }
+        const meter = account.id === PERSONAL
+          ? meters.find((item) => item.id === 'claude-subscription') ?? null
+          : meters.find((item) => item.account === account.id) ?? null;
+        return { ...publicAccount(account), ...(who?.value ?? {}), meter };
+      }));
+      return json(res, 200, { accounts: out });
     }
 
     if (route === '/agent/usage' && method === 'GET') {
@@ -1114,6 +1167,23 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           patch.focusY = body.focusY;
         }
         if (typeof body.queueCombine === 'boolean') patch.queueCombine = body.queueCombine;
+        // The Claude login this chat runs on: null goes back to the folder's.
+        // A login whose sessions live elsewhere cannot resume this chat's, so
+        // the next turn starts a fresh session there.
+        if ('account' in body) {
+          const settings = (await store.settings?.().catch(() => null)) ?? {};
+          const accounts = listClaudeAccounts(settings.claudeAccounts);
+          const next = body.account === null || body.account === '' ? null : String(body.account);
+          if (next !== null && !accounts.some((account) => account.id === next && account.present)) {
+            return json(res, 400, { error: `no Claude account "${next}"` });
+          }
+          if (next !== (meta.account ?? null)) {
+            patch.account = next;
+            const was = accounts.find((account) => account.id === (meta.accountUsed ?? PERSONAL)) ?? accounts[0];
+            const will = next ? accounts.find((account) => account.id === next) : null;
+            if (will && meta.providerSession && !sharesSessions(was.configDir, will.configDir)) patch.providerSession = null;
+          }
+        }
         if (body.failover !== undefined) {
           if (body.failover !== 'auto' && body.failover !== 'pause') {
             return json(res, 400, { error: 'failover must be auto or pause' });

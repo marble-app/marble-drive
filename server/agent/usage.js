@@ -199,7 +199,25 @@ const readJson = async (response) => {
  *  sends `retry-after: 0`, which is no help, so the caller picks the floor. */
 const reasonFor = (response) => (Number(response?.status) === 429 ? 'rate-limited' : 'error');
 
-export async function collectUsage({ exec = defaultExec, request = defaultRequest, credentialsFile = CLAUDE_CREDENTIALS } = {}) {
+/** One more Claude login's limits (claude-accounts.js), from the file its
+ *  config dir keeps. Its id is `login:<id>`, not `claude-…`: the chrome finds
+ *  the default login's meter by that prefix. */
+async function loginMeter({ id, label, credentialsFile }, request) {
+  const token = claudeTokenFromFile(await readSecretFile(credentialsFile));
+  if (!token) return { ...unavailableMeter(`login:${id}`, 'Claude', 'signed-out'), detail: 'Not signed in', account: id, accountLabel: label };
+  try {
+    const response = await request(CLAUDE_USAGE, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    });
+    const meter = response?.ok ? parseClaudeUsage(await readJson(response)) : null;
+    return { ...(meter ?? unavailableMeter('claude-subscription', 'Claude', reasonFor(response))), id: `login:${id}`, account: id, accountLabel: label };
+  } catch {
+    return { ...unavailableMeter(`login:${id}`, 'Claude', 'error'), account: id, accountLabel: label };
+  }
+}
+
+export async function collectUsage({ exec = defaultExec, request = defaultRequest, credentialsFile = CLAUDE_CREDENTIALS, logins = [], personalLabel = 'Personal' } = {}) {
   const meters = [];
   try {
     const claudeToken = claudeTokenFromKeychain(await readKeychain(exec, 'Claude Code-credentials'))
@@ -219,6 +237,12 @@ export async function collectUsage({ exec = defaultExec, request = defaultReques
         meters.push(unavailableMeter('claude-subscription', 'Claude', 'error'));
       }
     }
+    // With more than one login, the default one is named too, so the Usage
+    // tab can say whose limits each group is.
+    if (logins.length && meters[0]?.id === 'claude-subscription') {
+      Object.assign(meters[0], { account: 'personal', accountLabel: personalLabel });
+    }
+    for (const login of logins) meters.push(await loginMeter(login, request));
 
     const cursorToken = await readKeychain(exec, 'cursor-access-token');
     if (cursorToken) {
@@ -393,6 +417,7 @@ export function createUsageReader({ collect, ttl = CACHE_MS, now = Date.now, fil
       ...fresh,
       meters: meters.map((meter) => {
         if (rememberable(meter)) return meter;
+        if (meter?.reason === 'signed-out') return meter;
         const remembered = last?.meters?.[meter.id];
         return remembered ? asStale(remembered, last.at) : meter;
       }),

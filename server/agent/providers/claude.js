@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { CLAUDE_MODES } from '../catalog.js';
+import { claudeLoginFor } from '../claude-accounts.js';
 import { pickEnv } from '../env.js';
 import { instructionsFor } from '../instructions.js';
 import { PLUGIN_DIR } from '../skills.js';
@@ -221,26 +222,12 @@ export function parseClaudeLine(line, state = {}) {
 }
 
 // A folder of the drive can be worked on under another Claude login (the
-// owner's employer plan, say). Agents settings list them as
-// `claudeAccounts: [{ folder: 'Ai2', configDir: '/home/…/.claude-ai2' }]`,
-// and a turn on a document inside that folder runs with CLAUDE_CONFIG_DIR
-// set to it, so the CLI uses the login kept there. The deepest folder wins.
-// A config dir this machine doesn't have (the drive moved hosts) is skipped,
-// and the turn runs on the default login rather than failing.
+// owner's employer plan, say), and a chat can be put on one by hand
+// (claude-accounts.js). This is the folder rule alone, kept for its callers:
+// the config dir a turn on `target` gets, or null for the default login.
 export function claudeAccountFor(target, accounts, exists = fs.existsSync) {
   if (typeof target !== 'string' || !target || !Array.isArray(accounts)) return null;
-  const doc = target.replace(/^\/+/, '');
-  let best = null;
-  for (const account of accounts) {
-    const folder = String(account?.folder ?? '').replace(/^\/+|\/+$/g, '');
-    const configDir = account?.configDir;
-    if (!folder || typeof configDir !== 'string' || !path.isAbsolute(configDir)) continue;
-    if (!doc.startsWith(`${folder}/`)) continue;
-    if (best && best.folder.length >= folder.length) continue;
-    if (!exists(configDir)) continue;
-    best = { folder, configDir };
-  }
-  return best?.configDir ?? null;
+  return claudeLoginFor({ target, entries: accounts, exists }).configDir ?? null;
 }
 
 export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env, secrets, version = null } = {}) {
@@ -315,10 +302,11 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       await writePrivateFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2));
     },
 
-    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', kind = 'drive', cwd = null, target = null, accounts = null }) {
+    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', kind = 'drive', cwd = null, target = null, accounts = null, account = null }) {
       const current = live();
       // Only the login has a folder of its own; a key or starter credit pays the same everywhere.
-      const configDir = !api && !credit ? claudeAccountFor(target, accounts) : null;
+      const login = !api && !credit ? claudeLoginFor({ target, entries: accounts, choice: account }) : null;
+      const configDir = login?.configDir ?? null;
       const full = capability === 'full';
       // A conversation from before modes had `auto` stored `default`.
       const permission = !mode || mode === 'default' ? 'auto' : mode;
@@ -386,6 +374,15 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
         // nothing.
         ...(full && cwd ? { cwd } : {}),
       };
+    },
+
+    // Which login a turn would pay with, for the chat to show: the same pick
+    // spawn makes. Null on a key or starter credit, which pay the same everywhere.
+    loginFor({ target = null, accounts = null, account = null } = {}) {
+      // With one login there is nothing to tell apart, and nothing is said.
+      if (api || credit || !Array.isArray(accounts) || !accounts.length) return null;
+      const login = claudeLoginFor({ target, entries: accounts, choice: account });
+      return { id: login.id, label: login.label, how: login.how };
     },
 
     parse: (line, state) => parseClaudeLine(line, state),

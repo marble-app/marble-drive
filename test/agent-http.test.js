@@ -934,6 +934,21 @@ test('a new conversation starts on auto, and pause is the only other failover', 
   assert.equal(bad.status, 400);
 });
 
+test('a chat can be put on a Claude login by hand, and only on one the drive has', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake' });
+  const url = `/agent/conversations/${created.body.id}`;
+  const personal = await api('PATCH', url, { account: 'personal' });
+  assert.equal(personal.status, 200);
+  assert.equal(personal.body.account, 'personal');
+  assert.equal((await api('PATCH', url, { account: 'nobody' })).status, 400);
+  const cleared = await api('PATCH', url, { account: null });
+  assert.equal(cleared.body.account, null, 'null goes back to the folder rule');
+  const listed = await api('GET', '/agent/accounts');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.accounts[0].id, 'personal');
+  assert.equal('configDir' in listed.body.accounts[0], false, 'no host paths reach the page');
+});
+
 test('Leave it is still on the conversation after a reload', async () => {
   const created = await api('POST', '/agent/conversations', { provider: 'fake' });
   const left = await api('POST', `/agent/conversations/${created.body.id}/usage-left`, { turn: `${created.body.id}-t1` });

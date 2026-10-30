@@ -315,6 +315,8 @@
       codexSignOut: () => ask('/agent/codex/sign-out', { method: 'POST' }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
+      // The Claude logins this drive runs on, who each is, and its limits.
+      accounts: () => ask('/agent/accounts'),
       // Starter credit: whose, how much is used. `fresh` asks the proxy now.
       credit: ({ fresh = false } = {}) => ask(fresh ? '/agent/credit?fresh=1' : '/agent/credit'),
       // Whether this drive can hear and speak, and how it was set to.
@@ -351,8 +353,9 @@
       addProject: (body) => ask('/agent/projects', { method: 'POST', body }),
       removeProject: (id) => ask(`/agent/projects/${enc(id)}`, { method: 'DELETE' }),
 
-      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = null, failover = null } = {}) {
+      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = null, failover = null, account = null } = {}) {
         const body = { provider };
+        if (account) body.account = account;
         if (model) body.model = model;
         if (effort) body.effort = effort;
         if (mode) body.mode = mode;
