@@ -58,16 +58,18 @@ export function scheduleUploads({
   let running = false;
   let uploading = false;
   let refreshing = false;
+  let tickScannedAt = -Infinity; // when the upload timer last started a scan
   const look = async () => {
     const no = ++scans;
-    const sig = signature(await scanImpl(root));
+    const drive = await scanImpl(root);
+    const sig = signature(drive);
     if (no > seenNo) {
       // A new change re-arms a sprite that gave up waiting.
       if (seen !== null && sig !== seen) failingSince = null;
       seen = sig;
       seenNo = no;
     }
-    return sig;
+    return { sig, drive };
   };
   const failed = () => {
     if (failingSince === null) failingSince = now();
@@ -90,7 +92,8 @@ export function scheduleUploads({
         return;
       }
       const carries = touches;
-      const sig = await look();
+      tickScannedAt = now();
+      const { sig, drive } = await look();
       if (last !== null && sig === last) {
         // Nothing to upload. The scan came after every touch counted in
         // `carries`, so it saw whatever those requests wrote: they are
@@ -103,7 +106,10 @@ export function scheduleUploads({
       uploading = true;
       let result;
       try {
-        result = await upload({ root, settings, epoch: lease.epoch });
+        // The upload lists the drive from this scan rather than walking it
+        // again. A file written since goes up with this upload but differs
+        // from the list it records, so the next upload sends it again.
+        result = await upload({ root, settings, epoch: lease.epoch, seen: drive.byPath ? drive : null });
       } finally {
         uploading = false;
       }
@@ -140,7 +146,9 @@ export function scheduleUploads({
   const wantsAwake = () => dirty() && (failingSince === null || now() - failingSince < giveUpMs);
   const timer = schedule ? schedule(tick, everyMs) : null;
   timer?.unref?.();
-  const watch = schedule ? schedule(refresh, watchMs) : null;
+  // The rescan is skipped when the upload timer scanned within the last
+  // watchMs: that scan already saw the drive.
+  const watch = schedule ? schedule(() => now() - tickScannedAt >= watchMs && refresh(), watchMs) : null;
   watch?.unref?.();
   if (watch) refresh();
   return {
