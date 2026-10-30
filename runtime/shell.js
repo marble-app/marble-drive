@@ -750,6 +750,7 @@
     .chips a[aria-current="page"] { color: var(--ink); font-weight: 500; }
     .lines { display: flex; flex-direction: column; margin: 0 -6px; }
     .lines button { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 8px; color: var(--ink); text-align: left; }
+    .lines button[hidden] { display: none; }
     .lines button:hover { background: var(--paper-2); }
     .lines .i { color: var(--muted); }
     .lines small { margin-left: auto; color: var(--faint); font-size: 12px; }
@@ -996,6 +997,7 @@
             <div class="lines">
               <button type="button" data-tab="settings">${icon('gear')}<span>Agent settings</span><small>Models, keys</small></button>
               <button type="button" data-tab="usage">${icon('usage')}<span>Usage</span><small>What they have used</small></button>
+              <button type="button" data-tab="accounts" hidden>${icon('me')}<span>Claude accounts</span><small>Which one each chat uses</small></button>
             </div>
           </div>
         </div>
@@ -2711,6 +2713,11 @@
         row.tabIndex = on ? 0 : -1;
       }
       pop.querySelector('.agentry').hidden = !window.marble?.agent?.openSettings;
+      // Only a drive with more than one Claude login has accounts to show.
+      const accountsLine = pop.querySelector('[data-tab="accounts"]');
+      window.marble?.agent?.accounts?.()
+        .then((answer) => { accountsLine.hidden = (answer?.accounts?.length ?? 0) < 2; })
+        .catch(() => { accountsLine.hidden = true; });
     }
 
     bindSettings() {

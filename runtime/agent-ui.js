@@ -1423,6 +1423,38 @@
     return String(id);
   };
 
+  // Which Claude login a chat runs on next, as the host picks it
+  // (server/agent/claude-accounts.js): the chat's own pick, else the deepest
+  // folder that holds the page, else Personal. Null with only one login.
+  const accountFor = (accounts, { choice = null, target = '' } = {}) => {
+    if (!Array.isArray(accounts) || accounts.length < 2) return null;
+    const picked = choice ? accounts.find((item) => item.id === choice && item.present !== false) : null;
+    if (picked) return { ...picked, how: 'chosen' };
+    const doc = String(target ?? '').replace(/^\/+/, '');
+    let best = null;
+    let depth = -1;
+    for (const item of accounts) {
+      if (item.present === false) continue;
+      for (const folder of item.folders ?? []) {
+        if (doc.startsWith(`${folder}/`) && folder.length > depth) {
+          best = item;
+          depth = folder.length;
+        }
+      }
+    }
+    return best ? { ...best, how: 'folder' } : { ...accounts[0], how: 'default' };
+  };
+
+  // What a person reads about a login: who it is signed in as, and on what.
+  const PLAN_WORD = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise', free: 'Free' };
+  const accountWho = (account) => {
+    if (!account) return '';
+    if (account.signedIn === false) return 'Not signed in on this computer';
+    if (account.signedIn == null) return '';
+    const plan = PLAN_WORD[account.plan] ?? account.plan ?? '';
+    return [account.email, plan && `${plan} plan`].filter(Boolean).join(' · ');
+  };
+
   const conversationTags = (summary, labels, projects = null) => {
     const tags = [];
     // The drive is the default and goes unsaid; any other project is named.
@@ -1763,7 +1795,7 @@
     }
     for (const meter of meters) {
       const group = h('section', 'usage-group');
-      group.append(h('h3', '', meter.label));
+      group.append(h('h3', '', meter.accountLabel ? `${meter.label} \u00b7 ${meter.accountLabel}` : meter.label));
       if (!usageAvailable(meter)) {
         group.append(h('p', 'empty', meter.detail || 'Unavailable'));
         host.append(group);
@@ -4459,6 +4491,7 @@
                   <fieldset class="seg picker-project"><legend>Project</legend><div class="seg-opts" data-seg="project"></div></fieldset>
                   <fieldset class="seg picker-models"><legend>Model</legend><div class="seg-opts" data-seg="model"></div></fieldset>
                   <fieldset class="seg picker-effort"><legend>Effort</legend><div class="seg-opts" data-seg="effort"></div></fieldset>
+                  <fieldset class="seg picker-account" hidden><legend>Account</legend><div class="seg-opts" data-seg="account"></div></fieldset>
                 </div>
               </div>
               <div class="selection" hidden></div>
@@ -4533,6 +4566,8 @@
       this.agentLabel = root.querySelector('.picker-agent');
       this.agentBox = root.querySelector('[data-seg="agent"]');
       this.projectBox = root.querySelector('[data-seg="project"]');
+      this.accountBox = root.querySelector('[data-seg="account"]');
+      this.accountLabel = root.querySelector('.picker-account');
       this.projectLabel = root.querySelector('.picker-project');
       this.also = root.querySelector('.also');
       this.alsoLong = root.querySelector('.also-long');
@@ -4648,6 +4683,7 @@
           }
           if (name === 'model') { this.syncEfforts({ fit: true }); this.persistCatalog(); this.paintStatus(); this.paintTags(); }
           if (name === 'effort') { this.persistCatalog(); this.paintStatus(); this.paintTags(); }
+          if (name === 'account') { this.persistAccount(); this.applyAgentDisabled(); this.paintTags(); }
           if (track) {
             syncSegCurrent(track);
             slideThumb(track, { animate: true });
@@ -5310,7 +5346,14 @@
           this.dispatchEvent(new CustomEvent('meta', { detail: { meta: this.meta }, bubbles: true, composed: true }));
         }
         if (summary.id === id && !summary.removed) {
-          const previous = this.meta ?? {};
+          let previous = this.meta ?? {};
+          // Another page put this chat on another login, or a turn started on one.
+          if ((summary.account ?? null) !== (previous.account ?? null) || (summary.accountUsed ?? null) !== (previous.accountUsed ?? null)) {
+            this.meta = { ...previous, account: summary.account ?? null, accountUsed: summary.accountUsed ?? null, accountUsedLabel: summary.accountUsedLabel ?? null };
+            previous = this.meta;
+            this.fillAccounts();
+            this.paintTags();
+          }
           const setupChanged = summary.provider !== previous.provider
             || summary.model !== previous.model
             || summary.effort !== previous.effort;
@@ -5391,6 +5434,9 @@
     }
 
     claudeMeter() {
+      // A chat on another login is out when that login is, not the default one.
+      const account = this.currentAccount();
+      if (account && account.id !== 'personal') return (this.usageMeters ?? []).find((item) => item.account === account.id) ?? null;
       return (this.usageMeters ?? []).find((item) => item.id === 'claude-subscription' || String(item.id ?? '').startsWith('claude')) ?? null;
     }
 
@@ -5580,6 +5626,7 @@
         disabled: lockClaude ? new Set(models.map((item) => item.id)) : new Set(),
       });
       this.syncEfforts({ effort: effortValue, fit: switched });
+      this.fillAccounts();
       if (!this.mode) this.mode = provider?.modes?.[0]?.id ?? '';
       this.paintStatus();
       this.fitSetup();
@@ -6204,11 +6251,59 @@
 
     async loadChrome() {
       try {
-        const usage = await this.api.usage?.().catch(() => ({ meters: [] }));
+        const [usage, accounts] = await Promise.all([
+          this.api.usage?.().catch(() => ({ meters: [] })),
+          this.api.accounts?.().catch(() => null),
+        ]);
         this.usageMeters = usage?.meters ?? [];
+        if (accounts?.accounts) this.accountList = accounts.accounts;
       } catch {
         this.usageMeters = [];
       }
+      this.fillAccounts();
+      this.paintTags();
+    }
+
+    /** The login this chat runs on next. A new chat has no meta yet, so its
+     *  pick is the one waiting to go with its first message. */
+    currentAccount() {
+      const started = Boolean(this.getAttribute('conversation'));
+      const choice = started ? this.meta?.account ?? null : this.pendingAccount ?? null;
+      const target = this.api?.context?.().target || this.meta?.target || '';
+      return accountFor(this.accountList, { choice, target });
+    }
+
+    /** Account sits beside Model and Effort when the drive has more than one
+     *  Claude login and the chat is on Claude's own login (a key or starter
+     *  credit pays the same whichever is picked). Auto is the folder's. */
+    fillAccounts() {
+      if (!this.accountBox) return;
+      const provider = this.currentProvider()?.id ?? this.meta?.provider ?? '';
+      const list = this.accountList ?? [];
+      const show = list.length > 1 && provider === 'claude-subscription';
+      this.accountLabel.hidden = !show;
+      if (!show) return;
+      const started = Boolean(this.getAttribute('conversation'));
+      // A chat still opening has another chat's meta; its own fills this in.
+      if (started && this.meta?.id && this.meta.id !== this.getAttribute('conversation')) return;
+      const choice = (started ? this.meta?.account : this.pendingAccount) ?? '';
+      const folder = accountFor(list, { target: this.api?.context?.().target || this.meta?.target || '' });
+      fillRadios(this.accountBox, 'account', list.filter((item) => item.present !== false).map((item) => ({ id: item.id, label: item.label })), {
+        empty: folder ? `Auto (${folder.label})` : 'Auto',
+        value: choice,
+      });
+      this.fitSetup();
+    }
+
+    persistAccount() {
+      const account = radioValue(this.shadowRoot, 'account') || null;
+      const id = this.getAttribute('conversation');
+      if (!id) {
+        this.pendingAccount = account;
+        return;
+      }
+      if (this.meta) this.meta = { ...this.meta, account };
+      this.api.update(id, { account }).catch((err) => this.system(err.message, true));
     }
 
     async refreshChrome() {
@@ -6307,7 +6402,18 @@
       };
       this.tagsEl.replaceChildren();
       const projects = new Map((this.projectList ?? []).map((p) => [p.id, p]));
-      for (const tag of conversationTags(summary, labels, projects)) {
+      const tags = conversationTags(summary, labels, projects);
+      const account = summary.provider === 'claude-subscription' ? this.currentAccount() : null;
+      if (account) {
+        const who = accountWho(account);
+        tags.push({
+          kind: 'account',
+          label: account.label,
+          hue: 5,
+          title: `Runs on the ${account.label} Claude account${who ? ` (${who})` : ''}${account.how === 'folder' ? ', because of the folder this page is in' : ''}`,
+        });
+      }
+      for (const tag of tags) {
         const el = h('span', 'tag', tag.label);
         el.dataset.kind = tag.kind;
         el.dataset.hue = String(tag.hue);
@@ -6516,6 +6622,7 @@
             mode: picks.mode,
             project,
             failover: this.pendingFailover === 'pause' ? 'pause' : 'auto',
+            account: this.pendingAccount ?? null,
           });
           this.setAttribute('conversation', id);
           this.agentLabel.hidden = false;
@@ -6529,8 +6636,10 @@
             effort: picks.effort,
             mode: picks.mode,
             project,
+            account: this.pendingAccount ?? null,
             title: null,
           };
+          this.pendingAccount = null;
           this.paintMast();
           this.paintPresets();
           this.paintFailover();
@@ -9063,6 +9172,10 @@
     .voice-usage h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
     .voice-usage p { margin: 0; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
     .pane-usage[hidden], .body[hidden], .pane-chat[hidden] { display: none; }
+    .sheet[data-tab="accounts"] { width: min(560px, calc(100vw - 24px)); }
+    .usage-group.account .who { margin: -4px 0 2px; font-size: 12.5px; color: var(--ink); }
+    .usage-group.account .where { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+    .tabs button[hidden] { display: none; }
     /* Chat: how agents show up on the page, and the keys. */
     .pane-chat { display: flex; flex-direction: column; gap: 14px; }
     .pref { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; font-size: 13px; cursor: pointer; }
@@ -9130,7 +9243,7 @@
       return value === null ? pref.byDefault : value === '1';
     } catch { return pref.byDefault; }
   };
-  const TABS = new Set(['settings', 'chat', 'voice', 'usage']);
+  const TABS = new Set(['settings', 'chat', 'voice', 'usage', 'accounts']);
   const CHAT_KEYS = [
     ['⌘J', 'Ask about the selection, or what the pointer is on'],
     ['⌘⇧J', 'Show or hide the chat'],
@@ -9151,11 +9264,13 @@
             <button type="button" role="tab" data-tab="chat" aria-selected="false">Chat</button>
             <button type="button" role="tab" data-tab="voice" aria-selected="false">Voice</button>
             <button type="button" role="tab" data-tab="usage" aria-selected="false">Usage</button>
+            <button type="button" role="tab" data-tab="accounts" aria-selected="false" hidden>Accounts</button>
           </div>
           <div class="body" data-pane="settings"></div>
           <div class="pane-chat" data-pane="chat" hidden></div>
           <div class="pane-voice" data-pane="voice" hidden></div>
           <div class="pane-usage" data-pane="usage" hidden></div>
+          <div class="pane-usage pane-accounts" data-pane="accounts" hidden></div>
           <p class="status"></p>
           <div class="actions">
             <button type="button" class="close">Cancel</button>
@@ -9165,7 +9280,9 @@
       this.body = root.querySelector('.body');
       this.chatPane = root.querySelector('.pane-chat');
       this.voicePane = root.querySelector('.pane-voice');
-      this.usagePane = root.querySelector('.pane-usage');
+      this.usagePane = root.querySelector('[data-pane="usage"]');
+      this.accountsPane = root.querySelector('[data-pane="accounts"]');
+      this.accountsTab = root.querySelector('[data-tab="accounts"]');
       this.status = root.querySelector('.status');
       this.saveButton = root.querySelector('.save');
       this.closeButton = root.querySelector('.close');
@@ -9225,9 +9342,11 @@
       this.chatPane.hidden = this.tab !== 'chat';
       this.voicePane.hidden = this.tab !== 'voice';
       this.usagePane.hidden = this.tab !== 'usage';
+      this.accountsPane.hidden = this.tab !== 'accounts';
       this.shadowRoot.querySelector('.sheet').dataset.tab = this.tab;
-      this.saveButton.hidden = this.tab === 'usage';
-      this.closeButton.textContent = this.tab === 'usage' ? 'Close' : 'Cancel';
+      const readOnly = this.tab === 'usage' || this.tab === 'accounts';
+      this.saveButton.hidden = readOnly;
+      this.closeButton.textContent = readOnly ? 'Close' : 'Cancel';
     }
 
     /** Read straight from this browser, so it is there before the host answers. */
@@ -9258,6 +9377,8 @@
       this.fillChat();
       this.body.replaceChildren(h('p', 'status', 'Loading…'));
       this.usagePane.replaceChildren(h('p', 'empty', 'Loading…'));
+      this.accountsPane.replaceChildren(h('p', 'empty', 'Loading…'));
+      this.loadAccounts();
       this.setTab(this.tab);
       let providers = [];
       let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, claude: false, cursor: false, openai: false } };
@@ -9385,6 +9506,46 @@
       fillUsageDetail(this.usagePane, usage.meters ?? []);
       this.fillVoiceUsage(voice);
       this.loadHistory();
+    }
+
+    /** Settings › Accounts: each Claude login the drive runs on, who it is
+     *  signed in as, where it is used without being asked, and its limits.
+     *  Its own request, like the history: `claude auth status` per login is
+     *  slow the first time and must not hold up the other tabs. */
+    async loadAccounts() {
+      const token = (this.accountsToken = (this.accountsToken ?? 0) + 1);
+      let list = [];
+      try {
+        list = (await this.api.accounts?.())?.accounts ?? [];
+      } catch { /* shown as none */ }
+      if (token !== this.accountsToken) return;
+      // One login has nothing to choose between; the tab stays away.
+      this.accountsTab.hidden = list.length < 2;
+      if (list.length < 2 && this.tab === 'accounts') this.setTab('usage');
+      const pane = this.accountsPane;
+      pane.replaceChildren(h('p', 'hint', 'Each chat runs on the account picked under Account in its setup. Auto uses the account of the folder the page is in, and Personal everywhere else.'));
+      for (const account of list) {
+        const group = h('section', 'usage-group account');
+        group.dataset.account = account.id;
+        group.append(h('h3', '', account.label));
+        group.append(h('p', 'who', accountWho(account)));
+        const folders = (account.folders ?? []).map((folder) => `${folder}/`);
+        group.append(h('p', 'where', account.id === 'personal'
+          ? 'Auto uses it for pages outside the other accounts\u2019 folders.'
+          : folders.length ? `Auto uses it for pages in ${folders.join(', ')}.` : 'Only chats that pick it use it.'));
+        const meter = account.meter;
+        if (account.present === false) {
+          group.append(h('p', 'empty', 'Its sign-in folder is not on this computer.'));
+        } else if (!meter || !usageAvailable(meter)) {
+          group.append(h('p', 'empty', meter?.detail || 'Limits unavailable'));
+        } else {
+          const quotas = (meter.windows ?? []).filter((item) => item.kind !== 'share');
+          const rows = quotas.length ? quotas : [{ id: meter.id, label: meter.window || 'Limit', used: meter.used, resetsAt: meter.resetsAt, kind: 'quota' }];
+          for (const window of rows) group.append(usageRow(window));
+          if (meter.stale) group.append(h('p', 'subhead', formatAsOf(meter.at)));
+        }
+        pane.append(group);
+      }
     }
 
     // The daily picture under the live limits. It is its own request so a slow
@@ -11675,6 +11836,8 @@
       let hidden = new Set();
       try { hidden = new Set(JSON.parse(localStorage.getItem(`marble-glints-hidden:${here}`) || '[]')); } catch { /* private mode */ }
       const word = (summary) => (summary.asking ? 'Needs you' : summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status);
+      // Which Claude account the chat last ran on, where the drive has more than one.
+      const on = (summary) => (summary.accountUsedLabel ? `${summary.accountUsedLabel} · ` : '');
       const row = (summary, detail) => {
         this.summaries.set(summary.id, summary);
         // Choosing a chat is following it: its work may be drawn on the page.
@@ -11698,7 +11861,7 @@
       if (inApp.length) {
         seg('In this app', document.title || here);
         for (const summary of inApp) {
-          const item = row(summary, hidden.has(summary.id) ? `${word(summary)} · Hidden` : word(summary));
+          const item = row(summary, `${on(summary)}${hidden.has(summary.id) ? `${word(summary)} · Hidden` : word(summary)}`);
           item.classList.toggle('is-hidden', hidden.has(summary.id));
         }
         if (elsewhere.length) {
@@ -11709,7 +11872,7 @@
       for (const summary of elsewhere) {
         const provider = this.labels.get(summary.provider)?.label ?? summary.provider;
         const where = inApp.length && summary.target ? String(summary.target).split('/').pop() : provider;
-        row(summary, `${where} · ${word(summary)}`);
+        row(summary, `${where} · ${on(summary)}${word(summary)}`);
       }
       this.recent.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
     }

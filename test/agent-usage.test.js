@@ -398,3 +398,31 @@ test('the last good reading outlives a restart', async () => {
   assert.equal(out.meters[0].stale, true);
   await fs.rm(dir, { recursive: true, force: true });
 });
+
+test('each other Claude login gets its own meter, read from its own config dir', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'marble-usage-logins-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const personal = path.join(dir, 'personal.json');
+  const work = path.join(dir, 'work.json');
+  await fs.writeFile(personal, JSON.stringify({ claudeAiOauth: { accessToken: 'tok-personal' } }), 'utf8');
+  await fs.writeFile(work, JSON.stringify({ claudeAiOauth: { accessToken: 'tok-work' } }), 'utf8');
+  const { meters } = await collectUsage({
+    exec: async () => ({ code: 1, stdout: '', stderr: 'not found', missing: true }),
+    credentialsFile: personal,
+    logins: [
+      { id: 'ai2', label: 'Ai2', credentialsFile: work },
+      { id: 'lab', label: 'Lab', credentialsFile: path.join(dir, 'none.json') },
+    ],
+    request: async (url, options) => ({
+      ok: true,
+      json: async () => ({ five_hour: { utilization: options.headers.Authorization.endsWith('work') ? 12 : 70 }, seven_day: { utilization: 5 } }),
+    }),
+  });
+  assert.deepEqual(meters.map((m) => [m.id, m.account, m.accountLabel, m.used]), [
+    ['claude-subscription', 'personal', 'Personal', 70],
+    ['login:ai2', 'ai2', 'Ai2', 12],
+    ['login:lab', 'lab', 'Lab', null],
+  ]);
+  assert.equal(meters[2].reason, 'signed-out');
+  assert.equal(JSON.stringify(meters).includes('tok-'), false, 'no token comes back');
+});

@@ -600,12 +600,20 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     try {
       const meta = await store.conversation(turn.conversationId);
       const provider = providers.get(meta.provider);
-      await store.updateTurn(turn.id, { status: 'running', startedAt: turn.startedAt });
+      // Read now, like the project: a folder given its own login in settings,
+      // or a login picked for this chat, takes effect on the next turn.
+      const settings = (await store.settings?.().catch(() => null)) ?? {};
+      // The login this turn pays with, said on the chat and on the turn, so
+      // the page can show which account a chat is on.
+      const login = provider?.loginFor?.({ target: turn.target, accounts: settings.claudeAccounts, account: meta.account ?? null }) ?? null;
+      await store.updateTurn(turn.id, { status: 'running', startedAt: turn.startedAt, ...(login ? { account: login.id } : {}) });
       await store.updateConversation(turn.conversationId, {
         running: true,
         activity: turn.from ? `Message from ${turn.from.title || turn.from.conversation}` : `Working on ${turn.target}`,
+        accountUsed: login?.id ?? null,
+        accountUsedLabel: login?.label ?? null,
       });
-      await emit(turn, { type: 'turn.started', provider: meta.provider });
+      await emit(turn, { type: 'turn.started', provider: meta.provider, ...(login ? { account: login } : {}) });
       look(turn, { phase: 'working', stage: 'start', turn: turn.id, prompt: String(turn.prompt ?? '').slice(0, 300) });
 
       if (!provider) return safeFinish(turn, { status: 'failed', error: `no provider "${meta.provider}"` });
@@ -641,8 +649,6 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (browser) await fsp.rm(profile, { recursive: true, force: true });
       await provider.prepare?.({ workspace, mcp, browser, meta, skills, capability, kind, project });
       const prompt = await composePrompt(turn, meta, project);
-      // Read now, like the project: a folder given its own login in settings takes effect on the next turn.
-      const settings = (await store.settings?.().catch(() => null)) ?? {};
 
       // Cancel (or a host shutdown) can land anywhere in the awaits above,
       // before there is any child to kill. Check here, the last point before
@@ -670,6 +676,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         // The document this turn works on, and the folders that run under another login.
         target: turn.target,
         accounts: settings.claudeAccounts,
+        account: meta.account ?? null,
       });
 
       // The runner builds the environment, not the provider: a provider that

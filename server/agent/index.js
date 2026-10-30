@@ -19,6 +19,7 @@ import { createVoiceUsage, voiceSettings } from './voice/settings.js';
 import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { createClaudeSignIn } from './claude-signin.js';
+import { listClaudeAccounts } from './claude-accounts.js';
 import { createCodexSignIn } from './codex-signin.js';
 import { nameConversation } from './namer.js';
 import { drawWithCli } from './drawer.js';
@@ -331,7 +332,16 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     // It shows nothing for Claude until Claude Code's own /usage can say the
     // plan's limits (usage.js, collectUsageFromCli; config.cliUsage says why).
     usage: usage ?? createUsageReader({
-      collect: () => (config.guest ? (config.cliUsage ? collectUsageFromCli({ env: hostEnv }) : { meters: [] }) : collectUsage()),
+      // Each other login in settings (claudeAccounts) is read from its own
+      // config dir, so the Usage tab shows every account the drive runs on.
+      collect: async () => {
+        if (config.guest) return config.cliUsage ? collectUsageFromCli({ env: hostEnv }) : { meters: [] };
+        const settings = (await agentStore.settings().catch(() => null)) ?? {};
+        const logins = listClaudeAccounts(settings.claudeAccounts)
+          .filter((account) => account.configDir && account.present)
+          .map((account) => ({ id: account.id, label: account.label, credentialsFile: path.join(account.configDir, '.credentials.json') }));
+        return collectUsage({ logins });
+      },
       file: path.join(store.marbleDir, 'usage-last.json'),
     }),
     usageHistory: usageHistory ?? createUsageHistory(),
