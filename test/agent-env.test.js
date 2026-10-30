@@ -49,3 +49,9 @@ test('nothing else of the host does: no key, no token, no secret', () => {
 test('a variable that is not set is not invented', () => {
   assert.deepEqual(pickEnv({ PATH: '/bin' }), { PATH: '/bin' });
 });
+
+test('the login a host chose with CLAUDE_CONFIG_DIR reaches the agent', () => {
+  const env = pickEnv({ ...GUEST, CLAUDE_CONFIG_DIR: '/home/owner/.claude-work' });
+  assert.equal(env.CLAUDE_CONFIG_DIR, '/home/owner/.claude-work');
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+});
