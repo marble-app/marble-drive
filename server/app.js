@@ -674,7 +674,16 @@ export async function createDrive(config, { log = console, agentProviders = null
    *  share links and builds aimed at it. The Drive's move, and a build naming
    *  the app it made (server/build). */
   async function moveDocument(from, to) {
-    const moved = await store.move(from, to);
+    // In the document's queue, so a batch already deciding against the old
+    // name lands before the rename rather than write the old name back after
+    // it; one queued behind the move finds no document there (404).
+    let key = from;
+    try {
+      key = parsePath(from, { allowRoot: false });
+    } catch {
+      // Let store.move refuse it in its own words.
+    }
+    const moved = await enqueue(key, () => store.move(from, to));
     // The name is the address, so a move is a change of identity. The
     // bookkeeping this host holds in memory has to follow it or the next
     // write is measured against the wrong baseline.

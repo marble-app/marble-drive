@@ -248,6 +248,27 @@ test('an outside write that lands while a batch is queued is merged after it, no
   assert.match(after, /Slow title/);
 });
 
+test('a move waits for the batch already deciding, so the old name is not written back', async () => {
+  await drive.createDocument('moving', SOURCE, { label: 'test' });
+  const slow = drive.writeOps('moving', [{ type: 'setText', id: 'h1', text: 'Landed first' }], {
+    client: 'tab',
+    prepare: async () => {
+      await sleep(200);
+      return { ops: [{ type: 'setText', id: 'h1', text: 'Landed first' }] };
+    },
+  });
+  await sleep(20);
+  const moved = await fetch(`${base}/drive/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: 'moving', to: 'moved-away' }),
+  });
+  assert.equal(moved.status, 200);
+  assert.equal((await slow).applied, 1);
+  assert.equal(await drive.store.has('moving'), false, 'nothing written back under the old name');
+  assert.match(await drive.store.read('moved-away'), /Landed first/);
+});
+
 test('a watcher that fails says so, with the document', async () => {
   await drive.createDocument('loud', SOURCE, { label: 'test' });
   const mark = drive.store.mark;
