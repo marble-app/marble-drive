@@ -225,6 +225,10 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     browserPath: BROWSER,
     browserPass,
     readDocument: (docPath) => store.read(docPath),
+    // A restore point before every turn, of the document as the turn found it:
+    // ops writes are paced (server/store/fs-store.js), so this is what keeps
+    // an undo's "back to where it started" (turn.origins) restorable.
+    markOrigin: (docPath, source) => store.mark?.(docPath, source, 'turn-start'),
     // The host's own clock and measure, so the stall rule and keep-awake agree
     // on what "awake" and "progress" mean. Undefined falls to the runner's own.
     awake,

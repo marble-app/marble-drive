@@ -27,6 +27,7 @@ import {
   listCheckpoints,
   prune,
   readCheckpoint,
+  readIndex,
   shaOf,
   writeAtomic,
 } from '../engine.js';
@@ -102,7 +103,19 @@ const isStudio = (source) => {
 // can address. Kept identical to Marble's own count so two hosts agree.
 const nodesOf = (source) => (source.match(/data-marble-id="/g) ?? []).length;
 
-export function createFsStore({ root }) {
+// Restore points at a human pace: a write that asks to be paced (a keystroke's
+// batch, server/app.js) takes one only when the document's newest is older
+// than this. Gzipping an 11 MB page on every setAttr made 90 × 1.3 MB
+// snapshots in a minute; one every five minutes of typing is what anybody
+// could want back. Everything else — a labelled write — always takes one.
+const MIN_INTERVAL = 5 * 60 * 1000;
+
+const minInterval = () => {
+  const n = Number(process.env.MARBLE_HISTORY_MIN_INTERVAL_MS);
+  return Number.isFinite(n) && n >= 0 && process.env.MARBLE_HISTORY_MIN_INTERVAL_MS !== '' ? n : MIN_INTERVAL;
+};
+
+export function createFsStore({ root, historyMinInterval = null }) {
   const abs = (docPath) => resolveUnder(root, docPath);
   const fileOf = (docPath) => `${abs(docPath)}${DOC_EXT}`;
   const marbleDir = path.join(root, '.marble');
@@ -121,6 +134,14 @@ export function createFsStore({ root }) {
 
   async function read(docPath) {
     return fsp.readFile(fileOf(parsePath(docPath, { allowRoot: false })), 'utf8').catch(() => null);
+  }
+
+  /** A cheap fingerprint of a document's file — inode, size, change time —
+   *  that moves whenever anyone writes it, in place or by rename. Lets a
+   *  writer ask "is the file still the one I read?" without reading it. */
+  async function version(docPath) {
+    const info = await fsp.stat(fileOf(parsePath(docPath, { allowRoot: false }))).catch(() => null);
+    return info ? `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}` : null;
   }
 
   async function has(docPath) {
@@ -417,25 +438,50 @@ export function createFsStore({ root }) {
    * is being replaced *before* the bytes move, and the write itself is atomic —
    * a crash in the middle leaves the old file, never half of a new one.
    */
-  async function write(docPath, source, { label = 'ops', ops = [] } = {}) {
+  //
+  // `paced` writes (ops filed while someone works) take that restore point only
+  // when the document's newest one is older than MARBLE_HISTORY_MIN_INTERVAL_MS
+  // — and then skip reading the prior file at all. `checkpointed` in the
+  // answer says whether one was taken.
+  async function write(docPath, source, { label = 'ops', ops = [], paced = false } = {}) {
     const clean = parsePath(docPath, { allowRoot: false });
     const file = fileOf(clean);
     await fsp.mkdir(path.dirname(file), { recursive: true });
 
-    const prior = await fsp.readFile(file, 'utf8').catch(() => null);
-    if (prior !== null) {
-      // A failure here must cost the restore point, never the edit.
-      await checkpoint(docKey(clean), prior, { label, ops }).catch(() => {});
+    let checkpointed = false;
+    if (!paced || (await due(clean))) {
+      const prior = await fsp.readFile(file, 'utf8').catch(() => null);
+      if (prior !== null) {
+        // A failure here must cost the restore point, never the edit.
+        checkpointed = Boolean((await keep(clean, prior, { label, ops }))?.saved);
+      }
     }
     await writeAtomic(file, source);
-    return { path: clean, bytes: bytesOf(source), sha: shaOf(source) };
+    return { path: clean, bytes: bytesOf(source), sha: shaOf(source), checkpointed };
   }
 
-  /** A restore point for a state nobody is replacing — opening, or first sight. */
+  // docKey → when its newest restore point was taken (or found to exist).
+  const lastPoint = new Map();
+
+  async function due(clean) {
+    const key = docKey(clean);
+    if (!lastPoint.has(key)) {
+      const newest = (await readIndex(key).catch(() => [])).at(-1);
+      lastPoint.set(key, newest?.t ?? 0);
+    }
+    return Date.now() - lastPoint.get(key) >= (historyMinInterval ?? minInterval());
+  }
+
+  async function keep(clean, source, options) {
+    const made = await checkpoint(docKey(clean), source, options).catch(() => null);
+    if (made) lastPoint.set(docKey(clean), Date.now());
+    return made;
+  }
+
+  /** A restore point for a state nobody is replacing — opening, first sight,
+   *  an agent's turn starting, an edit from outside. Never paced. */
   async function mark(docPath, source, label) {
-    return checkpoint(docKey(parsePath(docPath, { allowRoot: false })), source, { label }).catch(
-      () => null,
-    );
+    return keep(parsePath(docPath, { allowRoot: false }), source, { label });
   }
 
   async function create(docPath, source) {
@@ -495,12 +541,20 @@ export function createFsStore({ root }) {
   // The history of a document is an index file and a directory of blobs, both
   // named after it. Renaming them is the whole of "history follows the file".
   async function renameHistory(from, to) {
+    lastPoint.delete(docKey(from));
+    lastPoint.delete(docKey(to));
     const pairs = [
       [`${docKey(from)}.history.jsonl`, `${docKey(to)}.history.jsonl`],
       [`${docKey(from)}.ops.jsonl`, `${docKey(to)}.ops.jsonl`],
       [`${docKey(from)}.intents.jsonl`, `${docKey(to)}.intents.jsonl`],
       [path.join('history', docKey(from)), path.join('history', docKey(to))],
     ];
+    // The op log's sealed segments (server/oplog.js): `<docKey>@<first>-<last>.ops.jsonl`.
+    for (const name of await fsp.readdir(marbleDir).catch(() => [])) {
+      if (name.startsWith(`${docKey(from)}@`) && name.endsWith('.ops.jsonl')) {
+        pairs.push([name, `${docKey(to)}${name.slice(docKey(from).length)}`]);
+      }
+    }
     for (const [was, now] of pairs) {
       const source = path.join(marbleDir, was);
       if (!(await exists(source))) continue;
@@ -646,6 +700,7 @@ export function createFsStore({ root }) {
     blobs,
     ready,
     read,
+    version,
     readRaw,
     putFile,
     placeFile,
