@@ -269,6 +269,20 @@ export const rootRemoved = (priorSource, ops) => {
   return roots.size > 0 && (ops ?? []).some((op) => op?.type === 'remove' && roots.has(op.id));
 };
 
+// A batch id is the page's to choose; this is only what it may look like.
+const BATCH_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+// Saves waiting on one document before /ops answers 503 rather than queue more.
+const OPS_QUEUE_MAX = 64;
+// The status a failed /ops answers with. A refusal carries its own (409, 422,
+// 404, 413); anything else is the host's fault, and a page retries a 5xx with
+// the same batch id. Out of descriptors, out of disk, a busy file: 503.
+const TRANSIENT = new Set(['EMFILE', 'ENFILE', 'ENOSPC', 'EBUSY', 'EAGAIN', 'ETIMEDOUT', 'ENOMEM']);
+function opsStatusOf(err) {
+  if (err?.status) return err.status;
+  if (err instanceof PathError) return 400;
+  return TRANSIENT.has(err?.code) ? 503 : 500;
+}
+
 /** Where this server's own agents reach it, from what `server.address()`
  *  says: the address it is bound to, so a drive the PC hosts, which listens
  *  on a loopback address of its own (127.0.0.37) and may not use 127.0.0.1,
@@ -436,10 +450,81 @@ export async function createDrive(config, { log = console, agentProviders = null
     return turn?.startedAt;
   };
 
+  // How many tasks each document's queue holds, so /ops can say "busy" (503,
+  // retry) rather than pile up behind a write that is taking minutes.
+  const depth = new Map();
   const enqueue = (docPath, task) => {
+    depth.set(docPath, (depth.get(docPath) ?? 0) + 1);
     const next = (queues.get(docPath) ?? Promise.resolve()).then(task, task);
+    const done = () => {
+      const left = (depth.get(docPath) ?? 1) - 1;
+      if (left > 0) depth.set(docPath, left);
+      else depth.delete(docPath);
+    };
+    next.then(done, done);
     queues.set(docPath, next.catch(() => {}));
     return next;
+  };
+
+  // Batches that already landed, per document: `<client>|<batch id>` → the
+  // answer the write gave, newest last, the last BATCHES_KEPT of them. A page
+  // that retries a POST whose answer it never heard (a timeout, a dropped
+  // connection, a host that was busy for a minute) sends the same id again and
+  // is told what happened instead of having it happen twice. Rebuilt after a
+  // restart from the `batch` field of the active op-log segment.
+  const BATCHES_KEPT = 256;
+  const batches = new Map();
+  const batchKey = (client, batch) => `${client ?? 'anon'}|${batch}`;
+  async function batchesOf(docPath) {
+    if (batches.has(docPath)) return batches.get(docPath);
+    const seen = new Map();
+    try {
+      for (const [batch, entry] of await oplog.batches(docPath)) {
+        seen.set(batchKey(entry.client, batch), { applied: entry.applied, rebuilt: true });
+      }
+    } catch (err) {
+      log.error(`[drive] could not read the batches already applied to ${docPath}: ${err.message}`);
+    }
+    while (seen.size > BATCHES_KEPT) seen.delete(seen.keys().next().value);
+    batches.set(docPath, seen);
+    return seen;
+  }
+  const rememberBatch = (seen, key, result) => {
+    seen.delete(key);
+    seen.set(key, {
+      path: result.path,
+      sha: result.sha,
+      bytes: result.bytes,
+      applied: result.applied,
+      forks: result.forks ?? [],
+    });
+    while (seen.size > BATCHES_KEPT) seen.delete(seen.keys().next().value);
+  };
+
+  // Who wrote to each document last, and when. A batch from someone else, from
+  // a new agent turn, or after a quiet spell starts an edit session, and its
+  // write keeps a restore point; the rest of a session's writes are paced
+  // (server/store/fs-store.js). The gap is build mode's own, so every edit its
+  // History lists has the restore point taken just before it.
+  const SESSION_GAP = 90_000;
+  const lastWriter = new Map();
+  const writerKey = (client) => `${client ?? 'anon'}@${sinceFor(client) ?? ''}`;
+  const startsSession = (docPath, client) => {
+    const was = lastWriter.get(docPath);
+    return !was || was.key !== writerKey(client) || Date.now() - was.t > SESSION_GAP;
+  };
+
+  // A guard or merge that throws is a refusal of the batch, not a fault of the
+  // host: 409 when an op names something the document no longer has, 422 for
+  // an op that is malformed or would break the page.
+  const UNRESOLVABLE = /no node with|has no addressed parent|has no end tag|has no inner range/;
+  const refusalOf = (err) => {
+    if (err?.status) return err;
+    const unresolvable = UNRESOLVABLE.test(String(err?.message));
+    return Object.assign(err instanceof Error ? err : new Error(String(err)), {
+      status: unresolvable ? 409 : 422,
+      reason: unresolvable ? 'unresolvable' : 'refused',
+    });
   };
 
   // ------------------------------------------------------------------ serving
@@ -589,7 +674,16 @@ export async function createDrive(config, { log = console, agentProviders = null
    *  share links and builds aimed at it. The Drive's move, and a build naming
    *  the app it made (server/build). */
   async function moveDocument(from, to) {
-    const moved = await store.move(from, to);
+    // In the document's queue, so a batch already deciding against the old
+    // name lands before the rename rather than write the old name back after
+    // it; one queued behind the move finds no document there (404).
+    let key = from;
+    try {
+      key = parsePath(from, { allowRoot: false });
+    } catch {
+      // Let store.move refuse it in its own words.
+    }
+    const moved = await enqueue(key, () => store.move(from, to));
     // The name is the address, so a move is a change of identity. The
     // bookkeeping this host holds in memory has to follow it or the next
     // write is measured against the wrong baseline.
@@ -598,6 +692,13 @@ export async function createDrive(config, { log = console, agentProviders = null
       lastKnown.delete(moved.from);
     }
     pendingWrites.move(moved.from, moved.to);
+    for (const map of [batches, lastWriter]) {
+      if (map.has(moved.from)) {
+        map.set(moved.to, map.get(moved.from));
+        map.delete(moved.from);
+      }
+    }
+    oplog.move(moved.from, moved.to);
     // A rename is the person naming the document, so the tab says the
     // new name too. A move that kept the name leaves the title alone.
     if (moved.kind === 'doc' && splitPath(moved.from).name !== splitPath(moved.to).name) {
@@ -655,22 +756,16 @@ export async function createDrive(config, { log = console, agentProviders = null
    *  document *as it is inside the queue* — an agent's precondition, and the
    *  undo record it keeps. Nothing can land between them and the write. A
    *  gesture passes neither. */
-  async function applyOps(docPath, ops, { client = null, prepare = null, after = null } = {}) {
+  async function applyOps(docPath, ops, { client = null, prepare = null, after = null, batch = null } = {}) {
     return enqueue(docPath, async () => {
-      const source = await store.read(docPath);
-      if (source === null) throw Object.assign(new Error(`no document "${docPath}"`), { status: 404 });
-
-      // A writer that ran the guard itself, to know the batch would land
-      // before saying so, hands on what it got rather than have it worked
-      // out twice (on a large page that is most of a second).
-      let guarded = null;
-      if (prepare) {
-        const planned = await prepare(source);
-        if (planned.refused) {
-          return { applied: 0, refused: planned.refused, bytes: bytesOf(source), sha: shaOf(source) };
-        }
-        ops = planned.ops;
-        if (typeof planned.html === 'string') guarded = planned.html;
+      // A batch this host already applied is answered, not applied again.
+      const seen = batch ? await batchesOf(docPath) : null;
+      const key = batch ? batchKey(client, batch) : null;
+      if (seen?.has(key)) {
+        const done = seen.get(key);
+        if (!done.rebuilt) return { ...done, ops: [], replay: true };
+        const now = await store.read(docPath);
+        return { path: docPath, sha: now === null ? null : shaOf(now), bytes: now === null ? 0 : bytesOf(now), applied: done.applied, forks: [], ops: [], replay: true };
       }
 
       // `after` is bookkeeping for a writer that has already won; it must not
@@ -690,7 +785,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // happens after the turn that would have forgotten its claim has ended.
       const isUndo = typeof client === 'string' && client.startsWith('agent-undo:');
 
-      const next = (() => {
+      const decide = (source, ops, guarded) => {
         // A person's write can only conflict with an agent's: another tab of
         // theirs that touched the same id is not a second author.
         const isAgentWrite = typeof client === 'string' && client.startsWith('agent:');
@@ -700,25 +795,92 @@ export async function createDrive(config, { log = console, agentProviders = null
         if (others.length) {
           const merged = mergeOps(source, ops, {
             touchedIds: others,
-            agent: typeof client === 'string' && client.startsWith('agent:') ? client : 'agent',
+            agent: isAgentWrite ? client : 'agent',
           });
           if (merged.forks.length) return { html: merged.source, ops: merged.ops, forks: merged.forks };
         }
         return { html: guarded ?? guardOps(source, ops), ops, forks: [] };
-      })();
+      };
+
+      // The file is read, the batch decided against it, and before the bytes
+      // move the file is checked to still be the one that was read. Something
+      // outside (a tool, an editor, a sync) that rewrote it in between is
+      // taken in, and the batch decided again on top of it — never written
+      // over. Three tries; a file rewritten that often is somebody's loop.
+      const original = ops;
+      let source;
+      let next;
+      let guarded = null;
+      for (let attempt = 1; ; attempt += 1) {
+        let version = await store.version?.(docPath);
+        source = await store.read(docPath);
+        if (source === null) throw Object.assign(new Error(`no document "${docPath}"`), { status: 404 });
+
+        // The file is not what this host last wrote, and the watcher has not got
+        // to it yet: something rewrote it from outside. It is taken in first —
+        // restore point, merge, echo — so this batch lands on top of it rather
+        // than make it look like this host's own write.
+        const known = lastKnown.get(docPath);
+        if (known && known.source !== source) {
+          source = (await absorb(docPath, source)) ?? source;
+          version = await store.version?.(docPath);
+        }
+
+        // A writer that ran the guard itself, to know the batch would land
+        // before saying so, hands on what it got rather than have it worked
+        // out twice (on a large page that is most of a second).
+        ops = original;
+        guarded = null;
+        if (prepare) {
+          let planned;
+          try {
+            planned = await prepare(source);
+          } catch (err) {
+            throw refusalOf(err);
+          }
+          if (planned.refused) {
+            return { applied: 0, refused: planned.refused, bytes: bytesOf(source), sha: shaOf(source) };
+          }
+          ops = planned.ops;
+          if (typeof planned.html === 'string') guarded = planned.html;
+        }
+
+        try {
+          next = decide(source, ops, guarded);
+        } catch (err) {
+          throw refusalOf(err);
+        }
+        if (version === undefined || attempt >= 3 || (await store.version(docPath)) === version) break;
+        log.log(`[drive] ${docPath} changed while a batch was deciding; deciding again on top of it`);
+      }
 
       if (next.html === source) {
         settle(source, source);
-        return { applied: 0, bytes: bytesOf(source), sha: shaOf(source), ops: [], forks: [] };
+        const result = { path: docPath, applied: 0, bytes: bytesOf(source), sha: shaOf(source), ops: [], forks: [] };
+        if (seen) rememberBatch(seen, key, result);
+        return result;
       }
 
-      lastKnown.set(docPath, { source: next.html, client });
+      // Marked before the bytes move, so the watcher's look — which waits its
+      // turn in this queue — knows them for ours whenever it gets there.
       pendingWrites.mark(docPath, shaOf(next.html));
-      const written = await store.write(docPath, next.html, { label: 'ops', ops: next.ops });
-      await oplog.append(docPath, next.ops, { client: client ?? 'anon' });
+      const paced = !startsSession(docPath, client);
+      const written = await store.write(docPath, next.html, { label: 'ops', ops: next.ops, paced });
+      lastKnown.set(docPath, { source: next.html, client });
+      lastWriter.set(docPath, { key: writerKey(client), t: Date.now() });
+      const result = { applied: next.ops.length, ops: next.ops, forks: next.forks, ...written };
+      // Remembered the moment the bytes are down: a retry from here on must be
+      // told, whatever happens to the bookkeeping below.
+      if (seen) rememberBatch(seen, key, result);
+      try {
+        await oplog.append(docPath, next.ops, { client: client ?? 'anon', batch });
+      } catch (err) {
+        // The edit landed; losing its log line must not make it look as if it did not.
+        log.error(`[drive] op log append for ${docPath} failed: ${err.message}`);
+      }
       if (!isUndo) sessionTouched.note(docPath, client, idsOfOps(ops));
       settle(source, next.html);
-      return { applied: next.ops.length, ops: next.ops, forks: next.forks, ...written };
+      return result;
     });
   }
 
@@ -726,6 +888,8 @@ export async function createDrive(config, { log = console, agentProviders = null
    *  through here, so the echo rule lives in one place. */
   async function writeOps(docPath, ops, options = {}) {
     const result = await applyOps(docPath, ops, options);
+    // A replay changed nothing now; everybody heard about it the first time.
+    if (result.replay) return result;
     if (result.applied) {
       const except = result.forks?.length ? null : (options.client ?? null);
       channels.toDocument(docPath, 'changed', {
@@ -770,9 +934,11 @@ export async function createDrive(config, { log = console, agentProviders = null
    *  flattened. Same serialization, same restore point, same echo. */
   async function putDocument(docPath, source, { label, client = null, event = 'created' } = {}) {
     const result = await enqueue(docPath, async () => {
-      lastKnown.set(docPath, { source, client: null });
       pendingWrites.mark(docPath, shaOf(source));
-      return store.write(docPath, source, { label });
+      const written = await store.write(docPath, source, { label });
+      lastKnown.set(docPath, { source, client: null });
+      lastWriter.delete(docPath);
+      return written;
     });
     channels.toDocument(docPath, 'changed', { except: client });
     channels.toDrive(event, { path: docPath }, { except: client });
@@ -1174,10 +1340,30 @@ export async function createDrive(config, { log = console, agentProviders = null
       }
 
       if (route === '/ops' && req.method === 'POST') {
+        // What the answer means, so a page knows what to do with its batch:
+        //   2xx  landed (or had already landed: `replay: true`); keep going
+        //   4xx  refused, and sending it again would be refused again; drop it
+        //   5xx  the host could not take it now; send it again, same batch id
         const docPath = parsePath(url.searchParams.get('app'), { allowRoot: false });
         const client = url.searchParams.get('client');
-        const ops = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
-        if (!Array.isArray(ops)) return json(res, 400, { error: 'expected an array of ops' });
+        // The page's own name for this POST, the same on every retry of it. A
+        // beacon cannot set headers, so the query carries it; the header is for
+        // anything that would rather not.
+        const batch = url.searchParams.get('batch') ?? req.headers['x-marble-batch'] ?? null;
+        if (batch !== null && !BATCH_ID.test(batch)) {
+          return json(res, 422, { error: 'a batch id is 1 to 128 letters, digits, -, _, . or :', reason: 'bad-batch' });
+        }
+        if ((depth.get(docPath) ?? 0) >= OPS_QUEUE_MAX) {
+          return json(res, 503, { error: 'this document has too many saves waiting; try again', reason: 'busy' }, { 'Retry-After': '1' });
+        }
+        let ops;
+        try {
+          ops = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
+        } catch (err) {
+          if (err.status) throw err;
+          return json(res, 422, { error: 'the body is not JSON', reason: 'bad-json' });
+        }
+        if (!Array.isArray(ops)) return json(res, 422, { error: 'expected an array of ops', reason: 'not-a-list' });
 
         // A share link's batch is judged against the document as it is inside
         // the queue, by what its level may change (server/share-policy.js),
@@ -1190,11 +1376,21 @@ export async function createDrive(config, { log = console, agentProviders = null
           : null;
         // The echo is for the other tabs, the other devices, the other people,
         // and the agent — never for whoever filed it.
-        const result = await writeOps(docPath, ops, { client, prepare });
-        if (result.refused) return json(res, 403, { error: result.refused });
+        let result;
+        try {
+          result = await writeOps(docPath, ops, { client, prepare, batch });
+        } catch (err) {
+          const status = opsStatusOf(err);
+          if (status >= 500) log.error(`[drive] POST /ops on ${docPath} failed: ${err.stack ?? err.message}`);
+          return json(res, status, { error: err.message, reason: err.reason ?? (status >= 500 ? 'internal' : 'refused') });
+        }
+        if (result.refused) return json(res, 403, { error: result.refused, reason: 'share-policy' });
+        const replay = result.replay ? { replay: true } : {};
         // An add-only link hears that it landed, and nothing about the page.
-        if (visit?.role === 'drop') return json(res, 200, { ok: true, applied: result.applied });
-        return json(res, 200, { ok: true, ...result });
+        if (visit?.role === 'drop') {
+          return json(res, 200, { ok: true, applied: result.applied, ...replay });
+        }
+        return json(res, 200, { ok: true, ...result, ...replay });
       }
 
       if (route === '/history' && req.method === 'GET') {
@@ -2079,8 +2275,18 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
 
   // ----------------------------------------------------------------- watching
 
-  const watcher = watchDrive(store, async (docPath) => {
-    const current = await store.read(docPath);
+  /** Take in what is on disk for a document, inside its queue. `current` is
+   *  the file as just read. If it is what this host last wrote (or one of its
+   *  own writes the record still holds) nothing happened; otherwise it is an
+   *  edit from outside: a restore point of what it replaced, a merge against
+   *  what people and agents touched, and the echo. Returns what the document
+   *  says afterwards (null when it is gone).
+   *
+   *  Runs only inside `enqueue(docPath, …)` — from the watcher, or from a
+   *  batch that found the file changed under it — so no batch can land
+   *  between its read and its write-back, and its write-back can never
+   *  overwrite one. */
+  async function absorb(docPath, current) {
     const prior = lastKnown.get(docPath);
 
     if (current === null) {
@@ -2090,35 +2296,23 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
         lastKnown.delete(docPath);
         channels.toDrive('removed', { path: docPath });
       }
-      return;
+      return null;
     }
 
     if (prior?.source === current) {
-      // Nothing changed. A save can wake a busy watcher twice with the second
-      // wake landing after the first has settled and used up the write's mark —
-      // macOS does this under load — and the bytes are still the ones this
-      // host knows about. Announcing it would reconcile the tab that made the
-      // save against its own save. An outside edit that leaves the bytes as
-      // they were is not an edit either.
-      return;
+      // Nothing changed — our own save, already announced by the route that
+      // made it, or a second wake for it, or an outside edit that left the
+      // bytes as they were. Any marks up to these bytes are spent.
+      pendingWrites.take(docPath, shaOf(current));
+      return current;
     }
 
     if (pendingWrites.take(docPath, shaOf(current))) {
-      // Our own save, and it has already been announced — synchronously, by the
-      // route that made it, which is both faster than this and certain to
-      // happen. Marble's host broadcasts from here instead, because its write
-      // path does not; doing both is how every other tab hears one edit twice.
-      //
-      // Matched by content rather than by "is this the *last* thing we wrote",
-      // because a document written to fast enough can have a second save start
-      // — and update what "last" means — before this settle check for the
-      // first one ever runs. Comparing against a single slot would call that
-      // race an edit from outside and reconcile the very tab that is still
-      // typing against a version of the file that predates its own keystrokes.
-      //
-      // Nothing is dropped by returning: a rename can wake this watcher several
-      // times for one save, and every one of those wakes is this branch.
-      return;
+      // Bytes this host wrote, though not the last thing it remembers writing
+      // here. Matched by content, with no clock: a host blocked for a minute
+      // still knows its own save (server/pending-writes.js).
+      lastKnown.set(docPath, { source: current, client: prior?.client ?? null });
+      return current;
     }
 
     log.log(`[drive] ${docPath} changed outside the host — patching clients`);
@@ -2150,9 +2344,10 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       // puts a head-only file on disk (seen 2026-09-18). It is a reload.
       const ops = rootRemoved(prior.source, merged.ops) ? null : merged.ops;
       if (merged.source !== current) {
-        lastKnown.set(docPath, { source: merged.source, client: null });
         pendingWrites.mark(docPath, shaOf(merged.source));
         await store.write(docPath, merged.source, { label: 'merge' });
+        lastKnown.set(docPath, { source: merged.source, client: null });
+        lastWriter.delete(docPath);
         await store.thinHistory(docPath).catch(() => {});
         channels.toDocument(docPath, 'changed', { ops });
         channels.toDrive('changed', { path: docPath });
@@ -2164,10 +2359,11 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
             phase: 'writing',
           });
         }
-        return;
+        return merged.source;
       }
 
       lastKnown.set(docPath, { source: current, client: null });
+      lastWriter.delete(docPath);
       await store.thinHistory(docPath).catch(() => {});
       channels.toDocument(docPath, 'changed', { ops: ops?.length ? ops : null });
       channels.toDrive('changed', { path: docPath });
@@ -2180,14 +2376,26 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
           ...(client.startsWith('agent') ? { phase: 'writing' } : {}),
         });
       }
-      return;
+      return current;
     }
 
     lastKnown.set(docPath, { source: current, client: null });
     await store.thinHistory(docPath).catch(() => {});
     channels.toDocument(docPath, 'changed');
     channels.toDrive('created', { path: docPath });
-  });
+    return current;
+  }
+
+  // The watcher's look waits its turn in the document's queue, behind any
+  // batch already there, and reads the file only once it is at the front.
+  const watcher = watchDrive(
+    store,
+    (docPath) =>
+      enqueue(docPath, async () => absorb(docPath, await store.read(docPath))).catch((err) => {
+        log.error(`[drive] taking in a change to ${docPath} from outside failed: ${err.stack ?? err.message}`);
+      }),
+    { onError: (docPath, err) => log.error(`[drive] watching ${docPath} failed: ${err.stack ?? err.message}`) },
+  );
 
   /** What every document said before this host was watching it. Reading the
    *  drive once at boot is what makes "every write is preceded by a snapshot"

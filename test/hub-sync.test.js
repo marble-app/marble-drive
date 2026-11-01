@@ -208,6 +208,25 @@ test('scan also lists each file with its size and mtime', async () => {
   assert.deepEqual(byPath['notes.mrbl'], [18, 1_700_000_000_250]);
 });
 
+test('a sealed op-log segment is an ordinary file: it uploads once, then never differs', async () => {
+  const { createOpLog } = await import('../server/oplog.js');
+  const root = await fixture();
+  const log = createOpLog({ dir: path.join(root, '.marble'), maxBytes: 300 });
+  const edit = (i) => log.append('notes', [{ type: 'setText', id: 'a', text: `edit ${i} ${'x'.repeat(60)}` }], { client: 'tab' });
+  for (let i = 0; i < 4; i += 1) await edit(i);
+  const first = (await scan(root)).byPath;
+  const sealed = Object.keys(first).filter((rel) => /^\.marble\/notes@\d+-\d+\.ops\.jsonl$/.test(rel));
+  assert.ok(sealed.length >= 1, Object.keys(first).join(', '));
+
+  // More edits: the active log changes, the sealed segments do not.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await edit(5);
+  const second = (await scan(root)).byPath;
+  const { differ } = compare(second, first);
+  assert.ok(differ.includes('.marble/notes.ops.jsonl'));
+  for (const rel of sealed) assert.ok(!differ.includes(rel), `${rel} would upload again`);
+});
+
 test('compare: what differs, what is extra, and a 1 ms tolerance on mtimes', () => {
   const want = { a: [1, 1000], b: [2, 2000], c: [3, 3000], d: [4, 4000] };
   const have = { a: [1, 1000], b: [2, 2001], c: [3, 3002], e: [5, 5000], '.marble/agents/host.lock': [1, 1] };

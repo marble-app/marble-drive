@@ -26,7 +26,11 @@ const SETTLE = 80;
 // watches each directory it finds and picks up new ones as they appear.
 const RECURSIVE_SUPPORTED = process.platform === 'darwin' || process.platform === 'win32';
 
-export function watchDrive(store, onChange, { recursiveSupported = RECURSIVE_SUPPORTED } = {}) {
+export function watchDrive(
+  store,
+  onChange,
+  { recursiveSupported = RECURSIVE_SUPPORTED, onError = (docPath, err) => console.error(`[watch] ${docPath}: ${err?.stack ?? err}`) } = {},
+) {
   const root = store._fsWatchRoot();
   const pending = new Map();
   const watchers = new Map();
@@ -47,7 +51,14 @@ export function watchDrive(store, onChange, { recursiveSupported = RECURSIVE_SUP
       docPath,
       setTimeout(() => {
         pending.delete(docPath);
-        if (!closed) Promise.resolve(onChange(docPath)).catch(() => {});
+        // A handler that fails is said, with the document it failed on —
+        // swallowed, a merge that threw left a page silently out of step.
+        if (closed) return;
+        try {
+          Promise.resolve(onChange(docPath)).catch((err) => onError(docPath, err));
+        } catch (err) {
+          onError(docPath, err);
+        }
       }, SETTLE),
     );
   }

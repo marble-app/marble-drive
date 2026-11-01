@@ -365,7 +365,9 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
     let introduced = [];
 
     const options = { client, note };
-    options.prepare = async (source) => {
+    // `again`: the host is deciding this batch a second time, because the
+    // file changed under it (server/app.js applyOps). Counters move once.
+    options.prepare = async (source, { again = false } = {}) => {
       if (signal?.aborted) return { refused: { reason: 'stopped', current: [], stopped: true } };
       // One parse of the document for every question this batch asks of
       // it: tags, hashes, parts, reach.
@@ -408,7 +410,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       }
       // A batch that changes nothing lands nothing: nothing to count or say.
       if (html === source) {
-        if (group) group.done += 1;
+        if (group && !again) group.done += 1;
         return { ops, html };
       }
 
@@ -439,7 +441,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       settleLost(v5, ops);
       if (group) v5.fanout = group;
       const before = groupsOf(v5);
-      if (group) group.done += 1;
+      if (group && !again) group.done += 1;
       const after = groupsOf(v5);
 
       const presence = {

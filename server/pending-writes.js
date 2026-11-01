@@ -1,63 +1,60 @@
 // Answers one question honestly: "is the content now on disk something *we*
 // just put there?" — no matter how many of our own writes to the same
-// document are still in flight at once.
+// document are still in flight at once, and no matter how long the host was
+// too busy to look.
 //
 // The watcher used to ask this by comparing disk content against a single
 // `lastKnown` slot, and that breaks the moment a document is written to fast
 // enough that write B's bookkeeping lands before write A's own rename event
-// has settled: by the time A's (slow) settle check runs, `lastKnown` already
-// holds B's content, the comparison misses, and A's own save gets reported to
-// every open tab — including the one that just made it — as an edit from
-// outside. A save that a person is still typing through is exactly the worst
-// moment for that: the page reconciles itself against a version of the file
-// that predates keystrokes it is still producing.
+// has settled. So instead of one slot, this is a record of the hashes of our
+// own recent writes, per document.
 //
-// So instead of one slot, this is a multiset of hashes we are expecting to
-// see confirmed. Each write registers the hash of what it is about to put on
-// disk; the watcher consumes one matching registration per hash it actually
-// sees. Order between overlapping writes no longer matters, because nothing
-// here is ever overwritten — only added and removed.
+// It used to be a multiset whose entries expired after 5 s. That made "ours"
+// a question about the clock: a batch that held the event loop for longer than
+// 5 s (a merge on a 2 MB page took 54 s) let the mark of the save before it
+// expire, the watcher then read the host's own save, called it an edit from
+// outside, and merged it against every session's edits — forking each edited
+// element into a <marble-alt>. Nothing here expires by time any more. A mark
+// leaves in one of two ways:
+//
+//   - the watcher consumes it, having seen those bytes on disk, and every
+//     older mark of the same document goes with it: writes to one document
+//     are serialized, so once a later write's bytes have been seen, the
+//     earlier ones will never be on disk again as *our* save;
+//   - it is pushed out by newer marks once a document has KEEP of them.
 
-const TTL = 5000; // long enough for any real write to settle; short enough
-                   // that a filesystem event a watcher never saw doesn't sit
-                   // here forever, shadowing a later, unrelated coincidence.
+const KEEP = 32;
 
-export function createPendingWrites({ ttl = TTL } = {}) {
-  const perDoc = new Map(); // docPath -> Map<hash, Timeout[]>
+export function createPendingWrites({ keep = KEEP } = {}) {
+  const perDoc = new Map(); // docPath -> hash[] (oldest first)
 
   /** Register a write we are about to make. Call this before the bytes move. */
   function mark(docPath, hash) {
-    if (!perDoc.has(docPath)) perDoc.set(docPath, new Map());
+    if (!perDoc.has(docPath)) perDoc.set(docPath, []);
     const hashes = perDoc.get(docPath);
-    if (!hashes.has(hash)) hashes.set(hash, []);
-    const bucket = hashes.get(hash);
-
-    const timer = setTimeout(() => {
-      const at = bucket.indexOf(timer);
-      if (at >= 0) bucket.splice(at, 1);
-      if (bucket.length === 0) {
-        hashes.delete(hash);
-        if (hashes.size === 0) perDoc.delete(docPath);
-      }
-    }, ttl);
-    timer.unref?.();
-    bucket.push(timer);
+    hashes.push(hash);
+    if (hashes.length > keep) hashes.splice(0, hashes.length - keep);
   }
 
-  /** Is this hash one of ours? Consumes exactly one matching registration if
-   *  so — a second write that happens to produce identical bytes is still
-   *  accounted for on its own. */
+  /** Is this hash one of ours? Consumes the oldest matching mark, and every
+   *  older one with it (they are superseded: writes to one document are
+   *  serialized). A second write that produced identical bytes and has not
+   *  been seen yet is newer, so it stays for its own event. */
   function take(docPath, hash) {
-    const bucket = perDoc.get(docPath)?.get(hash);
-    if (!bucket?.length) return false;
-    clearTimeout(bucket.shift());
-    if (bucket.length === 0) {
-      const hashes = perDoc.get(docPath);
-      hashes.delete(hash);
-      if (hashes.size === 0) perDoc.delete(docPath);
-    }
+    const hashes = perDoc.get(docPath);
+    if (!hashes) return false;
+    const at = hashes.indexOf(hash);
+    if (at < 0) return false;
+    hashes.splice(0, at + 1);
+    if (hashes.length === 0) perDoc.delete(docPath);
     return true;
   }
+
+  /** Is this hash one of ours, without consuming anything. */
+  const has = (docPath, hash) => Boolean(perDoc.get(docPath)?.includes(hash));
+
+  /** How many marks a document holds; for tests. */
+  const size = (docPath) => perDoc.get(docPath)?.length ?? 0;
 
   /** A document's identity is its path, and a move changes it — so a mark
    *  registered under the old path has to follow, the same way `lastKnown`
@@ -71,5 +68,5 @@ export function createPendingWrites({ ttl = TTL } = {}) {
     perDoc.delete(from);
   }
 
-  return { mark, take, move };
+  return { mark, take, has, size, move };
 }

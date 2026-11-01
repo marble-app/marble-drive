@@ -330,7 +330,9 @@ test('a first build takes the prompt, plans, builds, names the app and suggests 
   const moved = await until(async () => {
     if (!(await drive.store.has('CHI reviews'))) return null;
     const s = await state('CHI reviews');
-    return s?.builds?.[0]?.hasEnd ? s : null;
+    // The rename retitles the document and then records that as the build's
+    // end (settleEnd): wait for both, not the first end alone.
+    return s?.builds?.[0]?.hasEnd && s.builds[0].showing ? s : null;
   });
   const b1 = moved.builds[0];
   assert.equal(b1.status, 'finished');

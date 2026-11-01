@@ -320,7 +320,10 @@ test('an agent edits a document through the bridge, and the open tab hears it', 
   assert.ok(presence.some((p) => p.phase === 'reading' || p.phase === 'working'), 'the turn announced itself before the write');
 });
 
-const freshOrchard = () => drive.store.write('orchard', SOURCE.replace('Garden', 'Orchard'), { label: 'test' });
+// Reset through the host, so it knows the document's new state. A raw
+// store.write is an edit from outside, and the next batch takes it in first
+// (merging it against what was touched earlier) before landing on top.
+const freshOrchard = () => drive.createDocument('orchard', SOURCE.replace('Garden', 'Orchard'), { label: 'test' });
 
 const personWrites = (ops, client = 'you') =>
   fetch(`${base}/ops?app=orchard&client=${client}`, {
@@ -602,6 +605,10 @@ test('a document changed outside Marble during a turn is flagged, with a way bac
   const { body } = await finished(running.conversationId, running.turnId);
   const flagged = body.events.find((e) => e.type === 'watchdog');
   assert.ok(flagged, 'the turn was flagged');
+  // The document as the turn found it is a restore point of its own: ops
+  // writes are paced, so undo cannot count on the first write keeping one.
+  const points = await drive.store.history('watched');
+  assert.ok(points.some((p) => p.label === 'turn-start' || p.sha === flagged.sha), 'a restore point from before the turn');
   assert.equal(flagged.path, 'watched');
   assert.equal(body.meta.lastOutcome, 'watchdog');
   assert.equal(body.meta.needsReview, true);
