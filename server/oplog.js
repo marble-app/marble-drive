@@ -41,18 +41,62 @@ export function sealedName(name, key) {
   return m ? { first: Number(m[1]), last: Number(m[2]) } : null;
 }
 
-const parseLines = (text) => {
+const CHUNK = 1024 * 1024;
+
+/** Lines from the end of a file, newest first, read backwards a chunk at a
+ *  time: stops at `want` lines, at a line no later than `after`, or once
+ *  `maxBytes` have been read. A 300 MB log written before segments existed
+ *  costs what is asked of it. Splits on the newline byte, which never occurs
+ *  inside a multi-byte UTF-8 character. */
+export async function tailLines(file, { want = Infinity, after = 0, maxBytes = Infinity } = {}) {
+  const handle = await fsp.open(file, 'r').catch(() => null);
+  if (!handle) return [];
   const out = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      out.push(JSON.parse(line));
-    } catch {
-      // A truncated last line is what an interrupted append looks like.
+  try {
+    const { size } = await handle.stat();
+    const floor = Number.isFinite(maxBytes) ? Math.max(0, size - maxBytes) : 0;
+    let pos = size;
+    let carry = Buffer.alloc(0);
+    while (pos > floor && out.length < want) {
+      const len = Math.min(CHUNK, pos - floor);
+      pos -= len;
+      const buf = Buffer.alloc(len);
+      await handle.read(buf, 0, len, pos);
+      let data = carry.length ? Buffer.concat([buf, carry]) : buf;
+      // Unless this chunk starts the file (or the window), its first line is
+      // only the end of one: kept for the next read back.
+      let start = 0;
+      if (pos > floor) {
+        start = data.indexOf(10) + 1;
+        if (start === 0) {
+          carry = data;
+          continue;
+        }
+        carry = data.subarray(0, start - 1);
+      } else {
+        carry = Buffer.alloc(0);
+        // A window cut mid-line starts with a fragment; JSON.parse drops it.
+      }
+      const lines = data.subarray(start).toString('utf8').split('\n');
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        if (!lines[i].trim()) continue;
+        let entry;
+        try {
+          entry = JSON.parse(lines[i]);
+        } catch {
+          continue; // a truncated line: an interrupted append, or the window's edge
+        }
+        if (entry.t <= after) return out;
+        out.push(entry);
+        if (out.length >= want) return out;
+      }
+      data = null;
     }
+    return out;
+  } finally {
+    await handle.close();
   }
-  return out;
-};
+}
 
 export function createOpLog({ dir, maxBytes = null }) {
   // Per client, in this process. A client that reconnects starts again at 1 and
@@ -154,37 +198,33 @@ export function createOpLog({ dir, maxBytes = null }) {
   }
 
   /** The tail of the log, oldest first. Reads the active segment, then sealed
-   *  ones newest first, and stops as soon as it has `limit` lines after `after`
-   *  — so a long-lived document's history costs what is asked for, not its
-   *  whole life. Its reader today is build mode's History (server/build). */
+   *  ones newest first, each from its end, and stops as soon as it has `limit`
+   *  lines after `after` — so a long-lived document's history costs what is
+   *  asked for, not its whole life. Its reader today is build mode's History
+   *  (server/build). */
   async function since(docPath, { after = 0, limit: want = 500 } = {}) {
     const clean = parsePath(docPath, { allowRoot: false });
-    const chunks = [];
-    let count = 0;
-    const take = (lines) => {
-      const kept = lines.filter((entry) => entry.t > after);
-      chunks.unshift(kept);
-      count += kept.length;
-    };
-    take(parseLines(await fsp.readFile(activeFile(clean), 'utf8').catch(() => '')));
-    if (count < want) {
+    const newest = await tailLines(activeFile(clean), { want, after });
+    if (newest.length < want) {
       for (const segment of await segments(clean)) {
         if (segment.last <= after) break;
-        take(parseLines(await fsp.readFile(segment.file, 'utf8').catch(() => '')));
-        if (count >= want) break;
+        newest.push(...(await tailLines(segment.file, { want: want - newest.length, after })));
+        if (newest.length >= want) break;
       }
     }
-    return chunks.flat().slice(-want);
+    return newest.reverse();
   }
 
-  /** The batch ids in the active segment, oldest first, with how many ops each
-   *  filed — what a restart rebuilds its "already landed" set from. */
+  /** The batch ids in the active segment, with how many ops each filed and
+   *  who filed it — what a restart rebuilds its "already landed" set from.
+   *  Only the last segment's worth of bytes is read: a log from before
+   *  segments existed holds no batch ids, and may be hundreds of MB. */
   async function batches(docPath) {
     const clean = parsePath(docPath, { allowRoot: false });
-    const text = await fsp.readFile(activeFile(clean), 'utf8').catch(() => '');
     const out = new Map();
-    if (!text.includes('"batch":')) return out;
-    for (const entry of parseLines(text)) {
+    const lines = await tailLines(activeFile(clean), { maxBytes: limit() });
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const entry = lines[i];
       if (typeof entry.batch !== 'string') continue;
       const seen = out.get(entry.batch);
       if (seen) seen.applied += 1;

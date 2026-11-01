@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { compareOps, createOpLog } from '../server/oplog.js';
+import { compareOps, createOpLog, tailLines } from '../server/oplog.js';
 
 const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-ops-'));
 const log = createOpLog({ dir });
@@ -139,6 +139,34 @@ test('the segment size comes from MARBLE_OPLOG_SEGMENT_BYTES', async () => {
   } finally {
     if (was === undefined) delete process.env.MARBLE_OPLOG_SEGMENT_BYTES;
     else process.env.MARBLE_OPLOG_SEGMENT_BYTES = was;
+    await fsp.rm(own, { recursive: true, force: true });
+  }
+});
+
+test('the tail is read backwards across chunk edges and multi-byte characters', async () => {
+  const own = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-ops-tail-'));
+  try {
+    const file = path.join(own, 'big.ops.jsonl');
+    // ~1.6 MB, so the 1 MB chunks split lines and characters.
+    const text = '— café ✓ '.repeat(40);
+    const lines = Array.from({ length: 3000 }, (_, i) => JSON.stringify({ t: 1000 + i, doc: 'big', client: 'c', seq: i + 1, type: 'setText', id: `n${i}`, text }));
+    await fsp.writeFile(file, `${lines.join('\n')}\n`);
+    const all = await tailLines(file);
+    assert.equal(all.length, 3000);
+    assert.deepEqual(all.map((l) => l.seq), Array.from({ length: 3000 }, (_, i) => 3000 - i));
+    assert.ok(all.every((l) => l.text === text));
+    assert.deepEqual((await tailLines(file, { want: 3 })).map((l) => l.seq), [3000, 2999, 2998]);
+    assert.equal((await tailLines(file, { after: 1000 + 2989 })).length, 10);
+    // A byte window: only whole lines inside it.
+    const windowed = await tailLines(file, { maxBytes: 5000 });
+    assert.ok(windowed.length > 0 && windowed.length < 20);
+    assert.equal(windowed[0].seq, 3000);
+
+    // since() on an old log that size, asked for its tail, reads only the tail.
+    const log = createOpLog({ dir: own });
+    const tail = await log.since('big', { limit: 4 });
+    assert.deepEqual(tail.map((l) => l.seq), [2997, 2998, 2999, 3000]);
+  } finally {
     await fsp.rm(own, { recursive: true, force: true });
   }
 });
