@@ -522,3 +522,31 @@ test('the idle sweep closes a stream over the socket as it closes an EventSource
   await drive.close();
   ({ drive, port, base } = await boot());
 });
+
+test('a version follows its document when it moves', async () => {
+  await drive.createDocument('v-move', SOURCE, { label: 'test' });
+  await post('v-move', [text('p1', 'moved')], { base: 1 });
+  const res = await fetch(`${base}/drive/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'v-move', to: 'v-moved' }) });
+  assert.equal(res.status, 200);
+  // The rename retitles the page: a batch of its own.
+  assert.equal(await drive.versions.current('v-moved'), 3);
+  assert.equal((await post('v-moved', [text('p2', 'after the move')], { base: 3 })).body.v, 4);
+  assert.equal(await drive.versions.current('v-move'), 0, 'nothing left under the old name');
+});
+
+test('a page ahead of the host (its log lost a line) is gone on from, never handed a version twice', async () => {
+  await drive.createDocument('v-ahead', SOURCE, { label: 'test' });
+  const res = await post('v-ahead', [text('p1', 'ahead')], { client: 'a', base: 4 });
+  assert.equal(res.body.v, 5);
+  assert.deepEqual(await (await fetch(`${base}/ops?app=v-ahead&since=2`)).json(), { v: 5, reset: true }, 'the versions skipped cannot be replayed');
+  assert.equal((await post('v-ahead', [text('p1', 'way ahead')], { client: 'a', base: 999_999 })).body.v, 6, 'but not past all reason');
+});
+
+test('fixes: a forked element is answered under its own id with its whole wrapper, outermost only; a gone one is empty', async () => {
+  const { fixesOf } = await import('../server/rebase.js');
+  const { openDocument } = await import('../server/engine.js');
+  const doc = openDocument(`<!doctype html><html><head></head><body data-marble-id="b"><div data-marble-id="d"><marble-alt data-marble-id="w"><p data-marble-id="x">a</p><p data-marble-id="y">b</p></marble-alt></div><p data-marble-id="z">z</p></body></html>`);
+  assert.deepEqual(fixesOf(doc, [], [{ id: 'x', wrapper: 'w' }]), [{ id: 'x', html: '<marble-alt data-marble-id="w"><p data-marble-id="x">a</p><p data-marble-id="y">b</p></marble-alt>' }]);
+  assert.deepEqual(fixesOf(doc, ['d', 'y'], [{ id: 'x', wrapper: 'w' }]).map((f) => f.id), ['d'], 'inside d, so d says it');
+  assert.deepEqual(fixesOf(doc, ['gone', 'z'], []), [{ id: 'gone', html: '' }, { id: 'z', html: '<p data-marble-id="z">z</p>' }]);
+});

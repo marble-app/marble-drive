@@ -161,16 +161,35 @@ export function createVersions({ oplog, log = console, ringBatches = null, ringB
     return { v, batches };
   }
 
-  /** A document moved: its versions follow the name. */
+  /** A document or folder moved: the versions of what it held follow the
+   *  name, as their op logs do. */
   function move(from, to) {
-    if (!docs.has(from)) return;
-    docs.set(to, docs.get(from));
-    docs.delete(from);
+    for (const key of [...docs.keys()]) {
+      const moved = key === from ? to : key.startsWith(`${from}/`) ? to + key.slice(from.length) : null;
+      if (moved === null) continue;
+      docs.set(moved, docs.get(key));
+      docs.delete(key);
+    }
+  }
+
+  /** A batch says it was made on a version this host has not reached: its
+   *  versions went back (a log line lost in a crash, a restore of `.marble`
+   *  from a backup). The version goes on from the page's, so no version is
+   *  ever handed out twice; nothing is kept for the ones skipped, so catch-up
+   *  across them is a reset. */
+  function reach(state, base) {
+    // Far past it is not a lost line but a page that is wrong: ignored.
+    if (!Number.isInteger(base) || base <= state.v || base - state.v > 10_000) return false;
+    state.v = base;
+    state.floor = base;
+    state.ring = [];
+    state.ringBytes = 0;
+    return true;
   }
 
   /** A document is gone: forget what is kept in memory (its log stays, so a
    *  document made again at this name goes on from its last version). */
   const forget = (docPath) => docs.delete(docPath);
 
-  return { stateOf, current, peek, landed, concurrentFor, since, move, forget, byOf };
+  return { stateOf, current, peek, landed, concurrentFor, since, move, reach, forget, byOf };
 }

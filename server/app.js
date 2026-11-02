@@ -718,6 +718,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       }
     }
     oplog.move(moved.from, moved.to);
+    versions.move(moved.from, moved.to);
     // A rename is the person naming the document, so the tab says the
     // new name too. A move that kept the name leaves the title alone.
     if (moved.kind === 'doc' && splitPath(moved.from).name !== splitPath(moved.to).name) {
@@ -806,9 +807,24 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   /** The engine for a document's bytes: the one kept open since the last
    *  batch when it still holds exactly these bytes, else a new one. */
+  //
+  // An open engine holds its document's index, several times the bytes, so
+  // only the most recently written are kept open: ENGINE_CHARS of documents
+  // at most (the newest always). The rest are opened again when written.
+  const ENGINE_CHARS = 32_000_000;
+  const engines = new Map(); // state → chars, oldest first
   const engineFor = (state, source) => {
-    if (state.doc && state.doc.source === source) return state.doc;
-    state.doc = openDocument(source);
+    if (!(state.doc && state.doc.source === source)) state.doc = openDocument(source);
+    engines.delete(state);
+    engines.set(state, source.length);
+    let chars = 0;
+    for (const n of engines.values()) chars += n;
+    for (const [old, n] of engines) {
+      if (engines.size <= 1 || chars <= ENGINE_CHARS) break;
+      engines.delete(old);
+      chars -= n;
+      if (old !== state) old.doc = null;
+    }
     return state.doc;
   };
 
@@ -866,6 +882,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       const who = client ?? 'anon';
       const by = byOf(who);
       const state = await versions.stateOf(docPath);
+      // A page ahead of this host (its log lost a line): go on from there.
+      if (versions.reach(state, base)) log.error(`[drive] ${docPath}: a batch was made on v${base}, past this host's own; going on from it`);
 
       // The file is read (unless it is still the bytes this host last wrote,
       // which the open engine holds), the batch decided against it, and before
