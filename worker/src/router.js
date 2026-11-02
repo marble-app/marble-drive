@@ -300,6 +300,12 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now(),
     return resting(request);
   }
   if (UNREACHABLE.has(res.status)) return away(home);
+  // A tab's one socket (GET /sync/ws, server/socket.js): the upgrade went
+  // through whole (its Upgrade and Sec-WebSocket-* headers are the browser's)
+  // and the drive's 101 comes back as it is, its socket with it. A Response
+  // made anew would drop the socket, so a renewed pass waits for the tab's
+  // next ordinary request.
+  if (res.status === 101 || res.webSocket) return res;
   if (!renew) return res;
   const renewed = new Response(res.body, res);
   renewed.headers.append('set-cookie', renew);

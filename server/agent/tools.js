@@ -4,22 +4,24 @@
 // bridge, so the rules below are the rules whichever model is running:
 //
 //   - reads are free, and remembered: each element whose full source an agent
-//     was shown is recorded as a hash in this conversation's ledger;
-//   - an edit to an element is only accepted if the element is still what the
-//     ledger says. Otherwise the batch is refused with the element's current
-//     source, which is itself a read, so the retry can succeed. A person's own
-//     ops never carry a precondition — they own what they are typing in;
+//     was shown is recorded in this conversation's ledger, and the version of
+//     the document it read is recorded too (its base);
+//   - an edit names that base, and the host rebases it over whatever other
+//     writers changed since (server/rebase.js): words merge, an element both
+//     changed is kept both ways (forked) rather than either being lost, and an
+//     op whose target somebody removed is dropped — the answer says which. An
+//     edit is only refused when it touches an element the agent never read;
 //   - the check, the undo record and the write all happen inside the
 //     document's queue (`prepare`/`after`), so nothing lands in between.
 //
-// The ledger lives in memory. A host restart forgets it, which costs an agent
-// one refusal-and-retry per element, and is the honest answer: after a restart
-// nobody knows what the agent last saw.
+// The ledger and the bases live in memory. A host restart forgets them, which
+// costs an agent one "read it first" per element, and is the honest answer:
+// after a restart nobody knows what the agent last saw.
 
 import fsp from 'node:fs/promises';
 
 import { collectSlices, guardOps, idsOfOps, OP, repairOps, validateOps } from '../engine.js';
-import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut, targetsOf } from '../change/fanout.js';
+import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut } from '../change/fanout.js';
 import { anchorsOf, MARKS_MAX, marksOf, mergeMarks, PLACES, SHAPES, STATES } from '../change/marks.js';
 import { partsOf, parseStep } from '../change/parts.js';
 import { markFor } from '../favicon.js';
@@ -99,8 +101,10 @@ export const TOOL_SCHEMAS = [
     name: 'apply_ops',
     description:
       'Change a document with Marble ops (setText, setInner, setAttr, insert, move, remove) addressed by data-marble-id. ' +
-      'At most 24 ops per call. If an element changed since you read it, nothing applies and you get its current source: ' +
-      'rebuild your edit against that and call again. Inserted elements get ids minted for you. ' +
+      'At most 24 ops per call. Edits are made on the version you last read: if someone changed the same element since, ' +
+      'words are merged, a clash keeps both versions side by side (forked), and an op on something removed is dropped; ' +
+      'the answer lists what merged, forked or was dropped, with the current source of what merged or forked. ' +
+      'Inserted elements get ids minted for you. ' +
       'With no ops, reach, total and marks are drawn ahead of the first edit, and nothing is written. ' +
       'Example op: {"type":"setText","id":"h1","text":"New title"}.',
     inputSchema: {
@@ -285,9 +289,43 @@ export const TOOL_SCHEMAS = [
 // names them by the attribute it wrote, not by where they are kept.
 const STATE_KINDS = new Set(['toggle', 'choose', 'expand', 'step', 'note']);
 
-export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null, building = null, exec, side = null, log = console }) {
+export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null, building = null, exec, side = null, snapshot = null, log = console }) {
   // conversationId → docPath → Map<id, hash>
   const ledgers = new Map();
+  // conversationId → docPath → { read, wrote, start }: the versions this
+  // conversation read the document at, last wrote it at with its own file
+  // tools (an outside write the watcher took in), and found it at when its
+  // turn began.
+  const bases = new Map();
+  const baseEntry = (conversationId, docPath) => {
+    if (!bases.has(conversationId)) bases.set(conversationId, new Map());
+    const docs = bases.get(conversationId);
+    if (!docs.has(docPath)) docs.set(docPath, {});
+    return docs.get(docPath);
+  };
+  const note = (conversationId, docPath, kind, v) => {
+    if (!conversationId || !Number.isInteger(v)) return;
+    baseEntry(conversationId, docPath)[kind] = v;
+  };
+  /** The base of an apply_ops: the version the agent last read. */
+  const readBase = (conversationId, docPath) => {
+    const entry = bases.get(conversationId)?.get(docPath);
+    return entry?.read ?? entry?.start ?? null;
+  };
+  /** The base of a file-tool write: the newest of what it read, wrote, or
+   *  found when its turn began — it has seen at least that much. */
+  const fileBase = (conversationId, docPath) => {
+    const entry = bases.get(conversationId)?.get(docPath);
+    const known = [entry?.read, entry?.wrote, entry?.start].filter(Number.isInteger);
+    return known.length ? Math.max(...known) : null;
+  };
+
+  /** A document's bytes and the version they are. */
+  const snap = async (docPath) => {
+    if (snapshot) return snapshot(docPath);
+    const source = await store.read(docPath);
+    return source === null ? null : { source, v: null };
+  };
 
   const ledgerFor = (conversationId, docPath) => {
     if (!ledgers.has(conversationId)) ledgers.set(conversationId, new Map());
@@ -359,12 +397,15 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
    * `signal`: a batch still waiting in the queue when it aborts is refused.
    * `group`: the fan out this batch is one landed group of.
    */
-  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, marks = null, signal = null, group = null }) {
+  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, marks = null, signal = null, group = null, base = null }) {
     const client = `agent:${turn.conversationId}`;
     let steps = null;
     let introduced = [];
+    // Ops on elements the writer saw that are gone since: not a refusal of
+    // the rest, but dropped, and said (`removed`), with what they were.
+    let gone = [];
 
-    const options = { client, note };
+    const options = { client, note, base };
     // `again`: the host is deciding this batch a second time, because the
     // file changed under it (server/app.js applyOps). Counters move once.
     options.prepare = async (source, { again = false } = {}) => {
@@ -372,32 +413,39 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       // One parse of the document for every question this batch asks of
       // it: tags, hashes, parts, reach.
       const doc = indexOf(source);
+      // An op aimed at an element the writer saw that somebody has removed
+      // since is dropped (the host would drop it too) and said; a `before`
+      // sibling that went means the end of the parent instead.
+      gone = [];
+      const list = Array.isArray(given) ? given : [];
+      const live = [];
+      list.forEach((op, index) => {
+        const missing = [op?.id, op?.parentId].filter((id) => typeof id === 'string' && id && known.has(id) && !doc.has(id));
+        if (missing.length) gone.push({ index, op: op?.type ?? null, id: missing[0], reason: 'removed' });
+        else if (op?.beforeId && known.has(op.beforeId) && !doc.has(op.beforeId)) live.push({ ...op, beforeId: null });
+        else live.push(op);
+      });
+      if (list.length && !live.length) return { ops: [], html: source };
       let ops;
       try {
         // repairOps only knows a setInner payload's own tag — and so only
         // mints ids into markup it is confident is markup — when it is
         // handed the same slices validateOps checks against.
         const slices = doc.tags();
-        ops = repairOps(given, source, { slices }).ops;
+        ops = repairOps(live, source, { slices }).ops;
         ops = validateOps(ops, source, { slices, innerLimit: INNER_LIMIT });
       } catch (err) {
-        // An element the writer saw that has gone since is a change under
-        // it, whatever the check that tripped over its absence.
-        const gone = (Array.isArray(given) ? given : []).flatMap(targetsOf).filter((id) => known.has(id) && !doc.has(id));
-        if (gone.length) return { refused: refusal(source, { stale: [], unread: [], gone: [...new Set(gone)], error: err.message }) };
         return { refused: { reason: err.message, current: [] } };
       }
 
-      const current = doc.hashes();
+      // Only an element the writer has read may be changed. Whether it has
+      // changed since is the host's to settle, by version (server/rebase.js).
       const unread = [];
-      const stale = [];
       for (const op of ops) {
         if (op.type === 'insert' || !op.id) continue;
-        const seen = known.get(op.id);
-        if (seen === undefined) unread.push(op.id);
-        else if (seen !== current.get(op.id)) stale.push(op.id);
+        if (!known.has(op.id)) unread.push(op.id);
       }
-      if (stale.length || unread.length) return { refused: refusal(source, { stale, unread, gone: [] }) };
+      if (unread.length) return { refused: refusal(source, { stale: [], unread, gone: [] }) };
 
       // The write's own check, run here so that a batch it would refuse is
       // refused before anything is counted or said; the write uses its
@@ -488,7 +536,37 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       turn.undo.push({ path: docPath, steps });
       turn.onEvent({ type: 'ops.applied', path: docPath, count: result.applied });
     }
-    return { applied: result.applied, introduced };
+    return { applied: result.applied, introduced, v: result.v, settled: settledOf(result, gone) };
+  }
+
+  /** What the host made of a batch beyond applying it as sent: words merged
+   *  with someone else's, elements kept both ways, ops dropped — each with
+   *  the element as it now is, so the agent's next edit starts from it. */
+  function settledOf(result, gone = []) {
+    const out = {};
+    const forks = (result.forks ?? []).map((f) => (typeof f === 'string' ? { id: f } : f));
+    const forked = new Set(forks.map((f) => f.id));
+    const fixes = result.fixes ?? [];
+    let budget = REFUSAL_BUDGET;
+    const shown = (fix) => {
+      if (!fix?.html || fix.html.length > budget) return undefined;
+      budget -= fix.html.length;
+      return fix.html;
+    };
+    if (forks.length) {
+      out.forked = forks.map((f) => ({
+        id: f.id,
+        ...(f.wrapper ? { wrapper: f.wrapper } : {}),
+        html: shown(fixes.find((fix) => fix.id === f.id)),
+      }));
+      out.forkNote = 'Someone else changed these since you read them, so both versions are kept side by side in a <marble-alt> for the person to choose. Leave the choice to them.';
+    }
+    const merged = fixes.filter((fix) => !forked.has(fix.id));
+    if (merged.length) out.merged = merged.map((fix) => ({ id: fix.id, html: shown(fix) }));
+    const dropped = [...gone, ...(result.dropped ?? []).map((d) => ({ index: d.index, reason: d.reason, ...(d.id ? { id: d.id } : {}) }))];
+    if (dropped.length) out.dropped = dropped;
+    if (result.stale) out.stale = 'Your read of this document is too old to merge against, so these edits were applied as if made on the current version. Read it again before editing more.';
+    return Object.keys(out).length ? out : undefined;
   }
 
   /** A step's reach, the size of the change and its marks, said ahead of
@@ -521,9 +599,9 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
 
   const readable = async (input) => {
     const docPath = parsePath(String(input.path ?? ''), { allowRoot: false });
-    const source = await store.read(docPath);
-    if (source === null) throw new Error(`no document "${docPath}"`);
-    return { docPath, source };
+    const shot = await snap(docPath);
+    if (!shot || shot.source === null) throw new Error(`no document "${docPath}"`);
+    return { docPath, source: shot.source, v: shot.v };
   };
 
   const handlers = {
@@ -536,7 +614,9 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
     },
 
     async read_document(input, turn) {
-      const { docPath, source } = await readable(input);
+      const { docPath, source, v } = await readable(input);
+      // What it read is the version its next edit is made on.
+      if (!turn.quiet) note(turn.conversationId, docPath, 'read', v);
       // A reader that is not a turn (server/connector) has nothing to edit
       // with and no end to clear its look, so it is not remembered or drawn.
       const ledger = turn.quiet ? new Map() : ledgerFor(turn.conversationId, docPath);
@@ -582,6 +662,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         note: input.note,
         known: ledger,
         learn: ledger,
+        base: readBase(turn.conversationId, docPath),
         total: input.total,
         reach: input.reach,
         marks: input.marks,
@@ -589,9 +670,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
           // Gone since it was read: what the checks said, as before.
           if (gone.length) return { reason: error, current: [] };
           const blocked = [...new Set([...stale, ...unread])];
-          const reason = stale.length
-            ? `${stale.map((id) => `"${id}"`).join(', ')} changed since you read ${stale.length === 1 ? 'it' : 'them'} — nothing was applied. Here is the current source; rebuild the edit against it.`
-            : `read ${unread.map((id) => `"${id}"`).join(', ')} before editing — nothing was applied. Here is the current source.`;
+          const reason = `read ${unread.map((id) => `"${id}"`).join(', ')} before editing — nothing was applied. Here is the current source.`;
           const shown = collectSlices(source, blocked, { budget: REFUSAL_BUDGET });
           // The refusal is a read of what it shows in full, and only that: an
           // element cut to an outline, or left out for budget, is still unread.
@@ -600,7 +679,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         },
       });
       if (landed.refused) return { refused: true, ...landed.refused };
-      return { applied: landed.applied, introduced: landed.introduced };
+      return { applied: landed.applied, introduced: landed.introduced, ...(landed.settled ? landed.settled : {}) };
     },
 
     // Many parts that each need their own judgment (server/change/fanout.js):
@@ -614,8 +693,12 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       if (!turn.writable.has(docPath)) {
         return { error: `"${docPath}" is not writable in this turn — the target is "${turn.target}"` };
       }
-      const source = await store.read(docPath);
-      if (source === null) return { error: `no document "${docPath}"` };
+      const shot = await snap(docPath);
+      if (!shot || shot.source === null) return { error: `no document "${docPath}"` };
+      const { source } = shot;
+      // Every worker is shown the document as it is now: their edits are made
+      // on this version.
+      const fanBase = Number.isInteger(shot.v) ? shot.v : null;
       const client = `agent:${turn.conversationId}`;
       const note = String(input.note ?? '').trim() || 'Change each part.';
       const step = parseStep(note);
@@ -659,12 +742,13 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
             reach: all,
             signal,
             group: fan,
+            base: fanBase,
             refusal: (_source, { stale, gone }) => ({
               reason: stale.length || gone.length ? 'changed while it worked' : 'edited a part it was not shown whole',
               current: [],
             }),
           });
-          return landed.refused ? { error: landed.refused.reason } : { applied: landed.applied };
+          return landed.refused ? { error: landed.refused.reason } : { applied: landed.applied, ...(landed.settled ? { settled: landed.settled } : {}) };
         },
         onFailed: (_k, ids, _error, { inside }) => {
           const v5 = tallyOf(turn);
@@ -784,6 +868,16 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
   return {
     schemas: TOOL_SCHEMAS,
     call,
-    forget: (conversationId) => ledgers.delete(conversationId),
+    forget: (conversationId) => {
+      ledgers.delete(conversationId);
+      bases.delete(conversationId);
+    },
+    /** A turn began on this document at this version. */
+    noteStart: (conversationId, docPath, v) => note(conversationId, docPath, 'start', v),
+    /** This conversation's own file write landed as this version. */
+    noteWrote: (conversationId, docPath, v) => note(conversationId, docPath, 'wrote', v),
+    /** The base of this conversation's file-tool write (server/app.js, absorb). */
+    fileBase,
+    readBase,
   };
 }

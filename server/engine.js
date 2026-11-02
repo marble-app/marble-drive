@@ -39,7 +39,7 @@ const [patcher, guard, history, ops, intent, providers, scaffold, doctor, collab
  *  served to a browser or spliced into a new document as text. */
 export const enginePath = (relative) => fileURLToPath(new URL(relative, ROOT)); // decoded: the Mac's app folder has a space in it
 
-export const { applyOp, applyOps, indexIds, knownIds, parseSource, sliceOf } = patcher;
+export const { applyOp, applyOps, indexIds, knownIds, openDocument, parseSource, sliceOf } = patcher;
 export const { guardOps } = guard;
 export const {
   bytesOf,

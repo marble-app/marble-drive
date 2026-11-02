@@ -13,6 +13,10 @@
 // a second tab, or a job started from a terminal all look the same.
 
 (() => {
+  // A live stream on the tab's one socket. runtime/tab-rest.js stands in for
+  // EventSource on every drive page and rides `marble.stream` underneath,
+  // resting with the tab; without it, the carrier's stream; else native.
+  const liveStream = (url) => (window.marbleTabRest ? new EventSource(url) : window.marble?.stream?.(url) ?? new EventSource(url));
   const mount = document.querySelector('main[data-console]');
   if (!mount || window.marbleConsoleReady) return;
   // Only a flag and a redraw, for tests: the page keeps its state to itself.
@@ -2690,7 +2694,7 @@
     paint();
   }
 
-  const events = new EventSource('/console/api/events');
+  const events = liveStream('/console/api/events');
   events.onopen = () => {
     S.live = 'on';
     paint();

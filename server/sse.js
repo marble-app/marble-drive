@@ -49,6 +49,15 @@ export function forVisitor(frame) {
   return rest;
 }
 
+/** What a versioned listener hears for a whole-document batch (see `toBatch`). */
+export const RESET_FRAME = 'data: changed\n\n';
+
+/** A batch as an SSE frame (see `toBatch`). */
+export function batchFrame({ v, client = 'anon', batch = null, ops = [], by = 'person', reset = false }) {
+  const body = { v, client, batch, ops: reset ? [] : ops ?? [], by, ...(reset ? { reset: true } : {}) };
+  return `id: ${v}\nevent: batch\ndata: ${JSON.stringify(body)}\n\n`;
+}
+
 export function createChannels() {
   const perDoc = new Map();
   const drive = new Set();
@@ -79,18 +88,42 @@ export function createChannels() {
     }
   }
 
-  /** The bare `changed` Marble's carrier listens for. When `ops` is present,
-   *  a named `ops` event goes first so a new carrier can apply them without
-   *  throwing away undo; `changed` still follows so an old carrier refetches. */
+  /** The legacy frames, for a carrier from before versions (a tab opened
+   *  before this release, until it reloads): the bare `changed` it refetches
+   *  on and, when `ops` is present, a named `ops` event first so it can apply
+   *  them without throwing away undo. A listener that asked for versions
+   *  (`versioned`, server/app.js) is sent `batch` frames instead. */
   function toDocument(docPath, event = 'changed', { except = null, ops = null, client = null } = {}) {
     const opsFrame = ops?.length
       ? `event: ops\ndata: ${JSON.stringify({ ops, client })}\n\n`
       : null;
     const changedFrame = `data: ${event}\n\n`;
     for (const listener of perDoc.get(docPath) ?? []) {
+      if (listener.versioned) continue;
       if (except && listener.id === except) continue;
       if (opsFrame) write(listener, opsFrame);
       write(listener, changedFrame);
+    }
+  }
+
+  /** One accepted batch, to every versioned listener of the document but the
+   *  client that sent it (it learns from its answer):
+   *
+   *    id: <v>
+   *    event: batch
+   *    data: {"v":…,"client":"…","batch":"…","ops":[…],"by":"person|agent|outside|restore"}
+   *
+   *  A batch that replaced the document whole (`reset`: a restore, a create,
+   *  an outside write no op could say) has no ops to send. Those listeners
+   *  are sent a bare `changed` instead: the carrier asks `GET /ops?since`,
+   *  which answers `reset` for a range holding it, and reloads the
+   *  document. */
+  function toBatch(docPath, frame, { except = null } = {}) {
+    const payload = frame.reset ? RESET_FRAME : batchFrame(frame);
+    for (const listener of perDoc.get(docPath) ?? []) {
+      if (!listener.versioned) continue;
+      if (except && listener.id === except) continue;
+      write(listener, payload);
     }
   }
 
@@ -129,6 +162,7 @@ export function createChannels() {
     subscribeDoc,
     subscribeDrive,
     toDocument,
+    toBatch,
     toDrive,
     toPresence,
     get counts() {

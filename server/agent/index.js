@@ -138,7 +138,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, oplog = null, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass = null, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null, drawSummary = null }) {
+export async function createAgents({ config, store, oplog = null, snapshot = null, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass = null, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null, drawSummary = null }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -148,14 +148,14 @@ export async function createAgents({ config, store, oplog = null, writeOps, crea
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, oplog, writeOps, createDocument, putDocument, moveDocument, freePath, origin, browserPass, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity, drawSummary });
+    return await boot({ config, store, oplog, snapshot, writeOps, createDocument, putDocument, moveDocument, freePath, origin, browserPass, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity, drawSummary });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, oplog = null, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null, drawSummary = null }) {
+async function boot({ config, store, oplog = null, snapshot = null, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null, drawSummary = null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const keys = createKeyStore({ file: config.agentKeysFile });
@@ -208,6 +208,7 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     messaging,
     building,
     side,
+    snapshot,
     log,
   });
   const projects = { find: async (id) => findProject({ settings: await agentStore.settings(), root: config.root }, id) };
@@ -228,7 +229,15 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     // A restore point before every turn, of the document as the turn found it:
     // ops writes are paced (server/store/fs-store.js), so this is what keeps
     // an undo's "back to where it started" (turn.origins) restorable.
-    markOrigin: (docPath, source) => store.mark?.(docPath, source, 'turn-start'),
+    markOrigin: async (docPath, source, turn = null) => {
+      // The version the turn found the document at: the base of a file-tool
+      // write it makes before it reads the document any other way.
+      if (turn?.conversationId && snapshot) {
+        const shot = await snapshot(docPath).catch(() => null);
+        if (shot && Number.isInteger(shot.v)) tools.noteStart(turn.conversationId, docPath, shot.v);
+      }
+      return store.mark?.(docPath, source, 'turn-start');
+    },
     // The host's own clock and measure, so the stall rule and keep-awake agree
     // on what "awake" and "progress" mean. Undefined falls to the runner's own.
     awake,
@@ -427,6 +436,11 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
     read: (name, input) => (READS.has(name) ? tools.call(name, input, CONNECTOR_READER) : { error: `no tool "${name}"` }),
     watchdog: (docPath, sha) => runner.watchdog(docPath, sha),
     documentTouched: (docPath, sha) => runner.documentTouched(docPath, sha),
+    /** The version a conversation's file-tool write to this document was made
+     *  on, as far as this host can tell (server/agent/tools.js), or null. */
+    baseFor: (conversationId, docPath) => tools.fileBase(conversationId, docPath),
+    /** That write landed as version `v`. */
+    noteBase: (conversationId, docPath, v) => tools.noteWrote(conversationId, docPath, v),
     running: () => runner.running(),
     store: agentStore,
     runner,

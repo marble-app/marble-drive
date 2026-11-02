@@ -27,6 +27,10 @@
 // docs/superpowers/specs/2026-10-06-build-mode-design.md.
 
 (() => {
+  // A live stream on the tab's one socket. runtime/tab-rest.js stands in for
+  // EventSource on every drive page and rides `marble.stream` underneath,
+  // resting with the tab; without it, the carrier's stream; else native.
+  const liveStream = (url) => (window.marbleTabRest ? new EventSource(url) : window.marble?.stream?.(url) ?? new EventSource(url));
   const TRANSIENT = 'data-marble-transient';
   const EASE = 'cubic-bezier(.22, 1, .36, 1)';
   // The right side's width: the chat's own docked width, give or take.
@@ -627,7 +631,7 @@
     let stream = null;
     const openStream = () => {
       stream?.close();
-      stream = new EventSource(route('/events'));
+      stream = liveStream(route('/events'));
       stream.onmessage = (message) => {
         let data;
         try { data = JSON.parse(message.data); } catch { return; }

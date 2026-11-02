@@ -817,7 +817,7 @@ test('an outside write to a disjoint id both-applies next to a heading you wrote
   assert.doesNotMatch(after, /<marble-alt/);
 });
 
-test('an outside rewrite of a heading you wrote forks rather than clobbering', async () => {
+test('an outside rewrite of a heading you wrote is a batch made on the file it read: it stands, and the tab hears it', async () => {
   const source = collabDoc('Yours');
   const made = await asJson(await put('', 'Collab Fork.mrbl', source));
   const doc = encodeURIComponent(made.path);
@@ -832,11 +832,14 @@ test('an outside rewrite of a heading you wrote forks rather than clobbering', a
   assert.match(onDisk, />Yours!<\/h1>/);
   await fsp.writeFile(file, onDisk.replace('>Yours!</h1>', '>Theirs</h1>'));
 
-  await listening.frames;
+  const frames = await listening.frames;
   const after = await fsp.readFile(file, 'utf8');
-  assert.match(after, /<marble-alt data-marble-id="hc1"/);
-  assert.match(after, /Yours!/);
-  assert.match(after, /Theirs/);
+  // Whoever wrote it had read "Yours!" and changed it: that is an edit, not
+  // two versions. (What it could not have seen — a batch after the version it
+  // read — is rebased; server/rebase.js, and test/sync-versions.test.js.)
+  assert.doesNotMatch(after, /<marble-alt/);
+  assert.match(after, />Theirs<\/h1>/);
+  assert.ok(frames.some((f) => f.data.includes('Theirs')), 'the open tab is sent the edit');
 });
 
 test('an undo neither forks against your edit nor leaves a claim behind', async () => {
