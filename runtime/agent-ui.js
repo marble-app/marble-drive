@@ -1425,16 +1425,25 @@
 
   // Which Claude login a chat runs on next, as the host picks it
   // (server/agent/claude-accounts.js): the chat's own pick, else the deepest
-  // folder that holds the page, else Personal. Null with only one login.
+  // folder that holds the page (a paused login gives its folders up), else
+  // Personal. A login that ran out stands aside for its fallback. Null with
+  // only one login.
   const accountFor = (accounts, { choice = null, target = '' } = {}) => {
     if (!Array.isArray(accounts) || accounts.length < 2) return null;
+    const isOut = (item) => Boolean(item?.outUntil && item.outUntil > Date.now());
+    const standIn = (item, how) => {
+      if (!item.fallback || !isOut(item)) return { ...item, how };
+      const next = accounts.find((other) => other.id === item.fallback && other.present !== false && other.id !== item.id);
+      return next && !isOut(next) ? { ...next, how: 'fallback', from: item.id } : { ...item, how };
+    };
+    if (choice === 'personal') return { ...accounts[0], how: 'chosen' };
     const picked = choice ? accounts.find((item) => item.id === choice && item.present !== false) : null;
-    if (picked) return { ...picked, how: 'chosen' };
+    if (picked) return standIn(picked, 'chosen');
     const doc = String(target ?? '').replace(/^\/+/, '');
     let best = null;
     let depth = -1;
     for (const item of accounts) {
-      if (item.present === false) continue;
+      if (item.present === false || item.paused) continue;
       for (const folder of item.folders ?? []) {
         if (doc.startsWith(`${folder}/`) && folder.length > depth) {
           best = item;
@@ -1442,7 +1451,7 @@
         }
       }
     }
-    return best ? { ...best, how: 'folder' } : { ...accounts[0], how: 'default' };
+    return best ? standIn(best, 'folder') : { ...accounts[0], how: 'default' };
   };
 
   // What a person reads about a login: who it is signed in as, and on what.
@@ -9175,6 +9184,7 @@
     .sheet[data-tab="accounts"] { width: min(560px, calc(100vw - 24px)); }
     .usage-group.account .who { margin: -4px 0 2px; font-size: 12.5px; color: var(--ink); }
     .usage-group.account .where { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+    .usage-group.account .account-actions { justify-content: flex-start; margin: -4px 0 8px -6px; }
     .tabs button[hidden] { display: none; }
     /* Chat: how agents show up on the page, and the keys. */
     .pane-chat { display: flex; flex-direction: column; gap: 14px; }
@@ -9530,9 +9540,44 @@
         group.append(h('h3', '', account.label));
         group.append(h('p', 'who', accountWho(account)));
         const folders = (account.folders ?? []).map((folder) => `${folder}/`);
-        group.append(h('p', 'where', account.id === 'personal'
+        const backup = account.fallback ? list.find((item) => item.id === account.fallback) : null;
+        const out = account.outUntil && account.outUntil > Date.now();
+        const where = account.id === 'personal'
           ? 'Auto uses it for pages outside the other accounts\u2019 folders.'
-          : folders.length ? `Auto uses it for pages in ${folders.join(', ')}.` : 'Only chats that pick it use it.'));
+          : !folders.length ? 'Only chats that pick it use it.'
+            : account.paused ? `Switched off by hand: pages in ${folders.join(', ')} use ${list[0]?.label || 'Personal'}.`
+              : `Auto uses it for pages in ${folders.join(', ')}.${backup ? ` If it runs out, they use ${backup.label}.` : ''}`;
+        group.append(h('p', 'where', where));
+        if (out && backup) {
+          const back = formatReset(new Date(account.outUntil).toISOString());
+          group.append(h('p', 'where', `Out of usage, so its chats are on ${backup.label}${back ? `. ${back.replace(/^Resets/, 'Comes back')}` : ''}.`));
+        }
+        if (account.id !== 'personal' && folders.length && this.api?.setAccount) {
+          const actions = h('div', 'actions account-actions');
+          const toggle = h('button', 'link', account.paused
+            ? `Use ${account.label} for ${folders.join(', ')} again`
+            : `Use ${list[0]?.label || 'Personal'} for ${folders.join(', ')}`);
+          toggle.addEventListener('click', async () => {
+            toggle.disabled = true;
+            try {
+              await this.api.setAccount(account.id, { paused: !account.paused });
+            } catch { /* the reload says how it stands */ }
+            this.loadAccounts();
+          });
+          actions.append(toggle);
+          if (out) {
+            const retry = h('button', 'link', `Try ${account.label} now`);
+            retry.addEventListener('click', async () => {
+              retry.disabled = true;
+              try {
+                await this.api.setAccount(account.id, { out: false });
+              } catch { /* the reload says how it stands */ }
+              this.loadAccounts();
+            });
+            actions.append(retry);
+          }
+          group.append(actions);
+        }
         const meter = account.meter;
         if (account.present === false) {
           group.append(h('p', 'empty', 'Its sign-in folder is not on this computer.'));

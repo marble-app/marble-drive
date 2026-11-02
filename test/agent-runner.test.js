@@ -12,6 +12,7 @@ import { createAgentStore } from '../server/agent/store.js';
 import { createTools } from '../server/agent/tools.js';
 import { createFakeProvider } from './fixtures/fake-provider.js';
 import { STAY } from '../server/agent/usage-failover.js';
+import { claudeLoginFor } from '../server/agent/claude-accounts.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -2052,6 +2053,79 @@ async function setupFailover({
   await made.store.updateConversation(chat.id, { providerSession: 'claude-session' });
   return { ...made, spawned, chat };
 }
+
+const SPEND = "You've hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your weekly limit resets Nov 2, 12pm (America/Los_Angeles)";
+
+/** Claude with two logins: Ai2 for the Ai2 folder, backed by Personal. The
+ *  fake answers with the spend limit on whichever login is in `spentOn`. */
+async function setupLogins({ fallback = 'personal', spentOn = ['ai2'] } = {}) {
+  const spawned = [];
+  const claude = createFakeProvider({
+    id: 'claude-subscription',
+    scripts: { spent: [{ fail: SPEND }], hello: [{ say: 'done' }] },
+  });
+  const loginOf = (opts) => claudeLoginFor({ target: opts.target, entries: opts.accounts, choice: opts.account, out: opts.accountsOut });
+  claude.loginFor = ({ target, accounts, account, accountsOut }) => {
+    const login = claudeLoginFor({ target, entries: accounts, choice: account, out: accountsOut });
+    return { id: login.id, label: login.label, how: login.how };
+  };
+  const claudeSpawn = claude.spawn.bind(claude);
+  claude.spawn = (opts) => {
+    const login = loginOf(opts);
+    spawned.push({ login: login.id, ...opts });
+    return claudeSpawn({ ...opts, prompt: spentOn.includes(login.id) ? 'script:spent' : 'script:hello' });
+  };
+  const cursor = createFakeProvider({ id: 'cursor', scripts: { hello: [{ say: 'picked up' }] } });
+  cursor.detect = async () => ({ installed: true, signedIn: true });
+  cursor.listModels = async () => GROK_MODELS;
+  const made = await setup({ providerMap: new Map([['claude-subscription', claude], ['cursor', cursor]]) });
+  await made.store.saveSettings({ claudeAccounts: [{ folder: 'Ai2', configDir: os.tmpdir(), label: 'Ai2', ...(fallback ? { fallback } : {}) }] });
+  const chat = await made.store.createConversation({ provider: 'claude-subscription', model: 'opus', effort: 'high' });
+  return { ...made, spawned, chat };
+}
+
+test('a spend limit on a folder login continues the turn on its fallback login, and later turns go there too', async () => {
+  const { store, runner, spawned, chat, published } = await setupLogins();
+  const { turnId } = await runner.send(chat.id, { prompt: 'fix it', context: { target: 'Ai2/console.mrbl' } });
+  const failed = await finished(store, turnId);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.account, 'ai2');
+  await until(async () => (await store.turns(chat.id)).some((turn) => turn.prompt === 'Continue'));
+  const cont = (await store.turns(chat.id)).find((turn) => turn.prompt === 'Continue');
+  const done = await finished(store, cont.id);
+  assert.equal(done.status, 'completed');
+  assert.equal(done.account, 'personal');
+  assert.equal(cont.loginHandoff, true);
+  assert.deepEqual(spawned.map((item) => item.login), ['ai2', 'personal']);
+  assert.match(spawned[1].prompt, /Finish the work it started/);
+  assert.match(spawned[1].prompt, /Person: fix it/);
+  const meta = await store.conversation(chat.id);
+  assert.equal(meta.provider, 'claude-subscription', 'the chat stays on Claude');
+  assert.equal(meta.accountUsed, 'personal');
+  assert.equal(published.some((item) => item.event.type === 'usage.continued' && item.event.label === 'the Personal login'), true);
+
+  const next = await runner.send(chat.id, { prompt: 'and this', context: { target: 'Ai2/console.mrbl' } });
+  assert.equal((await finished(store, next.turnId)).status, 'completed');
+  assert.deepEqual(spawned.map((item) => item.login), ['ai2', 'personal', 'personal'], 'Ai2 is held out until its reset');
+  await runner.close();
+});
+
+test('a folder login with no fallback goes on to Cursor as before', async () => {
+  const { store, runner, chat } = await setupLogins({ fallback: null });
+  const { turnId } = await runner.send(chat.id, { prompt: 'fix it', context: { target: 'Ai2/console.mrbl' } });
+  await finished(store, turnId);
+  await until(async () => (await store.conversation(chat.id)).provider === 'cursor');
+  await runner.close();
+});
+
+test('when the fallback login is spent too, the chat goes on to Cursor', async () => {
+  const { store, runner, chat, spawned } = await setupLogins({ spentOn: ['ai2', 'personal'] });
+  const { turnId } = await runner.send(chat.id, { prompt: 'fix it', context: { target: 'Ai2/console.mrbl' } });
+  await finished(store, turnId);
+  await until(async () => (await store.conversation(chat.id)).provider === 'cursor');
+  assert.deepEqual(spawned.map((item) => item.login), ['ai2', 'personal']);
+  await runner.close();
+});
 
 test('a spent Claude window switches the chat to the newest Grok and continues', async () => {
   const { store, runner, spawned, chat, published } = await setupFailover();

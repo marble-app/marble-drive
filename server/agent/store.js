@@ -637,7 +637,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     appendEvent,
     events,
 
-    async createTurn(id, { prompt, context, dispatch = 'queue', behind = false, bundle = null, usageHandoff = false }) {
+    async createTurn(id, { prompt, context, dispatch = 'queue', behind = false, bundle = null, usageHandoff = false, loginHandoff = false }) {
       return serial(`turns:${id}`, async () => {
         const n = (await turns(id)).length + 1;
         const turn = {
@@ -659,6 +659,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
           undoneAt: null,
           keptAt: null,
           ...(usageHandoff ? { usageHandoff: true } : {}),
+          ...(loginHandoff ? { loginHandoff: true } : {}),
         };
         await writeJson(turnFile(turn.id), turn);
         return turn;

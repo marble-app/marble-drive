@@ -317,6 +317,8 @@
       usage: () => ask('/agent/usage'),
       // The Claude logins this drive runs on, who each is, and its limits.
       accounts: () => ask('/agent/accounts'),
+      // Take a login's folders to Personal by hand (`paused`), or try a login that ran out again (`out: false`).
+      setAccount: (id, body) => ask(`/agent/accounts/${enc(id)}`, { method: 'POST', body }),
       // Starter credit: whose, how much is used. `fresh` asks the proxy now.
       credit: ({ fresh = false } = {}) => ask(fresh ? '/agent/credit?fresh=1' : '/agent/credit'),
       // Whether this drive can hear and speak, and how it was set to.

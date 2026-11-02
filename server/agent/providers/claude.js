@@ -302,10 +302,10 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       await writePrivateFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2));
     },
 
-    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', kind = 'drive', cwd = null, target = null, accounts = null, account = null }) {
+    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', kind = 'drive', cwd = null, target = null, accounts = null, account = null, accountsOut = null }) {
       const current = live();
       // Only the login has a folder of its own; a key or starter credit pays the same everywhere.
-      const login = !api && !credit ? claudeLoginFor({ target, entries: accounts, choice: account }) : null;
+      const login = !api && !credit ? claudeLoginFor({ target, entries: accounts, choice: account, out: accountsOut }) : null;
       const configDir = login?.configDir ?? null;
       const full = capability === 'full';
       // A conversation from before modes had `auto` stored `default`.
@@ -378,11 +378,11 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
 
     // Which login a turn would pay with, for the chat to show: the same pick
     // spawn makes. Null on a key or starter credit, which pay the same everywhere.
-    loginFor({ target = null, accounts = null, account = null } = {}) {
+    loginFor({ target = null, accounts = null, account = null, accountsOut = null } = {}) {
       // With one login there is nothing to tell apart, and nothing is said.
       if (api || credit || !Array.isArray(accounts) || !accounts.length) return null;
-      const login = claudeLoginFor({ target, entries: accounts, choice: account });
-      return { id: login.id, label: login.label, how: login.how };
+      const login = claudeLoginFor({ target, entries: accounts, choice: account, out: accountsOut });
+      return { id: login.id, label: login.label, how: login.how, ...(login.from ? { from: login.from, fromLabel: login.fromLabel } : {}) };
     },
 
     parse: (line, state) => parseClaudeLine(line, state),
