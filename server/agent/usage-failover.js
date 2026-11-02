@@ -14,7 +14,10 @@ const EFFORT_WORD = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra 
 // "session limit" is Claude's 5-hour window ("You've hit your session limit").
 // The same phrase is what a Cursor stop has to match to continue on to Grok.
 // It does not match "hit your limit": the word session sits between them.
-const SPENT = /hit your limit|session limit|out of extra usage|extra usage limit|usage limit/i;
+// An organisation's login stops on its own cap instead: "You've hit your
+// individual spend limit · … your weekly limit resets Nov 2, 12pm". That is a
+// spent window too, and is caught the same way.
+const SPENT = /hit your limit|session limit|weekly limit|spend(?:ing)? limit|out of extra usage|extra usage limit|usage limit/i;
 const RETRY = /try again|retry|rate limit|overloaded/i;
 
 export const STAY = {

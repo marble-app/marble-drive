@@ -956,6 +956,27 @@ test('a chat can be put on a Claude login by hand, and only on one the drive has
   assert.equal('configDir' in listed.body.accounts[0], false, 'no host paths reach the page');
 });
 
+test('a login can be paused by hand, which puts its folder on Personal, and unpaused', async () => {
+  const before = (await drive.agents.store.settings()).claudeAccounts;
+  await drive.agents.store.saveSettings({ claudeAccounts: [{ folder: 'Ai2', configDir: os.tmpdir(), label: 'Ai2', fallback: 'personal' }] });
+  try {
+    const paused = await api('POST', '/agent/accounts/ai2', { paused: true });
+    assert.equal(paused.status, 200);
+    assert.equal(paused.body.account.paused, true);
+    assert.equal(paused.body.account.fallback, 'personal');
+    assert.equal((await drive.agents.store.settings()).claudeAccounts[0].paused, true);
+    const listed = await api('GET', '/agent/accounts');
+    assert.equal(listed.body.accounts.find((item) => item.id === 'ai2').paused, true);
+    const back = await api('POST', '/agent/accounts/ai2', { paused: false, out: false });
+    assert.equal(back.body.account.paused, false);
+    assert.equal('paused' in (await drive.agents.store.settings()).claudeAccounts[0], false);
+    assert.equal((await api('POST', '/agent/accounts/personal', { paused: true })).status, 404);
+    assert.equal((await api('POST', '/agent/accounts/ai2', { paused: 'yes' })).status, 400);
+  } finally {
+    await drive.agents.store.saveSettings({ claudeAccounts: before });
+  }
+});
+
 test('Leave it is still on the conversation after a reload', async () => {
   const created = await api('POST', '/agent/conversations', { provider: 'fake' });
   const left = await api('POST', `/agent/conversations/${created.body.id}/usage-left`, { turn: `${created.body.id}-t1` });

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { PERSONAL, claudeLoginFor, describeLogin, listClaudeAccounts, publicAccount, sharesSessions } from '../server/agent/claude-accounts.js';
+import { PERSONAL, claudeLoginFor, describeLogin, limitResetsAt, listClaudeAccounts, publicAccount, sharesSessions } from '../server/agent/claude-accounts.js';
 
 const here = () => true;
 
@@ -20,7 +20,7 @@ test('logins are listed Personal first, one per config dir, named by label or fo
     ['ai2', 'Ai2', ['Ai2', 'Work/Ai2 Notes']],
     ['lab', 'Lab', ['Lab']],
   ]);
-  assert.deepEqual(Object.keys(publicAccount(accounts[1])).sort(), ['folders', 'id', 'label', 'present'], 'no config dir goes to the page');
+  assert.deepEqual(Object.keys(publicAccount(accounts[1])).sort(), ['fallback', 'folders', 'id', 'label', 'paused', 'present'], 'no config dir goes to the page');
 });
 
 test('a chat on a picked login runs there, wherever its document is', () => {
@@ -39,6 +39,34 @@ test('without a pick, the folder decides, and a login this machine lacks is skip
   assert.equal(claudeLoginFor({ target: 'Ai2 Notes.mrbl', entries, exists }).id, PERSONAL);
   assert.equal(claudeLoginFor({ target: 'Gone/x.mrbl', entries, exists }).id, PERSONAL);
   assert.equal(claudeLoginFor({ target: 'Ai2/x.mrbl', entries, choice: 'gone', exists }).id, 'ai2', 'a pick that is not here falls back to the folder');
+});
+
+test('a login that is out hands its turns to its fallback, and only then', () => {
+  const entries = [{ folder: 'Ai2', configDir: '/h/.claude-ai2', fallback: 'personal' }];
+  assert.equal(claudeLoginFor({ target: 'Ai2/x.mrbl', entries, exists: here }).id, 'ai2');
+  const stand = claudeLoginFor({ target: 'Ai2/x.mrbl', entries, out: new Set(['ai2']), exists: here });
+  assert.deepEqual([stand.id, stand.how, stand.from, stand.configDir], [PERSONAL, 'fallback', 'ai2', null]);
+  assert.equal(claudeLoginFor({ target: 'Chat.mrbl', entries, choice: 'ai2', out: new Set(['ai2']), exists: here }).id, PERSONAL, 'a hand pick falls back too');
+  const none = [{ folder: 'Ai2', configDir: '/h/.claude-ai2' }];
+  assert.equal(claudeLoginFor({ target: 'Ai2/x.mrbl', entries: none, out: new Set(['ai2']), exists: here }).id, 'ai2', 'no fallback named, no move');
+  const both = claudeLoginFor({ target: 'Ai2/x.mrbl', entries, out: new Set(['ai2', PERSONAL]), exists: here });
+  assert.equal(both.id, 'ai2', 'a fallback that is out too is no help');
+});
+
+test('a paused login gives its folders back to Personal, but not a chat that picked it', () => {
+  const entries = [{ folder: 'Ai2', configDir: '/h/.claude-ai2', paused: true }];
+  assert.equal(claudeLoginFor({ target: 'Ai2/x.mrbl', entries, exists: here }).id, PERSONAL);
+  assert.equal(claudeLoginFor({ target: 'Ai2/x.mrbl', entries, choice: 'ai2', exists: here }).id, 'ai2');
+  assert.equal(listClaudeAccounts(entries, { exists: here })[1].paused, true);
+});
+
+test('the reset a limit message names is read in its own time zone', () => {
+  const now = Date.parse('2026-11-01T15:30:00-08:00');
+  const spend = "You've hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your weekly limit resets Nov 2, 12pm (America/Los_Angeles)";
+  assert.equal(new Date(limitResetsAt(spend, { now })).toISOString(), '2026-11-02T20:00:00.000Z');
+  assert.equal(new Date(limitResetsAt('resets 10:30am (America/Los_Angeles)', { now })).toISOString(), '2026-11-02T18:30:00.000Z', 'a time already past today is tomorrow');
+  assert.equal(new Date(limitResetsAt('resets 7pm (America/Los_Angeles)', { now })).toISOString(), '2026-11-02T03:00:00.000Z');
+  assert.equal(limitResetsAt('Claude reported an error', { now }), null);
 });
 
 test('two logins share sessions when their projects folders are one folder', () => {

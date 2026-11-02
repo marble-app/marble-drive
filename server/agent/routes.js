@@ -69,6 +69,7 @@ const hostnameOf = (req) => {
 const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const FAILOVER = /^\/agent\/conversations\/([0-9a-f]{12})\/failover$/;
+const ACCOUNT = /^\/agent\/accounts\/([a-z0-9-]{1,64})$/;
 const USAGE_LEFT = /^\/agent\/conversations\/([0-9a-f]{12})\/usage-left$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/redo|\/keep|\/answer|\/speech)?$/;
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
@@ -623,9 +624,36 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         const meter = account.id === PERSONAL
           ? meters.find((item) => item.id === 'claude-subscription') ?? null
           : meters.find((item) => item.account === account.id) ?? null;
-        return { ...publicAccount(account), ...(who?.value ?? {}), meter };
+        const until = guest ? null : runner.loginsOut?.().get(account.id) ?? null;
+        return { ...publicAccount(account), ...(who?.value ?? {}), meter, ...(until ? { outUntil: until } : {}) };
       }));
       return json(res, 200, { accounts: out });
+    }
+
+    // Take a login's folders back to Personal by hand, or give them back:
+    // `paused` is kept on every settings entry of that login. `out: false`
+    // forgets that it ran out, so the next turn tries it again.
+    const accountRoute = ACCOUNT.exec(route);
+    if (accountRoute && method === 'POST' && !guest) {
+      const id = accountRoute[1];
+      const body = (await readJson(req, maxBody)) ?? {};
+      const settings = (await store.settings?.().catch(() => null)) ?? {};
+      const entries = Array.isArray(settings.claudeAccounts) ? settings.claudeAccounts : [];
+      const account = listClaudeAccounts(entries).find((item) => item.id === id);
+      if (!account || account.id === PERSONAL) return json(res, 404, { error: `no Claude account "${id}" to switch` });
+      if (body.paused !== undefined && typeof body.paused !== 'boolean') return json(res, 400, { error: 'paused must be true or false' });
+      if (typeof body.paused === 'boolean') {
+        const next = entries.map((entry) => {
+          if (entry?.configDir !== account.configDir) return entry;
+          const { paused: _was, ...rest } = entry;
+          return body.paused ? { ...rest, paused: true } : rest;
+        });
+        await store.saveSettings({ claudeAccounts: next });
+      }
+      if (body.out === false) runner.clearLoginOut?.(id);
+      const now = listClaudeAccounts((await store.settings()).claudeAccounts).find((item) => item.id === id);
+      const until = runner.loginsOut?.().get(id) ?? null;
+      return json(res, 200, { account: { ...publicAccount(now), ...(until ? { outUntil: until } : {}) } });
     }
 
     if (route === '/agent/usage' && method === 'GET') {

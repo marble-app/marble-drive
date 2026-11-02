@@ -34,7 +34,9 @@ import {
   matchEffort,
   usageBrief,
   usageHandoffDue,
+  usageStopped,
 } from './usage-failover.js';
+import { PERSONAL, limitResetsAt, listClaudeAccounts, sharesSessions } from './claude-accounts.js';
 
 // What a chat's progress card says, shared with the card itself.
 const words = globalThis.marbleAgentWords;
@@ -307,9 +309,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const brief = await handoffBrief(meta.handoffFrom);
       if (brief) lines.unshift(`This continues an earlier conversation. What happened there:\n\n${brief}\n\n---\n`);
     }
-    if (turn.usageHandoff) {
+    if (turn.usageHandoff || turn.loginHandoff) {
       const events = (await store.events(turn.conversationId)).filter((event) => event.turn !== turn.id);
-      const earlier = (await store.turns(turn.conversationId)).some((item) => item.usageHandoff && item.id !== turn.id);
+      // Another login is the same Claude: the brief says Claude stopped, whatever came before.
+      const earlier = !turn.loginHandoff && (await store.turns(turn.conversationId)).some((item) => item.usageHandoff && item.id !== turn.id);
       const brief = usageBrief(events, turn.usageError, { afterCursor: earlier });
       if (brief) lines.unshift(`${brief}\n\n---\n`);
     }
@@ -342,7 +345,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   const hasPeers = async (conversationId, projectId) => (await projectPeers(conversationId, projectId)).length > 0;
 
-  async function send(conversationId, { prompt, context, dispatch, from = null, ahead = false, usageHandoff = false, usageError = null }) {
+  async function send(conversationId, { prompt, context, dispatch, from = null, ahead = false, usageHandoff = false, loginHandoff = false, usageError = null }) {
     const meta = await store.conversation(conversationId);
     if (!meta) throw Object.assign(new Error(`no conversation "${conversationId}"`), { status: 404 });
     if (!context?.target) throw Object.assign(new Error('a turn needs context.target'), { status: 400 });
@@ -365,7 +368,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       }
     }
 
-    const record = await store.createTurn(conversationId, { prompt: String(prompt ?? ''), context: frozen, dispatch, behind, usageHandoff });
+    const record = await store.createTurn(conversationId, { prompt: String(prompt ?? ''), context: frozen, dispatch, behind, usageHandoff, loginHandoff });
     let ended;
     const turn = {
       id: record.id,
@@ -417,7 +420,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       waiter: null, // resolve() of a wait_for_reply parked on this turn
       from, // { conversation, title, provider, messageId, hop } when a message started this turn
       usageHandoff,
+      loginHandoff,
       usageError,
+      login: null, // the Claude login this turn runs on, set at start
       arrived: null, // messages composePrompt() took from the inbox; handed back in finish() if this turn never got to act on them
       inbound: null, // every message this turn has actually received, in order; a reply without `inReplyTo` threads off the last one from that conversation
       finishing: false, // true once finish() has started; new tool calls are refused
@@ -487,10 +492,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     } else {
       order.push(turn.id);
     }
-    // A usage handoff is its own turn. Folding it into a combined queue would
+    // A usage handoff (or a move to another login) is its own turn. Folding it into a combined queue would
     // bury Continue inside the person's waiting prompt, and an interrupt
     // dispatch would try to cancel the turn that is still finishing.
-    const effective = usageHandoff || !meta.queueCombine ? turn.dispatch : batchDispatch(queuedFor(conversationId));
+    const effective = usageHandoff || loginHandoff || !meta.queueCombine ? turn.dispatch : batchDispatch(queuedFor(conversationId));
     if (effective === 'interrupt') {
       const running = liveFor(conversationId).find((t) => t.status === 'running' && t.id !== turn.id);
       if (running) await cancel(running.id);
@@ -580,7 +585,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   async function mergeQueued(conversationId) {
     if (!(await store.conversation(conversationId)).queueCombine) return;
-    const waiting = queuedFor(conversationId).filter((turn) => !turn.usageHandoff);
+    const waiting = queuedFor(conversationId).filter((turn) => !turn.usageHandoff && !turn.loginHandoff);
     if (waiting.length < 2) return;
     const survivor = waiting[0];
     survivor.bundle = waiting.map((t) => t.prompt);
@@ -610,7 +615,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const settings = (await store.settings?.().catch(() => null)) ?? {};
       // The login this turn pays with, said on the chat and on the turn, so
       // the page can show which account a chat is on.
-      const login = provider?.loginFor?.({ target: turn.target, accounts: settings.claudeAccounts, account: meta.account ?? null }) ?? null;
+      const login = provider?.loginFor?.({ target: turn.target, accounts: settings.claudeAccounts, account: meta.account ?? null, accountsOut: accountsOut() }) ?? null;
+      turn.login = login;
       await store.updateTurn(turn.id, { status: 'running', startedAt: turn.startedAt, ...(login ? { account: login.id } : {}) });
       await store.updateConversation(turn.conversationId, {
         running: true,
@@ -682,6 +688,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         target: turn.target,
         accounts: settings.claudeAccounts,
         account: meta.account ?? null,
+        accountsOut: accountsOut(),
       });
 
       // The runner builds the environment, not the provider: a provider that
@@ -1040,7 +1047,18 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (creditOut) error = 'Starter credit used up.';
     let usageMark = null;
     let pendingHandoff = false;
-    if (!lostSession && !creditOut && status === 'failed') {
+    // A login that names a fallback (the owner's employer plan, say, backed by
+    // their own) is held out until the reset it named, and this turn goes on
+    // there instead of to another provider.
+    let loginHop = null;
+    if (!lostSession && !creditOut && status === 'failed' && turn.login && turn.login.id !== PERSONAL && usageStopped(error)) {
+      try {
+        loginHop = await loginOut(turn.login.id, error);
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
+    }
+    if (!lostSession && !creditOut && !loginHop && status === 'failed') {
       const meta = await store.conversation(turn.conversationId);
       if (usageHandoffDue({ provider: turn.provider?.id, usageLane: meta?.usageLane, error })) {
         const ready = await cursorReadiness(meta);
@@ -1110,6 +1128,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (pendingHandoff) {
         try {
           await handoffUsage(turn.conversationId, { error });
+        } catch (err) {
+          log.error(`[agents] ${err.message}`);
+        }
+      }
+      if (loginHop) {
+        try {
+          await continueOnLogin(turn, loginHop, error);
         } catch (err) {
           log.error(`[agents] ${err.message}`);
         }
@@ -1231,6 +1256,60 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   const handoffInflight = new Map();
 
+  // Claude logins that ran out, by id, with when each comes back. Kept in
+  // memory: after a restart the first turn finds out again, and moves on.
+  const loginsOut = new Map();
+  const LOGIN_RETRY_MS = 60 * 60_000;
+  const LOGIN_OUT_MAX_MS = 8 * 24 * 60 * 60_000;
+
+  function accountsOut() {
+    const now = Date.now();
+    for (const [id, until] of loginsOut) if (until <= now) loginsOut.delete(id);
+    return new Set(loginsOut.keys());
+  }
+
+  /** Holds login `id` out after `error`, when it has a fallback to go to.
+   *  Returns { from, to } for the turn to continue on, or null. */
+  async function loginOut(id, error) {
+    const settings = (await store.settings?.().catch(() => null)) ?? {};
+    const accounts = listClaudeAccounts(settings.claudeAccounts);
+    const from = accounts.find((account) => account.id === id);
+    if (!from?.fallback) return null;
+    const now = Date.now();
+    const named = limitResetsAt(error, { now });
+    const until = named && named > now ? Math.min(named, now + LOGIN_OUT_MAX_MS) : now + LOGIN_RETRY_MS;
+    loginsOut.set(id, until);
+    log.info?.(`[agents] Claude login ${id} is out until ${new Date(until).toISOString()}: ${String(error).slice(0, 160)}`);
+    const out = accountsOut();
+    const to = accounts.find((account) => account.id === from.fallback && account.present && !out.has(account.id));
+    return to && to.id !== from.id ? { from, to } : null;
+  }
+
+  /** The turn that stopped goes on under the fallback login: Continue, with
+   *  the brief a handoff carries. Sessions move with it when the two logins
+   *  keep them in one place. */
+  async function continueOnLogin(turn, { from, to }, error) {
+    const meta = await store.conversation(turn.conversationId);
+    if (!meta || !turn.context?.target) return null;
+    if (meta.providerSession && !sharesSessions(from.configDir, to.configDir)) {
+      await store.updateConversation(turn.conversationId, { providerSession: null });
+    }
+    await store.updateConversation(turn.conversationId, { activity: `Continuing on the ${to.label} login` });
+    try {
+      await emit(turn, { type: 'usage.continued', label: `the ${to.label} login`, account: { from: from.id, to: to.id } });
+    } catch (err) {
+      log.error(`[agents] ${err.message}`);
+    }
+    return send(turn.conversationId, {
+      prompt: CONTINUE,
+      context: turn.context,
+      dispatch: 'queue',
+      ahead: true,
+      loginHandoff: true,
+      usageError: error,
+    });
+  }
+
   async function cursorReadiness(meta) {
     const cursor = providers.get('cursor');
     if (!cursor?.detect) return { ok: false, suffix: STAY.signedOut };
@@ -1334,6 +1413,14 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     send,
 
     handoffUsage,
+
+    /** Claude logins that ran out, id → when each comes back (epoch ms). */
+    loginsOut: () => {
+      accountsOut();
+      return new Map(loginsOut);
+    },
+
+    clearLoginOut: (id) => loginsOut.delete(id),
 
     cancel,
 

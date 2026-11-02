@@ -9,6 +9,12 @@
 // turn on a document inside it runs there, the deepest folder winning. A chat
 // can also be put on one login by hand (its `account`), which beats the folder.
 // Entries that share a config dir are one login with several folders.
+//
+// `fallback: 'personal'` (or another login's id) is where that login's turns
+// go while it is out: a turn it ran stopped on a usage or spend limit, and the
+// runner holds it out until the reset it named. `paused: true` takes its
+// folders back by hand, so Auto puts them on Personal until it is unpaused; a
+// chat that picked the login by name still uses it.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -31,31 +37,51 @@ export function listClaudeAccounts(entries, { exists = fs.existsSync, personalLa
     const known = byDir.get(configDir);
     if (known) {
       for (const folder of folders) if (!known.folders.includes(folder)) known.folders.push(folder);
+      if (entry.paused === true) known.paused = true;
+      if (!known.fallback && entry.fallback) known.fallback = slug(entry.fallback) || null;
       continue;
     }
     const fallback = folders[0] || path.basename(configDir).replace(/^\.?claude-?/, '') || 'Other';
     const label = String(entry.label ?? '').trim() || fallback;
     let id = slug(entry.id) || slug(label) || slug(fallback);
     if (!id || id === PERSONAL) id = `login-${byDir.size + 1}`;
-    byDir.set(configDir, { id, label, configDir, folders, present: Boolean(exists(configDir)) });
+    byDir.set(configDir, {
+      id,
+      label,
+      configDir,
+      folders,
+      present: Boolean(exists(configDir)),
+      paused: entry.paused === true,
+      fallback: slug(entry.fallback) || null,
+    });
   }
   return [personal, ...byDir.values()];
 }
 
 /** The login a turn on `target` runs under. A hand-picked `choice` wins when
- *  that login is here; otherwise the deepest folder that holds the target;
- *  otherwise Personal. `how` says which of the three it was. */
-export function claudeLoginFor({ target = null, entries = null, choice = null, exists = fs.existsSync } = {}) {
+ *  that login is here; otherwise the deepest folder that holds the target,
+ *  skipping a paused login; otherwise Personal. `how` says which of the three
+ *  it was. A login in `out` (ids of logins that are out of usage) hands the
+ *  turn to its `fallback`, when it names one that is here and not out itself:
+ *  `how` is then 'fallback' and `from` is the login it stood in for. */
+export function claudeLoginFor({ target = null, entries = null, choice = null, out = null, exists = fs.existsSync } = {}) {
   const accounts = listClaudeAccounts(entries, { exists });
   const personal = accounts[0];
+  const isOut = (account) => Boolean(out && (out instanceof Map || out instanceof Set ? out.has(account.id) : out[account.id]));
+  const standIn = (account, how) => {
+    if (account.id === PERSONAL || !account.fallback || !isOut(account)) return { ...account, how };
+    const next = accounts.find((item) => item.id === account.fallback && item.present && item.id !== account.id);
+    if (!next || isOut(next)) return { ...account, how };
+    return { ...next, how: 'fallback', from: account.id, fromLabel: account.label };
+  };
   if (choice === PERSONAL) return { ...personal, how: 'chosen' };
   const picked = choice ? accounts.find((account) => account.id === choice && account.present) : null;
-  if (picked) return { ...picked, how: 'chosen' };
+  if (picked) return standIn(picked, 'chosen');
   const doc = typeof target === 'string' ? target.replace(/^\/+/, '') : '';
   let best = null;
   let depth = -1;
   for (const account of accounts) {
-    if (!account.present) continue;
+    if (!account.present || account.paused) continue;
     for (const folder of account.folders) {
       if (doc.startsWith(`${folder}/`) && folder.length > depth) {
         best = account;
@@ -63,7 +89,51 @@ export function claudeLoginFor({ target = null, entries = null, choice = null, e
       }
     }
   }
-  return best ? { ...best, how: 'folder' } : { ...personal, how: 'default' };
+  return best ? standIn(best, 'folder') : { ...personal, how: 'default' };
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/** Minutes `zone` is ahead of UTC at the instant `ms`. */
+function zoneOffset(ms, zone) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
+  }).formatToParts(new Date(ms)).map((part) => [part.type, part.value]));
+  const wall = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second);
+  return Math.round((wall - ms) / 60_000);
+}
+
+/** When a limit message says the login comes back, as epoch ms, or null.
+ *  Claude says it as "resets Nov 2, 12pm (America/Los_Angeles)" or
+ *  "resets 10:30am (America/Los_Angeles)": a time with no date is the next
+ *  time that clock reads it. */
+export function limitResetsAt(message, { now = Date.now() } = {}) {
+  const match = /resets\s+(?:([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*(?:\(([^)]+)\))?/i.exec(String(message ?? ''));
+  if (!match) return null;
+  const [, mon, day, hourText, minText, half, zoneText] = match;
+  let zone = zoneText?.trim() || 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+  } catch {
+    zone = 'UTC';
+  }
+  let hour = Number(hourText) % 12;
+  if (/pm/i.test(half)) hour += 12;
+  const minute = Number(minText ?? 0);
+  const here = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric' })
+    .formatToParts(new Date(now)).map((part) => [part.type, part.value]));
+  let year = +here.year;
+  let month = mon ? MONTHS.indexOf(mon.toLowerCase()) : +here.month - 1;
+  if (month < 0) return null;
+  let date = mon ? Number(day) : +here.day;
+  const at = (y, m, d) => {
+    const guess = Date.UTC(y, m, d, hour, minute);
+    const first = guess - zoneOffset(guess, zone) * 60_000;
+    return guess - zoneOffset(first, zone) * 60_000;
+  };
+  let when = at(year, month, date);
+  if (when <= now - 60_000) when = mon ? at(year + 1, month, date) : at(year, month, date + 1);
+  return when;
 }
 
 /** Two logins keep their sessions in one place when their projects folders
@@ -87,6 +157,8 @@ export const publicAccount = (account) => ({
   label: account.label,
   folders: [...(account.folders ?? [])],
   present: account.present !== false,
+  paused: account.paused === true,
+  fallback: account.fallback ?? null,
 });
 
 /** Who a login is signed in as, from Claude Code's own `auth status`: the

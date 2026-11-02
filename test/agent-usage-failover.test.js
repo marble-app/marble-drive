@@ -31,6 +31,14 @@ test('a spent window is a usage stop, and a short retry is not', () => {
   assert.equal(usageStopped(null), false);
 });
 
+test('an organisation spend limit is a usage stop like a session limit', () => {
+  const spend = "You've hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your weekly limit resets Nov 2, 12pm (America/Los_Angeles)";
+  assert.equal(usageStopped(spend), true);
+  assert.equal(usageStopped("You've hit your weekly limit · resets Nov 3, 3am"), true);
+  assert.equal(usageStopped('You have reached your spending limit'), true);
+  assert.equal(usageHandoffDue({ provider: 'claude-subscription', error: spend }), true);
+});
+
 const CURSOR_FAMILIES = [
   { id: 'auto', label: 'Auto' },
   { id: 'claude-fable-5-1-high', label: 'Claude Fable 5.1 1M' },
