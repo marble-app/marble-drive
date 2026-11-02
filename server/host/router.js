@@ -29,6 +29,7 @@
 
 import crypto from 'node:crypto';
 import http from 'node:http';
+import net from 'node:net';
 
 import { guestAddress, HOST_SIDE } from './addresses.js';
 import { NAME } from './settings.js';
@@ -205,9 +206,60 @@ export function createRouter({ key, lookup, direct = null, join = null, onPoke =
   server.requestTimeout = 0;
   server.headersTimeout = 60_000;
   server.keepAliveTimeout = 65_000;
-  // Nothing here upgrades a connection (the drive streams over plain HTTP).
-  server.on('upgrade', (req, socket) => {
-    socket.end('HTTP/1.1 501 Not Implemented\r\nconnection: close\r\n\r\n');
+  // A tab's one socket (GET /sync/ws, server/socket.js) is an upgrade: the
+  // same checks as any request, then the bytes are piped to the drive and
+  // back, untouched, until either side goes. Nothing else upgrades. A tab
+  // whose socket cannot open falls back to EventSource by itself.
+  server.on('upgrade', (req, socket, head) => {
+    socket.on('error', () => socket.destroy());
+    const refuse = (status, words) => socket.end(`HTTP/1.1 ${status} ${words}\r\nconnection: close\r\ncontent-length: 0\r\n\r\n`);
+    let pathname = '/';
+    try {
+      pathname = new URL(req.url, 'http://x').pathname;
+    } catch {
+      return refuse(400, 'Bad Request');
+    }
+    if (pathname !== '/sync/ws' || String(req.headers.upgrade ?? '').toLowerCase() !== 'websocket') return refuse(501, 'Not Implemented');
+    const keyed = same(req.headers['x-marble-host-key'], key);
+    let name = null;
+    if (keyed) name = req.headers['x-marble-drive'] ?? null;
+    else if (direct) {
+      name = directName(req.headers.host, direct.suffix);
+      if (name) {
+        delete req.headers['x-marble-drive'];
+        req.headers['x-forwarded-host'] = req.headers.host;
+        req.headers['x-forwarded-proto'] = 'https';
+      }
+    }
+    if (!name) return refuse(401, 'Unauthorized');
+    const drive = NAME.test(String(name)) ? lookup(String(name)) : null;
+    let address = null;
+    try {
+      address = drive?.port ? guestAddress(drive.port) : null;
+    } catch (err) {
+      log.error?.(`[router] ${name}: ${err.message}`);
+    }
+    if (!drive || drive.state !== 'running' || !address) return refuse(503, 'Service Unavailable');
+
+    const headers = forwardHeaders(req.headers, req.socket.remoteAddress);
+    headers.connection = 'Upgrade';
+    headers.upgrade = 'websocket';
+    const upstream = net.connect({ host: address, port: drive.port, localAddress: HOST_SIDE });
+    upstream.on('connect', () => {
+      const lines = [`GET ${req.url} HTTP/1.1`];
+      for (const [k, v] of Object.entries(headers)) for (const one of [].concat(v)) lines.push(`${k}: ${one}`);
+      upstream.write(`${lines.join('\r\n')}\r\n\r\n`);
+      if (head?.length) upstream.write(head);
+      upstream.pipe(socket);
+      socket.pipe(upstream);
+    });
+    upstream.on('error', (err) => {
+      log.error?.(`[router] ${name} socket: ${err.code ?? err.message}`);
+      if (!socket.destroyed) refuse(503, 'Service Unavailable');
+    });
+    socket.on('close', () => upstream.destroy());
+    upstream.on('close', () => socket.destroy());
+    return undefined;
   });
 
   return {

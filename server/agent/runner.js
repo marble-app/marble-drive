@@ -465,7 +465,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (originSource != null) {
       turn.origins.set(frozen.target, shaOf(originSource));
       // Kept as a restore point too: an undo restores to this sha.
-      await Promise.resolve(markOrigin?.(frozen.target, originSource)).catch((err) =>
+      await Promise.resolve(markOrigin?.(frozen.target, originSource, turn)).catch((err) =>
         log.error(`[agents] no restore point before the turn on ${frozen.target}: ${err.message}`));
     }
 

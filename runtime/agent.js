@@ -13,6 +13,10 @@
 //     conversation are open, and closes it when the last one goes.
 
 (() => {
+  // A live stream on the tab's one socket. runtime/tab-rest.js stands in for
+  // EventSource on every drive page and rides `marble.stream` underneath,
+  // resting with the tab; without it, the carrier's stream; else native.
+  const liveStream = (url) => (window.marbleTabRest ? new EventSource(url) : window.marble?.stream?.(url) ?? new EventSource(url));
   const KEY = 'marble-agent:conversation';
   const TRANSIENT = '[data-marble-transient]';
 
@@ -181,7 +185,7 @@
       // stream to begin; a reconnect goes on from Last-Event-ID either way.
       const url = key === '*' ? '/agent/events?all=1'
         : `/agent/events?conversation=${enc(key)}${entry.after ? `&after=${entry.after}` : ''}`;
-      const source = new EventSource(url);
+      const source = liveStream(url);
       const current = entry;
       const deliver = (message) => {
         let data;

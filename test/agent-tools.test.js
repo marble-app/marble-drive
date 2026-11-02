@@ -134,19 +134,26 @@ test('reading the whole document lets the agent edit anything it was shown in fu
   assert.deepEqual(turn.events.at(-1), { type: 'ops.applied', path: turn.target, count: 1 });
 });
 
-test('an element a person changed after the agent read it is refused with its current source', async () => {
+test('an element a person changed after the agent read it is rebased on the version it read, never refused', async () => {
+  // The host's own wiring: a read records the version it was served at.
+  const versioned = createTools({ store: drive.store, writeOps: drive.writeOps, snapshot: drive.snapshot, createDocument: drive.createDocument });
   const turn = await freshTurn();
-  await tools.call('read_document', { path: turn.target, ids: ['q2'] }, turn);
+  await versioned.call('read_document', { path: turn.target, ids: ['q2'] }, turn);
   // The person types into the same item.
   await drive.writeOps(turn.target, [{ type: 'setText', id: 'q2', text: 'How, exactly?' }], { client: 'tab' });
 
-  const result = await tools.call('apply_ops', {
+  const result = await versioned.call('apply_ops', {
     path: turn.target, note: 'x', ops: [{ type: 'setText', id: 'q2', text: 'How come?' }],
   }, turn);
-  assert.equal(result.refused, true);
-  assert.match(result.reason, /changed since/);
-  assert.match(result.current[0].html, /How, exactly\?/);
-  assert.match(await drive.store.read(turn.target), /How, exactly\?/, 'the person keeps their text');
+  assert.equal(result.refused, undefined, JSON.stringify(result));
+  assert.ok(result.applied >= 1);
+  // Both edited the same words: merged where they do not overlap, kept both
+  // ways where they do, and the answer says which with the element as it is.
+  const said = [...(result.merged ?? []), ...(result.forked ?? [])];
+  assert.ok(said.length, 'the answer says what became of the edit');
+  const now = await drive.store.read(turn.target);
+  assert.match(now, /How, exactly\?|How, exactly come\?/, 'the person keeps their text');
+  assert.match(now, /come/, 'and the agent its edit');
 });
 
 test('the agent can make consecutive edits without re-reading its own work', async () => {

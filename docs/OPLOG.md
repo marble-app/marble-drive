@@ -42,8 +42,8 @@ What `/ops` answers:
 | 422 | not JSON, not a list, a malformed op or one the guard refuses, a bad batch id (`reason`: `bad-json`, `not-a-list`, `refused`, `bad-batch`) | drops it |
 | 500 / 503 | the host could not take it now (`reason: "internal"` or `"busy"`) | retries with the same batch id |
 
-A 2xx body is `{ok, path, sha, bytes, applied, forks, ops, checkpointed, replay?}`.
-An add-only share link hears only `{ok, applied, replay?}`.
+A 2xx body is `{ok, path, v, sha, bytes, applied, ops, forks, dropped, fixes, checkpointed, replay?, stale?}`
+(see Versions, below). An add-only share link hears only `{ok, applied, replay?}`.
 
 ## Segments
 
@@ -73,6 +73,59 @@ with the document.
 `since(path, {after, limit})` reads the active segment, then sealed ones newest
 first, and stops once it has `limit` lines after `after`.
 
+## Versions
+
+Every document has a version `v` (server/versions.js): 0 for one that has
+never been written through this host, and one more for every batch that lands
+on it — a page's, an agent's, an outside write the watcher took in, a restore,
+a create. A batch that changes nothing (every op dropped, or a replay) leaves
+it alone. Every line of a batch carries the version it made, and `by`, what
+kind of writer filed it (`person`, `agent`, `outside`, `restore`):
+
+```json
+{"t":1787408196387,"doc":"notes","client":"hxopj75m","seq":3,"batch":"k2f9q1","v":42,"by":"person",
+ "type":"setText","id":"p1","text":"Hello"}
+```
+
+A batch with no ops to log (a restore, a create, an outside write no op could
+express) is one marker line, `{"type":"reset", "v":…}`. `since()` leaves the
+markers out, so History reads what it always read. `fixed: true` on a batch's
+lines says its sender's copy had to be corrected (its answer carried fixes).
+On start, a document's version is the `v` of the newest line in its active
+segment, or of the newest sealed one when the active one is empty.
+
+A page is served with its version in `<meta name="marble-version">` (never in
+the file) and an `X-Marble-Version` header, and names it as the `base` of each
+batch it sends (`POST /ops?…&base=<v>`; none means the current version). The
+host rebases the batch over every batch after its base by any other client
+(server/rebase.js, the rules in `@bdhmin/marble/sync`), and answers
+
+    { ok, v, sha, bytes, applied, ops, forks, dropped, fixes, replay?, stale? }
+
+`ops` are the canonical ops every other copy receives; `fixes` the elements, as
+they now are, whose state differs from what the sender's own ops made; `stale`
+that the base was older than the host keeps records for (the last
+`MARBLE_SYNC_RING_BATCHES`, 2000, or `MARBLE_SYNC_RING_BYTES`, 64 MB, of them),
+so the batch was taken as made on the current version.
+
+Every other subscriber of the document hears the batch as
+
+    id: <v>
+    event: batch
+    data: {"v":…,"client":"…","batch":"…","ops":[…],"by":"…"}
+
+and `GET /ops?app=<doc>&since=<v>` answers `{ v, batches: [{ v, client, batch,
+by, ops }] }`, oldest first, from memory or this log, or `{ v, reset: true }`
+when it cannot (a range holding a marker, a log older than versions). A
+subscription that sends `Last-Event-ID: <v>` (or `?since=<v>`) is sent what it
+missed first. A whole-document batch has no ops for a frame: those subscribers
+are sent a bare `changed`, which a carrier that keeps versions answers by
+asking `since`, being told `reset`, and reloading.
+
+A subscription that names no version is a carrier from before versions (an
+open tab, until it reloads): it is sent the legacy `event: ops` and `changed`
+instead, and never `batch`. These stay for one release.
+
 ## Why a timestamp is not enough
 
 Two clients whose clocks differ by 40ms — which is every pair of clients — are
@@ -90,8 +143,9 @@ export const compareOps = (a, b) =>
 
 ## What reads it today
 
-Build mode's History (server/build) reads `since()` to say who changed what,
-and the host reads the active segment's `batch` fields when it restarts. G4 is
+Build mode's History (server/build) reads `since()` to say who changed what;
+the host reads the active segment's `batch` fields when it restarts, the newest
+`v` for each document's version, and the lines after a version for catch-up. G4 is
 where the log earns its keep — "sync over the op log" is the one item in the
 plan that cannot be added in front of the data it needs.
 

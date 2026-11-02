@@ -12,6 +12,14 @@
   const ALT = 'data-marble-alt';
   const ACTIVE = 'data-marble-active';
   const BY = 'data-marble-by';
+  // A fork from the sync core (@bdhmin/marble/sync, rule 8): the wrapper has
+  // a fresh id, the version that was in the document keeps its own, each
+  // version names the client that wrote it, and a removal that collided with
+  // someone's edit is an empty version marked removed. A fork from before
+  // (the wrapper took the element's id; versions say only you or agent) has
+  // none of these and is resolved the old way.
+  const CLIENT = 'data-marble-client';
+  const REMOVED = 'data-marble-removed';
   const EASE = 'var(--settle, cubic-bezier(.22, 1, .36, 1))';
 
   const attach = (marble) => {
@@ -449,10 +457,25 @@
       return by === 'person' || by.startsWith('agent');
     });
 
+    const isSynced = (alt) => persistentChildren(alt).some((el) => el.hasAttribute(CLIENT) || el.hasAttribute(REMOVED));
+
     const labelOf = (version) => {
       const by = version.getAttribute(BY) ?? '';
-      if (by === 'person') return 'Yours';
       const name = version.getAttribute(ALT) ?? '';
+      if (version.hasAttribute(REMOVED)) return 'Removed';
+      const client = version.getAttribute(CLIENT);
+      if (client) {
+        if (by.startsWith('agent')) return 'The new one';
+        // Which tab this is, when the carrier says.
+        const mine = marble.client ?? marble.status?.client ?? null;
+        if (mine) return client === mine ? 'Yours' : 'Theirs';
+        // Two people's edits: in the order they landed (the one already in
+        // the document comes first in the wrapper).
+        const people = persistentChildren(version.parentElement).filter((el) => (el.getAttribute(BY) ?? '') === 'person' && !el.hasAttribute(REMOVED));
+        if (people.length < 2) return 'Yours';
+        return people.indexOf(version) === 0 ? 'First edit' : 'Second edit';
+      }
+      if (by === 'person') return 'Yours';
       if (name === 'you') return 'Yours';
       if (by.startsWith('agent') || name.startsWith('agent') || name === 'claude') return 'The new one';
       return name || 'Version';
@@ -1240,6 +1263,18 @@
       const parent = alt.parentElement;
       if (!parent || !marble.id(parent)) return;
       const altId = marble.id(alt);
+      if (isSynced(alt)) {
+        // The wrapper's id is its own: the kept version steps out in front of
+        // it, under the id it already has, and the wrapper goes. Keeping the
+        // removal is the removal.
+        if (keep.hasAttribute(REMOVED)) return play([{ type: 'remove', id: altId }]);
+        const keepId = marble.id(keep);
+        return play([
+          { type: 'move', id: keepId, parentId: marble.id(parent), beforeId: altId },
+          ...[ALT, BY, CLIENT].filter((name) => keep.hasAttribute(name)).map((name) => ({ type: 'setAttr', id: keepId, name, value: null })),
+          { type: 'remove', id: altId },
+        ]);
+      }
       const before = nextPersistent(alt);
       const clone = marble.clone(keep);
       clone.removeAttribute(ALT);

@@ -18,6 +18,14 @@
 // While used, the tab says so (POST /tab/alive, at most once a minute) and
 // tags its streams with its id; the host closes the streams of a tab that
 // stopped saying so (server/streams.js).
+//
+// Underneath, a stream rides the tab's one socket when the carrier offers it
+// (`marble.stream`, @bdhmin/marble's runtime/marble.js: every stream of the
+// tab over one WebSocket, server/socket.js), and is a native EventSource
+// otherwise. So every page script that opens `new EventSource(url)` shares
+// that one connection and still rests. `marble.stream` falls back to an
+// EventSource itself when the socket cannot open; that one is let through as
+// native (its address already carries this tab's id), not wrapped again.
 
 (() => {
   if (window.marbleTabRest || typeof window.EventSource !== 'function') return;
@@ -46,8 +54,22 @@
     }).catch(() => {});
   }
 
+  // Is this address one this script made (it names this tab)? Then it is
+  // `marble.stream` falling back to an EventSource underneath one of ours.
+  const ours = (url) => {
+    try {
+      return new URL(url, location.href).searchParams.get('tab') === TAB;
+    } catch {
+      return false;
+    }
+  };
+
+  // The carrier's one-socket stream, once it is there.
+  const carried = () => (typeof window.marble?.stream === 'function' ? window.marble.stream : null);
+
   class RestingEventSource extends EventTarget {
     constructor(url, init = {}) {
+      if (ours(url)) return new Native(url, init);
       super();
       this.url = new URL(url, location.href).href;
       this.withCredentials = Boolean(init.withCredentials);
@@ -73,7 +95,8 @@
       super.addEventListener(type, listener, options);
       if (!this._types.has(type)) {
         this._types.add(type);
-        this._native?.addEventListener(type, (event) => this._forward(event));
+        const under = this._native;
+        under?.addEventListener(type, (event) => this._forward(event, under));
       }
     }
 
@@ -92,10 +115,20 @@
     }
 
     _open(wake) {
-      const native = new Native(this._address(wake), this._init);
+      const address = this._address(wake);
+      const stream = carried();
+      let native = null;
+      if (stream) {
+        try {
+          native = stream(address, { lastEventId: this.lastEventId || undefined, withCredentials: this.withCredentials });
+        } catch {
+          native = null;
+        }
+      }
+      native ??= new Native(address, this._init);
       this._native = native;
       this._catchUp = wake && !/^\d+$/.test(this.lastEventId);
-      for (const type of this._types) native.addEventListener(type, (event) => this._forward(event));
+      for (const type of this._types) native.addEventListener(type, (event) => this._forward(event, native));
     }
 
     _rest() {
@@ -103,8 +136,8 @@
       this._native = null;
     }
 
-    _forward(event) {
-      if (event.target !== this._native) return;
+    _forward(event, from) {
+      if (from !== this._native) return;
       if (event.lastEventId) this.lastEventId = event.lastEventId;
       const copy = event.type === 'error' || event.type === 'open'
         ? new Event(event.type)
@@ -134,6 +167,12 @@
     if (resting) return;
     resting = true;
     for (const source of all) source._rest();
+    // The carrier's socket is not one of ours to close: it is asked.
+    try {
+      window.marble?.stream?.rest?.();
+    } catch {
+      // A carrier without it polls `marbleTabRest.resting` itself.
+    }
   }
 
   // A stream with nothing open underneath: rested, or given up on by the
@@ -158,6 +197,12 @@
     resting = false;
     await reopen();
     if (resting) return;
+    // After the ping, so the host lets the tab's streams back in.
+    try {
+      window.marble?.stream?.wake?.();
+    } catch {
+      // As above.
+    }
     // A page that resyncs when it is shown again (the Agents page does) had
     // not been hidden, so it is told the same way.
     if (fromIdle) document.dispatchEvent(new Event('visibilitychange'));

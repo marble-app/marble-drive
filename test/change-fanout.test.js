@@ -483,6 +483,8 @@ function fanTools(exec, { beforeWrite = null } = {}) {
   const presences = [];
   const tools = createTools({
     store: drive.store,
+    // As the host wires it: what a fan out reads is the version its shards are made on.
+    snapshot: drive.snapshot,
     writeOps: async (docPath, ops, options) => {
       await beforeWrite?.(options);
       const result = await drive.writeOps(docPath, ops, options);
@@ -540,7 +542,7 @@ test('each shard lands as its own batch with its own undo record, and the turn\'
   assert.equal(await drive.store.read(turn.target), SOURCE);
 });
 
-test('a shard whose part changed while its worker read it fails, says so on the page, and leaves the person\'s edit', async () => {
+test('a shard whose part changed while its worker read it is rebased over the change, and the person keeps their edit', async () => {
   let release;
   const typed = new Promise((resolve) => { release = resolve; });
   let working;
@@ -558,22 +560,16 @@ test('a shard whose part changed while its worker read it fails, says so on the 
   await drive.writeOps(turn.target, [{ type: 'setText', id: 'p3t', text: 'Typed by hand' }], { client: 'tab' });
   release();
   const result = await call;
-  assert.match(result.shards[1].error, /changed while it worked/);
-  assert.equal(result.shards[1].applied, 0);
-  assert.equal(result.applied, 4);
-  assert.equal(turn.undo.length, 2);
+  // Made on the version the fan out read, the shard lands on top of the
+  // person's edit instead of failing: the two texts clash, so both are kept.
+  assert.equal(result.shards[1].error, undefined, JSON.stringify(result.shards[1]));
+  assert.equal(result.applied >= 5, true, JSON.stringify(result));
+  assert.equal(turn.undo.length, 3);
   const after = await drive.store.read(turn.target);
-  assert.match(after, /Typed by hand/);
-  assert.doesNotMatch(after, /Paper 4, relabelled/, 'none of the failed shard\'s ops landed');
-  const failed = looks.find((l) => l.extra?.failed);
-  assert.ok(failed, 'a failed shard is said on the page');
-  assert.deepEqual(failed.extra.failed, ['p3', 'p4']);
-  assert.equal(failed.extra.stage, 'after');
-  assert.equal(failed.extra.turn, turn.id);
-  assert.equal(failed.client, `agent:${turn.conversationId}`);
-  assert.equal(failed.extra.groups.failed, 1);
-  assert.equal(failed.extra.groups.of, 3);
-  assert.equal(turn.v5.failed, 1, 'the turn counts what failed, for its end');
+  assert.match(after, /Typed by hand/, "the person's edit is still there");
+  assert.match(after, /Paper 4, relabelled/, 'the rest of the shard landed');
+  assert.equal(looks.some((l) => l.extra?.failed), false, 'nothing failed');
+  assert.equal(turn.v5.failed, 0);
 });
 
 test('a shard that edits outside itself lands nothing at all', async () => {
@@ -723,7 +719,7 @@ test('two fan outs in one turn are counted apart', async () => {
   assert.ok(second[0].seq > first.at(-1).seq, 'the newer count is said as newer');
 });
 
-test('a part the person deleted while its worker read it fails the shard as changed, not as a bad op', async () => {
+test('a part the person deleted while its worker read it is dropped from the shard, and the rest lands', async () => {
   let release;
   const deleted = new Promise((resolve) => { release = resolve; });
   let working;
@@ -741,8 +737,12 @@ test('a part the person deleted while its worker read it fails the shard as chan
   await drive.writeOps(turn.target, [{ type: 'remove', id: 'p3' }], { client: 'tab' });
   release();
   const result = await call;
-  assert.equal(result.shards[1].error, 'changed while it worked');
   assert.equal(result.shards[0].applied, 2);
+  assert.equal(result.shards[1].error, undefined);
+  assert.equal(result.shards[1].applied, 1, 'the row still there was relabelled');
+  const after = await drive.store.read(turn.target);
+  assert.doesNotMatch(after, /data-marble-id="p3"/, 'the removed row stays removed');
+  assert.match(after, /Paper 4, relabelled/);
 });
 
 // ------------------------------------------------------------ review, round 2

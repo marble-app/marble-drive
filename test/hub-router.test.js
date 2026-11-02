@@ -280,3 +280,21 @@ test('the lease API under the public name is only a path on the drive: it never 
   const lease = await (await handle(new Request('https://marble-lease.example.workers.dev/lease/bryan', { headers: { authorization: 'Bearer secret' } }), env)).json();
   assert.deepEqual(lease, { home: 'fly', epoch: 0, since: null });
 });
+
+test("a tab's socket (GET /sync/ws) goes through with its upgrade headers, and the drive's 101 comes back as it is", async () => {
+  const env = fakeEnv();
+  // Workers hand back a 101 with the socket on it; Node cannot make one, so a stand-in.
+  const switched = { status: 101, webSocket: { accept() {} }, headers: new Headers({ upgrade: 'websocket' }) };
+  const up = upstream(() => switched);
+  const req = new Request('https://bryan.marbledrive.app/sync/ws', {
+    headers: { upgrade: 'websocket', connection: 'Upgrade', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-version': '13', origin: 'https://bryan.marbledrive.app', cookie: 'marble_drive=abc' },
+  });
+  const res = await route(req, env, { fetchImpl: up.fetchImpl });
+  assert.equal(res, switched, 'the 101 is the one the drive gave, socket and all');
+  assert.equal(up.calls.length, 1);
+  const sent = up.calls[0].headers;
+  assert.equal(sent.get('upgrade'), 'websocket');
+  assert.equal(sent.get('sec-websocket-key'), 'dGhlIHNhbXBsZSBub25jZQ==');
+  assert.equal(sent.get('x-forwarded-host'), 'bryan.marbledrive.app');
+  assert.match(up.calls[0].url, /^https:\/\/mac-bryan\.marbledrive\.app\/sync\/ws$/);
+});

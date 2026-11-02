@@ -304,3 +304,42 @@ test('without direct mode, a drive\'s name alone opens nothing', async (t) => {
   assert.equal((await ask(r.port, { headers: { host: 'ana.marbledrive.app' } })).status, 401);
   assert.equal(reached, 0);
 });
+
+test("a tab's socket goes through to its drive and back, with the key's checks; nothing else upgrades", async (t) => {
+  const { WebSocketServer, WebSocket } = await import('ws');
+  const seen = [];
+  const guest = await listenGuest((req, res) => res.end('ok'));
+  const wss = new WebSocketServer({ noServer: true });
+  guest.server.on('upgrade', (req, socket, head) => {
+    seen.push({ url: req.url, headers: req.headers });
+    wss.handleUpgrade(req, socket, head, (ws) => ws.on('message', (m) => ws.send(`echo ${m}`)));
+  });
+  const r = await rig({ drives: { ana: { state: 'running', port: guest.port } } });
+  t.after(async () => {
+    await r.close();
+    await guest.close();
+  });
+  const open = (headers, path = '/sync/ws') =>
+    new Promise((resolve) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${r.port}${path}`, { headers });
+      ws.on('open', () => resolve({ ws }));
+      ws.on('unexpected-response', (_req, res) => resolve({ status: res.statusCode }));
+      ws.on('error', () => resolve({ status: 0 }));
+    });
+
+  assert.equal((await open({ 'x-marble-drive': 'ana' })).status, 401, 'no key, no socket');
+  assert.equal((await open(keyed('ana'), '/events')).status, 501, 'only the socket upgrades');
+  assert.equal((await open(keyed('nobody'))).status, 503);
+
+  const { ws } = await open(keyed('ana', { 'x-forwarded-host': 'ana.marbledrive.app' }));
+  ws.send('hi');
+  const [reply] = await once(ws, 'message');
+  assert.equal(String(reply), 'echo hi');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].headers['x-marble-host-key'], undefined, 'the key stays here');
+  assert.equal(seen[0].headers['x-marble-drive'], undefined);
+  assert.equal(seen[0].headers['x-forwarded-host'], 'ana.marbledrive.app');
+  assert.ok(seen[0].headers['x-forwarded-for'], 'never taken for a local request');
+  ws.close();
+  await once(ws, 'close');
+});

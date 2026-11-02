@@ -17,6 +17,10 @@
 // answer is "nothing" rather than a broken fetch.
 
 (() => {
+  // A live stream on the tab's one socket. runtime/tab-rest.js stands in for
+  // EventSource on every drive page and rides `marble.stream` underneath,
+  // resting with the tab; without it, the carrier's stream; else native.
+  const liveStream = (url) => (window.marbleTabRest ? new EventSource(url) : window.marble?.stream?.(url) ?? new EventSource(url));
   const attach = (marble) => {
     if (marble.drive) return;
 
@@ -476,7 +480,7 @@
 
     function listen() {
       if (stream || typeof EventSource === 'undefined') return;
-      stream = new EventSource(`/events?drive=1&client=${CLIENT}`);
+      stream = liveStream(`/events?drive=1&client=${CLIENT}`);
       for (const name of ['created', 'changed', 'moved', 'trashed', 'restored', 'removed']) {
         stream.addEventListener(name, (event) => {
           let data = {};

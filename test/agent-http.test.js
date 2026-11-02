@@ -51,6 +51,13 @@ const SCRIPTS = {
     { call: 'apply_ops', args: { path: 'orchard', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
     { say: 'Renamed late.' },
   ],
+  // Reads, then takes its time: a person's edit lands after its read.
+  orchardRace: [
+    { call: 'read_document', args: { path: 'orchard' } },
+    { sleep: 800 },
+    { call: 'apply_ops', args: { path: 'orchard', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { say: 'Renamed after a while.' },
+  ],
   wait: [{ sleep: 2500 }, { say: 'waited' }],
   // A turn of its own page, for the status widgets' reads.
   status: [
@@ -346,12 +353,31 @@ test('an edit you made before the turn began does not fork the agent’s rewrite
   assert.match(after, />Backlog</);
 });
 
-test('an edit you made while the turn ran forks the agent’s rewrite', async () => {
+test('an edit you made before the agent read it is the version its rewrite is made on: no fork', async () => {
   await freshOrchard();
   const run = await start('script:orchardLate\nRename the heading', 'orchard');
   await until(async () => {
     const { body } = await api('GET', `/agent/conversations/${run.conversationId}`);
     return body.turns.find((t) => t.id === run.turnId)?.status === 'running' ? true : null;
+  });
+  // The agent is still asleep: it reads after this.
+  assert.equal((await personWrites([{ type: 'setText', id: 'h', text: 'Mine' }])).status, 200);
+
+  const { turn } = await finished(run.conversationId, run.turnId);
+  assert.equal(turn.status, 'completed');
+
+  const after = await drive.store.read('orchard');
+  assert.doesNotMatch(after, /<marble-alt/, 'it read your words and changed them knowingly');
+  assert.match(after, />Backlog</);
+});
+
+test('an edit you made after the agent read it forks the agent’s rewrite of the same words', async () => {
+  await freshOrchard();
+  const run = await start('script:orchardRace\nRename the heading', 'orchard');
+  // Once it has read the page, and before it writes.
+  await until(async () => {
+    const { body } = await api('GET', `/agent/conversations/${run.conversationId}`);
+    return body.events?.some((e) => e.type === 'tool.result') ? true : null;
   });
   assert.equal((await personWrites([{ type: 'setText', id: 'h', text: 'Mine' }])).status, 200);
 
@@ -359,7 +385,7 @@ test('an edit you made while the turn ran forks the agent’s rewrite', async ()
   assert.equal(turn.status, 'completed');
 
   const after = await drive.store.read('orchard');
-  assert.match(after, /<marble-alt data-marble-id="h"/, 'both of you changed it during the turn');
+  assert.match(after, /<marble-alt/, 'both of you changed it, from the same version');
   assert.match(after, /Mine/);
   assert.match(after, /Backlog/);
 });

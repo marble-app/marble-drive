@@ -48,7 +48,7 @@ const CHUNK = 1024 * 1024;
  *  `maxBytes` have been read. A 300 MB log written before segments existed
  *  costs what is asked of it. Splits on the newline byte, which never occurs
  *  inside a multi-byte UTF-8 character. */
-export async function tailLines(file, { want = Infinity, after = 0, maxBytes = Infinity } = {}) {
+export async function tailLines(file, { want = Infinity, after = 0, maxBytes = Infinity, keep = null, until = null } = {}) {
   const handle = await fsp.open(file, 'r').catch(() => null);
   if (!handle) return [];
   const out = [];
@@ -87,6 +87,13 @@ export async function tailLines(file, { want = Infinity, after = 0, maxBytes = I
           continue; // a truncated line: an interrupted append, or the window's edge
         }
         if (entry.t <= after) return out;
+        // `until`: the first line it is true of ends the read, unkept, and the
+        // answer says so (`stopped`).
+        if (until?.(entry)) {
+          out.stopped = true;
+          return out;
+        }
+        if (keep && !keep(entry)) continue;
         out.push(entry);
         if (out.length >= want) return out;
       }
@@ -154,7 +161,14 @@ export function createOpLog({ dir, maxBytes = null }) {
     return target;
   }
 
-  async function append(docPath, ops, { client = 'anon', label = null, batch = null } = {}) {
+  // `v` is the document's version once this batch has landed, the same on
+  // every line of the batch (server/versions.js); `by` says what kind of
+  // writer it was (person, agent, outside, restore); `fixed` that the sender's
+  // own copy had to be corrected (its answer carried fixes), so a retry after
+  // a restart knows to reload. A batch with no ops to show for it (a restore,
+  // a create, an outside write no op could express) is one marker line,
+  // `type: "reset"`, which carries its version and nothing to replay.
+  async function append(docPath, ops, { client = 'anon', label = null, batch = null, v = null, by = null, fixed = false } = {}) {
     if (!ops?.length) return { written: 0 };
     const clean = parsePath(docPath, { allowRoot: false });
     await fsp.mkdir(dir, { recursive: true });
@@ -167,6 +181,9 @@ export function createOpLog({ dir, maxBytes = null }) {
         client,
         seq: next(client),
         ...(batch ? { batch } : {}),
+        ...(Number.isInteger(v) ? { v } : {}),
+        ...(by ? { by } : {}),
+        ...(fixed ? { fixed: true } : {}),
         ...(label ? { label } : {}),
         ...op,
       }))
@@ -197,22 +214,88 @@ export function createOpLog({ dir, maxBytes = null }) {
       .map((s) => ({ file: path.join(dir, s.name), ...s.at }));
   }
 
+  /** A batch that has no ops to log — a restore, a create, an outside write
+   *  no op could express — still has a version, and the log is where versions
+   *  live: one marker line. */
+  async function mark(docPath, { client = 'anon', v, by = null, batch = null, label = null } = {}) {
+    return append(docPath, [{ type: 'reset' }], { client, v, by, batch, label });
+  }
+
   /** The tail of the log, oldest first. Reads the active segment, then sealed
    *  ones newest first, each from its end, and stops as soon as it has `limit`
    *  lines after `after` — so a long-lived document's history costs what is
    *  asked for, not its whole life. Its reader today is build mode's History
-   *  (server/build). */
-  async function since(docPath, { after = 0, limit: want = 500 } = {}) {
+   *  (server/build). Version markers (`type: "reset"`) are left out unless
+   *  `markers` asks for them: they are not edits anybody made. */
+  async function since(docPath, { after = 0, limit: want = 500, markers = false } = {}) {
     const clean = parsePath(docPath, { allowRoot: false });
-    const newest = await tailLines(activeFile(clean), { want, after });
+    const keep = markers ? null : (entry) => entry.type !== 'reset';
+    const newest = await tailLines(activeFile(clean), { want, after, keep });
     if (newest.length < want) {
       for (const segment of await segments(clean)) {
         if (segment.last <= after) break;
-        newest.push(...(await tailLines(segment.file, { want: want - newest.length, after })));
+        newest.push(...(await tailLines(segment.file, { want: want - newest.length, after, keep })));
         if (newest.length >= want) break;
       }
     }
     return newest.reverse();
+  }
+
+  /** Every line newest first across the active segment and then the sealed
+   *  ones, until `stop(entry)` says enough (or the log ends). */
+  async function walkBack(clean, stop, { maxBytes = Infinity } = {}) {
+    const files = [activeFile(clean), ...(await segments(clean)).map((s) => s.file)];
+    const out = [];
+    let read = 0;
+    for (const file of files) {
+      const lines = await tailLines(file, { until: stop, maxBytes: maxBytes - read });
+      out.push(...lines);
+      if (lines.stopped) return { lines: out, stopped: true };
+      const info = await fsp.stat(file).catch(() => null);
+      read += info?.size ?? 0;
+      if (read >= maxBytes) break;
+    }
+    return { lines: out, stopped: false };
+  }
+
+  /** The document's version as the log last said it: the `v` of its newest
+   *  line, from the active segment or, when that is empty, the newest sealed
+   *  one. 0 for a document whose log has none (never written, or only ever
+   *  written before versions existed). */
+  async function lastVersion(docPath) {
+    const clean = parsePath(docPath, { allowRoot: false });
+    for (const file of [activeFile(clean), ...(await segments(clean)).map((s) => s.file)]) {
+      const [newest] = await tailLines(file, { want: 1 });
+      if (newest) return Number.isInteger(newest.v) ? newest.v : 0;
+    }
+    return 0;
+  }
+
+  /** The batches after version `after`, oldest first: `[{ v, client, batch,
+   *  by, ops, reset? }]`. `null` when the log cannot say: a version in the
+   *  range has no lines (lost, or written before versions), or reading back
+   *  would pass `maxBytes`. A batch that was a marker (`reset`) is returned
+   *  with `reset: true` and no ops. */
+  async function versionsSince(docPath, after, { upTo = Infinity, maxBytes = 64 * 1024 * 1024 } = {}) {
+    const clean = parsePath(docPath, { allowRoot: false });
+    const { lines, stopped } = await walkBack(clean, (entry) => !Number.isInteger(entry.v) || entry.v <= after, { maxBytes });
+    if (!stopped && after > 0) return null;
+    const byV = new Map();
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const { t, doc, client, seq, batch, v, by, fixed, label, ...op } = lines[i];
+      if (v > upTo) continue;
+      let entry = byV.get(v);
+      if (!entry) {
+        entry = { v, client, batch: batch ?? null, by: by ?? null, ops: [] };
+        byV.set(v, entry);
+      }
+      if (op.type === 'reset') entry.reset = true;
+      else entry.ops.push(op);
+    }
+    const out = [...byV.values()].sort((a, b) => a.v - b.v);
+    // Every version from after+1 up, with none missing.
+    for (let i = 0; i < out.length; i += 1) if (out[i].v !== after + 1 + i) return null;
+    return out;
   }
 
   /** The batch ids in the active segment, with how many ops each filed and
@@ -225,10 +308,10 @@ export function createOpLog({ dir, maxBytes = null }) {
     const lines = await tailLines(activeFile(clean), { maxBytes: limit() });
     for (let i = lines.length - 1; i >= 0; i -= 1) {
       const entry = lines[i];
-      if (typeof entry.batch !== 'string') continue;
+      if (typeof entry.batch !== 'string' || entry.type === 'reset') continue;
       const seen = out.get(entry.batch);
       if (seen) seen.applied += 1;
-      else out.set(entry.batch, { applied: 1, t: entry.t, client: entry.client });
+      else out.set(entry.batch, { applied: 1, t: entry.t, client: entry.client, v: Number.isInteger(entry.v) ? entry.v : null, fixed: Boolean(entry.fixed) });
     }
     return out;
   }
@@ -240,7 +323,7 @@ export function createOpLog({ dir, maxBytes = null }) {
     active.delete(to);
   }
 
-  return { append, since, batches, segments: (docPath) => segments(parsePath(docPath, { allowRoot: false })), move, dir };
+  return { append, mark, since, lastVersion, versionsSince, batches, segments: (docPath) => segments(parsePath(docPath, { allowRoot: false })), move, dir };
 }
 
 /** Total order over two log lines, for whoever needs one. Time first because it
