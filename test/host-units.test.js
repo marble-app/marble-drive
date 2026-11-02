@@ -84,7 +84,8 @@ test('user mode: a transient unit in marble-guests.slice, its walls, its setting
   for (const wall of ['PrivateUsers=yes', 'PrivatePIDs=yes', 'PrivateTmp=yes', 'ProtectSystem=strict', 'ProtectHome=yes', 'NoNewPrivileges=yes', 'MemoryMax=1536M', 'TasksMax=512', 'KillMode=mixed']) {
     assert.ok(launch.includes(`-p ${wall}`), wall);
   }
-  assert.ok(launch.includes(`-p InaccessiblePaths=-/mnt -/run/WSL -/run/tailscale -/run/docker.sock -${guestEnvDir}`));
+  assert.ok(launch.includes('-p TemporaryFileSystem=/mnt:ro'));
+  assert.ok(launch.includes(`-p InaccessiblePaths=-/run/WSL -/run/tailscale -/run/docker.sock -${guestEnvDir}`));
   assert.ok(!/RestrictNamespaces/.test(launch), 'Chromium and Claude Code make namespaces of their own');
   assert.ok(f.calls.some((c) => c.startsWith('systemctl --user set-property --runtime marble-guests.slice MemoryHigh=5G MemoryMax=6G')));
   assert.ok(f.calls.includes('systemctl --user set-property --runtime marble.slice CPUWeight=50'), 'the weight on the level beside the owner\'s drive');
@@ -108,7 +109,7 @@ test('user mode: the release is at /opt/marble inside the walls, wherever it rea
   assert.ok(moved.includes('BindReadOnlyPaths=/var/tmp/trial/opt:/opt/marble'));
   assert.ok(moved.includes('BindPaths=/var/tmp/trial/guests/ana'));
   const real = userProperties({ name: 'ana', opt: '/opt/marble', guestEnvDir: '/etc/marble-guests', guestStateDir: '/var/lib/marble-guests' });
-  assert.ok(!real.some((p) => p.startsWith('TemporaryFileSystem=')));
+  assert.ok(!real.includes('TemporaryFileSystem=/opt'));
   assert.ok(real.includes('IPAddressAllow=100.100.100.100 fd7a:115c:a1e0::53'));
 });
 

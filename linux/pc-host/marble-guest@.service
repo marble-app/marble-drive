@@ -76,8 +76,14 @@ SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 # Windows' drives (/mnt) and WSL's interop sockets (/run/WSL), through which
 # a process could run Windows programs as the owner; Tailscale's and Docker's
-# sockets; and every drive's settings.
-InaccessiblePaths=/mnt -/run/WSL -/run/tailscale -/run/docker.sock /etc/marble-guests
+# sockets; and every drive's settings. /mnt is an empty folder rather than a
+# locked one: on WSL, Claude Code looks for an organization policy at
+# /mnt/c/Program Files/ClaudeCode/managed-settings.json, and a locked /mnt
+# answers EACCES, which it takes for a policy it couldn't read and refuses
+# every sign-in. An empty /mnt answers "no such file", as on any machine
+# without one.
+TemporaryFileSystem=/mnt:ro
+InaccessiblePaths=-/run/WSL -/run/tailscale -/run/docker.sock /etc/marble-guests
 # 127.0.0.1 and ::1 are closed: the owner's drive, marble-host's router and
 # admin API and cloudflared's metrics listen there, and the owner's drive
 # takes anything from loopback for the owner at its gate. systemd checks the

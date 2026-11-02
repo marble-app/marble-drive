@@ -104,9 +104,13 @@ export function userProperties({ name, opt, guestEnvDir, guestStateDir }) {
     'RestrictRealtime=yes',
     'SystemCallArchitectures=native',
     'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK',
+    // Windows' drives as an empty folder, not a locked one: Claude Code on
+    // WSL refuses to sign in when its policy file under /mnt/c answers
+    // EACCES, but takes "no such file" for no policy.
+    'TemporaryFileSystem=/mnt:ro',
     // Missing paths are fine: a folder under /tmp is already out of sight
     // behind PrivateTmp.
-    `InaccessiblePaths=-/mnt -/run/WSL -/run/tailscale -/run/docker.sock -${guestEnvDir}`,
+    `InaccessiblePaths=-/run/WSL -/run/tailscale -/run/docker.sock -${guestEnvDir}`,
     // The drive's folder, wherever the trial keeps it, writable through the
     // walls (and visible behind PrivateTmp when it lives under /tmp).
     `BindPaths=${state}`,
