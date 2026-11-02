@@ -108,6 +108,10 @@ const outerOf = (doc, id) => {
   }
 };
 
+// The document's own elements cannot be swapped by a fix: a page that
+// replaces its <body> with parsed markup is left with none.
+const DOCUMENT_TAG = /^<(html|head|body)[\s>]/i;
+
 /** The elements a batch's sender has to put right, as they now are:
  *  `[{ id, html }]`, the outerHTML of each of `fixIds` in `doc`, as the
  *  carrier applies them (replace the element with that id by the html):
@@ -116,12 +120,21 @@ const outerOf = (doc, id) => {
  *     <marble-alt> that now stands where it stood (the wrapper has a fresh
  *     id the sender's copy has never seen);
  *   - only the outermost: a fix inside another one is already in it;
- *   - an element that is no longer there is `html: ""` (remove it). */
+ *   - an element that is no longer there is `html: ""` (remove it);
+ *   - a fix of <html>, <head> or <body> is never sent. One that only holds
+ *     a fork is said by the fork's own fix; any other means the sender has
+ *     to reload, which `settleFixes` says. */
 export function fixesOf(doc, fixIds, forks = []) {
+  return settleFixes(doc, fixIds, forks).fixes;
+}
+
+/** `fixesOf`, and whether the sender can only be put right by a reload. */
+export function settleFixes(doc, fixIds, forks = []) {
   const wrapperOf = new Map();
   for (const fork of forks ?? []) if (fork && typeof fork === 'object' && fork.wrapper) wrapperOf.set(fork.id, fork.wrapper);
   const wanted = new Set([...(fixIds ?? []).filter((id) => typeof id === 'string'), ...wrapperOf.keys()]);
   const fixes = [];
+  let reload = false;
   for (const id of wanted) {
     if (wrapperOf.has(id)) {
       const html = outerOf(doc, wrapperOf.get(id));
@@ -133,11 +146,19 @@ export function fixesOf(doc, fixIds, forks = []) {
     // The fork's wrapper itself is reached through the element it wraps.
     if ([...wrapperOf.values()].includes(id)) continue;
     const html = outerOf(doc, id);
+    if (html != null && DOCUMENT_TAG.test(html)) {
+      const onlyForks = wrapperOf.size > 0 && [...wrapperOf.values()].every((w) => html.includes(`data-marble-id="${w}"`));
+      if (!onlyForks) reload = true;
+      continue;
+    }
     fixes.push({ id, html: html ?? '', holds: [id] });
   }
   // Outermost only: a fix whose element sits inside another fix's html goes.
   const inside = (outer, inner) => outer !== inner && outer.html && inner.holds.some((id) => outer.html.includes(`data-marble-id="${id}"`));
-  return fixes.filter((fix) => !fixes.some((other) => inside(other, fix))).map(({ id, html }) => ({ id, html }));
+  return {
+    fixes: fixes.filter((fix) => !fixes.some((other) => inside(other, fix))).map(({ id, html }) => ({ id, html })),
+    reload,
+  };
 }
 
 /** One batch onto the document, over what it did not see. `batch` seeds the
@@ -152,6 +173,8 @@ export function rebase(doc, ops, { client = 'anon', by = 'person', batch = null,
       fixIds: result.fixIds ?? [],
       record: result.record ?? recordOf(result.ops ?? [], { client, by }),
       source: result.source ?? doc.source,
+      // A fix the sender needs has no addressed element: it reloads.
+      ...(result.reload ? { reload: true } : {}),
     };
   }
   return fallback(doc, ops, { client, by, concurrent });

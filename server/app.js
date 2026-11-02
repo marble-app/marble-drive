@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { agentsAllowed, createAgents } from './agent/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
 import { applyOps as applyToSource, bytesOf, chooseProvider, diffSources, enginePath, examine, idsOfOps, openDocument, shaOf } from './engine.js';
-import { fixesOf, rebase } from './rebase.js';
+import { rebase, settleFixes } from './rebase.js';
 import { byOf, createVersions } from './versions.js';
 import { dataUri as iconUri, markFor, refreshed, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten, PLACEHOLDER } from './flatten.js';
@@ -514,7 +514,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       forks: result.forks ?? [],
       dropped: result.dropped ?? [],
       fixes: kept ? fixes : [],
-      ...(kept ? {} : { reset: true }),
+      ...(kept && !result.reset ? {} : { reset: true }),
+      ...(result.bumped ? { bumped: true } : {}),
       ...(result.stale ? { stale: true } : {}),
     });
     while (seen.size > BATCHES_KEPT) seen.delete(seen.keys().next().value);
@@ -943,20 +944,35 @@ export async function createDrive(config, { log = console, agentProviders = null
       }
 
       const dropped = next.dropped ?? [];
+      // The sender's copy cannot be put right by fixes alone (one needs an
+      // element with no id, an unaddressed <head>): it reloads the document.
+      const settled = settleFixes(doc, next.fixIds, next.forks);
+      const reload = Boolean(next.reload) || settled.reload;
+      const fixes = reload ? [] : settled.fixes;
       if (next.source === source) {
         settle(source, source);
+        // Its ops were dropped or came to nothing, so what the sender's page
+        // did with them locally is undone by its fixes (or a reload). Those
+        // are placed at a version, so this batch takes one; a batch that
+        // changed nothing and needs nothing put right does not.
+        const bumped = fixes.length > 0 || reload;
+        let v = state.v;
+        if (bumped) {
+          v = versions.landed(state, { client: who, batch, by, ops: [], record: next.record, reload });
+          await oplog.mark(docPath, { client: who, v, by, batch, type: 'noop', reload }).catch((err) => log.error(`[drive] op log marker for ${docPath} failed: ${err.message}`));
+        }
         const result = {
           path: docPath,
           applied: 0,
           bytes: bytesOf(source),
           sha: shaOf(source),
-          v: state.v,
+          v,
           ops: [],
           forks: [],
           dropped,
-          // Its ops were dropped, so what the sender's page did with them
-          // locally is undone by putting their targets' parents back.
-          fixes: fixesOf(doc, next.fixIds, []),
+          fixes,
+          ...(bumped ? { bumped: true } : {}),
+          ...(reload ? { reset: true } : {}),
           ...(gap.stale ? { stale: true } : {}),
         };
         if (seen) rememberBatch(seen, key, result);
@@ -977,12 +993,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       }
       // The version, the bytes it names and the engine move together, before
       // anything else can look.
-      const v = versions.landed(state, { client: who, batch, by, ops: next.ops, record: next.record });
+      const v = versions.landed(state, { client: who, batch, by, ops: next.ops, record: next.record, reload });
       state.source = next.source;
       state.fp = null;
       lastKnown.set(docPath, { source: next.source, client });
       lastWriter.set(docPath, { key: writerKey(client), t: Date.now() });
-      const fixes = fixesOf(doc, next.fixIds, next.forks);
       const result = {
         applied: next.ops.length,
         ops: next.ops,
@@ -991,6 +1006,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         fixes,
         ...written,
         v,
+        ...(reload ? { reset: true } : {}),
         ...(gap.stale ? { stale: true } : {}),
       };
       // Remembered the moment the bytes are down: a retry from here on must be
@@ -998,7 +1014,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (seen) rememberBatch(seen, key, result);
       state.fp = (await store.version?.(docPath)) ?? null;
       try {
-        await oplog.append(docPath, next.ops, { client: who, batch, v, by, fixed: fixes.length > 0 });
+        await oplog.append(docPath, next.ops, { client: who, batch, v, by, fixed: fixes.length > 0 || reload, reload });
       } catch (err) {
         // The edit landed; losing its log line must not make it look as if it did not.
         log.error(`[drive] op log append for ${docPath} failed: ${err.message}`);
@@ -1016,11 +1032,20 @@ export async function createDrive(config, { log = console, agentProviders = null
     const result = await applyOps(docPath, ops, options);
     // A replay changed nothing now; everybody heard about it the first time.
     if (result.replay) return result;
+    // A batch that applied nothing but took a version (its sender's fixes
+    // are placed at it) is heard too, with no ops, so every copy's version
+    // keeps step.
+    if (result.bumped && !result.applied) {
+      const client = options.client ?? null;
+      channels.toBatch(docPath, { v: result.v, client: client ?? 'anon', batch: options.batch ?? null, ops: [], by: byOf(client ?? 'anon'), reset: Boolean(result.reset) }, { except: client });
+    }
     if (result.applied) {
       const client = options.client ?? null;
       // Every copy but the sender's hears the batch as it landed; the sender
       // learns it from its answer (its `fixes` put right whatever differs).
-      channels.toBatch(docPath, { v: result.v, client: client ?? 'anon', batch: options.batch ?? null, ops: result.ops, by: byOf(client ?? 'anon') }, { except: client });
+      // One the rebase could only settle by a reload is heard as `changed`
+      // by everyone: they catch up, are told `reset`, and reload too.
+      channels.toBatch(docPath, { v: result.v, client: client ?? 'anon', batch: options.batch ?? null, ops: result.ops, by: byOf(client ?? 'anon'), reset: Boolean(result.reset) }, { except: client });
       // Pages from before versions (an open tab's old carrier, until it
       // reloads) hear the legacy frames; one whose own copy needs correcting
       // hears them too, and reloads.

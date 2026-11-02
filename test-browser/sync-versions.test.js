@@ -73,7 +73,7 @@ const FORKED = `<!doctype html>
 </body></html>
 `;
 
-const host = await startDrive({ agents: false, documents: { pad: PAD, race: PAD, agent: PAD, missed: PAD, five: PAD, refused: PAD, big: BIG, forked: FORKED } });
+const host = await startDrive({ agents: false, documents: { pad: PAD, race: PAD, agent: PAD, missed: PAD, five: PAD, refused: PAD, big: BIG, forked: FORKED, clash: PAD } });
 test.after(() => host.close());
 
 const until = async (fn, what, ms = 15_000) => {
@@ -110,6 +110,7 @@ async function tab(doc, { blockable = false } = {}) {
  *  elements is layout, not content), with the page's chrome left out. */
 const shown = (page) =>
   page.evaluate(() => {
+    if (!document.body) return null;
     const body = document.body.cloneNode(true);
     for (const el of body.querySelectorAll('[data-marble-transient], script, .marble-fork')) el.remove();
     const walk = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
@@ -318,20 +319,27 @@ test('the step-1 false fork stays fixed: an agent-touched 2 MB page and a 20-op 
 test("Keep this on a fork from the sync core keeps that version under its own id and takes the wrapper away", async () => {
   const { page, errors } = await host.newPage();
   await page.goto(`${host.base}/a/forked`);
+  // A tab that wrote neither version sees two people's edits in order.
   const bar = page.locator('marble-alt[data-marble-id="w1"] > .marble-fork');
   await bar.waitFor();
   assert.deepEqual(await bar.locator('.marble-fork-seg button').allTextContents(), ['First edit', 'Second edit']);
-  await bar.getByRole('button', { name: 'Second edit', exact: true }).click();
+  // The tab that wrote one of them sees it as its own.
+  const me = await page.evaluate(() => marble.client);
+  // (Written whole while the tab is open: it reconciles, and the fork that
+  // arrives that way is wired too.)
+  await host.drive.createDocument('forked', FORKED.replaceAll('tabB', me), { label: 'test' });
+  await until(async () => JSON.stringify(await bar.locator('.marble-fork-seg button').allTextContents()) === JSON.stringify(['Their edit', 'Your edit']), 'the labels from this tab');
+  await bar.getByRole('button', { name: 'Your edit', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('[data-marble-id="w1"] > .marble-alt-shown')?.textContent === 'Second words');
   await bar.getByRole('button', { name: 'Keep this' }).click();
   await until(async () => !(await file('forked')).includes('data-marble-id="w1"'), 'the wrapper to go');
   const now = await file('forked');
-  assert.match(now, /<p data-marble-id="x9">Second words<\/p>/, 'the kept version, plain, under its own id');
+  assert.match(now, /<p data-marble-id="x9">Second words<\/p>/, 'the kept version, plain, under its own id, no client');
   assert.doesNotMatch(now, /First words/);
 
   // A removal that met an edit: keeping the removal removes it.
   const removal = page.locator('marble-alt[data-marble-id="w2"] > .marble-fork');
-  assert.deepEqual(await removal.locator('.marble-fork-seg button').allTextContents(), ['Yours', 'Removed']);
+  assert.deepEqual(await removal.locator('.marble-fork-seg button').allTextContents(), ['Their edit', 'Removed']);
   await removal.getByRole('button', { name: 'Removed', exact: true }).click();
   await removal.getByRole('button', { name: 'Keep this' }).click();
   await until(async () => !(await file('forked')).includes('data-marble-id="w2"'), 'the removal to land');
@@ -341,4 +349,38 @@ test("Keep this on a fork from the sync core keeps that version under its own id
   assert.match(after, /Not forked/);
   assert.deepEqual(errors.filter((message) => !/favicon/.test(message)), []);
   await page.context().close();
+});
+
+test('two tabs replacing the same words fork, and both tabs get the fork bar: one from the batch, one from its fixes', async () => {
+  const a = await tab('clash');
+  const b = await tab('clash');
+  // Tab b's save is held at the network until tab a's has landed, so it is
+  // made on the version before a's.
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await b.page.route('**/ops?**', async (route) => {
+    if (route.request().method() === 'POST') await held;
+    await route.continue();
+  });
+  const say = (page, words) => page.evaluate((w) => {
+    const el = document.querySelector('[data-marble-id="p1"]');
+    el.textContent = w;
+    marble.op({ type: 'setText', id: 'p1', text: w });
+  }, words);
+  const before = await hostV('clash');
+  await say(b.page, 'Beta wrote this instead');
+  await say(a.page, 'Alpha wrote something else');
+  await until(async () => (await hostV('clash')) > before, "tab a's batch to land");
+  release();
+  await settled([a.page, b.page], 'clash');
+  const now = await file('clash');
+  assert.match(now, /<marble-alt/, 'the clash forked');
+  for (const page of [a.page, b.page]) {
+    await page.locator('marble-alt > .marble-fork').waitFor();
+    const labels = await page.locator('marble-alt > .marble-fork .marble-fork-seg button').allTextContents();
+    assert.deepEqual(labels.slice().sort(), ['Their edit', 'Your edit']);
+  }
+  await converged([a.page, b.page], 'clash');
+  await a.page.context().close();
+  await b.page.context().close();
 });

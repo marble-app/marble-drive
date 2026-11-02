@@ -168,7 +168,7 @@ export function createOpLog({ dir, maxBytes = null }) {
   // a restart knows to reload. A batch with no ops to show for it (a restore,
   // a create, an outside write no op could express) is one marker line,
   // `type: "reset"`, which carries its version and nothing to replay.
-  async function append(docPath, ops, { client = 'anon', label = null, batch = null, v = null, by = null, fixed = false } = {}) {
+  async function append(docPath, ops, { client = 'anon', label = null, batch = null, v = null, by = null, fixed = false, reload = false } = {}) {
     if (!ops?.length) return { written: 0 };
     const clean = parsePath(docPath, { allowRoot: false });
     await fsp.mkdir(dir, { recursive: true });
@@ -184,6 +184,7 @@ export function createOpLog({ dir, maxBytes = null }) {
         ...(Number.isInteger(v) ? { v } : {}),
         ...(by ? { by } : {}),
         ...(fixed ? { fixed: true } : {}),
+        ...(reload ? { reload: true } : {}),
         ...(label ? { label } : {}),
         ...op,
       }))
@@ -217,8 +218,11 @@ export function createOpLog({ dir, maxBytes = null }) {
   /** A batch that has no ops to log — a restore, a create, an outside write
    *  no op could express — still has a version, and the log is where versions
    *  live: one marker line. */
-  async function mark(docPath, { client = 'anon', v, by = null, batch = null, label = null } = {}) {
-    return append(docPath, [{ type: 'reset' }], { client, v, by, batch, label });
+  //
+  // `type: "noop"` is a batch that applied nothing but still took a version
+  // (its sender's fixes are placed at it): it replays as a batch with no ops.
+  async function mark(docPath, { client = 'anon', v, by = null, batch = null, label = null, type = 'reset', reload = false } = {}) {
+    return append(docPath, [{ type }], { client, v, by, batch, label, fixed: type === 'noop', reload });
   }
 
   /** The tail of the log, oldest first. Reads the active segment, then sealed
@@ -229,7 +233,7 @@ export function createOpLog({ dir, maxBytes = null }) {
    *  `markers` asks for them: they are not edits anybody made. */
   async function since(docPath, { after = 0, limit: want = 500, markers = false } = {}) {
     const clean = parsePath(docPath, { allowRoot: false });
-    const keep = markers ? null : (entry) => entry.type !== 'reset';
+    const keep = markers ? null : (entry) => entry.type !== 'reset' && entry.type !== 'noop';
     const newest = await tailLines(activeFile(clean), { want, after, keep });
     if (newest.length < want) {
       for (const segment of await segments(clean)) {
@@ -282,15 +286,15 @@ export function createOpLog({ dir, maxBytes = null }) {
     if (!stopped && after > 0) return null;
     const byV = new Map();
     for (let i = lines.length - 1; i >= 0; i -= 1) {
-      const { t, doc, client, seq, batch, v, by, fixed, label, ...op } = lines[i];
+      const { t, doc, client, seq, batch, v, by, fixed, reload, label, ...op } = lines[i];
       if (v > upTo) continue;
       let entry = byV.get(v);
       if (!entry) {
         entry = { v, client, batch: batch ?? null, by: by ?? null, ops: [] };
         byV.set(v, entry);
       }
-      if (op.type === 'reset') entry.reset = true;
-      else entry.ops.push(op);
+      if (op.type === 'reset' || reload) entry.reset = true;
+      if (op.type !== 'reset' && op.type !== 'noop') entry.ops.push(op);
     }
     const out = [...byV.values()].sort((a, b) => a.v - b.v);
     // Every version from after+1 up, with none missing.
@@ -310,6 +314,11 @@ export function createOpLog({ dir, maxBytes = null }) {
       const entry = lines[i];
       if (typeof entry.batch !== 'string' || entry.type === 'reset') continue;
       const seen = out.get(entry.batch);
+      // A batch that applied nothing still landed (and took a version).
+      if (entry.type === 'noop') {
+        if (!seen) out.set(entry.batch, { applied: 0, t: entry.t, client: entry.client, v: Number.isInteger(entry.v) ? entry.v : null, fixed: true });
+        continue;
+      }
       if (seen) seen.applied += 1;
       else out.set(entry.batch, { applied: 1, t: entry.t, client: entry.client, v: Number.isInteger(entry.v) ? entry.v : null, fixed: Boolean(entry.fixed) });
     }

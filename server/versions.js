@@ -99,9 +99,12 @@ export function createVersions({ oplog, log = console, ringBatches = null, ringB
 
   /** A batch landed: version up by one, and its entry kept on the ring.
    *  Call only inside the document's queue. Returns the new version. */
-  function landed(state, { client, batch = null, by = byOf(client), ops = null, record = null, reset = false }) {
+  // `reload`: a batch with ops and a record (it is rebased over like any
+  // other) that a copy can still only settle by reloading: catch-up across it
+  // is a reset.
+  function landed(state, { client, batch = null, by = byOf(client), ops = null, record = null, reset = false, reload = false }) {
     state.v += 1;
-    const entry = { v: state.v, client: client ?? 'anon', batch, by, ops: reset ? null : ops ?? [], record, reset: Boolean(reset) };
+    const entry = { v: state.v, client: client ?? 'anon', batch, by, ops: reset ? null : ops ?? [], record, reset: Boolean(reset), reload: Boolean(reload) };
     entry.size = sizeOf(entry);
     state.ring.push(entry);
     state.ringBytes += entry.size;
@@ -150,7 +153,7 @@ export function createVersions({ oplog, log = console, ringBatches = null, ringB
     if (since === v) return { v, batches: [] };
     let batches = null;
     if (since >= state.floor) {
-      batches = state.ring.filter((entry) => entry.v > since).map(({ v: at, client, batch, by, ops, reset }) => ({ v: at, client, batch, by, ops, ...(reset ? { reset: true } : {}) }));
+      batches = state.ring.filter((entry) => entry.v > since).map(({ v: at, client, batch, by, ops, reset, reload }) => ({ v: at, client, batch, by, ops, ...(reset || reload ? { reset: true } : {}) }));
     } else {
       batches = await oplog.versionsSince(docPath, since, { upTo: v }).catch((err) => {
         log.error?.(`[versions] catch-up for ${docPath} from the op log failed: ${err.message}`);

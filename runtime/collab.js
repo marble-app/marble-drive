@@ -459,20 +459,23 @@
 
     const isSynced = (alt) => persistentChildren(alt).some((el) => el.hasAttribute(CLIENT) || el.hasAttribute(REMOVED));
 
+    // A fork's versions, in the words of the person looking: theirs is
+    // "Your edit" (the version whose client is this tab, `marble.client`),
+    // anyone else's "Their edit", an agent's "Agent's edit". A tab that wrote
+    // neither sees two people's edits in the order they landed.
     const labelOf = (version) => {
       const by = version.getAttribute(BY) ?? '';
       const name = version.getAttribute(ALT) ?? '';
       if (version.hasAttribute(REMOVED)) return 'Removed';
       const client = version.getAttribute(CLIENT);
       if (client) {
-        if (by.startsWith('agent')) return 'The new one';
-        // Which tab this is, when the carrier says.
-        const mine = marble.client ?? marble.status?.client ?? null;
-        if (mine) return client === mine ? 'Yours' : 'Theirs';
-        // Two people's edits: in the order they landed (the one already in
-        // the document comes first in the wrapper).
-        const people = persistentChildren(version.parentElement).filter((el) => (el.getAttribute(BY) ?? '') === 'person' && !el.hasAttribute(REMOVED));
-        if (people.length < 2) return 'Yours';
+        if (by.startsWith('agent')) return 'Agent’s edit';
+        const mine = marble.client ?? null;
+        if (mine && client === mine) return 'Your edit';
+        const siblings = persistentChildren(version.parentElement);
+        const people = siblings.filter((el) => (el.getAttribute(BY) ?? '') === 'person' && !el.hasAttribute(REMOVED));
+        const anyMine = mine && siblings.some((el) => el.getAttribute(CLIENT) === mine);
+        if (anyMine || people.length < 2) return 'Their edit';
         return people.indexOf(version) === 0 ? 'First edit' : 'Second edit';
       }
       if (by === 'person') return 'Yours';
@@ -1263,18 +1266,7 @@
       const parent = alt.parentElement;
       if (!parent || !marble.id(parent)) return;
       const altId = marble.id(alt);
-      if (isSynced(alt)) {
-        // The wrapper's id is its own: the kept version steps out in front of
-        // it, under the id it already has, and the wrapper goes. Keeping the
-        // removal is the removal.
-        if (keep.hasAttribute(REMOVED)) return play([{ type: 'remove', id: altId }]);
-        const keepId = marble.id(keep);
-        return play([
-          { type: 'move', id: keepId, parentId: marble.id(parent), beforeId: altId },
-          ...[ALT, BY, CLIENT].filter((name) => keep.hasAttribute(name)).map((name) => ({ type: 'setAttr', id: keepId, name, value: null })),
-          { type: 'remove', id: altId },
-        ]);
-      }
+      if (isSynced(alt)) return settleSynced(alt, keep);
       const before = nextPersistent(alt);
       const clone = marble.clone(keep);
       clone.removeAttribute(ALT);
@@ -1294,10 +1286,36 @@
       ]);
     }
 
+    // A fork from the sync core is settled in one batch: the chosen version
+    // steps out in front of the wrapper under its own id, plain, and the
+    // wrapper goes with whatever else it held. Choosing the removal removes
+    // the whole of it.
+    function settleSynced(alt, keep) {
+      const parent = alt.parentElement;
+      const altId = marble.id(alt);
+      if (!parent || !marble.id(parent) || !altId) return Promise.resolve();
+      if (keep.hasAttribute(REMOVED)) return play([{ type: 'remove', id: altId }]);
+      const keepId = marble.id(keep);
+      return play([
+        { type: 'move', id: keepId, parentId: marble.id(parent), beforeId: altId },
+        ...[ALT, BY, CLIENT].filter((name) => keep.hasAttribute(name)).map((name) => ({ type: 'setAttr', id: keepId, name, value: null })),
+        { type: 'remove', id: altId },
+      ]);
+    }
+
     function resolve(alt, keepName) {
       const versions = persistentChildren(alt);
       const keep = versions.find((el) => el.getAttribute(ALT) === keepName) ?? versions[0];
       if (!keep) return;
+      if (isSynced(alt)) {
+        const bar = alt.querySelector(':scope > .marble-fork');
+        const commit = () => settleSynced(alt, keep);
+        if (bar && !reducedMotion()) {
+          bar.classList.add('marble-fork-out');
+          setTimeout(commit, 160);
+        } else commit();
+        return;
+      }
       const doomed = versions.filter((el) => el !== keep);
       const id = marble.id(alt);
       const ops = [];
@@ -1409,8 +1427,13 @@
       alt.append(bar);
       render();
       new MutationObserver(render).observe(alt, { attributes: true, attributeFilter: [ACTIVE], childList: true });
+      // Whose each version is can change under it too (a reconcile, a fix).
+      new MutationObserver(render).observe(alt, { attributes: true, attributeFilter: [ALT, CLIENT, REMOVED], subtree: true });
     }
 
+    // Every subtree the carrier adopts — an insert, a reconcile, and the
+    // fixes that hand a batch's sender the fork its edit became — is offered
+    // here, so a fork arriving any of those ways gets its bar.
     marble.register((root) => {
       deriveAlts(root);
       for (const alt of altsIn(root)) wireFork(alt);

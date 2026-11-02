@@ -277,8 +277,11 @@ test('what the core forked, dropped and fixed comes back to the sender as forks,
     assert.deepEqual(res.body.forks, [{ id: 'p1', wrapper: 'w1' }]);
     assert.deepEqual(res.body.dropped, [{ index: 1, reason: 'removed' }]);
     assert.equal(res.body.fixes.length, 1);
-    assert.equal(res.body.fixes[0].id, 'b0');
-    assert.match(res.body.fixes[0].html, /^<body data-marble-id="b0">[\s\S]*<marble-alt data-marble-id="w1">\s*<p data-marble-id="p1">theirs<\/p>\s*<\/marble-alt>[\s\S]*<\/body>$/, 'the fixed element, as it now is');
+    // The core fixed the fork's parent, <body>: a page cannot swap its body,
+    // so the fork is said under the element's own id, with its wrapper.
+    assert.equal(res.body.fixes[0].id, 'p1');
+    assert.match(res.body.fixes[0].html, /^<marble-alt data-marble-id="w1">\s*<p data-marble-id="p1">theirs<\/p>\s*<\/marble-alt>$/, 'the wrapper stands where the element stood');
+    assert.equal(res.body.reset, undefined);
   } finally {
     useCore(was);
   }
@@ -549,4 +552,72 @@ test('fixes: a forked element is answered under its own id with its whole wrappe
   assert.deepEqual(fixesOf(doc, [], [{ id: 'x', wrapper: 'w' }]), [{ id: 'x', html: '<marble-alt data-marble-id="w"><p data-marble-id="x">a</p><p data-marble-id="y">b</p></marble-alt>' }]);
   assert.deepEqual(fixesOf(doc, ['d', 'y'], [{ id: 'x', wrapper: 'w' }]).map((f) => f.id), ['d'], 'inside d, so d says it');
   assert.deepEqual(fixesOf(doc, ['gone', 'z'], []), [{ id: 'gone', html: '' }, { id: 'z', html: '<p data-marble-id="z">z</p>' }]);
+  const { settleFixes } = await import('../server/rebase.js');
+  assert.deepEqual(settleFixes(doc, ['b'], [{ id: 'x', wrapper: 'w' }]).reload, false, 'a body fixed for a fork is said by the fork');
+  assert.equal(settleFixes(doc, ['b'], []).fixes.length, 0, 'a body is never sent');
+  assert.equal(settleFixes(doc, ['b'], []).reload, true, 'a body fixed for anything else is a reload');
+});
+
+test('a batch that applies nothing but has fixes takes a version; one that changes nothing and fixes nothing does not', async () => {
+  const was = useCore({
+    rebaseBatch(doc, ops, options) {
+      // Stand-in: every op of client "late" is dropped, and its target's parent fixed.
+      if (options.client === 'late') return { ops: [], forks: [], dropped: ops.map((_, index) => ({ index, reason: 'removed' })), fixIds: ['l1'], record: { client: options.client, by: options.by, changes: [] }, source: doc.source };
+      return { ops, forks: [], dropped: [], fixIds: [], record: { client: options.client, by: options.by, changes: [] }, source: guardOps(doc, ops) };
+    },
+  });
+  try {
+    await drive.createDocument('v-noop', SOURCE, { label: 'test' });
+    const other = listen('/events?app=v-noop&client=o&since=1');
+    await other.ready;
+    const res = await post('v-noop', [text('i1', 'x')], { client: 'late', batch: 'n1', base: 1 });
+    assert.equal(res.body.applied, 0);
+    assert.equal(res.body.v, 2, 'the fixes are placed at a version of their own');
+    assert.equal(res.body.fixes[0].id, 'l1');
+    assert.ok(await until(() => other.events.some((e) => e.event === 'batch')));
+    assert.deepEqual(JSON.parse(other.events.find((e) => e.event === 'batch').data).ops, []);
+    other.close();
+    assert.deepEqual(await (await fetch(`${base}/ops?app=v-noop&since=1`)).json(), { v: 2, batches: [{ v: 2, client: 'late', batch: 'n1', by: 'person', ops: [] }] });
+    const replay = await post('v-noop', [text('i1', 'x')], { client: 'late', batch: 'n1', base: 1 });
+    assert.equal(replay.body.replay, true);
+    assert.equal(replay.body.v, 2);
+    // A true no-op: nothing to apply, nothing to put right.
+    const same = await post('v-noop', [text('h1', 'Title')], { client: 'a', base: 2 });
+    assert.equal(same.body.v, 2);
+    // After a restart, from the log: the no-op batch is still a version, and still a replay.
+    await drive.close();
+    ({ drive, port, base } = await boot());
+    assert.equal(await drive.versions.current('v-noop'), 2);
+    const again = await post('v-noop', [text('i1', 'x')], { client: 'late', batch: 'n1', base: 1 });
+    assert.equal(again.body.replay, true);
+    assert.equal(again.body.v, 2);
+  } finally {
+    useCore(was);
+  }
+});
+
+test('a rebase that can only be settled by a reload answers reset, and every other copy is told to reload', async () => {
+  const was = useCore({
+    rebaseBatch(doc, ops, options) {
+      return { ops, forks: [], dropped: [], fixIds: [], record: { client: options.client, by: options.by, changes: [] }, source: guardOps(doc, ops), ...(options.client === 'head' ? { reload: true } : {}) };
+    },
+  });
+  try {
+    await drive.createDocument('v-reload', SOURCE, { label: 'test' });
+    const other = listen('/events?app=v-reload&client=o&since=1');
+    await other.ready;
+    const res = await post('v-reload', [text('p1', 'needs a reload')], { client: 'head', base: 1 });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.reset, true);
+    assert.equal(res.body.v, 2);
+    assert.ok(await until(() => other.events.some((e) => e.data === 'changed')), 'the others hear changed');
+    assert.ok(!other.events.some((e) => e.event === 'batch'));
+    other.close();
+    assert.deepEqual(await (await fetch(`${base}/ops?app=v-reload&since=1`)).json(), { v: 2, reset: true }, 'and catch-up tells them to reload');
+    await drive.close();
+    ({ drive, port, base } = await boot());
+    assert.deepEqual(await (await fetch(`${base}/ops?app=v-reload&since=1`)).json(), { v: 2, reset: true }, 'from the log too');
+  } finally {
+    useCore(was);
+  }
 });
