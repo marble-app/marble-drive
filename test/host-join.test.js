@@ -148,7 +148,7 @@ const LIST_DOC = `<!doctype html>
 <html data-marble-id="h"><head data-marble-id="hd"><title data-marble-id="t">Interest list</title></head>
 <body data-marble-id="b">
   <h1 data-marble-id="title">Interest list</h1>
-  <ol data-marble-id="emails" data-marble-add></ol>
+  <ol data-marble-id="emails" data-marble-sortable></ol>
 </body></html>
 `;
 
@@ -185,7 +185,7 @@ test('an email left on the page lands as a row in the owner\'s list, through an 
   assert.equal(sent.status, 200, sent.body);
   assert.deepEqual(sent.json(), { ok: true });
   const file = await drive.file();
-  assert.match(file, /<ol data-marble-id="emails" data-marble-add>\s*<li[^>]*><a[^>]*href="mailto:ana@example.org"[^>]*>ana@example.org<\/a> <time[^>]*>\d{4}-\d\d-\d\d<\/time><\/li>/);
+  assert.match(file, /<ol data-marble-id="emails" data-marble-sortable>\s*<li[^>]*data-marble-removable[^>]*><a[^>]*href="mailto:ana@example.org"[^>]*>ana@example.org<\/a> <time[^>]*>\d{4}-\d\d-\d\d<\/time><\/li>/);
 
   assert.equal((await leave(r.port, 'ANA@example.org')).status, 200, 'the same address again');
   assert.equal(((await drive.file()).match(/mailto:/gi) ?? []).length, 1, 'is filed once');

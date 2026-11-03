@@ -157,7 +157,7 @@ export function createJoin({ settings, readCode, readInterest = () => null, regi
     if (!cookie || !to.startsWith('/a/')) throw new Error(`the link answered ${door.status}`);
     const app = decodeURIComponent(to.slice(3));
     const day = new Date(now()).toISOString();
-    const html = `<li><a href="mailto:${escape(email)}">${escape(email)}</a> <time datetime="${day}">${day.slice(0, 10)}</time></li>`;
+    const html = `<li data-marble-removable><a href="mailto:${escape(email)}">${escape(email)}</a> <time datetime="${day}">${day.slice(0, 10)}</time></li>`;
     const res = await fetch(new URL(`/ops?app=${encodeURIComponent(app)}`, link), {
       method: 'POST',
       headers: { cookie, 'content-type': 'application/json' },
