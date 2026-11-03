@@ -140,6 +140,11 @@ export function loadHostSettings(env = process.env) {
     inviteCode: get('HOST_INVITE_CODE'),
     inviteCohort: get('HOST_INVITE_COHORT'),
     maxDrives: Number(get('HOST_MAX_DRIVES', 10)),
+    // The same page's email list for people with no code: an Add only share
+    // link to a page in the owner's drive, and the data-marble-id of the list
+    // in it that takes a row per email. Without both, no form.
+    interestLink: get('HOST_INTEREST_LINK'),
+    interestList: get('HOST_INTEREST_LIST'),
     mode,
     ownerName: get('HOST_OWNER_NAME', 'Bryan'),
   };
