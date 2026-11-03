@@ -921,6 +921,17 @@ dashboard:
   address (Cloudflare's `CF-Connecting-IP`), or a hundred from everyone, shut
   sign-up for the hour; it says the study is full at `HOST_MAX_DRIVES` (10).
   No code in host.env, no sign-up.
+- **An email list for people with no code.** With `HOST_INTEREST_LINK` (an
+  **Add only** share link to a page in the owner's drive, docs/SHARING.md) and
+  `HOST_INTEREST_LIST` (the `data-marble-id` of a list in that page that
+  carries an affordance marker, `data-marble-sortable` say) in host.env, the
+  join page also asks for an email. marble-host opens the link for its
+  cookie, then files one insert at the end of the list:
+  `<li data-marble-removable><a href="mailto:…">…</a> <time>…</time></li>`. The link can add there
+  and nothing else, so the PC never reads the list. Five tries an hour from
+  one address, a hundred from everyone; an address sent twice since marble-host
+  started is filed once. Both settings are read on every try; without both,
+  the form isn't on the page.
 
 Anyone holding a link can open that drive until it runs out; send each
 person theirs alone. Removing the drive ends it. Consent is taken as the lab's

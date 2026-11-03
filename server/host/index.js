@@ -79,6 +79,9 @@ export async function startHost({ env = process.env, log = console, units = null
         } catch {
           return null;
         }
+      }, readInterest: () => {
+        const { interestLink: link, interestList: list } = loadHostSettings(env);
+        return link && list ? { link, list } : null;
       } })
     : null;
   const router = createRouter({
