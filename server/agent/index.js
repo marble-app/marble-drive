@@ -20,6 +20,9 @@ import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { createClaudeSignIn } from './claude-signin.js';
 import { listClaudeAccounts } from './claude-accounts.js';
+import { claudeModelArg } from './providers/claude.js';
+import { runCommand } from './providers/exec.js';
+import { pickEnv } from './env.js';
 import { createCodexSignIn } from './codex-signin.js';
 import { nameConversation } from './namer.js';
 import { drawWithCli } from './drawer.js';
@@ -39,7 +42,7 @@ import { createBuildRoutes } from '../build/routes.js';
 import { createBuildStore } from '../build/store.js';
 import { normalizeUndo, undoTurn } from './undo.js';
 import { createDriveIndex, suggestPieces } from '../build/pieces.js';
-import { writeReply } from '../build/reply.js';
+import { replyPlan, writeReply } from '../build/reply.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.resolve(HERE, '..', '..', 'bin', 'marble-mcp.js');
@@ -165,6 +168,15 @@ async function boot({ config, store, oplog = null, snapshot = null, writeOps, cr
   // workers) run on whichever CLI this drive has connected, on its own login
   // or key (side-model.js).
   const side = createSideModel({ env: hostEnv, secrets: () => keys.asEnv(), log });
+  // The CLI's version, asked once, so a side job named `opus` runs the Opus a
+  // chat runs (claudeModelArg) and not whatever the bare alias means there.
+  let claudeVersion = null;
+  const sideClaudeVersion = async () => {
+    claudeVersion ??= runCommand('claude', ['--version'], { env: pickEnv(hostEnv), timeout: 8_000 })
+      .then((r) => /(\d+\.\d+\.\d+)/.exec(`${r.stdout ?? ''}\n${r.stderr ?? ''}`)?.[1] ?? '')
+      .catch(() => '');
+    return claudeVersion;
+  };
   const skills = await listSkills(skillDirs({ home: os.homedir(), root: config.root }));
   const hub = createHub();
 
@@ -394,9 +406,12 @@ async function boot({ config, store, oplog = null, snapshot = null, writeOps, cr
     putDocument: putDocument ?? ((docPath, source, options) => createDocument(docPath, source, options)),
     moveDocument,
     freePath,
-    // A comment is answered by the quick model, or by the one chosen on the
-    // note it was sent from.
-    reply: config.agentNaming ? (input) => writeReply({ ...input, model: /claude|opus|sonnet|haiku|fable/i.test(input.model ?? '') ? input.model : config.agentNamingModel, side, log }) : null,
+    // A comment is answered on the model and effort a new chat starts on, or
+    // on the model chosen on the note it was sent from.
+    reply: config.agentNaming ? async (input) => {
+      const plan = replyPlan({ settings: await agentStore.settings(), provider: await routes.defaultProvider(), picked: input.model });
+      return writeReply({ ...input, ...plan, model: claudeModelArg(plan.model, await sideClaudeVersion()), side, log });
+    } : null,
     suggest: config.agentNaming ? (input) => suggestPieces({ ...input, model: config.agentNamingModel, side, log }) : null,
     driveRegions: createDriveIndex({ store }),
     // A build's sketches, photographed over the app for its brief.

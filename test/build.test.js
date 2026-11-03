@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { buildBrief, phraseOf, resumeBrief } from '../server/build/brief.js';
 import { kindOf, outlineOf, pieceFrom, previewOf, regionsOf } from '../server/build/pieces.js';
-import { readReply, replyPrompt } from '../server/build/reply.js';
+import { readReply, replyPlan, replyPrompt, writeReply } from '../server/build/reply.js';
 import { cleanMark, cleanPlan, createBuildStore } from '../server/build/store.js';
 import { linesOf, partNow, stepOf } from '../server/build/steps.js';
 import { timelineOf } from '../server/build/history.js';
@@ -292,6 +292,22 @@ test('a reply is read only when it has the shape asked for', () => {
   assert.deepEqual(readReply('x {"answer":"Yes.","offer":"Group the overdue on top"} y'), { answer: 'Yes.', offer: 'Group the overdue on top', change: false });
   // A sent note that asks for a change is built at once rather than answered.
   assert.equal(readReply('{"answer":"Making it.","offer":"Bigger","change":true}').change, true);
+});
+
+test('a comment is answered on the model and effort a new chat starts on', async () => {
+  const settings = { models: { 'claude-subscription': 'opus', codex: 'gpt-6.1-sol' }, efforts: { 'claude-subscription': 'high', codex: 'xhigh' } };
+  assert.deepEqual(replyPlan({ settings, provider: 'claude-subscription' }), { model: 'opus', effort: 'high' });
+  // A model picked on the sent note wins; the chat's effort still holds.
+  assert.deepEqual(replyPlan({ settings, provider: 'claude-subscription', picked: 'sonnet' }), { model: 'sonnet', effort: 'high' });
+  // A chat on another agent: Opus, at that agent's effort.
+  assert.deepEqual(replyPlan({ settings, provider: 'codex' }), { model: 'opus', effort: 'xhigh' });
+  assert.deepEqual(replyPlan({ settings: {}, provider: 'claude-subscription' }), { model: 'opus', effort: null });
+  const asked = [];
+  const side = { run: async (request) => { asked.push(request); return { code: 0, stdout: '{"answer":"Yes."}' }; } };
+  await writeReply({ title: 'A', thread: [{ who: 'you', text: 'Why?' }], model: 'claude-opus-5-5[1m]', effort: 'high', side });
+  assert.equal(asked[0].model, 'claude-opus-5-5[1m]');
+  assert.equal(asked[0].effort, 'high');
+  assert.ok(asked[0].timeout >= 60_000);
 });
 
 test('the store keeps one document\'s state per path, and moves it', async () => {
