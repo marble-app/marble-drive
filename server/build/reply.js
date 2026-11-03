@@ -10,6 +10,7 @@
 // the next build.
 
 import { claudeOnLogin } from '../agent/side-model.js';
+import { CLAUDE_EFFORTS } from '../agent/providers/claude.js';
 
 const HTML_MAX = 5_000;
 const OUTLINE_MAX = 3_000;
@@ -69,12 +70,27 @@ export function readReply(raw) {
   return { answer, offer: offer || null, change: value?.change === true };
 }
 
+const CLAUDE_NAME = /claude|opus|sonnet|haiku|fable/i;
+
+/** The model and effort a comment is answered on: the ones a new chat in the
+ *  drawer starts on (Agents settings, for the default agent), so a reply is
+ *  as good as asking in a chat. A model chosen on the note it was sent from
+ *  wins. A chat default that is not Claude's (Codex, Cursor) is answered on
+ *  Opus, which a drive on Codex runs as Codex's workhorse at that effort. */
+export function replyPlan({ settings = {}, provider = null, picked = null } = {}) {
+  const chatModel = settings.models?.[provider] ?? null;
+  const chatEffort = settings.efforts?.[provider] ?? null;
+  const model = [picked, chatModel].find((name) => CLAUDE_NAME.test(name ?? '')) ?? 'opus';
+  return { model, effort: CLAUDE_EFFORTS.includes(chatEffort) ? chatEffort : null };
+}
+
 /** Ask the connected CLI. Returns null — never throws — without an answer.
- *  `side` is the drive's helper; without one, Claude on its login. */
-export async function writeReply({ title = '', html = '', about = '', outline = '', thread = [], model = 'haiku', side = null, exec, env, timeout = 30_000, log = console } = {}) {
+ *  `side` is the drive's helper; without one, Claude on its login. A chat's
+ *  model at a chat's effort takes longer than the quick one did. */
+export async function writeReply({ title = '', html = '', about = '', outline = '', thread = [], model = 'haiku', effort = null, side = null, exec, env, timeout = 120_000, log = console } = {}) {
   if (!thread.some((line) => line.who !== 'agent' && line.text)) return null;
   const ask = replyPrompt({ title, html, about, outline, thread });
-  const result = await (side ?? claudeOnLogin({ exec, env })).run({ job: 'build reply', prompt: ask, model, timeout });
+  const result = await (side ?? claudeOnLogin({ exec, env })).run({ job: 'build reply', prompt: ask, model, effort, timeout });
   if (result.aborted || result.missing) return null;
   if (result.timedOut || result.code) {
     log.error?.(`[builds] reply failed: ${result.timedOut ? 'timed out' : result.stderr?.trim() || `exit ${result.code}`}`);
