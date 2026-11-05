@@ -713,6 +713,31 @@ test('a data-marble-run button starts an agent with its brief, aimed at its elem
   assert.equal(await page.evaluate((cid) => window.marble.agent.attending(cid), run.id), true, 'pressed here, so followed here');
 });
 
+test('a run button whose last run ended unheard starts a new run when pressed again', async () => {
+  const page = await open('runnable');
+  // Every run of this button: how many, and how many have ended.
+  const fills = (arg) => until(page, async ({ runs, ended }) => {
+    let n = 0, done = 0;
+    for (const s of await window.marble.agent.conversations()) {
+      const it = await window.marble.agent.conversation(s.id);
+      if (!/fill the rest/.test(it.turns?.[0]?.prompt ?? '')) continue;
+      n += 1;
+      if (it.meta.lastOutcome && !it.meta.running && !it.meta.queued) done += 1;
+    }
+    return n >= runs && done >= ended ? { runs: n, ended: done } : null;
+  }, arg);
+  const before = await fills({ runs: 0, ended: 0 });
+  // The turn's end never reaches this tab, as when the host restarts mid-run.
+  await page.evaluate(() => { window.marble.agent.on = () => () => {}; });
+  const fill = page.getByRole('button', { name: 'Fill' });
+  await fill.click();
+  await fills({ runs: before.runs + 1, ended: before.ended + 1 });
+  assert.equal(await fill.getAttribute('aria-busy'), 'true', 'still drawn as running: the end was not heard');
+  await fill.click();
+  const after = await fills({ runs: before.runs + 2, ended: 0 });
+  assert.equal(after.runs, before.runs + 2, 'the second press started a run instead of opening the finished one');
+});
+
 test('an alive trigger runs now when pressed, and Pause holds it in the file', async () => {
   const page = await open('alive');
   await page.getByRole('button', { name: 'Update now' }).click();
