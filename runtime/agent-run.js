@@ -38,15 +38,25 @@
         ?? el.getAttribute('data-marble-id');
     };
 
+    const stillWorking = (id) => agent.conversation(id, { turns: 1 })
+      .then((it) => Boolean(it?.meta?.running || it?.meta?.queued), () => false);
+
     async function run(el) {
       const brief = (el.getAttribute('data-marble-run') || '').trim();
       if (!brief) return;
       const scope = scopeOf(el);
       if (scope && running.has(scope)) {
         // Already at work here: pressing again follows it rather than
-        // starting a second agent on the same element.
-        agent.open(running.get(scope));
-        return;
+        // starting a second agent on the same element. Only the host knows
+        // whether it still is: the turn's end can be missed (the host
+        // restarted, the stream dropped), and a press must not open a
+        // finished chat in place of the run that was asked for.
+        const id = running.get(scope);
+        if (await stillWorking(id)) {
+          agent.open(id);
+          return;
+        }
+        running.delete(scope);
       }
       el.setAttribute('aria-busy', 'true');
       try {
