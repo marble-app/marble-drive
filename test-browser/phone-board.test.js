@@ -113,20 +113,19 @@ for (const viewport of [PHONE, { width: 320, height: 640 }]) {
         inner: innerWidth,
         dock: { left: dock.left, right: dock.right },
         head: box('.head').right,
-        view: box('.view').left,
         more: getComputedStyle(document.querySelector('.dock .more')).display,
       };
     });
     assert.ok(seen.scroll <= seen.inner, `the page is ${seen.scroll}px wide in a ${seen.inner}px window`);
     assert.ok(seen.dock.left >= 0 && seen.dock.right <= seen.inner, `the dock runs ${seen.dock.left}–${seen.dock.right}`);
-    assert.ok(seen.head <= seen.view, `the name and undo end at ${seen.head}, over the view's buttons from ${seen.view}`);
+    assert.ok(seen.head <= seen.inner, `the name and undo end at ${seen.head}, past the ${seen.inner}px window`);
     assert.equal(seen.more, 'grid', 'the tools that do not fit are under More, not off the side');
-    assert.deepEqual(await smallTargets(page, '.dock > .tb, .head .tb, .view .tb, .view .ask-btn'), []);
+    assert.deepEqual(await smallTargets(page, '.dock > .tb, .head .tb'), []);
     assert.deepEqual(errors, []);
   });
 }
 
-test('More holds the tools the dock has no room for, by its button, and wears the one picked', async () => {
+test('More holds the tools the dock has no room for, by its button, and the dock wears the one picked', async () => {
   const { page, errors } = await openBoard();
   await page.locator('.dock .more').tap();
   const menu = page.locator('#bw-more');
@@ -140,8 +139,9 @@ test('More holds the tools the dock has no room for, by its button, and wears th
       button: { top: b.top },
     };
   });
-  // Pan goes under More too: the dock leaves the drive's chat button its corner.
-  assert.deepEqual(seen.rows, ['Pan', 'Section', 'Highlighter', 'Comment', 'Image, video or file', 'From your drive', 'Link']);
+  // Each family's other tools, the ones the dock has no room for, and
+  // Actions: the dock leaves the drive's chat button its corner.
+  assert.deepEqual(seen.rows, ['Hand tool', 'Section', 'Ellipse', 'Line', 'Arrow', 'Highlighter', 'Eraser', 'Comment', 'Image, video or file', 'From your drive', 'Link', 'Actions and asking Claude']);
   assert.ok(seen.menu.bottom <= seen.button.top && seen.button.top - seen.menu.bottom < 16, `the menu ends at ${seen.menu.bottom}, not by its button at ${seen.button.top}`);
   assert.ok(seen.menu.top >= 0 && seen.menu.left >= 0 && seen.menu.right <= PHONE.width, 'and inside the screen');
   assert.deepEqual(await smallTargets(page, '#bw-more .act'), []);
@@ -149,10 +149,11 @@ test('More holds the tools the dock has no room for, by its button, and wears th
   await page.locator('#bw-more .act', { hasText: 'Highlighter' }).tap();
   const after = await page.evaluate(() => ({
     tool: document.querySelector('.stage').dataset.tool,
-    pressed: document.querySelector('.dock .more').getAttribute('aria-pressed'),
-    icon: document.querySelector('.dock .more use').getAttribute('href'),
+    pressed: document.querySelector('.dock .tb[data-group="draw"]').getAttribute('aria-pressed'),
+    icon: document.querySelector('.dock .tb[data-group="draw"] use').getAttribute('href'),
     open: document.querySelector('#bw-more').matches(':popover-open'),
   }));
+  // The drawing tools' button stands for the one picked, as Figma's do.
   assert.deepEqual(after, { tool: 'marker', pressed: 'true', icon: '#i-marker', open: false });
   assert.deepEqual(errors, []);
 });
@@ -322,7 +323,7 @@ test('with a note in hand its tools stand above the dock, inside the screen, 44p
     assert.ok(seen.left >= 0 && seen.right <= viewport.width, `${viewport.width}px: the bar runs ${seen.left}–${seen.right}`);
     assert.ok(seen.bottom <= seen.dock, `${viewport.width}px: the bar ends at ${seen.bottom}, over the dock at ${seen.dock}`);
     assert.ok(seen.scroll <= viewport.width);
-    assert.deepEqual(await smallTargets(page, '.selbar .tb, .selbar .sw, .handle'), []);
+    assert.deepEqual(await smallTargets(page, '.selbar .tb, .selbar .sw, .ov-handle:not([hidden])'), []);
     assert.deepEqual(errors, []);
   }
 });
