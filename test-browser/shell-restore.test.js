@@ -98,3 +98,25 @@ test('what the last page left is replaced, not added to: a document gone since i
   });
   assert.ok((await rows(page, 'drive')).includes('Travel'));
 });
+
+test('a tree too big to keep still leaves the pins, so the next page does not read the Drive for them', async () => {
+  const { page, errors } = await host.newPage();
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => document.querySelector('marble-shell')?.shadowRoot);
+  await page.keyboard.press('Control+\\');
+  await page.locator('marble-shell').locator('.sec[data-sec="pinned"] a.row').first().waitFor();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('marble-shell:last') ?? 'null')?.pinsStamp);
+  // What a drive of thousands of folders leaves: everything but the tree.
+  await page.evaluate(() => {
+    const last = JSON.parse(localStorage.getItem('marble-shell:last'));
+    localStorage.setItem('marble-shell:last', JSON.stringify({ ...last, tree: null }));
+  });
+  let driveReads = 0;
+  page.on('request', (req) => { if (new URL(req.url()).pathname === '/a/drive') driveReads += 1; });
+  await page.goto(`${host.base}/a/Research%2Fatlas`);
+  await page.locator('marble-shell').locator('.sec[data-sec="drive"] .row').first().waitFor();
+  await page.waitForTimeout(300);
+  assert.ok((await rows(page, 'pinned')).length >= 1, 'the pins are drawn');
+  assert.equal(driveReads, 0, 'and were not read from the Drive again');
+  assert.deepEqual(errors, []);
+});

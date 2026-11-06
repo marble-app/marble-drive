@@ -10,6 +10,25 @@ import zlib from 'node:zlib';
 const COMPRESSIBLE = /^(text\/|application\/(json|javascript)|image\/svg\+xml)/i;
 const MIN_COMPRESS_BYTES = 1024;
 const BROTLI = { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } };
+// Above this the squeezing is done on libuv's threads, not the event loop's:
+// brotli takes 15 ms over the Drive page and 400 ms over a 30 MB document,
+// and every other request in the drive waited that long behind it.
+const OFF_LOOP_BYTES = 64 * 1024;
+
+/** `body` compressed with `encoding`, off the event loop. */
+export const compress = (body, encoding) =>
+  new Promise((resolve, reject) => {
+    const done = (err, out) => (err ? reject(err) : resolve(out));
+    if (encoding === 'br') zlib.brotliCompress(body, BROTLI, done);
+    else zlib.gzip(body, done);
+  });
+
+const finish = (res, status, head, body) => {
+  // A body that took a moment to squeeze may find its asker gone.
+  if (res.headersSent || res.destroyed) return;
+  res.writeHead(status, head);
+  res.end(body);
+};
 
 const header = (headers, name) => {
   const key = Object.keys(headers).find((k) => k.toLowerCase() === name);
@@ -25,13 +44,41 @@ export const send = (res, status, body, headers = {}) => {
     head.Vary = 'Accept-Encoding';
     const encoding = encodingFor(res.req?.headers['accept-encoding']);
     if (encoding && body && status !== 204 && status !== 304 && Buffer.byteLength(body) >= MIN_COMPRESS_BYTES) {
-      body = encoding === 'br' ? zlib.brotliCompressSync(body, BROTLI) : zlib.gzipSync(body);
       head['Content-Encoding'] = encoding;
+      if (body.length >= OFF_LOOP_BYTES) {
+        return compress(body, encoding).then(
+          (packed) => finish(res, status, head, packed),
+          () => {
+            delete head['Content-Encoding'];
+            finish(res, status, head, body);
+          },
+        );
+      }
+      body = encoding === 'br' ? zlib.brotliCompressSync(body, BROTLI) : zlib.gzipSync(body);
     }
   }
-  res.writeHead(status, head);
-  res.end(body);
+  return finish(res, status, head, body);
 };
+
+/**
+ * A JSON answer made once and sent many times: `kept` is `{body}`, and the
+ * compressed forms are added to it as they are first asked for, so a hundred
+ * tabs asking for one answer cost one squeeze of it.
+ */
+export async function sendKept(res, status, kept, headers = {}) {
+  const head = { 'Cache-Control': 'no-store', 'Content-Type': 'application/json', Vary: 'Accept-Encoding', ...headers };
+  const encoding = Buffer.byteLength(kept.body) >= MIN_COMPRESS_BYTES ? encodingFor(res.req?.headers['accept-encoding']) : null;
+  if (!encoding) return finish(res, status, head, kept.body);
+  kept.packed ??= new Map();
+  if (!kept.packed.has(encoding)) kept.packed.set(encoding, compress(kept.body, encoding));
+  try {
+    const packed = await kept.packed.get(encoding);
+    return finish(res, status, { ...head, 'Content-Encoding': encoding }, packed);
+  } catch {
+    kept.packed.delete(encoding);
+    return finish(res, status, head, kept.body);
+  }
+}
 
 export const json = (res, status, obj, headers = {}) =>
   send(res, status, JSON.stringify(obj), { 'Content-Type': 'application/json', ...headers });

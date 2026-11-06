@@ -27,7 +27,7 @@ The `k-tree` card is explicit that this is the shape of the change:
 
 | | |
 |---|---|
-| `marble.drive.tree(folder = '')` | the folder, nested. Falls back to an empty drive rather than throwing |
+| `marble.drive.tree(folder = '', {files})` | the folder, nested; `files: false` leaves out what is neither a document nor a folder. Each tab keeps the last tree and asks the host only what changed since (`/drive/tree?since=`, docs/STORE.md), and every call gets its own copy. Falls back to an empty drive rather than throwing |
 | `marble.drive.starters()` | what you can make |
 | `marble.drive.create({path, from, copy})` | a document from a starter, or a copy of another document |
 | `marble.drive.mkdir(path)` | |
