@@ -17,6 +17,61 @@
 // answer is "nothing" rather than a broken fetch.
 
 (() => {
+  // ------------------------------------------------------- the tree, kept
+  //
+  // A Drive asks for the whole tree each time it draws: every folder opened,
+  // and again on every change anywhere in the drive, which with agents at
+  // work is every few seconds. On the owner's PC that tree is 40,000 entries
+  // and 12 MB. So each tab keeps the last tree it was given and asks the host
+  // only what changed since (`since`, server/store/live-index.js): nothing,
+  // the folders that did, or, when it cannot say, the whole tree again.
+  //
+  // Every call still answers with its own copy. Pages write onto what they
+  // are handed (the owner's Activities view hangs its sittings on each entry),
+  // and the tree kept here must not carry one caller's notes into the next.
+
+  const copyTree = (node) => (node.children ? { ...node, children: node.children.map(copyTree) } : { ...node });
+
+  /** `tree` with each folder in `patch` listing what it lists now: a
+   *  patch's folders come without children, and keep the ones the tree
+   *  already holds for them. Null when the patch names a folder the tree
+   *  does not hold, which is a patch for some other tree. */
+  function patchTree(tree, patch) {
+    const listings = new Map(patch.map((item) => [item.path, item.children]));
+    // Every folder on the way down to one that changed.
+    const onTheWay = new Set();
+    for (const changed of listings.keys()) {
+      for (let at = changed; !onTheWay.has(at); at = at.slice(0, Math.max(0, at.lastIndexOf('/')))) {
+        onTheWay.add(at);
+        if (at === '') break;
+      }
+    }
+    let placed = 0;
+    const redo = (node, fields) => {
+      const at = fields ? fields.path : node.path;
+      const listing = listings.get(at);
+      let children;
+      if (listing) {
+        placed += 1;
+        const had = new Map();
+        for (const child of node?.children ?? []) if (child.kind === 'folder') had.set(child.path, child);
+        children = listing.map((entry) => (entry.kind === 'folder' ? redo(had.get(entry.path) ?? null, entry) : entry));
+      } else if (!node) {
+        children = [];
+      } else if (onTheWay.has(at)) {
+        children = node.children.map((child) => (child.kind === 'folder' && onTheWay.has(child.path) ? redo(child, null) : child));
+      } else {
+        children = node.children;
+      }
+      return fields ? { ...fields, children } : { ...node, children };
+    };
+    const next = redo(tree, null);
+    return placed === listings.size ? next : null;
+  }
+
+  // For the tests, which run this file without a page.
+  globalThis.marbleDriveTree = { patchTree, copyTree };
+
   // A live stream on the tab's one socket. runtime/tab-rest.js stands in for
   // EventSource on every drive page and rides `marble.stream` underneath,
   // resting with the tab; without it, the carrier's stream; else native.
@@ -50,13 +105,61 @@
 
     // `{ files: false }` for a caller that draws only folders and documents:
     // in a drive with a dataset in it, the files are most of the answer.
-    const tree = (folder = '', { files = true } = {}) =>
-      ask(`/drive/tree?folder=${encodeURIComponent(folder)}${files ? '' : '&files=0'}`).catch(() => ({
+    const kept = new Map();
+    const askTree = (folder, files, since) =>
+      ask(`/drive/tree?folder=${encodeURIComponent(folder)}${files ? '' : '&files=0'}&since=${encodeURIComponent(since ?? '')}`);
+
+    async function freshTree(folder, files, keep) {
+      let answer = await askTree(folder, files, keep.v);
+      // A host from before `since` answers with the tree itself.
+      if (!answer || !('v' in answer)) {
+        keep.v = null;
+        keep.tree = null;
+        return answer;
+      }
+      let next = answer.tree ?? null;
+      if (!next && answer.same) next = keep.tree;
+      if (!next && answer.patch && keep.tree) next = patchTree(keep.tree, answer.patch);
+      if (!next) {
+        answer = await askTree(folder, files, '');
+        next = answer.tree;
+      }
+      keep.v = answer.v;
+      keep.tree = next;
+      return next;
+    }
+
+    const tree = (folder = '', { files = true } = {}) => {
+      const key = `${folder}\n${files ? 1 : 0}`;
+      if (!kept.has(key)) kept.set(key, { v: null, tree: null, out: null, again: null });
+      const keep = kept.get(key);
+      const run = () => {
+        keep.out = freshTree(folder, files, keep).finally(() => {
+          keep.out = null;
+        });
+        return keep.out;
+      };
+      // One question at a time for each tree. A call made while one is out
+      // is asked again once it is answered (what prompted it may have landed
+      // after the first answer was made), and every call made meanwhile
+      // shares that second question.
+      let asking;
+      if (keep.out) {
+        keep.again ??= keep.out.catch(() => {}).then(() => {
+          keep.again = null;
+          return run();
+        });
+        asking = keep.again;
+      } else {
+        asking = run();
+      }
+      return asking.then(copyTree).catch(() => ({
         kind: 'folder',
         path: '',
         title: 'My Drive',
         children: [],
       }));
+    };
 
     const starters = () => ask('/drive/starters').catch(() => []);
 

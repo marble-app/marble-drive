@@ -43,6 +43,7 @@ import {
   titleize,
 } from '../paths.js';
 import { createBlobs } from './blobs.js';
+import { createLiveIndex } from './live-index.js';
 import { HOST_MARKS, SPACE_META } from '../favicon.js';
 
 const HIDDEN = /^\./;
@@ -218,6 +219,7 @@ export function createFsStore({ root, historyMinInterval = null }) {
         fs.createWriteStream(part, { flags: 'wx' }),
       );
       await fsp.link(part, at);
+      wrote(clean);
     } catch (err) {
       if (err.code === 'EEXIST') throw new PathError(`"${clean}" is already there`);
       throw err;
@@ -244,6 +246,7 @@ export function createFsStore({ root, historyMinInterval = null }) {
       if (err.code === 'EEXIST') throw new PathError(`"${clean}" is already there`);
       throw err;
     }
+    wrote(clean);
     await fsp.rm(from, { force: true });
     const info = await fsp.stat(at);
     return { path: clean, bytes: info.size };
@@ -320,6 +323,54 @@ export function createFsStore({ root, historyMinInterval = null }) {
     };
   }
 
+  // One name in a folder that is not itself a folder, as a listing shows it:
+  // a document's stat, a file's size and time. The same whether the folder
+  // is being walked or kept (./live-index.js), so the two cannot disagree.
+  async function entryOf(relative, name) {
+    const child = joinPath(relative, name);
+    // A name the grammar refuses is a file somebody put there by hand. It
+    // is not addressable, so it is not listed — but it is not deleted or
+    // complained about either, because it is their folder.
+    if (!name.endsWith(DOC_EXT)) {
+      if (!isValidPath(child)) return null;
+      const info = await fsp.stat(path.join(abs(relative), name)).catch(() => null);
+      if (!info) return null;
+      // The path of a file keeps its extension, because that *is* its
+      // address — `atlas.json` and `atlas.md` are two files, and a
+      // document's path drops `.mrbl` only because every document has it.
+      return {
+        kind: 'file',
+        path: child,
+        name,
+        folder: relative,
+        title: name,
+        ext: extOf(name),
+        bytes: info.size,
+        modified: info.mtimeMs,
+      };
+    }
+    const docPath = child.slice(0, -DOC_EXT.length);
+    if (!isValidPath(docPath)) return null;
+    return stat(docPath);
+  }
+
+  // The listing kept in memory while a watcher tells it what changed. Paths
+  // reaching it come off the disk or through the grammar, so a join is
+  // enough to find them.
+  const index = createLiveIndex({
+    abs: (relative) => (relative === '' ? root : path.join(root, ...relative.split('/'))),
+    entryOf,
+  });
+
+  // A write of this store's own, said to the index before whoever made it
+  // tells anybody: the watcher hears it too, but a beat later. Every level,
+  // because a write may have made the folders it is in.
+  const wrote = (relative) => {
+    const parts = relative.split('/');
+    for (let i = parts.length; i > 0; i--) index.saw(parts.slice(0, i).join('/'));
+  };
+  const wroteDoc = (docPath) => wrote(`${docPath}${DOC_EXT}`);
+
   /**
    * Every document and every folder under `folder`, newest first. Flat by
    * design: the tree is composed from this rather than walked twice, so there
@@ -334,6 +385,10 @@ export function createFsStore({ root, historyMinInterval = null }) {
    */
   async function list({ folder = '', recursive = true, files = false } = {}) {
     const base = parsePath(folder);
+    if (index.live) {
+      await index.ensure(base, { deep: recursive });
+      return index.entries(base, { recursive, files }).sort((a, b) => b.modified - a.modified);
+    }
 
     // Every entry of a folder at once, and every folder under it at once: a
     // drive of two thousand files is two thousand stats, and one after the
@@ -365,30 +420,8 @@ export function createFsStore({ root, historyMinInterval = null }) {
             ...(inside.repo ? { repo: true } : {}),
           }, ...inside];
         }
-        // A name the grammar refuses is a file somebody put there by hand. It
-        // is not addressable, so it is not listed — but it is not deleted or
-        // complained about either, because it is their folder.
-        if (!entry.name.endsWith(DOC_EXT)) {
-          if (!files || !isValidPath(child)) return [];
-          const info = await fsp.stat(path.join(here, entry.name)).catch(() => null);
-          if (!info) return [];
-          // The path of a file keeps its extension, because that *is* its
-          // address — `atlas.json` and `atlas.md` are two files, and a
-          // document's path drops `.mrbl` only because every document has it.
-          return [{
-            kind: 'file',
-            path: child,
-            name: entry.name,
-            folder: relative,
-            title: entry.name,
-            ext: extOf(entry.name),
-            bytes: info.size,
-            modified: info.mtimeMs,
-          }];
-        }
-        const docPath = child.slice(0, -DOC_EXT.length);
-        if (!isValidPath(docPath)) return [];
-        const info = await stat(docPath);
+        if (!files && !entry.name.endsWith(DOC_EXT)) return [];
+        const info = await entryOf(relative, entry.name);
         return info ? [info] : [];
       }));
       const found = each.flat();
@@ -405,6 +438,10 @@ export function createFsStore({ root, historyMinInterval = null }) {
    *  draws folders and documents (the shell's sidebar). */
   async function tree({ folder = '', files = true } = {}) {
     const base = parsePath(folder);
+    if (index.live) {
+      await index.ensure(base);
+      return index.tree(base, { files });
+    }
     const flat = await list({ folder: base, recursive: true, files });
 
     const folders = new Map();
@@ -429,6 +466,23 @@ export function createFsStore({ root, historyMinInterval = null }) {
     const rootNode = folders.get(base);
     order(rootNode);
     return rootNode;
+  }
+
+  /** The tree, or what changed in it since a page last had it. `since` is
+   *  the `v` a previous answer carried; the answer is `{v, same: true}`,
+   *  `{v, patch}` (./live-index.js, `changesSince`) or `{v, tree}`. `v` is
+   *  null, and the answer always the tree, while nothing watches the drive.
+   *  `unless` is a `v` the caller already holds the whole tree at: then
+   *  `{v, kept: true}`, and nothing is assembled. */
+  async function treeSince({ folder = '', files = true, since = null, unless = null } = {}) {
+    const base = parsePath(folder);
+    if (!index.live) return { v: null, tree: await tree({ folder: base, files }) };
+    await index.ensure(base);
+    const v = index.token();
+    // The caller already holds the whole answer at this number.
+    if (unless && unless === v && !since) return { v, kept: true };
+    const delta = since ? index.changesSince(since, base, { files }) : null;
+    return delta ? { v, ...delta } : { v, tree: index.tree(base, { files }) };
   }
 
   // ------------------------------------------------------------------ writing
@@ -457,6 +511,7 @@ export function createFsStore({ root, historyMinInterval = null }) {
       }
     }
     await writeAtomic(file, source);
+    wroteDoc(clean);
     return { path: clean, bytes: bytesOf(source), sha: shaOf(source), checkpointed };
   }
 
@@ -494,6 +549,7 @@ export function createFsStore({ root, historyMinInterval = null }) {
     const clean = parsePath(folderPath, { allowRoot: false });
     if (await has(clean)) throw new PathError(`"${clean}" is a document, not a folder`);
     await fsp.mkdir(abs(clean), { recursive: true });
+    wrote(clean);
     return { path: clean };
   }
 
@@ -525,6 +581,13 @@ export function createFsStore({ root, historyMinInterval = null }) {
     const target = isDoc ? fileOf(to) : abs(to);
     await fsp.mkdir(path.dirname(target), { recursive: true });
     await fsp.rename(source, target);
+    if (isDoc) {
+      wroteDoc(from);
+      wroteDoc(to);
+    } else {
+      wrote(from);
+      wrote(to);
+    }
 
     if (isDoc) await renameHistory(from, to);
     else if (isFolder) {
@@ -586,6 +649,8 @@ export function createFsStore({ root, historyMinInterval = null }) {
     // back on the way in. The journal is what says which is which.
     const target = path.join(trashDir, isDoc ? `${id}${DOC_EXT}` : id);
     await fsp.rename(isDoc ? fileOf(clean) : abs(clean), target);
+    if (isDoc) wroteDoc(clean);
+    else wrote(clean);
 
     const entry = { id, t: Date.now(), path: clean, kind: isDoc ? 'doc' : isFolder ? 'folder' : 'file' };
     await fsp.appendFile(trashLog, `${JSON.stringify(entry)}\n`);
@@ -671,6 +736,8 @@ export function createFsStore({ root, historyMinInterval = null }) {
     const destination = entry.kind === 'doc' ? fileOf(target) : abs(target);
     await fsp.mkdir(path.dirname(destination), { recursive: true });
     await fsp.rename(source, destination);
+    if (entry.kind === 'doc') wroteDoc(target);
+    else wrote(target);
     await fsp.appendFile(trashLog, `${JSON.stringify({ id: entry.id, restored: true, t: Date.now() })}\n`);
     return { ...entry, path: target };
   }
@@ -710,6 +777,7 @@ export function createFsStore({ root, historyMinInterval = null }) {
     stat,
     list,
     tree,
+    treeSince,
     write,
     mark,
     create,
@@ -726,6 +794,8 @@ export function createFsStore({ root, historyMinInterval = null }) {
     // takes a real directory and there is no honest way around that.
     _fsPath: (docPath = '') => abs(parsePath(docPath)),
     _fsFile: (docPath) => fileOf(parsePath(docPath, { allowRoot: false })),
+    // What the watcher tells about the drive, so a listing need not walk it.
+    _fsIndex: index,
     _fsWatchRoot: () => {
       fs.mkdirSync(root, { recursive: true });
       return root;

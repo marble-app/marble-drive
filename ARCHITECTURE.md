@@ -47,8 +47,8 @@ What is here is everything to do with there being more than one folder:
 | | |
 |---|---|
 | `server/paths.js` | the path grammar. A name is a path now, `..` is refused twice, and a name from another filesystem is flattened into one this accepts |
-| `server/store/` | the seam: read, write, list, tree, move, trash, history, blobs |
-| `server/watch.js` | a recursive watcher, with a walk for the platforms that have no recursive flag |
+| `server/store/` | the seam: read, write, list, tree, move, trash, history, blobs. `live-index.js` keeps the listing in memory while the watcher says what changed, so a tree is not a walk (docs/STORE.md) |
+| `server/watch.js` | a recursive watcher, with a walk for the platforms that have no recursive flag. Every name it hears change goes to the store's kept listing |
 | `server/oplog.js` | the op log, with `client` and `seq` alongside `t` |
 | `server/gate.js` | one shared secret and a signed cookie. Thrown away at G2 |
 | `server/shares.js` | share links: one document each, at a level, good until turned off (docs/SHARING.md) |

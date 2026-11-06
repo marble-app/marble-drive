@@ -3509,7 +3509,12 @@
         for (const k of CONV_KEEP) if (c[k] !== undefined) slim[k] = c[k];
         return slim;
       });
-      const saved = JSON.stringify({ v: 1, tree: this.tree, pins: this.pins ?? null, pinsStamp: this.pinsStamp ?? null, tints: this.tints ?? null, realms: this.realms ?? null, builtin: this.builtinAt ?? null, driveName: this.driveName ?? null, convs });
+      const rest = { pins: this.pins ?? null, pinsStamp: this.pinsStamp ?? null, tints: this.tints ?? null, realms: this.realms ?? null, builtin: this.builtinAt ?? null, driveName: this.driveName ?? null, convs };
+      let saved = JSON.stringify({ v: 1, tree: this.tree, ...rest });
+      // A drive with thousands of folders has a tree too big to keep (2.3 MB
+      // on the owner's PC). The pins still are kept, with the stamp that says
+      // they are current, or every page reads the whole Drive page for them.
+      if (saved.length > LAST_MAX) saved = JSON.stringify({ v: 1, tree: null, ...rest });
       if (saved.length > LAST_MAX) return;
       try { localStorage.setItem(LAST, saved); } catch { /* full, or private: the next page asks, as it always did */ }
     }
@@ -3520,10 +3525,14 @@
     restore() {
       let last = null;
       try { last = JSON.parse(localStorage.getItem(LAST) ?? 'null'); } catch { /* unreadable: nothing */ }
-      if (last?.v !== 1 || !last.tree?.children?.length) return;
-      this.tree = last.tree;
-      this.byPath = new Map(this.docs().map((d) => [d.path, d]));
-      this.treeSaid = JSON.stringify(last.tree);
+      if (last?.v !== 1) return;
+      const tree = last.tree?.children?.length ? last.tree : null;
+      if (!tree && !last.pins) return;
+      if (tree) {
+        this.tree = tree;
+        this.byPath = new Map(this.docs().map((d) => [d.path, d]));
+        this.treeSaid = JSON.stringify(tree);
+      }
       // The colours come with it, so a row is not drawn grey and then tinted.
       if (last.realms) this.realms = last.realms;
       if (last.pins) {
@@ -3540,7 +3549,7 @@
         this.convs.set(c.id, c);
         this.restored.add(c.id);
       }
-      this.drawTree();
+      if (tree) this.drawTree();
     }
 
     // ------------------------------------------------------------ agents

@@ -34,7 +34,7 @@ import { zipStream } from './zip-write.js';
 import { createTouched } from './touched.js';
 import { createDoor } from './door.js';
 import { createGate, isLocal, overHttps, returnPath } from './gate.js';
-import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
+import { escapeHtml, html, json, readBody, readJson, send, sendKept, text } from './http.js';
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
 import { createMoves } from './moves.js';
@@ -672,6 +672,27 @@ export async function createDrive(config, { log = console, agentProviders = null
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
       : source + tags;
   };
+
+  // The whole tree's answer, made once per change and shared by every tab:
+  // turning it into JSON and squeezing it took 180 ms of the event loop on the
+  // owner's PC (12 MB), and every open tab asks again after every save. A page
+  // that says `since` (runtime/drive.js) gets `{v, tree}`, `{v, patch}` or
+  // `{v, same}`; one that does not gets the tree, as it always has.
+  const treeAnswers = new Map();
+  const TREE_ANSWERS_KEPT = 6;
+  async function answerTree(res, { folder, files, since }) {
+    const asked = since !== null;
+    const key = `${folder}\n${files}\n${asked}`;
+    const was = treeAnswers.get(key);
+    const answer = await store.treeSince({ folder, files, since: since || null, unless: was?.v });
+    if (answer.kept && was) return sendKept(res, 200, was);
+    if (!answer.tree || !answer.v) return json(res, 200, asked ? answer : answer.tree);
+    const kept = { v: answer.v, body: JSON.stringify(asked ? answer : answer.tree) };
+    treeAnswers.delete(key);
+    treeAnswers.set(key, kept);
+    while (treeAnswers.size > TREE_ANSWERS_KEPT) treeAnswers.delete(treeAnswers.keys().next().value);
+    return sendKept(res, 200, kept);
+  }
 
   /** Every document the Drive can see, flat — the shape Marble's carrier
    *  already expects from `/docs`, with `path` and `folder` added. A document
@@ -1727,10 +1748,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       }
 
       if (route === '/drive/tree' && req.method === 'GET') {
-        return json(res, 200, await store.tree({
-          folder: url.searchParams.get('folder') ?? '',
+        return answerTree(res, {
+          folder: parsePath(url.searchParams.get('folder') ?? ''),
           files: url.searchParams.get('files') !== '0',
-        }));
+          since: url.searchParams.get('since'),
+        });
       }
 
       if (route === '/drive/new' && req.method === 'POST') {
@@ -2711,6 +2733,16 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       }),
     { onError: (docPath, err) => log.error(`[drive] watching ${docPath} failed: ${err.stack ?? err.message}`) },
   );
+  // The listing is read once while nobody waits on it, so the first Drive
+  // opened after a start does not pay for the walk.
+  setTimeout(() => {
+    const index = store._fsIndex;
+    if (!index?.live) return;
+    const t = Date.now();
+    index.ensure('')
+      .then(() => log.log(`[drive] listing kept: ${index.folders} folders read in ${Date.now() - t} ms`))
+      .catch(() => {});
+  }, 1500).unref?.();
 
   /** What every document said before this host was watching it. Reading the
    *  drive once at boot is what makes "every write is preceded by a snapshot"

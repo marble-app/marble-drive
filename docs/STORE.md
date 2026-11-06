@@ -22,7 +22,8 @@ hasFolder(path)         → boolean         a folder is there
 hasFile(path)           → boolean         something that is neither is there
 stat(path)              → entry|null
 list({folder,recursive,files}) → entry[]  flat, newest first, folders included
-tree({folder})          → folder node with `children`, files included
+tree({folder,files})    → folder node with `children`, files included unless `files` is false
+treeSince({folder,files,since}) → {v, tree} | {v, patch} | {v, same: true}
 write(path, source, {label, ops}) → {path, bytes, sha}
 mark(path, source, label)                 a restore point for a state nobody replaced
 create(path, source)                      refuses to overwrite
@@ -46,6 +47,34 @@ An `entry` is what a Drive shows:
 
 `kind: "folder"` entries carry `path`, `name`, `folder`, `title`, `modified` —
 and `children` when they come from `tree()`.
+
+## A listing that is kept
+
+A Drive asks for the tree on every folder it opens and again after every change
+anywhere in the drive, from every tab. Walking the disk each time stopped
+scaling once a drive held experiment output: on the owner's PC (2026-11-05) the
+tree was 40,000 entries, a walk took 2.2 s and 3.3 s of CPU, and a folder click
+waited 2.6 s for it.
+
+So while a watcher runs (`server/watch.js`), `list()` and `tree()` answer from
+a listing kept in memory ([`server/store/live-index.js`](../server/store/live-index.js)).
+Each folder is read once. After that the watcher says which names changed (any
+writer: an agent's editor, a `git checkout`, Finder), and the store says so
+for its own writes before the route that made them tells anybody, so the next
+listing reads only those names. A folder the watcher lost is read on every
+listing, and once a minute each folder's change time is checked against the one
+it was read at, which catches what nobody reported. With no watcher (a command
+line tool, a test) the store walks the disk as it always did.
+
+Every change to what a folder lists is numbered. `treeSince({since})` takes the
+`v` an earlier answer carried and answers `{same: true}`, or a `patch`: each
+folder whose listing changed, with all it now lists, parents first, its own
+folders without their children. Another run of the host, or a patch of more
+than 2,000 folders, is answered with the whole `tree`. `GET /drive/tree` takes
+the same `since`; without it the answer is the tree, as before.
+`runtime/drive.js` keeps each tab's last tree and asks with `since`, so a
+refresh while agents work is a few hundred bytes. It still hands each caller
+its own copy, because pages write onto what they are given.
 
 ## The third kind
 

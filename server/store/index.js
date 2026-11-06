@@ -28,6 +28,9 @@
 //                          `files` is false
 //                          a folder that is its own git repository carries
 //                          `repo: true`
+//   treeSince({folder,files,since,unless}) → {v, tree} | {v, patch} | {v, same: true}
+//                          what changed since an earlier answer's `v`
+//                          (live-index.js); `v` is null while nothing watches
 //   write(path, source, {label, ops}) → {path, bytes, sha}
 //   mark(path, source, label)              a restore point for a state nobody replaced
 //   create(path, source)                   refuses to overwrite
@@ -43,7 +46,8 @@
 //
 // Anything prefixed `_fs` is not part of the contract. It exists because
 // `fs.watch` needs a real directory, and a store that cannot be watched would
-// have to be polled.
+// have to be polled. `_fsIndex` is how the watcher tells the store's kept
+// listing what changed (live-index.js).
 
 import { createFsStore } from './fs-store.js';
 
