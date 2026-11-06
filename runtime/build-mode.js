@@ -1969,12 +1969,25 @@
       const r = button?.getBoundingClientRect();
       return r?.width ? r : null;
     };
+    // The chat's panel while it is open beside the page (not over all of it, as
+    // on a phone): the handle keeps out of it, or it would sit on the panel's
+    // send button and mode switch in the same corner.
+    // Its width, not where it is drawn, so the handle moves once, as it opens,
+    // and not on every frame of the slide.
+    const panelWidth = () => {
+      const panel = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.panel[data-open="true"]');
+      const w = panel?.offsetWidth ?? 0;
+      return w && w < innerWidth - 60 ? w : 0;
+    };
     const placeHandle = () => {
-      // Beside the chat's own button, in the corner, where the toolbar went.
-      const t = launcherRect();
-      const right = t ? innerWidth - t.left + 10 : 20;
+      // Beside the chat's own button, in the corner, where the toolbar went;
+      // left of the chat's panel while it is open.
+      const w = panelWidth();
+      const t = w ? null : launcherRect();
+      const right = w ? w + 12 : t ? innerWidth - t.left + 10 : 20;
       handle.style.right = `${Math.round(right)}px`;
       if (t) handle.style.bottom = `${Math.round(innerHeight - t.bottom + (t.height - 44) / 2)}px`;
+      else handle.style.removeProperty('bottom');
     };
 
     const paintDescribing = () => {
@@ -2036,6 +2049,10 @@
     addEventListener('scroll', reframe, true);
     addEventListener('resize', reframe);
     document.addEventListener('marble:ops', reframe);
+    // The chat's panel opening, closing or being dragged wider moves the
+    // handle with it.
+    addEventListener('marble-agent:view', reframe);
+    addEventListener('pointerup', reframe);
     // The keys coming up or going decide whether a thread docks (phone.js).
     window.visualViewport?.addEventListener('resize', reframe);
     window.marblePhone?.onKeyboard?.(reframe);
