@@ -320,6 +320,28 @@ test('turning Describe off is remembered for the app, and folds the toolbar into
   assert.equal(await page.evaluate(() => window.marbleMarks.describing), true);
 });
 
+test('with the chat open beside the app, the Describe button stands left of it, off its send button', async () => {
+  const { page } = await open();
+  await tool(page, 'done').click();
+  const handle = page.locator('.marble-build-handle:not([data-away])');
+  await handle.waitFor();
+  await page.evaluate(() => document.querySelector('marble-agent-drawer').open());
+  const panel = () => page.evaluate(() => {
+    const r = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel[data-open="true"]')?.getBoundingClientRect();
+    return r && { left: r.left, width: r.width };
+  });
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel[data-open="true"]')?.getBoundingClientRect().width > 0);
+  await page.waitForTimeout(500);
+  const p = await panel();
+  const h = await handle.boundingBox();
+  assert.ok(h.x + h.width <= p.left, `the handle (right edge ${h.x + h.width}) is left of the panel (${p.left})`);
+  // Closed again, it goes back beside the chat's own button in the corner.
+  await page.evaluate(() => document.querySelector('marble-agent-drawer').close());
+  await page.waitForTimeout(500);
+  const back = await handle.boundingBox();
+  assert.ok(back.x > h.x, 'back in the corner once the chat is closed');
+});
+
 test('Build hands the marks to one agent: its status is three layers, nothing floats over the app, and History keeps it', async () => {
   const { page, errors } = await open();
   await noteOn(page, 's1', 'script:build Group the overdue ones on top');
