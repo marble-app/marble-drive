@@ -32,6 +32,7 @@
   const pdfnote = document.querySelector('#pdfnote');
   const compileBtn = document.querySelector('#compile');
   const colsBtn = document.querySelector('#toggle-cols');
+  const setupMenu = document.querySelector('#setup-menu');
 
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -640,12 +641,91 @@
     return 1;
   }
 
+  // The three ways CHI and UIST ask for an acmart paper to be set: the
+  // proceedings format as published; UIST's review copy, the same two columns
+  // with the lines numbered and the names taken off; CHI's, one column.
+  const PRESETS = {
+    camera: { format: 'sigconf', label: 'Camera-ready', flags: [] },
+    uist: { format: 'sigconf', label: 'UIST submission', flags: ['review', 'anonymous'] },
+    chi: { format: 'manuscript', label: 'CHI submission', flags: ['review', 'anonymous'] },
+  };
+  const FLAGS = ['review', 'anonymous', 'authordraft'];
+
+  function presetOf(found) {
+    if (!found || found.name !== 'acmart') return null;
+    const format = found.options.find((option) => TWO.includes(option) || ONE.includes(option)) || 'manuscript';
+    const flags = FLAGS.filter((flag) => found.options.includes(flag));
+    for (const [key, preset] of Object.entries(PRESETS)) {
+      if (preset.format === format && preset.flags.length === flags.length && preset.flags.every((flag) => flags.includes(flag))) return key;
+    }
+    return null;
+  }
+
   function deriveColumns() {
     if (!colsBtn) return;
     const section = mainSection();
-    const two = section ? columnsOf(textOf(section)) === 2 : false;
-    colsBtn.textContent = two ? '▥ 2 col' : '▤ 1 col';
-    colsBtn.setAttribute('aria-pressed', String(two));
+    const text = section ? textOf(section) : '';
+    const two = columnsOf(text) === 2;
+    const found = documentclass(text);
+    const preset = presetOf(found);
+    if (found && found.name === 'acmart') {
+      colsBtn.textContent = `${two ? '▥' : '▤'} ${preset ? PRESETS[preset].label : (two ? '2 col' : '1 col')}`;
+      colsBtn.setAttribute('aria-haspopup', 'menu');
+      colsBtn.removeAttribute('aria-pressed');
+    } else {
+      colsBtn.textContent = two ? '▥ 2 col' : '▤ 1 col';
+      colsBtn.removeAttribute('aria-haspopup');
+      colsBtn.setAttribute('aria-pressed', String(two));
+    }
+    if (setupMenu) {
+      for (const item of $$('button', setupMenu)) item.setAttribute('aria-checked', String(item.getAttribute('data-preset') === preset));
+    }
+  }
+
+  function openSetup() {
+    if (!setupMenu || !colsBtn) return;
+    const box = colsBtn.getBoundingClientRect();
+    setupMenu.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - 260))}px`;
+    setupMenu.style.top = `${box.bottom + 4}px`;
+    setupMenu.removeAttribute('hidden');
+  }
+  const closeSetup = () => { if (setupMenu) setupMenu.setAttribute('hidden', ''); };
+
+  /** Write one line of the main file, through the carrier, the way a person
+   *  editing it would — so the change is in the file, in history, and undoable. */
+  function rewriteClass(section, pre, text, replacement, found) {
+    const next = text.slice(0, found.at) + replacement + text.slice(found.at + found.whole.length);
+    pre.textContent = next;
+    paint(pre);
+    const id = carrier && carrier.id(pre);
+    if (id) {
+      carrier.record({
+        redo: [{ type: 'setText', id, text: next }],
+        undo: [{ type: 'setText', id, text }],
+      });
+      carrier.op({ type: 'setText', id, text: next }, { immediate: true });
+    }
+    if (!section.classList.contains('marble-open')) setState('data-active', keyOf(section));
+    derive();
+    recompile();
+  }
+
+  /** Set the paper up for camera-ready, UIST review or CHI review: the format
+   *  and the review flags change, every other option stays as written. */
+  function applyPreset(key) {
+    const preset = PRESETS[key];
+    const section = mainSection();
+    const pre = section && preOf(section);
+    if (!preset || !pre) return;
+    const text = pre.textContent;
+    const found = documentclass(text);
+    if (!found) {
+      say('There is no \\documentclass to change — the main file needs one.');
+      return;
+    }
+    const rest = found.options.filter((option) => !TWO.includes(option) && !ONE.includes(option) && !FLAGS.includes(option));
+    const options = [preset.format, ...preset.flags, ...rest];
+    rewriteClass(section, pre, text, `\\documentclass[${options.join(',')}]{${found.name}}`, found);
   }
 
   /** Rewrite the class options so the paper is set in the other number of
@@ -667,22 +747,7 @@
     } else {
       options.push(two ? 'onecolumn' : 'twocolumn');
     }
-    const replacement = `\\documentclass[${options.join(',')}]{${found.name}}`;
-    const next = text.slice(0, found.at) + replacement + text.slice(found.at + found.whole.length);
-
-    pre.textContent = next;
-    paint(pre);
-    const id = carrier && carrier.id(pre);
-    if (id) {
-      carrier.record({
-        redo: [{ type: 'setText', id, text: next }],
-        undo: [{ type: 'setText', id, text }],
-      });
-      carrier.op({ type: 'setText', id, text: next }, { immediate: true });
-    }
-    if (!section.classList.contains('marble-open')) setState('data-active', keyOf(section));
-    derive();
-    recompile();
+    rewriteClass(section, pre, text, `\\documentclass[${options.join(',')}]{${found.name}}`, found);
   }
 
   // ------------------------------------------------------------- the images
@@ -1057,6 +1122,10 @@
     const target = event.target;
     const closest = (selector) => (target.closest ? target.closest(selector) : null);
 
+    const preset = closest('#setup-menu button');
+    if (preset) { closeSetup(); applyPreset(preset.getAttribute('data-preset')); return; }
+    if (!closest('#setup-menu') && !closest('#toggle-cols')) closeSetup();
+
     const item = closest('.menu button');
     if (item) { menuAction(item.getAttribute('data-do')); return; }
     if (!closest('.menu')) closeMenu();
@@ -1106,7 +1175,17 @@
       setState('data-auto', app.getAttribute('data-auto') === 'on' ? 'off' : 'on');
       return;
     }
-    if (closest('#toggle-cols')) { switchColumns(); return; }
+    if (closest('#toggle-cols')) {
+      // An acmart paper picks a setup; anything else has two states.
+      const section = mainSection();
+      const found = section ? documentclass(textOf(section)) : null;
+      if (found && found.name === 'acmart') {
+        if (setupMenu && setupMenu.hasAttribute('hidden')) openSetup(); else closeSetup();
+      } else {
+        switchColumns();
+      }
+      return;
+    }
     if (closest('#compile')) { recompile(); return; }
     if (closest('#get-pdf')) {
       if (lastPdf) download(lastPdf, `${projectName()}.pdf`);
@@ -1144,7 +1223,7 @@
   // \section down to \subparagraph. Switching the panes stays a click on the
   // bar — it is a view, not an edit, and nothing here should reach for it.
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeMenu();
+    if (event.key === 'Escape') { closeMenu(); closeSetup(); }
     const meta = event.metaKey || event.ctrlKey;
     if (!meta) return;
     const key = event.key.toLowerCase();

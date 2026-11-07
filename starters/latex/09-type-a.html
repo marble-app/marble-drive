@@ -19,6 +19,11 @@
   const T = window.TeX;
   const M = () => T.metrics;
 
+  // TeX measures in points of 1/72.27 inch and PDF in points of 1/72: a third
+  // of a percent, which is a line in three hundred. A class that states its
+  // lengths in TeX points (acmart does) multiplies by this.
+  const PT = 72 / 72.27;
+
   const PAPER = {
     letterpaper: [612, 792],
     a4paper: [595.28, 841.89],
@@ -146,6 +151,7 @@
       list: [],
       notes: [],
       pendingNotes: [],
+      floatQueue: [],
       started: false,
       inFront: false,
     };
@@ -173,13 +179,17 @@
    *  either changes, because everything downstream reads `job.measure` and
    *  nothing downstream needs to know why it is what it is. */
   function layout(job) {
-    job.textWidth = job.W - job.margin * 2;
+    job.textWidth = job.fixedTextWidth || (job.W - job.margin * 2);
     job.colWidth = (job.textWidth - job.colGap * (job.cols - 1)) / job.cols;
     job.measure = job.spanning ? job.textWidth : job.colWidth;
   }
 
-  const columnX = (job, index) => job.margin + index * (job.colWidth + job.colGap);
-  const frameX = (job) => (job.spanning ? job.margin : columnX(job, job.colIndex));
+  // A two-sided class moves the text block between left and right pages; the
+  // page sets `left` when it starts, and everything that places a column
+  // reads it from here.
+  const leftEdge = (job) => (job.left === undefined ? job.margin : job.left);
+  const columnX = (job, index) => leftEdge(job) + index * (job.colWidth + job.colGap);
+  const frameX = (job) => (job.spanning ? leftEdge(job) : columnX(job, job.colIndex));
 
   /** How much of the bottom of this frame is promised to something else: the
    *  footnotes called from it, and on the first page the block a conference
@@ -201,6 +211,79 @@
     job.y = job.columnTop;
     job.firstOnPage = true;
     job.prevDepth = 0;
+    beginColumn(job);
+  }
+
+  /** A column is starting: what was set in it so far is nothing, and the
+   *  floats that were waiting for a column top get this one first. */
+  function beginColumn(job) {
+    job.colStart = job.page ? job.page.items.length : 0;
+    job.colStretch = [];
+    job.colFloatTop = job.y;
+    job.colFloatCount = 0;
+    job.lastSkip = 0;
+    job.keeping = null;
+    if (job.page && !job.spanning && typeof placeQueuedFloats === 'function') placeQueuedFloats(job);
+  }
+
+  /** \flushbottom. A column that ends because the next line would not fit is
+   *  stretched until its last baseline sits on the bottom of the text block,
+   *  the slack shared among the skips that can stretch (the space above a
+   *  heading, around a list, under a float) in proportion to how far each of
+   *  them may. Lines themselves never move apart: baselineskip has no stretch. */
+  function flushColumn(job) {
+    if (!job.flushBottom || job.spanning || !job.page || !job.colStretch || !job.colStretch.length) return;
+    const floor = job.marginBottom + reserved(job);
+    const slack = job.y - floor;
+    if (slack <= 0.01) return;
+    const total = job.colStretch.reduce((sum, glue) => sum + glue.amount, 0);
+    if (total <= 0) return;
+    const ratio = slack / total;
+    const items = job.page.items;
+    let g = 0;
+    let shift = 0;
+    for (let i = job.colStart; i < items.length; i += 1) {
+      while (g < job.colStretch.length && job.colStretch[g].at <= i) {
+        shift += job.colStretch[g].amount * ratio;
+        g += 1;
+      }
+      if (shift) items[i] = { ...items[i], y: items[i].y - shift };
+    }
+    job.y -= shift;
+    job.colStretch = [];
+  }
+
+  /** The column is full: stretch it, then go on to the next column, or to a
+   *  new page when this was the last one. */
+  function moveOn(job) {
+    flushColumn(job);
+    if (!job.spanning && job.colIndex + 1 < job.cols) nextColumn(job);
+    else startPage(job);
+  }
+
+  /** A heading is about to be set. What the page looks like now is kept, so
+   *  that if the heading would end a column with nothing under it, it can be
+   *  taken back off and set at the top of the next one instead. */
+  function startKeep(job) {
+    if (job.capture || !job.klassKeeps) return;
+    if (!job.page) startPage(job);
+    job.keeping = {
+      at: job.page.items.length, y: job.y, prevDepth: job.prevDepth,
+      firstOnPage: job.firstOnPage, lastSkip: job.lastSkip || 0,
+      stretchLen: (job.colStretch || []).length,
+      pageIndex: job.pageIndex, col: job.spanning ? 0 : job.colIndex,
+      top: job.firstOnPage, rows: [], closed: false,
+    };
+  }
+  const closeKeep = (job) => { if (job.keeping) job.keeping.closed = true; };
+
+  function rollbackKeep(job, keep) {
+    job.page.items.length = keep.at;
+    job.y = keep.y;
+    job.prevDepth = keep.prevDepth;
+    job.firstOnPage = keep.firstOnPage;
+    job.lastSkip = keep.lastSkip;
+    if (job.colStretch) job.colStretch.length = keep.stretchLen;
   }
 
   /** Leave the columns for a moment and run the full width — a title block, a
@@ -225,19 +308,25 @@
     job.y = job.columnTop;
     job.firstOnPage = true;
     job.prevDepth = 0;
+    beginColumn(job);
   }
 
   /** Wide floats wait for the top of a page, which is where a two-column class
    *  puts them. They are already rows by the time they get here. */
   function flushWide(job) {
-    if (!job.wide.length || job.flushing || job.spanning) return;
+    if (!job.wide.length || job.flushing || job.spanning) return false;
     const queue = job.wide;
     job.wide = [];
     job.flushing = true;
     const was = beginSpan(job);
-    for (const row of queue) emitRow(job, row);
+    for (const row of queue) {
+      emitRow(job, row);
+      // \dbltextfloatsep under each wide float, and the columns begin below.
+      if (row.wideEnd && job.texSkips) vspace(job, 20 * PT);
+    }
     endSpan(job, was);
     job.flushing = false;
+    return true;
   }
 
   const leading = (job) =>
@@ -256,6 +345,8 @@
     finishPage(job);
     job.page = job.doc.page(job.W, job.H);
     job.pageIndex += 1;
+    // Page one is a right-hand page, so it takes the odd margin.
+    if (job.oddLeft !== undefined) job.left = job.pageIndex % 2 === 0 ? job.oddLeft : job.evenLeft;
     job.y = job.H - job.marginTop;
     job.columnTop = job.y;
     job.colIndex = 0;
@@ -263,14 +354,21 @@
     job.prevDepth = 0;
     job.colNotes = Array.from({ length: job.cols }, () => []);
     job.colNoteHeight = Array.from({ length: job.cols }, () => 0);
-    flushWide(job);
+    job.colStart = job.page.items.length;
+    job.colStretch = [];
+    // Wide floats first, across the top; the columns begin under them, and
+    // endSpan starts the first one. With nothing wide waiting, it starts here.
+    if (!flushWide(job)) beginColumn(job);
     return job.page;
   }
 
   function finishPage(job) {
     if (!job.page) return;
     // The folio, centred under the text block, the way an article sets it.
-    if (job.folios !== false) {
+    // A class that draws its own heads and feet does it in `decorate`.
+    if (job.decorate) {
+      job.decorate(job);
+    } else if (job.folios !== false) {
       const number = String(job.counters.page);
       const size = job.base * 0.9;
       const width = M().width(number, 'rm', size);
@@ -298,7 +396,9 @@
       for (const note of notes) y = placeRows(job, note, y + note[0].above, columnX(job, col));
     });
 
-    if (onBlockPage) {
+    if (onBlockPage && block.draw) {
+      block.draw(columnX(job, block.col));
+    } else if (onBlockPage) {
       // The strip the column reserved is `height`; the block sits at the foot
       // of it and the gap is above, which is where the reader needs it. The
       // rule is the class's own: the width of the column.
@@ -313,7 +413,7 @@
    *  to a block of rows that was captured rather than placed. */
   const stepFor = (row, prevDepth, first) =>
     (first ? row.above
-      : Math.max(row.leading || 0, prevDepth + row.above + LINESKIP));
+      : (row.gap || 0) + Math.max(row.leading || 0, prevDepth + row.above + LINESKIP));
 
   const noteHeightOf = (rows) => {
     let total = 0;
@@ -349,29 +449,49 @@
   function emitRow(job, row) {
     if (job.capture) {
       row.leading = leading(job);
+      // A skip asked for while capturing rides on the row after it.
+      if (job.captureGap) { row.gap = (row.gap || 0) + job.captureGap; job.captureGap = 0; }
       job.capture.push(row);
       return undefined;
     }
     if (!job.page) startPage(job);
+    if (row.gap && !job.firstOnPage) job.y -= row.gap;
     const col = job.spanning ? 0 : job.colIndex;
     const extra = row.notes
-      ? noteHeightOf(row.notes.flat()) + job.base * 1.2 * (job.colNotes[col].length ? 0 : 1)
+      ? noteHeightOf(row.notes.flat()) + (job.noteSkip || job.base * 1.2) * (job.colNotes[col].length ? 0 : 1)
       : 0;
     // TeX's rule: put the baseline a \baselineskip below the last one, unless
     // that would leave less than \lineskiplimit of daylight between the two
-    // lines, in which case leave \lineskip and let the line grow.
-    const wanted = leading(job);
+    // lines, in which case leave \lineskip and let the line grow. The first
+    // line of a column sits \topskip below its top, or lower if it is taller.
+    const wanted = row.fixedLeading || row.leading || leading(job);
     const daylight = wanted - job.prevDepth - row.above;
     const drop = job.firstOnPage
-      ? row.above
+      ? Math.max(row.above, job.spanning ? 0 : (job.topskip || 0))
       : (daylight >= LINESKIP ? wanted : job.prevDepth + row.above + LINESKIP) + (row.lead || 0);
+
+    // A heading waits for the line after it, and that line for the one after
+    // it: \@afterheading forbids a break between them. If the pair will not go
+    // here, the heading is taken back off and goes with them.
+    const keep = job.keeping;
+    const part = keep && !keep.closed;
+    const follower = keep && keep.closed;
+    const below = job.depthHangs ? 0 : row.below;
+    const need = drop + below + extra + (follower ? (row.club || 0) : 0);
 
     // A frame that cannot hold this row hands it on: to the next column if the
     // page has one, to a new page if it does not. A row taller than a whole
     // frame is set where it is rather than moved for ever.
-    if (!fits(job, drop + row.below + extra) && !job.firstOnPage) {
-      if (!job.spanning && job.colIndex + 1 < job.cols) nextColumn(job);
-      else startPage(job);
+    if (!fits(job, need) && !job.firstOnPage) {
+      if (follower && !keep.top && keep.pageIndex === job.pageIndex && keep.col === col) {
+        job.keeping = null;
+        rollbackKeep(job, keep);
+        moveOn(job);
+        for (const held of keep.rows) emitRow(job, held);
+        return emitRow(job, row);
+      }
+      if (follower) job.keeping = null;
+      moveOn(job);
       return emitRow(job, row);
     }
 
@@ -381,6 +501,9 @@
     }
     job.prevDepth = row.below;
     job.firstOnPage = false;
+    job.lastSkip = 0;
+    if (part) keep.rows.push({ ...row, fixedLeading: wanted });
+    if (follower) job.keeping = null;
 
     if (row.notes) {
       for (const note of row.notes) {
@@ -395,10 +518,32 @@
   /** Space asked for by name rather than by what is in it. The depth of the
    *  last row is settled here rather than being carried into the next one,
    *  because after an explicit skip there is no "next row" to settle it. */
-  function vspace(job, height) {
-    if (job.capture) return;
+  function vspace(job, height, options = {}) {
+    if (job.capture) {
+      if (job.texSkips && job.capture.length) job.captureGap = (job.captureGap || 0) + height;
+      return;
+    }
     if (!job.page) startPage(job);
     if (job.firstOnPage) return;
+    if (job.texSkips) {
+      // TeX's own reckoning, which acmart is measured in: a skip goes between
+      // the depth of the line above and the height of the line below, and the
+      // baselineskip still applies across it — so the depth is not spent here.
+      // \addvspace (sections, lists, displays) takes the larger of two skips
+      // in a row rather than their sum.
+      let add = height;
+      if (options.max) {
+        add = Math.max(0, height - (job.lastSkip || 0));
+        job.lastSkip = Math.max(job.lastSkip || 0, height);
+      } else {
+        job.lastSkip = height;
+      }
+      job.y -= add;
+      if (options.stretch && job.flushBottom && !job.spanning && job.colStretch) {
+        job.colStretch.push({ at: job.page.items.length, amount: options.stretch });
+      }
+      return;
+    }
     job.y -= job.prevDepth + height;
     job.prevDepth = 0;
   }
@@ -532,7 +677,8 @@
   function withDiscretionaries(node) {
     if (node.k !== 'word' || node.runs.length !== 1 || !T.hyphenate) return [node];
     const run = node.runs[0];
-    if (run.link || run.f.startsWith('tt') || run.f === 'sy') return [node];
+    // Linked words hyphenate like any others; a URL never does.
+    if ((run.link && run.link.raw) || run.f.startsWith('tt') || run.f === 'sy') return [node];
     const parts = /^([^A-Za-z]*)([A-Za-z]{5,})([^A-Za-z]*)$/.exec(run.t);
     if (!parts) return [node];
     const points = T.hyphenate(parts[2]);
@@ -560,6 +706,44 @@
     return out;
   }
 
+  /** A word with a hyphen or a dash in it may break after that character,
+   *  with nothing added — TeX's \exhyphenpenalty, 50, the same price as a
+   *  hyphen it had to insert. "camera-ready" and "more—all" break here. */
+  function explicitBreaks(node) {
+    if (node.k !== 'word' || node.runs.some((run) => run.link && run.link.raw)) return [node];
+    const m = M();
+    const out = [];
+    let pieceRuns = [];
+    const flush = () => {
+      if (!pieceRuns.length) return;
+      const w = pieceRuns.reduce((sum, run) => sum + m.width(run.t, run.f, run.s), 0);
+      out.push({ k: 'word', w, h: node.h, d: node.d, runs: pieceRuns, notes: out.length ? null : node.notes });
+      pieceRuns = [];
+    };
+    const total = node.runs.reduce((sum, run) => sum + run.t.length, 0);
+    let seen = 0;
+    for (const run of node.runs) {
+      let from = 0;
+      // Typewriter text has no \hyphenchar: "--verbose" stays whole.
+      if (run.f.startsWith('tt')) { pieceRuns.push(run); seen += run.t.length; continue; }
+      for (let i = 0; i < run.t.length; i += 1) {
+        const ch = run.t[i];
+        const at = seen + i;
+        if ((ch === '-' || ch === '\u2013' || ch === '\u2014') && at > 0 && at < total - 1
+          && !(run.t[i + 1] === '-' || run.t[i + 1] === '\u2013' || run.t[i + 1] === '\u2014')) {
+          pieceRuns.push({ ...run, t: run.t.slice(from, i + 1) });
+          from = i + 1;
+          flush();
+          out.push({ k: 'disc', w: 0, hyphen: 0, explicit: true });
+        }
+      }
+      if (from < run.t.length) pieceRuns.push({ ...run, t: run.t.slice(from) });
+      seen += run.t.length;
+    }
+    flush();
+    return out.length > 1 ? out : [node];
+  }
+
   /** The paragraph as TeX sees it: boxes, glue and penalties. */
   function itemsFor(nodes, hyphenate) {
     const items = [];
@@ -576,9 +760,11 @@
         });
         continue;
       }
-      for (const piece of (hyphenate ? withDiscretionaries(node) : [node])) {
-        if (piece.k === 'disc') items.push({ kind: 'penalty', w: piece.hyphen, p: KP.hyphen, flagged: true, node: piece });
-        else items.push({ kind: 'box', w: piece.w, node: piece });
+      for (const part of explicitBreaks(node)) {
+        for (const piece of (hyphenate && part.k === 'word' ? withDiscretionaries(part) : [part])) {
+          if (piece.k === 'disc') items.push({ kind: 'penalty', w: piece.hyphen, p: KP.hyphen, flagged: true, node: piece.explicit ? null : piece });
+          else items.push({ kind: 'box', w: piece.w, node: piece });
+        }
       }
     }
     // TeX ends a paragraph with \penalty10000 \hfil \penalty-10000, which is
@@ -591,7 +777,7 @@
 
   /** One pass. Returns the chosen breakpoints, or null if no way of breaking
    *  the paragraph stayed inside the tolerance. */
-  function tryBreaking(items, widthFor, tolerance) {
+  function tryBreaking(items, widthFor, tolerance, protrusionAt = null, ragged = false) {
     const n = items.length;
     const sumW = new Array(n + 1).fill(0);
     const sumY = new Array(n + 1).fill(0);
@@ -630,15 +816,26 @@
       const best = new Map();
       const keep = [];
 
+      // microtype's protrusion: a hyphen or a full stop at the end of a line
+      // hangs most of its width into the margin, so the line may hold that
+      // much more.
+      const hang = protrusionAt ? protrusionAt(items, b) : 0;
       for (const node of active) {
-        const width = sumW[b] - sumW[node.start] + (here.kind === 'penalty' ? here.w : 0);
+        const width = sumW[b] - sumW[node.start] + (here.kind === 'penalty' ? here.w : 0) - hang;
         const stretch = sumY[b] - sumY[node.start];
         const shrink = sumZ[b] - sumZ[node.start];
         const room = widthFor(node.line);
         const slack = room - width;
 
         let ratio;
-        if (stretch >= INF_STRETCH) ratio = 0;
+        // A line with \parfillskip in it is never loose, but it can still be
+        // too wide: then it shrinks like any other, and may not fit at all.
+        if (slack < 0 && stretch >= INF_STRETCH) ratio = shrink > 0 ? slack / shrink : -1000;
+        else if (stretch >= INF_STRETCH) ratio = 0;
+        // \centering and \raggedright put 0pt plus 1fil at the ends of every
+        // line, so any line that fits is a perfect one — and the first pass,
+        // without hyphens, always succeeds.
+        else if (ragged && slack >= 0) ratio = 0;
         else if (slack > 0) ratio = stretch > 0 ? Math.min(slack / stretch, 1000) : 1000;
         else if (slack < 0) ratio = shrink > 0 ? slack / shrink : -1000;
         else ratio = 0;
@@ -686,6 +883,7 @@
 
     const breaks = [];
     for (let node = chosen; node && node.previous; node = node.previous) breaks.unshift(node);
+    if (protrusionAt) for (const stop of breaks) stop.hang = protrusionAt(items, stop.position);
     return breaks;
   }
 
@@ -708,6 +906,7 @@
         });
       }
       if (here.kind === 'penalty' && here.p <= -INF_PENALTY) line.forced = true;
+      line.hang = stop.hang || 0;
       lines.push(line);
     }
     while (lines.length > 1 && !lines[lines.length - 1].length) lines.pop();
@@ -763,17 +962,58 @@
 
   /** Break a paragraph. `widthFor(n)` is how wide the nth line may be, because
    *  that is not one number when the first line is indented. */
+  // microtype's default protrusion, in thousandths of the character's own
+  // width: how far each hangs past the right edge of a justified line.
+  const PROTRUDE = {
+    '-': 700, '.': 700, ',': 700, ':': 500, ';': 500, '!': 200, '?': 200,
+    '\u2019': 700, '\u201d': 700, ')': 50, '\u2013': 300, '\u2014': 200, '\'': 700, '"': 500,
+  };
+
+  function protrusionOf(items, b) {
+    const here = items[b];
+    if (!here) return 0;
+    if (here.kind === 'penalty' && here.flagged && here.node && here.w) return here.w * (PROTRUDE['-'] / 1000);
+    if (here.kind === 'penalty' && here.flagged && !here.node) {
+      const before = items[b - 1];
+      return before && before.kind === 'box' ? lastHang(before.node) : 0;
+    }
+    if (here.kind !== 'glue' && here.kind !== 'penalty') return 0;
+    const before = items[b - 1];
+    return before && before.kind === 'box' ? lastHang(before.node) : 0;
+  }
+
+  function lastHang(node) {
+    if (!node || node.k !== 'word' || !node.runs.length) return 0;
+    const run = node.runs[node.runs.length - 1];
+    if (!run.t || run.f === 'sy' || run.f.startsWith('tt') || run.rise) return 0;
+    const ch = run.t[run.t.length - 1];
+    const factor = PROTRUDE[ch];
+    return factor ? M().charWidth(ch, run.f, run.s) * (factor / 1000) : 0;
+  }
+
   function breakLines(nodes, measure, job, options = {}) {
     const widthFor = options.widthFor || (() => measure);
     const tolerance = (job && job.tolerance) || KP.tolerance;
+    const hang = job && job.protrusion && options.justify !== false ? protrusionOf : null;
+    const ragged = !!(job && job.klass === 'acm' && options.justify === false);
+    // With fil glue at both ends every break that fits costs nothing, and
+    // what TeX sets is each line filled as far as it goes: a title or a
+    // heading breaks late, and never needs a hyphen to do it.
+    if (ragged) return firstFit(nodes, widthFor(0), job);
 
     // TeX's first pass does not hyphenate: a paragraph that reads well without
     // hyphens should not be given any.
     for (const [hyphenate, limit] of [[false, KP.pretolerance], [true, tolerance]]) {
       const items = itemsFor(nodes, hyphenate);
-      const breaks = tryBreaking(items, widthFor, limit);
+      const breaks = tryBreaking(items, widthFor, limit, hang, ragged);
       if (breaks && breaks.length) return linesFrom(items, breaks);
     }
+    // TeX would set an overfull line here and say so. A line that runs into
+    // the next column is worse to look at than a loose one, so a last pass
+    // takes any breaking at all that keeps every line inside the measure.
+    const items = itemsFor(nodes, true);
+    const loose = tryBreaking(items, widthFor, INF_PENALTY, hang);
+    if (loose && loose.length) return linesFrom(items, loose);
     return firstFit(nodes, widthFor(0), job);
   }
 
@@ -783,7 +1023,7 @@
     const natural = line.reduce((sum, node) => sum + node.w, 0);
     const glues = line.filter((node) => node.k === 'glue' && !node.fill);
     const fills = line.filter((node) => node.k === 'glue' && node.fill);
-    const slack = measure - indent - natural;
+    const slack = measure - indent - natural + (justify ? (line.hang || 0) : 0);
 
     let stretchPer = 0;
     let fillPer = 0;
@@ -792,15 +1032,15 @@
     } else if (justify && slack > 0 && glues.length) {
       const total = glues.reduce((sum, glue) => sum + glue.stretch, 0);
       stretchPer = total > 0 ? slack / total : 0;
-    } else if (justify && slack < 0 && glues.length) {
+    } else if (slack < 0 && glues.length) {
       const total = glues.reduce((sum, glue) => sum + glue.shrink, 0);
       stretchPer = total > 0 ? Math.max(-1, slack / total) : 0;
     }
 
     let x = indent;
     if (!justify && !fills.length) {
-      if (align === 'center') x += slack / 2;
-      else if (align === 'right') x += slack;
+      if (align === 'center') x += Math.max(0, slack) / 2;
+      else if (align === 'right') x += Math.max(0, slack);
     }
 
     const items = [];
@@ -851,6 +1091,10 @@
   /** End the paragraph being built and put its lines on the page. */
   function endParagraph(job, options = {}) {
     endWord(job);
+    // A run-in heading waits for its paragraph: the blank line under
+    // \subsubsection{…} does not end anything, because nothing has begun.
+    if (job.runInCount && job.nodes.length <= job.runInCount && !options.force) return;
+    job.runInCount = 0;
     const nodes = job.nodes;
     job.nodes = [];
     if (!nodes.length) return;
@@ -867,6 +1111,7 @@
     // it to the full width, which is where the gappy spacing came from.
     const lines = breakLines(nodes, measure, job, {
       widthFor: (n) => measure - (n === 0 ? indent : hanging),
+      justify: job.align === 'justify',
     });
     lines.forEach((line, i) => {
       const first = i === 0;
@@ -877,6 +1122,9 @@
         indent: first ? indent : hanging,
       });
       row.x = job.leftSkip;
+      // The first line of a paragraph says how much room the second needs, so
+      // a heading above it can insist on both.
+      if (first && lines.length > 1) row.club = leading(job);
       if (options.keep && i === lines.length - 1) row.keep = true;
       if (options.mark && first) row.mark = options.mark;
       emitRow(job, row);

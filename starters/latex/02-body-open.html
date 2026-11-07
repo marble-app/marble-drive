@@ -23,9 +23,14 @@
         <button class="btn" data-set-layout="split" title="Side by side">◫</button>
         <button class="btn" data-set-layout="pdf" title="PDF only">◨</button>
       </div>
-      <button class="btn" id="toggle-cols" title="One column or two (rewrites \documentclass)">▥ 2 col</button>
+      <button class="btn" id="toggle-cols" title="How the paper is set (rewrites \documentclass)">▥ 2 col</button>
       <button class="btn" id="toggle-auto" title="Typeset as you type">auto</button>
       <button class="btn go" id="compile" title="Recompile (⌘⏎)"><span class="ico">▶</span> Recompile</button>
+      <div class="menu setup" id="setup-menu" role="menu" hidden>
+        <button role="menuitemradio" data-preset="camera"><b>Camera-ready</b><span>sigconf · two columns, authors named</span></button>
+        <button role="menuitemradio" data-preset="uist"><b>UIST submission</b><span>sigconf, review, anonymous</span></button>
+        <button role="menuitemradio" data-preset="chi"><b>CHI submission</b><span>manuscript, review, anonymous</span></button>
+      </div>
       <button class="btn" id="get-pdf" title="Download the PDF">⤓ PDF</button>
       <button class="btn" id="get-tex" title="Download the open file">⤓ .tex</button>
     </div>

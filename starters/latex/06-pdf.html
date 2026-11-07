@@ -120,7 +120,26 @@
           font = item.f; size = item.s;
         }
         out.push(`1 0 0 1 ${n(item.x)} ${n(item.y)} Tm`);
-        out.push(`(${literal(codesFor(item.t, item.f))}) Tj`);
+        // The kerning the typesetter measured with goes in as TJ offsets, so
+        // the letters land where the line was justified for.
+        const adj = enc().adjustments && item.f !== 'sy' ? enc().adjustments(item.t, item.f) : null;
+        const glyphs = adj ? enc().drawCodes(item.t, item.f) : null;
+        if (glyphs) {
+          const parts = [];
+          let run = [];
+          glyphs.forEach((glyph, g) => {
+            run.push(glyph.code);
+            const kern = adj[glyph.last];
+            if (Math.abs(kern) > 0.05 && g < glyphs.length - 1) {
+              parts.push(`(${literal(run)})`, n(-kern));
+              run = [];
+            }
+          });
+          if (run.length) parts.push(`(${literal(run)})`);
+          out.push(parts.length === 1 ? `${parts[0]} Tj` : `[${parts.join(' ')}] TJ`);
+        } else {
+          out.push(`(${literal(codesFor(item.t, item.f))}) Tj`);
+        }
       } else if (item.k === 'r') {
         endText();
         colour(item.c);
@@ -171,7 +190,10 @@
       // the face acmart would set — Linux Libertine O, Linux Biolinum O — and
       // the widths 04b measured are the widths of those very glyphs. The file
       // goes in as a FontFile3, which is why this document is a 1.7.
-      const face = !spec.symbol && embed && embed[key];
+      // Inconsolata only where the page was measured in it: an article is
+      // measured in Courier, and Courier's wider letters need Courier.
+      const measuredMono = !key.startsWith('tt') || (enc().using && enc().using() === 'libertine');
+      const face = !spec.symbol && measuredMono && embed && embed[key];
       if (face) {
         const raw = unb64(face.b64);
         const fileId = reserve();
@@ -184,10 +206,14 @@
             ` /Ascent ${face.ascent} /Descent ${face.descent} /CapHeight ${face.cap}` +
             ` /StemV ${face.stemv} /FontFile3 ${fileId} 0 R >>`,
         );
+        const differences = enc().ligatureDifferences ? enc().ligatureDifferences(key) : '';
+        const encoding = differences
+          ? `<< /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [${differences}] >>`
+          : '/WinAnsiEncoding';
         put(
           id,
           `<< /Type /Font /Subtype /Type1 /BaseFont /${face.name}` +
-            ` /Encoding /WinAnsiEncoding${declared} /FontDescriptor ${descId} 0 R >>`,
+            ` /Encoding ${encoding}${declared} /FontDescriptor ${descId} 0 R >>`,
         );
         continue;
       }

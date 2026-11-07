@@ -89,7 +89,7 @@
     const text = sources.map((file) => file.text).join('\n');
 
     const cited = [];
-    for (const match of text.matchAll(/\\(?:no)?cite[tp]?\s*(?:\[[^\]]*\])?\{([^}]*)\}/g)) {
+    for (const match of text.matchAll(/\\(?:no)?(?:[cC]ite(?:t|p|alp|num|author|year|yearpar)?)\s*(?:\[[^\]]*\]\s*){0,2}\{([^}]*)\}/g)) {
       for (const key of match[1].split(',')) {
         const clean = key.trim();
         if (clean && !cited.includes(clean)) cited.push(clean);
@@ -106,6 +106,24 @@
     const known = {};
     for (const file of project.files) {
       if (file.kind === 'bib' || /\.bib$/.test(file.name)) Object.assign(known, parseBib(file.text));
+    }
+
+    // \nocite{*} cites everything the .bib files hold.
+    if (cited.includes('*')) {
+      cited.splice(cited.indexOf('*'), 1);
+      for (const key of Object.keys(known)) if (!cited.includes(key)) cited.push(key);
+    }
+
+    // ACM-Reference-Format sorts by every author's surname and first names,
+    // then the year, then the title; the plain style by the first surname.
+    const acm = /\\documentclass\s*(\[[^\]]*\])?\s*\{acmart\}/.test(text) || /ACM-Reference-Format/.test(text);
+    if (acm && T.acmSortKey) {
+      const wanted = cited.filter((key) => known[key]);
+      const keyOf = new Map(wanted.map((key) => [key, T.acmSortKey(known[key])]));
+      wanted.sort((a, b) => (keyOf.get(a) < keyOf.get(b) ? -1 : keyOf.get(a) > keyOf.get(b) ? 1 : 0));
+      wanted.forEach((key, i) => { bib[key] = { number: i + 1, fields: known[key].fields, type: known[key].type }; });
+      for (const key of cited) if (!bib[key]) bib[key] = { number: '?' };
+      return bib;
     }
 
     // The plain style: alphabetical by the first author's surname.

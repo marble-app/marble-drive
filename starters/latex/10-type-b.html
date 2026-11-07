@@ -217,7 +217,92 @@
 
   // ------------------------------------------------------------------ pieces
 
+  /** acmart's \@startsection calls, read out of the class: how far above,
+   *  how far below or across, which face, and whether the heading is a line
+   *  of its own or the start of the paragraph it introduces. The skips are in
+   *  baselines of the body, which is why they are worked out here and not
+   *  written down as points. */
+  function acmHead(job, kind) {
+    const body = (ladder(job).normalsize || [job.base, job.base * 1.2])[1] * PT * (job.lineStretch || 1);
+    const sansHeads = job.headingFamily === 'sf';
+    const big = sansHeads ? 'normalsize' : 'Large';
+    switch (kind) {
+      case 'part':
+        return { size: 'normalsize', family: 'rm', bold: false, italic: true, before: 10 * PT, stretch: 4 * PT, after: 4 * PT };
+      case 'section': case 'subsection':
+        return { size: big, family: sansHeads ? 'sf' : 'rm', bold: true, italic: false, before: 0.75 * body, stretch: 2 * PT, after: 0.25 * body };
+      case 'subsubsection':
+        return { size: 'normalsize', family: 'sf', bold: false, italic: true, before: 0.5 * body, stretch: 2 * PT, runIn: 3.5 * PT };
+      case 'paragraph':
+        return { size: 'normalsize', family: 'rm', bold: false, italic: true, before: 0.5 * body, stretch: 2 * PT, runIn: 3.5 * PT, indent: true };
+      default:
+        // amsart's own \subparagraph: no skip, upright, a full stop after it.
+        return { size: 'normalsize', family: 'rm', bold: false, italic: false, before: 0, stretch: 0, runIn: 'space', period: true };
+    }
+  }
+
+  function acmHeading(job, kind, starred, tokens) {
+    const spec = SECTIONS[kind];
+    const head = acmHead(job, kind);
+    endParagraph(job, { force: true });
+    let label = '';
+    if (spec.number && !starred) {
+      if (kind === 'section') { job.counters.section += 1; job.counters.subsection = 0; job.counters.subsubsection = 0; }
+      if (kind === 'subsection') { job.counters.subsection += 1; job.counters.subsubsection = 0; }
+      if (kind === 'subsubsection') job.counters.subsubsection += 1;
+      label = number(job, kind);
+      job.lastNumber = label;
+    }
+    const title = T.lex.plain(tokens).trim();
+    const entry = { level: spec.level, title, label, page: job.counters.page };
+    if (spec.number && !starred) job.toc.push(entry);
+    job.lastKind = kind;
+
+    if (!head.runIn) startKeep(job);
+    if (head.before) vspace(job, head.before, { max: true, stretch: head.stretch });
+    const saved = save(job);
+    amsSize(job, head.size);
+    job.font.family = head.family;
+    job.font.bold = head.bold;
+    job.font.italic = head.italic;
+    job.font.sc = false;
+    // \section@raggedright: a heading is set ragged, never justified.
+    if (!head.runIn) job.align = 'left';
+    job.parindent = false;
+
+    const mark = (pageIndex, y) => {
+      entry.page = job.counters.page;
+      entry.at = { page: pageIndex, y: y + job.font.size };
+      if (!starred) job.outline.push({ title, level: Math.max(1, spec.level), page: pageIndex, x: job.margin, y: y + job.font.size * 1.4 });
+    };
+
+    // The number and the title are a \quad apart, a quad of the heading's
+    // own face.
+    if (label) { addText(job, label); addGlue(job, { w: job.font.size, stretch: 0, shrink: 0, nobreak: true }); }
+    inGroup(job, tokens);
+
+    if (head.runIn) {
+      if (head.period) addText(job, '.');
+      if (head.runIn === 'space') addGlue(job);
+      else addGlue(job, { w: head.runIn, stretch: 0, shrink: 0 });
+      endWord(job);
+      const nodes = job.nodes;
+      job.nodes = [];
+      restore(job, saved);
+      job.nodes = nodes;
+      job.runInCount = nodes.length;
+      job.parindent = !!head.indent;
+      return;
+    }
+    endParagraph(job, { indent: 0, keep: true, mark });
+    closeKeep(job);
+    restore(job, saved);
+    job.parindent = false;
+    vspace(job, head.after);
+  }
+
   function heading(job, kind, starred, tokens) {
+    if (job.klass === 'acm') { acmHeading(job, kind, starred, tokens); return; }
     const spec = SECTIONS[kind];
     endParagraph(job);
     let label = '';
@@ -276,20 +361,71 @@
 
   function displayRow(job, box, { tag = null, gapAbove = 0.9, gapBelow = 0.9, centred = true } = {}) {
     endParagraph(job);
-    vspace(job, job.base * gapAbove);
-    const x = centred ? Math.max(0, (job.measure - box.w) / 2) : 0;
+    const acm = job.klass === 'acm';
+    // amsart's \abovedisplayskip and \belowdisplayskip, as they come out.
+    if (acm) vspace(job, 7 * PT, { max: true, stretch: 2 * PT });
+    else vspace(job, job.base * gapAbove);
+    const x = centred ? Math.max(0, (job.measure - job.leftSkip - job.rightSkip - box.w) / 2) : 0;
     const items = box.items.map((item) => ({ ...item, x: item.x + x }));
     if (tag) {
-      const size = job.base;
+      const size = acm ? job.font.size : job.base;
       const width = M().width(tag, 'rm', size);
       items.push({ k: 't', x: job.measure - width, y: 0, f: 'rm', s: size, t: tag });
     }
     emitRow(job, { items, above: box.h, below: box.d, x: job.leftSkip, lead: 0 });
-    vspace(job, job.base * gapBelow);
+    if (acm) vspace(job, 5.5 * PT, { max: true, stretch: 2 * PT });
+    else vspace(job, job.base * gapBelow);
     job.parindent = false;
   }
 
+  /** acmart's caption: label and text both bold, a colon between, the
+   *  body size. One line is centred and more than one is justified, which is
+   *  the caption package's singlelinecheck. Tables carry theirs on top. */
+  function acmCaption(job, kind, tokens) {
+    endParagraph(job);
+    const top = kind === 'table';
+    // \abovecaptionskip, as it comes out under a picture in a real build.
+    if (!top) vspace(job, 8.7 * PT);
+    const saved = save(job);
+    amsSize(job, 'normalsize');
+    job.font.family = 'rm';
+    job.font.italic = false;
+    job.parindent = false;
+    if (job.subKind) {
+      job.subCount = (job.subCount || 0) + 1;
+      const letter = alpha(job.subCount);
+      job.lastNumber = `${job.counters[job.subKind] + 1}${letter}`;
+      job.lastKind = job.subKind;
+      job.font.bold = false;
+      addText(job, `(${letter})`);
+      addGlue(job);
+      inGroup(job, tokens);
+      endWord(job);
+      const natural = job.nodes.reduce((sum, node) => sum + (node.w || 0), 0);
+      job.align = natural <= job.measure ? 'center' : 'justify';
+      endParagraph(job, { indent: 0 });
+      restore(job, saved);
+      return;
+    }
+    job.counters[kind] += 1;
+    job.subCount = 0;
+    job.lastNumber = String(job.counters[kind]);
+    job.lastKind = kind;
+    job.font.bold = true;
+    addText(job, `${kind === 'figure' ? 'Figure' : 'Table'} ${job.counters[kind]}:`);
+    addGlue(job);
+    inGroup(job, tokens);
+    endWord(job);
+    const natural = job.nodes.reduce((sum, node) => sum + (node.w || 0), 0);
+    job.align = natural <= job.measure - job.leftSkip - job.rightSkip ? 'center' : 'justify';
+    endParagraph(job, { indent: 0 });
+    restore(job, saved);
+    // Under a caption that heads a table, the skip that would have been above.
+    if (top) vspace(job, 12.35);
+  }
+
   function caption(job, kind, tokens) {
+    if (job.klass === 'acm') { acmCaption(job, kind, tokens); return; }
     // Whatever the float holds has been built by now — the table, the
     // picture — and the caption is a paragraph under it, not beside it.
     endParagraph(job);
@@ -428,6 +564,11 @@
   // How heavy a rule is. booktabs is the reason a table looks like a table
   // rather than a spreadsheet: three weights and no verticals.
   const RULES = { hline: 0.4, midrule: 0.45, toprule: 0.8, bottomrule: 0.8 };
+  // booktabs: \heavyrulewidth .08em, \lightrulewidth .05em, and the space a
+  // rule keeps around it, \aboverulesep .4ex and \belowrulesep .65ex.
+  const ruleWeight = (job, kind) => (kind === 'hline' ? 0.4
+    : (kind === 'midrule' ? 0.05 : 0.08) * job.font.size);
+  const BOOKTABS = new Set(['toprule', 'midrule', 'bottomrule', 'cmidrule']);
 
   /** A table. Cells are laid out once to be measured and once to be placed,
    *  because a column is as wide as its widest cell and nothing knows that
@@ -456,9 +597,11 @@
         current = [];
         continue;
       }
-      const started = cells.length || current.length;
+      // Only something other than white space means the row has begun: a
+      // \midrule on the line after a \\ belongs before the next row.
+      const started = cells.length || current.some((one) => one.t !== 'space' && one.t !== 'par');
       if (tok.t === 'cs' && RULES[tok.v] !== undefined) {
-        hlines.push({ at: rows.length + (started ? 1 : 0), weight: RULES[tok.v] });
+        hlines.push({ at: rows.length + (started ? 1 : 0), weight: ruleWeight(job, tok.v), kind: tok.v });
         continue;
       }
       if (tok.t === 'cs' && (tok.v === 'cmidrule' || tok.v === 'cline')) {
@@ -474,7 +617,8 @@
         const range = T.lex.plain(reader.group()).split('-').map((n) => Number(n.trim()));
         hlines.push({
           at: rows.length + (started ? 1 : 0),
-          weight: 0.4,
+          weight: tok.v === 'cmidrule' ? 0.03 * job.font.size : 0.4,
+          kind: tok.v,
           from: range[0] || 1,
           to: range[1] || range[0] || 1,
         });
@@ -565,7 +709,9 @@
             }));
           });
         });
-        box = stack(rowsOut, job.font.size * 0.25);
+        // A \parbox: its first baseline is the cell's baseline, and its lines
+        // are a baselineskip apart, as in the text around the table.
+        box = stackRows(rowsOut);
         box.w = width;
       } else {
         box = pack(job, collect(job, cell.tokens));
@@ -620,13 +766,37 @@
     const fills = [];
     const items = [];
     let y = 0;
-    const heights = grid.map((row) => Math.max(job.font.size * 0.75, ...row.map((cell) => cell.box.h)));
-    const depths = grid.map((row) => Math.max(job.font.size * 0.25, ...row.map((cell) => cell.box.d)));
+    // Every row carries \@arstrut: seven tenths of a baselineskip up and three
+    // down, so rows of ordinary text are one baselineskip apart.
+    const lead = leading(job) * (job.arraystretch || 1);
+    const heights = grid.map((row) => Math.max(lead * 0.7, ...row.map((cell) => cell.box.h)));
+    const depths = grid.map((row) => Math.max(lead * 0.3, ...row.map((cell) => cell.box.d)));
+    const ex = M().xHeight('rm', job.font.size);
     const tops = [];
+    const ruleYs = new Map();
+    // The rules that stand before row `at` (or after the last), each on a line
+    // of its own and booktabs' ones with their separations; the \cmidrules
+    // of one row share a line.
+    const rulesBefore = (at) => {
+      const here = hlines.filter((line) => line.at === at);
+      if (!here.length) return;
+      const lines = here.filter((line) => !line.from).map((line) => [line]);
+      const partial = here.filter((line) => line.from);
+      if (partial.length) lines.push(partial);
+      for (const group of lines) {
+        const booktabs = group.some((line) => BOOKTABS.has(line.kind));
+        const weight = Math.max(...group.map((line) => line.weight));
+        if (booktabs && at > 0) y -= 0.4 * ex;
+        for (const line of group) ruleYs.set(line, y);
+        y -= weight;
+        if (booktabs && at < grid.length) y -= 0.65 * ex;
+      }
+    };
     grid.forEach((row, r) => {
+      rulesBefore(r);
       tops.push(y);
       const top = y;
-      y -= heights[r] + job.font.size * 0.3;
+      y -= heights[r];
       row.forEach((cell) => {
         const room = between(cell.col, cell.col + cell.span);
         const column = columnAt(cell.col);
@@ -642,7 +812,7 @@
           items.push({ ...item, x: item.x + xs[cell.col] + pad + left, y: item.y + y - down });
         }
         if (cell.fill) {
-          const bottom = top - (heights[r] + job.font.size * 0.3 + depths[r] + job.font.size * 0.25);
+          const bottom = top - (heights[r] + depths[r]);
           fills.push({
             k: 'r', c: cell.fill,
             x: xs[cell.col] - (rules[cell.col] || 0) * (ruleWidth + 1.5),
@@ -652,14 +822,16 @@
           });
         }
       });
-      y -= depths[r] + job.font.size * 0.25;
+      y -= depths[r];
     });
+    rulesBefore(grid.length);
     tops.push(y);
 
     for (const line of hlines) {
-      const where = line.at >= tops.length ? y : tops[line.at];
-      const from = line.from ? xs[line.from - 1] - pad * 0.0 : 0;
-      const to = line.to ? xs[Math.min(count, line.to) - 1] + widths[Math.min(count, line.to) - 1] + gap : total;
+      const where = ruleYs.has(line) ? ruleYs.get(line) : (line.at >= tops.length ? y : tops[line.at]);
+      const trim = line.from && line.kind === 'cmidrule' ? pad * 0.5 : 0;
+      const from = line.from ? xs[line.from - 1] + trim : 0;
+      const to = line.to ? xs[Math.min(count, line.to) - 1] + widths[Math.min(count, line.to) - 1] + gap - trim : total;
       items.push({ k: 'r', x: from, y: where - line.weight, w: to - from, h: line.weight });
     }
     for (let c = 0; c <= count; c += 1) {
@@ -670,7 +842,13 @@
       }
     }
 
-    return { w: total, h: 0, d: -y, items: fills.concat(items) };
+    // Centred on the maths axis, as a [c] tabular is: half above and half
+    // below, a quarter of an em up.
+    const tall = -y;
+    const axis = job.font.size * 0.25;
+    const h = tall / 2 + axis;
+    const all = fills.concat(items).map((item) => ({ ...item, y: item.y + h }));
+    return { w: total, h, d: tall - h, items: all };
   }
 
   // ------------------------------------------------------------ environments
@@ -695,8 +873,11 @@
           const saved = save(job);
           endParagraph(job);
           job.parindent = false;
+          // The journal formats (and manuscript) set it \small, with no
+          // heading; the conference ones at the body size under "Abstract".
+          if (job.formatSpec && job.formatSpec.journal) amsSize(job, 'small');
           job.held.abstract = capture(job, () => {
-            inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+            inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job); });
           });
           restore(job, saved);
           return;
@@ -754,6 +935,26 @@
         const tight = /noitemsep|nosep|itemsep\s*=\s*0/.test(options);
         const saved = save(job);
         endParagraph(job);
+        if (job.klass === 'acm') {
+          // acmart's lists: the first level indented by \parindent + 2\labelsep
+          // + 6.5pt, so its labels never hang left of the text around it; the
+          // levels under it by half a \labelsep + 6.5pt. \topsep is a
+          // \smallskip at the first level and nothing below it, \itemsep 0.
+          const depth = job.list.length;
+          const skip = depth ? 0 : (tight ? 0 : 5 * PT);
+          if (skip) vspace(job, skip, { max: true, stretch: 2 * PT });
+          job.list.push({ kind: name, count: 0, depth, tight, labelSep: 4 * PT });
+          job.leftSkip += wanted && !/\*/.test(wanted[1])
+            ? length(wanted[1].trim(), job, 24.5 * PT)
+            : (depth ? 8.5 : 24.5) * PT;
+          job.parindent = false;
+          inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0, hanging: 0 }); });
+          job.list.pop();
+          restore(job, saved);
+          if (skip) vspace(job, skip, { max: true, stretch: 2 * PT });
+          job.parindent = false;
+          return;
+        }
         vspace(job, job.base * (tight ? 0.2 : 0.45));
         job.list.push({ kind: name, count: 0, depth: job.list.length, tight });
         job.leftSkip += wanted && !/\*/.test(wanted[1])
@@ -772,12 +973,14 @@
         const saved = save(job);
         // The placement — [h!], [tb] — is read and dropped: a float is set
         // where it was written, except a starred one, which cannot be.
-        reader.optional();
+        const where = T.lex.plain(reader.optional() || []).trim();
         endParagraph(job);
         job.floatKind = name.startsWith('figure') ? 'figure' : 'table';
         job.parindent = false;
         if (name.endsWith('*') && job.cols > 1) {
           job.wide.push(...wideFloat(job, () => body()));
+        } else if (job.klass === 'acm' && !job.capture) {
+          acmFloat(job, () => body(), where);
         } else {
           vspace(job, job.base * 0.9);
           inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
@@ -801,6 +1004,9 @@
         job.parindent = false;
         return;
       }
+
+      // \begin{math} … \end{math} is $ … $ spelt out.
+      case 'math': addBox(job, mathBox(job, reader.until(name), false)); return;
 
       // The concept list is XML for the ACM's benefit and nobody else's; what
       // gets set is \ccsdesc.
@@ -836,6 +1042,7 @@
           if (tagged) job.counters.equation += 1;
           const tag = tagged ? `(${job.counters.equation})` : null;
           if (tagged) job.lastNumber = String(job.counters.equation);
+          job.lastKind = 'equation';
           takeLabels(job, part);
           displayRow(job, mathBox(job, part, true), { tag });
         });
@@ -865,6 +1072,7 @@
           const tagged = !starred && !hasNoTag(row);
           if (tagged) job.counters.equation += 1;
           if (tagged) job.lastNumber = String(job.counters.equation);
+          job.lastKind = 'equation';
           takeLabels(job, row);
           const items = [];
           for (const item of left[i].items) items.push({ ...item, x: item.x + startX + (axis - thick - left[i].w) });
@@ -965,8 +1173,115 @@
     job.measure = wasMeasure;
     restore(job, saved);
     // A little air under it, so the columns do not start against the caption.
-    rows.push({ items: [], above: job.base * 1.1, below: 0, x: 0 });
+    // acmart's is \dbltextfloatsep, which flushWide puts in as a skip.
+    if (job.klass !== 'acm') rows.push({ items: [], above: job.base * 1.1, below: 0, x: 0 });
+    else if (rows.length) rows[rows.length - 1].wideEnd = true;
     return rows;
+  }
+
+  // ------------------------------------------------------------ the floats
+  //
+  // A figure goes where LaTeX would put it. [h] is here, if it fits; anything
+  // else goes to the top of a column — this one, if the text already in it
+  // can move down to make room, or the next one that has room. Floats keep
+  // their order: one that had to wait holds back every float after it. On the
+  // first page none goes at the top, because acmart's \maketitle sets
+  // \@topnum to zero there.
+
+  const FLOAT = { intext: 12 * PT, textsep: 20 * PT, floatsep: 12 * PT };
+
+  function acmFloat(job, tokens, where) {
+    const saved = save(job);
+    job.parindent = false;
+    job.leftSkip = 0;
+    job.rightSkip = 0;
+    const rows = capture(job, () => {
+      inGroup(job, tokens(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+    });
+    restore(job, saved);
+    if (!rows.length) return;
+    const float = { rows, h: noteHeightOf(rows) };
+    const spec = where.replace(/[!\s]/g, '');
+    const here = /[hH]/.test(spec);
+    const forced = /H/.test(spec);
+    if (!job.page) startPage(job);
+    const queued = job.floatQueue.length > 0;
+
+    if (here && (!queued || forced) && !job.spanning) {
+      if (forced || fits(job, FLOAT.intext * 2 + float.h)) {
+        vspace(job, FLOAT.intext, { max: true, stretch: 2 * PT });
+        for (const row of rows) emitRow(job, row);
+        vspace(job, FLOAT.intext, { max: true, stretch: 2 * PT });
+        job.parindent = false;
+        return;
+      }
+    }
+    if (!queued && canTopFloat(job, float)) insertTopFloat(job, float);
+    else job.floatQueue.push(float);
+  }
+
+  /** Whether this column can still take a float at its top: everything
+   *  already set in it moves down by the float and the space under it, and
+   *  all of that has to stay inside the column. */
+  function canTopFloat(job, float) {
+    if (!job.page || job.spanning) return false;
+    if (job.noTopFloatsOnFirstPage && job.pageIndex === 0) return false;
+    if (job.colFloatCount >= 3) return false;
+    const sep = job.colFloatCount ? FLOAT.floatsep : FLOAT.textsep;
+    return job.y - (float.h + sep) >= job.marginBottom + reserved(job);
+  }
+
+  function insertTopFloat(job, float) {
+    const sep = job.colFloatCount ? FLOAT.floatsep : 0;
+    const x = columnX(job, job.colIndex);
+    const placed = [];
+    let y = job.colFloatTop - sep;
+    let prevDepth = 0;
+    float.rows.forEach((row, i) => {
+      y -= stepFor(row, prevDepth, i === 0);
+      for (const item of row.items) placed.push({ ...item, x: item.x + x + (row.x || 0), y: item.y + y });
+      prevDepth = row.below;
+    });
+    const bottom = y - prevDepth;
+    const push = (job.colFloatTop - bottom) + (job.colFloatCount ? 0 : FLOAT.textsep);
+    const items = job.page.items;
+    for (let i = job.colStart; i < items.length; i += 1) items[i] = { ...items[i], y: items[i].y - push };
+    job.y -= push;
+    items.splice(job.colStart, 0, ...placed);
+    const n = placed.length;
+    for (const glue of job.colStretch) glue.at += n;
+    if (job.keeping) job.keeping.at += n;
+    job.colStart += n;
+    // \textfloatsep stretches like any other skip in the column.
+    if (!job.colFloatCount && job.flushBottom) job.colStretch.unshift({ at: job.colStart, amount: 2 * PT });
+    job.colFloatTop = bottom;
+    job.colFloatCount += 1;
+  }
+
+  /** The floats that were waiting, at the top of a column that has just
+   *  begun. The first always goes, even one taller than the column — a float
+   *  that cannot fit anywhere has to go somewhere. */
+  function placeQueuedFloats(job) {
+    if (!job.floatQueue || !job.floatQueue.length) return;
+    if (job.noTopFloatsOnFirstPage && job.pageIndex === 0) return;
+    while (job.floatQueue.length) {
+      const float = job.floatQueue[0];
+      if (job.colFloatCount && !canTopFloat(job, float)) break;
+      if (!job.colFloatCount && !canTopFloat(job, float) && !job.firstOnPage) break;
+      job.floatQueue.shift();
+      insertTopFloat(job, float);
+    }
+  }
+
+  /** At the end, or at a \clearpage: every float still waiting gets set,
+   *  on as many columns as it takes. */
+  function flushFloats(job) {
+    let guard = 0;
+    while (job.floatQueue && job.floatQueue.length && guard < 200) {
+      guard += 1;
+      if (!job.spanning && job.colIndex + 1 < job.cols) nextColumn(job);
+      else startPage(job);
+    }
   }
 
   const splitRows = (tokens) => {
@@ -1116,9 +1431,12 @@
   function verbatim(job, text) {
     const saved = save(job);
     endParagraph(job);
-    vspace(job, job.base * 0.5);
+    const acm = job.klass === 'acm';
+    // acmart's verbatim is the body size in Inconsolata, in a trivlist.
+    if (acm) vspace(job, 5 * PT, { max: true, stretch: 2 * PT });
+    else vspace(job, job.base * 0.5);
     job.font.family = 'tt';
-    job.font.size = job.base * 0.85;
+    if (!acm) job.font.size = job.base * 0.85;
     job.align = 'left';
     for (const line of String(text).split('\n')) {
       const nodes = [];
@@ -1132,7 +1450,8 @@
       emitRow(job, row);
     }
     restore(job, saved);
-    vspace(job, job.base * 0.5);
+    if (acm) vspace(job, 5 * PT, { max: true, stretch: 2 * PT });
+    else vspace(job, job.base * 0.5);
     job.parindent = false;
   }
 
@@ -1177,6 +1496,19 @@
     word.notes = (word.notes || []).concat([rows]);
   }
 
+  function breakableUrl(job, url, shown = url) {
+    // url.sty breaks after any of these, one at a time: "http:" "/" "/www."
+    const pieces = String(shown).split(/(?<=[/.\-_?&=#:])/).filter(Boolean);
+    const c = job.acm && job.acm.screen ? '0 0.3318 0.79' : undefined;
+    pieces.forEach((piece, i) => {
+      addRun(job, piece, fontKey(job), job.font.size, { link: { url, raw: true }, c });
+      if (i < pieces.length - 1) {
+        endWord(job);
+        job.nodes.push({ k: 'glue', w: 0, stretch: 0, shrink: 0, nobreak: false, urlBreak: true });
+      }
+    });
+  }
+
   function graphic(job, options, name) {
     const image = job.images[name] || job.images[`${name}.png`] || job.images[`${name}.jpg`] || job.images[`${name}.jpeg`];
     if (!image) {
@@ -1209,6 +1541,13 @@
   }
 
   function reference(job, key, kind) {
+    const was = job.colour;
+    if (job.acm && job.acm.screen) job.colour = '0.3825 0 0.85';
+    referenceText(job, key, kind);
+    job.colour = was;
+  }
+
+  function referenceText(job, key, kind) {
     const found = job.refs[key];
     if (!found) {
       say(job, 'warning', `Reference "${key}" was never defined`, job.line, job.file);
@@ -1233,6 +1572,13 @@
 
   function link(job, url, tokens) {
     const saved = save(job);
+    if (!tokens && job.klass === 'acm') {
+      // acmart sets \url in the text face, and lets it break after a slash,
+      // a dot, a hyphen and the rest of url.sty's list, with no hyphen drawn.
+      breakableUrl(job, url);
+      restore(job, saved);
+      return;
+    }
     if (!tokens) {
       // A bare \url is set in the typewriter face, as hyperref does it.
       job.font.family = 'tt';

@@ -1,0 +1,463 @@
+  // ------------------------------------------------------- the ACM references
+  //
+  // ACM-Reference-Format.bst, ported entry type by entry type against the
+  // reference list acmart's own sample builds (2.21): the authors as written,
+  // first name first; the year; the title, upright for a part of something
+  // and italic for a whole thing; where it appeared; the DOI as "doi:…",
+  // or the URL when there is no DOI. \footnotesize, the number flush right in
+  // a box as wide as the widest number, the text hanging a \labelsep after it.
+
+  const ACM_MONTHS = {
+    jan: 'Jan.', feb: 'Feb.', mar: 'March', apr: 'April', may: 'May', jun: 'June',
+    jul: 'July', aug: 'Aug.', sep: 'Sept.', oct: 'Oct.', nov: 'Nov.', dec: 'Dec.',
+  };
+
+  function acmMonth(value) {
+    const clean = String(value || '').trim().replace(/[{}]/g, '');
+    if (!clean) return '';
+    const n = Number(clean);
+    if (n >= 1 && n <= 12) return Object.values(ACM_MONTHS)[n - 1];
+    // One month's name, however it was written; anything else ("Jan.-March")
+    // is printed as it stands.
+    if (/^[A-Za-z]+\.?$/.test(clean)) return ACM_MONTHS[clean.slice(0, 3).toLowerCase()] || clean;
+    return clean;
+  }
+
+  /** Split at a separator that is not inside braces. */
+  function splitTop(text, pattern) {
+    const out = [];
+    let depth = 0;
+    let from = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      else if (!depth) {
+        const match = pattern.exec(text.slice(i));
+        if (match && match.index === 0) {
+          out.push(text.slice(from, i));
+          i += match[0].length - 1;
+          from = i + 1;
+        }
+      }
+    }
+    out.push(text.slice(from));
+    return out.map((part) => part.trim()).filter((part) => part.length);
+  }
+
+  /** BibTeX's names: "Last, First", "von Last, Jr, First" or "First von Last". */
+  function bibNames(value) {
+    return splitTop(String(value || ''), /^\s+and\s+/i).map((one) => {
+      if (one === 'others') return { others: true };
+      const parts = splitTop(one, /^,/);
+      let first = '';
+      let last = '';
+      let jr = '';
+      if (parts.length === 1) {
+        const words = splitTop(one, /^\s+/);
+        if (words.length === 1) return { first: '', last: words[0], jr: '' };
+        // "von" words are the lower-case ones before the last word.
+        let i = words.length - 1;
+        while (i > 1 && /^[a-z]/.test(words[i - 1])) i -= 1;
+        first = words.slice(0, Math.min(i, words.length - 1)).join(' ');
+        last = words.slice(Math.min(i, words.length - 1)).join(' ');
+      } else if (parts.length === 2) {
+        [last, first] = parts;
+      } else {
+        [last, jr, first] = parts;
+      }
+      return { first, last, jr };
+    });
+  }
+
+  const fullName = (n) => (n.others ? 'others' : [n.first, n.last].filter(Boolean).join(' ') + (n.jr ? `, ${n.jr}` : ''));
+
+  /** "A", "A and B", "A, B, and C", with "et al." for "and others". */
+  function nameList(names) {
+    const shown = names.map(fullName);
+    const others = names.length > 1 && names[names.length - 1].others;
+    if (others) shown.pop();
+    let text;
+    if (shown.length === 1) text = shown[0];
+    else if (shown.length === 2 && !others) text = `${shown[0]} and ${shown[1]}`;
+    else text = `${shown.slice(0, -1).join(', ')}, ${others ? '' : 'and '}${shown[shown.length - 1]}`;
+    return others ? `${text} et al.` : text;
+  }
+
+  /** The surname as it sorts and as \citet prints it. */
+  const surname = (n) => (n.others ? '' : n.last.replace(/[{}]/g, ''));
+
+  function citeNames(entry) {
+    const f = entry.fields || {};
+    const names = bibNames(f.author || f.editor || '');
+    if (!names.length) return (f.key || f.organization || '?').replace(/[{}]/g, '');
+    if (names.length === 1) return surname(names[0]);
+    if (names.length === 2 && !names[1].others) return `${surname(names[0])} and ${surname(names[1])}`;
+    return `${surname(names[0])} et al.`;
+  }
+
+  /** The key ACM-Reference-Format sorts by: surnames, then year, then title. */
+  function acmSortKey(entry) {
+    const f = entry.fields || {};
+    const who = f.author || f.editor;
+    const names = who
+      ? bibNames(who).map((n) => `${surname(n)} ${n.first || ''}`).join('   ')
+      : (f.key || f.organization || '');
+    const clean = (s) => String(s || '').replace(/\\[a-zA-Z]+\s*/g, '').replace(/[{}\\'"`^~.]/g, '').toLowerCase().trim();
+    return `${clean(names)}    ${clean(f.year)}    ${clean(f.title)}`;
+  }
+
+  // ACM-Reference-Format's own string macros (`journal = jacm`, `month = mar`)
+  // and its journal.canon.abbrev table, which is why "Communications of the
+  // ACM" comes out "Commun. ACM".
+  const BST_MACROS = {"jan": "Jan.", "feb": "Feb.", "mar": "March", "apr": "April", "may": "May", "jun": "June", "jul": "July", "aug": "Aug.", "sep": "Sept.", "oct": "Oct.", "nov": "Nov.", "dec": "Dec.", "cie": "ACM Computers in Entertainment", "csur": "ACM Computing Surveys", "dgov": "Digital Government: Research and Practice", "dtrap": "Digital Threats: Research and Practice", "health": "ACM Transactions on Computing for Healthcare", "imwut": "PACM on Interactive, Mobile, Wearable and Ubiquitous Technologies", "jacm": "Journal of the ACM", "jdiq": "ACM Journal of Data and Information Quality", "jea": "ACM Journal of Experimental Algorithmics", "jeric": "ACM Journal of Educational Resources in Computing", "jetc": "ACM Journal on Emerging Technologies in Computing Systems", "jocch": "ACM Journal on Computing and Cultural Heritage", "pacmcgit": "Proceedings of the ACM on Computer Graphics and Interactive Techniques", "pacmhci": "PACM on Human-Computer Interaction", "pacmpl": "PACM on Programming Languages", "pomacs": "PACM on Measurement and Analysis of Computing Systems", "taas": "ACM Transactions on Autonomous and Adaptive Systems", "taccess": "ACM Transactions on Accessible Computing", "taco": "ACM Transactions on Architecture and Code Optimization", "talg": "ACM Transactions on Algorithms", "tallip": "ACM Transactions on Asian and Low-Resource Language Information Processing", "tap": "ACM Transactions on Applied Perception", "tcps": "ACM Transactions on Cyber-Physical Systems", "tds": "ACM/IMS Transactions on Data Science", "teac": "ACM Transactions on Economics and Computation", "tecs": "ACM Transactions on Embedded Computing Systems", "telo": "ACM Transactions on Evolutionary Learning", "thri": "ACM Transactions on Human-Robot Interaction", "tiis": "ACM Transactions on Interactive Intelligent Systems", "tiot": "ACM Transactions on Internet of Things", "tissec": "ACM Transactions on Information and System Security", "tist": "ACM Transactions on Intelligent Systems and Technology", "tkdd": "ACM Transactions on Knowledge Discovery from Data", "tmis": "ACM Transactions on Management Information Systems", "toce": "ACM Transactions on Computing Education", "tochi": "ACM Transactions on Computer-Human Interaction", "tocl": "ACM Transactions on Computational Logic", "tocs": "ACM Transactions on Computer Systems", "toct": "ACM Transactions on Computation Theory", "todaes": "ACM Transactions on Design Automation of Electronic Systems", "tods": "ACM Transactions on Database Systems", "tog": "ACM Transactions on Graphics", "tois": "ACM Transactions on Information Systems", "toit": "ACM Transactions on Internet Technology", "tomacs": "ACM Transactions on Modeling and Computer Simulation", "tomm": "ACM Transactions on Multimedia Computing, Communications and Applications", "tompecs": "ACM Transactions on Modeling and Performance Evaluation of Computing Systems", "toms": "ACM Transactions on Mathematical Software", "topc": "ACM Transactions on Parallel Computing", "toplas": "ACM Transactions on Programming Languages and Systems", "tops": "ACM Transactions on Privacy and Security", "tos": "ACM Transactions on Storage", "tosem": "ACM Transactions on Software Engineering and Methodology", "tosn": "ACM Transactions on Sensor Networks", "tqc": "ACM Transactions on Quantum Computing", "trets": "ACM Transactions on Reconfigurable Technology and Systems", "tsas": "ACM Transactions on Spatial Algorithms and Systems", "tsc": "ACM Transactions on Social Computing", "tslp": "ACM Transactions on Speech and Language Processing", "tweb": "ACM Transactions on the Web", "acmcs": "ACM Computing Surveys", "acta": "Acta Informatica", "cacm": "Communications of the ACM", "ibmjrd": "IBM Journal of Research and Development", "ibmsj": "IBM Systems Journal", "ieeese": "IEEE Transactions on Software Engineering", "ieeetc": "IEEE Transactions on Computers", "ieeetcad": "IEEE Transactions on Computer-Aided Design of Integrated Circuits", "ipl": "Information Processing Letters", "jcss": "Journal of Computer and System Sciences", "scp": "Science of Computer Programming", "sicomp": "SIAM Journal on Computing", "toois": "ACM Transactions on Office Information Systems", "tcs": "Theoretical Computer Science"};
+  const BST_ABBREV = {"ACM Computing Surveys": "Comput. Surveys", "ACM Transactions on Mathematical Software": "ACM Trans. Math. Software", "ACM SIGNUM Newsletter": "ACM SIGNUM Newslett.", "American Journal of Sociology": "Amer. J. Sociology", "American Mathematical Monthly": "Amer. Math. Monthly", "American Mathematical Society Translations": "Amer. Math. Soc. Transl.", "Applied Mathematics and Computation": "Appl. Math. Comput.", "British Journal of Mathematical and Statistical Psychology": "Brit. J. Math. Statist. Psych.", "Bulletin of the American Mathematical Society": "Bull. Amer. Math. Soc.", "Canadian Mathematical Bulletin": "Canad. Math. Bull.", "Communications of the ACM": "Commun. ACM", "Computers and Structures": "Comput. \\& Structures", "Contemporary Mathematics": "Contemp. Math.", "Crelle's Journal": "Crelle's J.", "Giornale di Mathematiche": "Giorn. Mat.", "IEEE Transactions on Aerospace and Electronic Systems": "IEEE Trans. Aerospace Electron. Systems", "IEEE Transactions on Automatic Control": "IEEE Trans. Automat. Control", "IEEE Transactions on Computers": "IEEE Trans. Comput.", "IMA Journal of Numerical Analysis": "IMA J. Numer. Anal.", "Information Processing Letters": "Inform. Process. Lett.", "International Journal for Numerical Methods in Engineering": "Internat. J. Numer. Methods Engrg.", "International Journal of Control": "Internat. J. Control", "International Journal of Supercomputing Applications": "Internat. J. Supercomputing Applic.", "Journal of Computational Physics": "J. Comput. Phys.", "Journal of Computational and Applied Mathematics": "J. Comput. Appl. Math.", "Journal of Computer and System Sciences": "J. Comput. System Sci.", "Journal of Mathematical Analysis and Applications": "J. Math. Anal. Appl.", "Journal of Mathematical Physics": "J. Math. Phys.", "Journal of Parallel and Distributed Computing": "J. Parallel and Distrib. Comput.", "Journal of Research of the National Bureau of Standards": "J. Res. Nat. Bur. Standards", "Journal of VLSI and Computer Systems": "J. VLSI Comput. Syst.", "Journal of the ACM": "J. ACM", "Journal of the American Statistical Association": "J. Amer. Statist. Assoc.", "Journal of the Institute of Mathematics and its Applications": "J. Inst. Math. Appl.", "Journal of the Society for Industrial and Applied Mathematics": "J. Soc. Indust. Appl. Math.", "Journal of the Society for Industrial and Applied Mathematics, Series B, Numerical Analysis": "J. Soc. Indust. Appl. Math. Ser. B Numer. Anal.", "Linear Algebra and its Applications": "Linear Algebra Appl.", "Mathematica Scandinavica": "Math. Scand.", "Mathematical Tables and Other Aids to Computation": "Math. Tables Aids Comput.", "Mathematics of Computation": "Math. Comp.", "Mathematische Annalen": "Math. Ann.", "Numerische Mathematik": "Numer. Math.", "Pacific Journal of Mathematics": "Pacific J. Math.", "Parallel Computing": "Parallel Comput.", "Philosophical Magazine": "Philos. Mag.", "Proceedings of the American Mathematical Society": "Proc. Amer. Math. Soc.", "Proceedings of the IEEE": "Proc. IEEE", "Proceedings of the National Academy of Sciences of the USA": "Proc. Nat. Acad. Sci. U. S. A.", "Quarterly Journal of Mathematics, Oxford, Series (2)": "Quart. J. Math. Oxford Ser. (2)", "Quarterly of Applied Mathematics": "Quart. Appl. Math.", "Review of the International Statisical Institute": "Rev. Inst. Internat. Statist.", "SIAM Journal on Algebraic and Discrete Methods": "SIAM J. Algebraic Discrete Methods", "SIAM Journal on Applied Mathematics": "SIAM J. Appl. Math.", "SIAM Journal on Computing": "SIAM J. Comput.", "SIAM Journal on Matrix Analysis and Applications": "SIAM J. Matrix Anal. Appl.", "SIAM Journal on Numerical Analysis": "SIAM J. Numer. Anal.", "SIAM Journal on Scientific and Statistical Computing": "SIAM J. Sci. Statist. Comput.", "SIAM Review": "SIAM Rev.", "Software Practice and Experience": "Software Prac. Experience", "Statistical Science": "Statist. Sci.", "The Computer Journal": "Comput. J.", "Transactions of the American Mathematical Society": "Trans. Amer. Math. Soc.", "USSR Computational Mathematics and Mathematical Physics": "U. S. S. R. Comput. Math. and Math. Phys.", "Zeitschrift fur Angewandte Mathematik und Mechanik": "Z. Angew. Math. Mech.", "Zeitschrift fur Angewandte Mathematik und Physik": "Z. Angew. Math. Phys."};
+
+  /** A field as BibTeX would read it: macros expanded, # pieces joined. */
+  function field(value) {
+    if (value === undefined || value === null) return '';
+    const text = String(value).trim();
+    if (!text) return '';
+    const pieces = splitTop(text, /^\s*#\s*/);
+    if (pieces.length === 1 && !/^"/.test(text) && /^\w+$/.test(text)) {
+      return BST_MACROS[text.toLowerCase()] !== undefined ? BST_MACROS[text.toLowerCase()] : text;
+    }
+    if (pieces.length === 1) return text.replace(/^"(.*)"$/s, '$1');
+    return pieces.map((piece) => {
+      if (/^".*"$/s.test(piece)) return piece.slice(1, -1);
+      if (/^\{.*\}$/s.test(piece)) return piece.slice(1, -1);
+      return BST_MACROS[piece.toLowerCase()] !== undefined ? BST_MACROS[piece.toLowerCase()] : piece;
+    }).join('');
+  }
+
+  const ends = (text) => /[.?!][}'"’”]*$/.test(String(text).trim());
+  const italic = (text) => `\\textit{${text}}`;
+  const pagesOf = (value) => String(value || '').replace(/\s*-+\s*/g, '--');
+  const articleNo = (value) => String(value || '').replace(/^\s*(paper|article)\s*/i, '');
+  const ordinal = (n) => n;
+
+  /** BibTeX's output state machine, which is where the punctuation of an
+   *  entry comes from: a comma inside a sentence, a full stop and a space
+   *  between sentences, a full stop and \newblock between blocks, and a full
+   *  stop at the end unless there is one already. */
+  function writer() {
+    const parts = [];
+    let state = 'before';
+    let last = '';
+    // A DOI or a URL is written out on a line of its own in the .bbl, outside
+    // this machine, so nothing is added after it.
+    let linked = false;
+    const period = () => { if (last && !ends(last) && !linked) { parts.push('.'); last += '.'; } };
+    return {
+      out(piece, comma = ', ') {
+        if (!piece) return;
+        if (state === 'mid') parts.push(comma);
+        else if (state === 'sentence') { period(); parts.push(' '); }
+        else if (state === 'block') { period(); parts.push({ block: true }); }
+        linked = false;
+        parts.push(piece);
+        last = typeof piece === 'string' ? piece : piece.text;
+        state = 'mid';
+      },
+      raw(piece) { parts.push(piece); last = typeof piece === 'string' ? piece : piece.text; },
+      linked() { linked = true; },
+      sentence() { if (state !== 'before' && state !== 'block') state = 'sentence'; },
+      block() { if (state !== 'before') state = 'block'; },
+      done() { period(); return parts; },
+    };
+  }
+
+  /** One entry as a run of pieces: TeX to set, a \newblock, or a link whose
+   *  text is set as written. Each case is the .bst function of that name. */
+  function acmEntry(entry) {
+    const raw = entry.fields || {};
+    const f = new Proxy(raw, { get: (target, key) => field(target[key]) });
+    const type = (entry.type || 'misc').toLowerCase();
+    const w = writer();
+
+    const eds = (list) => `${nameList(list)} (${list.length > 1 ? 'Eds.' : 'Ed.'})`;
+    const authors = f.author ? bibNames(f.author) : null;
+    const editors = f.editor ? bibNames(f.editor) : null;
+    const year = String(f.year || (f.date ? String(f.date).slice(0, 4) : '')).trim();
+    const inside = ['inproceedings', 'conference', 'incollection'].includes(type)
+      || (type === 'inbook' && !!f.booktitle);
+
+    // format.authors, or the editors standing in for them, or the key.
+    if (authors && authors.length) w.out(nameList(authors));
+    else if (editors && editors.length && !inside) w.out(eds(editors));
+    else if (f.key || f.organization) {
+      w.out(f.key || f.organization);
+      if (year) { w.raw(` ${year}`); }
+    }
+    if (year && ((authors && authors.length) || (editors && editors.length && !inside))) { w.sentence(); w.out(year); }
+    else if (year && !(f.key || f.organization)) w.out(year);
+    w.block();
+
+    const journal = () => {
+      const name = f.journal || '';
+      return BST_ABBREV[name.replace(/[{}]/g, '')] || name;
+    };
+    const date = () => [acmMonth(f.month), year].filter(Boolean).join(' ');
+    const edition = f.edition ? ` (${f.edition} ed.)` : '';
+    // format.bvolume: a series is named with its volume, or not at all.
+    const seriesVol = () => (f.volume ? [f.series, `Vol.~${f.volume}`].filter(Boolean).join(', ') : '');
+    const publisher = (extra = []) => [f.publisher || f.school || f.institution, f.address].filter(Boolean).concat(extra).join(', ');
+    const link = (url, text) => ({ link: url, text });
+
+    // output.issue.doi.coden.isxn.lccn.url.eprint.note, in the order the
+    // sample's reference list shows them.
+    const tail = (url = true) => {
+      if (f.isbn) { w.block(); w.out(`ISBN ${f.isbn}`); }
+      const doi = String(f.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim();
+      if (f.eprint) {
+        w.block();
+        w.out(link(`https://arxiv.org/abs/${f.eprint}`, `arXiv:${f.eprint}`));
+        if (f.primaryclass) w.raw(` [${f.primaryclass}]`);
+        if (doi) { w.raw(' '); w.raw(link(`https://doi.org/${doi}`, `doi:${doi}`)); }
+        w.linked();
+      } else if (doi) {
+        w.sentence();
+        w.out(link(`https://doi.org/${doi}`, `doi:${doi}`));
+        w.linked();
+      } else if (url && f.url) {
+        w.block();
+        if (f.lastaccessed || f.urldate) {
+          w.out(`Retrieved ${f.lastaccessed || f.urldate} from `);
+          w.raw(link(f.url, f.url));
+        } else {
+          w.out(link(f.url, f.url));
+        }
+        if (f.archived) { w.raw(', archived at ['); w.raw(link(f.archived, f.archived)); w.raw(']'); }
+        w.linked();
+      }
+      if (f.note) { w.block(); w.out(f.note); }
+    };
+
+    switch (type) {
+      case 'article': case 'periodical': case 'underreview': {
+        w.out(f.title);
+        if (f.howpublished) { w.block(); w.out(f.howpublished); }
+        w.block();
+        if (type === 'underreview') {
+          w.out(italic(journal()));
+          w.sentence();
+          w.out('Manuscript submitted for review');
+          tail();
+          break;
+        }
+        let venue = italic(journal());
+        if (f.volume) venue += ` ${f.volume}`;
+        if (f.number) venue += `, ${f.number}`;
+        if (f.articleno || f.eid) venue += `, Article ${articleNo(f.articleno || f.eid)}`;
+        if (year) venue += ` (${date()})`;
+        w.out(venue);
+        if (f.pages) w.out(pagesOf(f.pages));
+        else if (f.numpages) w.out(`${f.numpages} pages`);
+        tail();
+        break;
+      }
+      case 'inproceedings': case 'conference': case 'incollection': case 'inbook': {
+        if (!inside) {
+          // A chapter of a book nobody else wrote: the book's own entry, then
+          // which chapter and which pages.
+          w.out(`${italic(f.title)}${edition}`);
+          w.sentence();
+          w.out(seriesVol());
+          w.block();
+          w.out(publisher());
+          if (f.chapter) w.out(`Chapter ${f.chapter}`);
+          if (f.pages) w.out(pagesOf(f.pages));
+          tail();
+          break;
+        }
+        w.out(f.title);
+        if (f.howpublished) { w.sentence(); w.out(f.howpublished); }
+        if (type === 'incollection') w.block(); else w.sentence();
+        const inSeries = f.series ? ` (${f.series}${f.volume ? `, Vol.~${f.volume}` : ''})` : '';
+        let book = `In ${italic(`${f.booktitle}${type !== 'incollection' ? inSeries : ''}`)}`;
+        if (type !== 'inproceedings' && type !== 'conference' && f.edition) book += edition;
+        w.out(book);
+        if (editors && editors.length) w.out(eds(editors));
+        if (type === 'incollection' && f.series) { w.sentence(); w.out(seriesVol()); }
+        w.sentence();
+        if (f.organization && type !== 'incollection') w.out(f.organization);
+        w.out(publisher());
+        if (f.articleno) w.out(`Article ${articleNo(f.articleno)}`);
+        if (f.pages) w.out(pagesOf(f.pages));
+        else if (f.numpages) w.out(`${f.numpages} pages`);
+        tail();
+        break;
+      }
+      case 'book': case 'proceedings': case 'collection': case 'booklet': case 'manual': {
+        w.out(`${italic(f.title)}${edition}`);
+        w.sentence();
+        w.out(seriesVol());
+        w.block();
+        w.out(publisher());
+        if (f.pages) { w.sentence(); w.out(`${f.pages} pages`); }
+        tail();
+        break;
+      }
+      case 'phdthesis': case 'mastersthesis': {
+        w.out(italic(f.title));
+        w.block();
+        w.out(f.type || (type === 'phdthesis' ? 'Ph.\\,D. Dissertation' : 'Master’s thesis'));
+        w.sentence();
+        w.out(publisher());
+        tail();
+        break;
+      }
+      case 'techreport': {
+        w.out(italic(f.title));
+        w.sentence();
+        w.out(`${f.type || 'Technical Report'}${f.number ? ` ${f.number}` : ''}`);
+        w.sentence();
+        w.out(publisher());
+        tail();
+        break;
+      }
+      case 'patent': {
+        w.out(f.title);
+        w.block();
+        w.out([f.number ? `Patent No.~${f.number}` : 'Patent', f.filed && `Filed ${f.filed}`, f.issued && `Issued ${f.issued}`].filter(Boolean).join(', '));
+        tail();
+        break;
+      }
+      case 'presentation': {
+        w.out(f.title);
+        w.sentence();
+        w.out(`Presentation at ${f.venue || f.booktitle || f.howpublished || ''}`.trim());
+        tail();
+        break;
+      }
+      case 'unpublished': {
+        w.out(f.title);
+        tail();
+        break;
+      }
+      case 'misc': {
+        w.out(f.title);
+        if (f.howpublished) { w.block(); w.out(f.howpublished); }
+        if (f.publisher || f.organization) { w.block(); w.out([f.publisher || f.organization, f.address].filter(Boolean).join(', ')); }
+        tail();
+        break;
+      }
+      default: {
+        // online, software, dataset, preprint, game, video, artifact…: a
+        // whole thing, so italic.
+        w.out(`${italic(f.title)}${f.version ? `, version ${f.version}` : ''}`);
+        if (f.howpublished) { w.block(); w.out(f.howpublished); }
+        if (f.publisher || f.organization || f.institution) {
+          w.block();
+          w.out([f.publisher || f.organization || f.institution, f.address].filter(Boolean).join(', '));
+        }
+        tail();
+      }
+    }
+    return w.done();
+  }
+
+  /** The list itself, as natbib sets it under acmart. */
+  function acmBibliography(job, entries) {
+    heading(job, 'section', true, T.lex.tokenize('References'));
+    const saved = save(job);
+    const wasStretch = job.lineStretch;
+    job.lineStretch = 1;
+    amsSize(job, 'footnotesize');
+    job.parindent = false;
+    job.align = 'justify';
+    const labels = entries.map((entry) => `[${entry.number}]`);
+    const widest = Math.max(0, ...labels.map((label) => M().width(label, 'rm', job.font.size)));
+    const hang = widest + 4 * PT;
+    entries.forEach((entry, i) => {
+      const label = labels[i];
+      const w = M().width(label, 'rm', job.font.size);
+      job.parindent = false;
+      addBox(job, {
+        w: hang, h: job.font.size * 0.7, d: 0,
+        items: [{ k: 't', x: widest - w, y: 0, f: 'rm', s: job.font.size, t: label }],
+      });
+      for (const part of acmEntry(entry)) {
+        if (typeof part === 'string') {
+          if (/^\s+$/.test(part)) { addGlue(job); continue; }
+          if (/^\s/.test(part)) addGlue(job);
+          inGroup(job, T.lex.tokenize(part.trim()));
+          if (/\s$/.test(part)) addGlue(job);
+        } else if (part.block) {
+          // \newblock: \hskip .11em plus .33em minus .07em, after the space.
+          const em = job.font.size;
+          endWord(job);
+          const last = job.nodes[job.nodes.length - 1];
+          if (last && last.k === 'glue') job.nodes.pop();
+          addGlue(job, { w: M().charWidth(' ', fontKey(job), em) + 0.11 * em, stretch: 0.33 * em + 0.5, shrink: 0.07 * em });
+        } else if (part.link) {
+          breakableUrl(job, part.link, part.text);
+        }
+      }
+      endParagraph(job, { indent: 0, hanging: hang });
+    });
+    job.lineStretch = wasStretch;
+    restore(job, saved);
+    job.parindent = false;
+  }
+
+  /** "[1, 3–5]": natbib's sort&compress, which acmnumeric asks for. */
+  function acmCiteNumbers(job, keys) {
+    const nums = [];
+    const missing = [];
+    for (const key of keys) {
+      const found = job.bib[key];
+      if (!found || found.number === '?') { missing.push(key); continue; }
+      nums.push(Number(found.number));
+    }
+    for (const key of missing) say(job, 'warning', `Citation "${key}" was never defined`, job.line, job.file);
+    nums.sort((a, b) => a - b);
+    const out = [];
+    for (let i = 0; i < nums.length; i += 1) {
+      let j = i;
+      while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j += 1;
+      if (j - i >= 2) { out.push(`${nums[i]}–${nums[j]}`); i = j; } else out.push(String(nums[i]));
+    }
+    return out.concat(missing.map(() => '?'));
+  }
+
+  /** \cite and its natbib relatives, in acmart's numeric style. */
+  function acmCite(job, name, keys, pre, post) {
+    const was = job.colour;
+    if (job.acm.screen) job.colour = '0.3825 0 0.85';
+    acmCiteText(job, name, keys, pre, post);
+    job.colour = was;
+  }
+
+  function acmCiteText(job, name, keys, pre, post) {
+    const list = keys.split(',').map((key) => key.trim()).filter(Boolean);
+    const note = post && T.lex.plain(post).trim() ? `, ${T.lex.plain(post).trim()}` : '';
+    const before = pre && T.lex.plain(pre).trim() ? `${T.lex.plain(pre).trim()} ` : '';
+    const known = (key) => job.bib[key] && job.bib[key].fields;
+    if (name === 'citeauthor' || name === 'Citeauthor') {
+      prose(job, list.map((key) => (known(key) ? citeNames(job.bib[key]) : '?')).join(', '));
+      return;
+    }
+    if (name === 'citeyear' || name === 'citeyearpar') {
+      const years = list.map((key) => (known(key) ? job.bib[key].fields.year : '?')).join(', ');
+      prose(job, name === 'citeyearpar' ? `[${years}]` : years);
+      return;
+    }
+    if (name === 'citet' || name === 'Citet') {
+      list.forEach((key, i) => {
+        if (i) { addText(job, ','); addGlue(job); }
+        const entry = job.bib[key];
+        prose(job, known(key) ? citeNames(entry) : '?');
+        addGlue(job, { nobreak: true });
+        const n = entry && entry.number !== undefined ? entry.number : '?';
+        addText(job, `[${n}${i === list.length - 1 ? note : ''}]`);
+      });
+      return;
+    }
+    const numbers = acmCiteNumbers(job, list);
+    const body = `${before}${numbers.join(', ')}${note}`;
+    addText(job, name === 'citealp' || name === 'citenum' ? body : `[${body}]`);
+  }
+
+  // The compiler numbers entries before anything is set, so it sorts with this.
+  T.acmSortKey = acmSortKey;

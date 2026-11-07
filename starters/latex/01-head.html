@@ -203,6 +203,13 @@ __ICON__
   .menu button:hover { background: var(--accent-soft); color: var(--accent-ink); }
   .menu button[data-do="delete"]:hover { color: var(--bad); }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: .2rem .3rem; }
+  /* The paper's setup: a name, and the class options it writes under it. */
+  .menu.setup { min-width: 15rem; }
+  .menu.setup button { display: grid; gap: .05rem; padding: .4rem .55rem; }
+  .menu.setup b { font-weight: 600; color: var(--ink, inherit); }
+  .menu.setup span { font: .7rem/1.4 var(--mono); color: var(--faint); }
+  .menu.setup button[aria-checked="true"] { background: var(--accent-soft); }
+  .menu.setup button[aria-checked="true"] b { color: var(--accent-ink); }
 
   /* A folder has no source, so what it shows is what it is. */
   .dirnote {
