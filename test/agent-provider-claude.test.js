@@ -148,13 +148,17 @@ test('ids, labels, catalog, and the documents spawn', () => {
   assert.deepEqual(api.spawn({ workspace: '/w', prompt: 'x', env: {} }).env, { ANTHROPIC_API_KEY: 'sk-test' });
   assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--resume'));
   assert.deepEqual(sub.models.map((m) => m.id), ['haiku', 'sonnet', 'opus', 'fable']);
-  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 5', 'Opus 5.5', 'Fable 5.1']);
+  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 5', 'Opus 5.5', 'Fable 5.2']);
   const oldCli = createClaudeProvider({ version: '2.1.278' });
   const pinned = oldCli.spawn({ workspace: '/w', prompt: 'x', model: 'opus', env: {} });
   assert.equal(pinned.args[pinned.args.indexOf('--model') + 1], 'opus', '2.1.278 rejects claude-opus-5-5; the bare alias is the one it runs');
   const current = createClaudeProvider({ version: '2.1.280' });
   const opus = current.spawn({ workspace: '/w', prompt: 'x', model: 'opus', env: {} });
   assert.equal(opus.args[opus.args.indexOf('--model') + 1], 'claude-opus-5-5[1m]', '2.1.280 and newer can pin Opus 5.5');
+  const fableOld = createClaudeProvider({ version: '2.1.281' }).spawn({ workspace: '/w', prompt: 'x', model: 'fable', env: {} });
+  assert.equal(fableOld.args[fableOld.args.indexOf('--model') + 1], 'fable', '2.1.281 rejects claude-fable-5-2; its fable is Fable 5.1');
+  const fable = createClaudeProvider({ version: '2.1.290' }).spawn({ workspace: '/w', prompt: 'x', model: 'fable', env: {} });
+  assert.equal(fable.args[fable.args.indexOf('--model') + 1], 'claude-fable-5-2[1m]', '2.1.290 and newer can pin Fable 5.2, at its 1M window');
   assert.deepEqual(sub.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
   assert.deepEqual(sub.modes.map((m) => m.id), ['auto', 'acceptEdits', 'plan', 'manual', 'bypassPermissions']);
 });

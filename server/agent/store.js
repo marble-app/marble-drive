@@ -24,6 +24,9 @@ import { fallbackTitle } from './namer.js';
 const folderLib = () => globalThis.marbleAgentFolders;
 const statusLib = () => globalThis.marbleAgentStatus;
 
+// The model a new chat on each agent starts on before anyone has chosen one.
+export const DEFAULT_MODELS = { 'claude-subscription': 'fable', 'claude-api': 'fable' };
+
 const REVIEWABLE = new Set(['changes', 'done', 'failed', 'interrupted', 'watchdog']);
 
 export const needsReview = (meta) =>
@@ -299,7 +302,10 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     // Dropped on read so the key stops being answered, and dropped from
     // disk the next time anything saves.
     const { maxRunning: _retired, ...saved } = (await readJson(path.join(dir, 'settings.json'))) ?? {};
-    return { defaultProvider, models: {}, efforts: {}, modes: {}, projects: [], defaultProject: 'drive', skills: {}, ...saved };
+    const settled = { defaultProvider, models: {}, efforts: {}, modes: {}, projects: [], defaultProject: 'drive', skills: {}, ...saved };
+    // Until someone picks a model, Claude starts on Fable. Starter credit is
+    // left on the CLI's own default: it is the drive owner's key paying.
+    return { ...settled, models: { ...DEFAULT_MODELS, ...settled.models } };
   }
 
   async function saveSettings(patch) {

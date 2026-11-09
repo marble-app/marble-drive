@@ -68,7 +68,7 @@ const CLAUDE_QUOTAS = [
 
 // Per-model weekly limits are entries in `limits` (kind `weekly_scoped`, group
 // `weekly`), named by scope.model.display_name; there is no top-level
-// seven_day_fable key. The name is matched as a word ("Fable", "Fable 5.1"),
+// seven_day_fable key. The name is matched as a word ("Fable", "Fable 5.2"),
 // and the weekly group by prefix, so a renamed kind or a versioned model does
 // not silently drop the slider. A missing array, a null scope or a missing
 // percent is simply no window.

@@ -232,7 +232,7 @@ test('saved setups hug their labels instead of stretching across the composer', 
       names: [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim()),
     };
   });
-  assert.deepEqual(names.names, ['Sonnet High', 'Opus 5.5 High', 'Fable 5.1 High']);
+  assert.deepEqual(names.names, ['Sonnet High', 'Opus 5.5 High', 'Fable 5.2 High']);
   assert.ok(names.presets <= names.pills + 12, `presets ${names.presets} should hug pills ${names.pills}, not setup ${names.setup}`);
   // The setup shares its row with the mode and send buttons now, so the
   // margin is what Custom takes, not the old empty half of the composer.
@@ -498,7 +498,7 @@ test('a signed-in Claude with no usage meter keeps its models pickable', async (
         installed: true,
         signedIn: true,
         default: true,
-        models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5.5' }, { id: 'fable', label: 'Fable 5.1' }],
+        models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5.5' }, { id: 'fable', label: 'Fable 5.2' }],
         efforts: ['high', 'xhigh'],
         modes: [{ id: 'default', label: 'Default' }],
       },
@@ -561,7 +561,7 @@ const withSetups = (view, { efforts = ['high', 'xhigh'], model = 'fable', effort
       installed: true,
       signedIn: true,
       default: true,
-      models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5.5' }, { id: 'fable', label: 'Fable 5.1' }],
+      models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5.5' }, { id: 'fable', label: 'Fable 5.2' }],
       efforts: list,
       modes: [{ id: 'default', label: 'Default' }],
     }];
@@ -839,9 +839,9 @@ test('holding the two modifiers raises the setups as a stepped scrubber', async 
   assert.equal(up.open, true);
   // Weakest at the left: a slider is pushed right to turn something up.
   assert.deepEqual(up.stops, ['sonnet-high', 'opus-high', 'fable-high'], 'one stop per setup you can pick, weakest first');
-  assert.deepEqual(up.labels, ['Sonnet', 'Opus 5.5', 'Fable 5.1'], 'the model alone — effort has its own axis now');
+  assert.deepEqual(up.labels, ['Sonnet', 'Opus 5.5', 'Fable 5.2'], 'the model alone — effort has its own axis now');
   assert.equal(up.marked, up.at, 'the stop it starts on is the one marked');
-  assert.equal(up.model, 'Fable 5.1');
+  assert.equal(up.model, 'Fable 5.2');
   assert.equal(up.effort, 'High');
 
   // Raised, not just floated: it has the pane next door to clear as well.
@@ -862,7 +862,7 @@ test('the arrows walk the scrubber while the modifiers are held, and stop at the
   // The default setup is the strongest, which is now the right-hand end.
   const start = await scrub(left);
   assert.equal(start.at, start.stops.length - 1);
-  assert.equal(start.model, 'Fable 5.1');
+  assert.equal(start.model, 'Fable 5.2');
 
   await page.keyboard.press('ArrowLeft');
   const moved = await scrub(left);
@@ -1006,7 +1006,7 @@ test('each model keeps its own effort, and wears it under its name', async () =>
   assert.equal(back.effort, 'Max', 'the model you tuned kept it');
   // Each stop says what it is remembering, under its own name.
   assert.deepEqual(back.stopEfforts, ['High', 'Medium', 'Max']);
-  assert.deepEqual(back.labels, ['Sonnet', 'Opus 5.5', 'Fable 5.1'], 'the names stay the names');
+  assert.deepEqual(back.labels, ['Sonnet', 'Opus 5.5', 'Fable 5.2'], 'the names stay the names');
   await release(page);
 });
 
@@ -1264,7 +1264,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
     el.paintPresets({ initial: true });
     return [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim());
   });
-  assert.deepEqual(names, ['Sonnet High', 'Grok 4.7 High', 'Opus 5.5 High', 'Fable 5.1 High']);
+  assert.deepEqual(names, ['Sonnet High', 'Grok 4.7 High', 'Opus 5.5 High', 'Fable 5.2 High']);
   assert.equal(await view.locator('.presets').isVisible(), true);
   assert.equal(await view.locator('.picker').isVisible(), false);
   assert.equal(await view.locator('input[name="preset"][value="sonnet-high"]').isChecked(), true);
