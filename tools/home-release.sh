@@ -26,8 +26,12 @@ die() { printf 'home-release: %s\n' "$*" >&2; exit 1; }
 git -C "$REPO" fetch -q origin
 SHA="$(git -C "$REPO" rev-parse "$REF")"
 MARBLE_VERSION="$(node -p "require('$MARBLE_DIR/package.json').version")"
-CLAUDE_VERSION="$(tr -d '[:space:]' <"$HERE/sprite/claude-version")"
-CODEX_VERSION="$(tr -d '[:space:]' <"$HERE/sprite/codex-version")"
+# The CLI versions are the ones pinned at the ref being released, not the
+# ones in whatever this checkout has out.
+pinned() { git -C "$REPO" show "$SHA:tools/sprite/$1" 2>/dev/null | tr -d '[:space:]'; }
+CLAUDE_VERSION="$(pinned claude-version)"
+CODEX_VERSION="$(pinned codex-version)"
+[[ -n "$CLAUDE_VERSION" && -n "$CODEX_VERSION" ]] || die "no Claude Code or Codex version pinned at $SHA"
 NAME="$(date -u +%Y%m%dT%H%M%SZ)-${SHA:0:7}"
 DIR="$APP/releases/$NAME/marble-drive"
 mkdir -p "$DIR"
