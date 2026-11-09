@@ -839,7 +839,7 @@ no status line. The setup shrinks first (segments fold into dropdowns, the
 capsule packs into More) and takes its own line only when even that does not
 fit. Saved setups are the main toggles when Claude or Cursor is signed in: Anthropic or
 Cursor mark plus a short **model + effort** name, weakest first (Sonnet High,
-Grok 4.7 High, Opus High, Fable 5.1 High). Grok 4.7 rests on High; High Fast
+Grok 4.7 High, Opus High, Fable 5.2 High). Grok 4.7 rests on High; High Fast
 is the same model with fast on, and it stays on the effort slider. Those presets stay clickable on an
 existing thread, so you can switch from Claude to Cursor (or back) without
 starting a new conversation. The next turn uses the new CLI and does not

@@ -138,11 +138,15 @@ test('a conversation keeps the CLI mode Shift+Tab picked', async () => {
 test('settings have defaults and keep what was saved', async () => {
   const { store } = await fresh();
   assert.deepEqual(await store.settings(), {
-    defaultProvider: 'claude-subscription', models: {}, efforts: {}, modes: {},
-    projects: [], defaultProject: 'drive', skills: {},
+    defaultProvider: 'claude-subscription',
+    models: { 'claude-subscription': 'fable', 'claude-api': 'fable' },
+    efforts: {}, modes: {}, projects: [], defaultProject: 'drive', skills: {},
   });
   await store.saveSettings({ defaultProvider: 'cursor', models: { cursor: 'composer-2.5' } });
   assert.equal((await store.settings()).models.cursor, 'composer-2.5');
+  assert.equal((await store.settings()).models['claude-subscription'], 'fable', 'Claude starts on Fable until someone picks');
+  await store.saveSettings({ models: { 'claude-subscription': 'opus' } });
+  assert.equal((await store.settings()).models['claude-subscription'], 'opus', 'a pick wins over the default');
   // A permission mode is a standing default too, so a new conversation can
   // start somewhere other than `auto`.
   await store.saveSettings({ modes: { 'claude-subscription': 'acceptEdits' } });

@@ -32,7 +32,7 @@ export const CLAUDE_MODELS = [
   { id: 'haiku', label: 'Haiku 4.5' },
   { id: 'sonnet', label: 'Sonnet 5' },
   { id: 'opus', label: 'Opus 5.5' },
-  { id: 'fable', label: 'Fable 5.1' },
+  { id: 'fable', label: 'Fable 5.2' },
 ];
 // The picker keeps the family id (`opus`) so a saved conversation still
 // selects it. Claude Code 2.1.280 is the first build that accepts the Opus
@@ -40,18 +40,25 @@ export const CLAUDE_MODELS = [
 // 2.1.280 or newer is required") and runs the bare alias `opus`. `[1m]` is
 // the CLI's hint that an unrecognized model has a 1M window; it is stripped
 // before the request. Opus 5.5's window is 1M (platform.claude.com, 2026-09-22).
-export function claudeCodeAcceptsOpus55(version) {
+// Fable 5.2 is the same story at 2.1.290: 2.1.281 refuses `claude-fable-5-2`
+// ("version 2.1.290 or newer is required") and its `fable` is Fable 5.1, and
+// 2.1.290 runs the id but gives it a 200K window without the hint. From
+// 2.1.321 the bare `fable` is Fable 5.2 at 1M (checked 2026-11-09).
+const claudeCodeAtLeast = (version, least) => {
   const match = /(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ''));
   if (!match) return false;
   const major = Number(match[1]);
   const minor = Number(match[2]);
   const patch = Number(match[3]);
   if (major !== 2 || minor !== 1) return major > 2 || (major === 2 && minor > 1);
-  return patch >= 280;
-}
+  return patch >= least;
+};
+export const claudeCodeAcceptsOpus55 = (version) => claudeCodeAtLeast(version, 280);
+export const claudeCodeAcceptsFable52 = (version) => claudeCodeAtLeast(version, 290);
 
 export function claudeModelArg(model, version) {
   if (model === 'opus' && claudeCodeAcceptsOpus55(version)) return 'claude-opus-5-5[1m]';
+  if (model === 'fable' && claudeCodeAcceptsFable52(version)) return 'claude-fable-5-2[1m]';
   return model;
 }
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];

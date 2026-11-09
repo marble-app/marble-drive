@@ -23,7 +23,7 @@ const PROVIDERS = [
       { id: 'haiku', label: 'Haiku 4.5' },
       { id: 'sonnet', label: 'Sonnet 5' },
       { id: 'opus', label: 'Opus 5.5' },
-      { id: 'fable', label: 'Fable 5.1' },
+      { id: 'fable', label: 'Fable 5.2' },
     ],
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     modes: [{ id: 'auto', label: 'Auto' }, { id: 'plan', label: 'Plan' }],
@@ -100,7 +100,7 @@ test('the setup word follows the setup you pick', async () => {
   assert.equal(await setupWord(view), 'Opus 5.5 High');
   await pick(view, 'preset', 'fable-high');
   await settled(view);
-  assert.equal(await setupWord(view), 'Fable 5.1 High');
+  assert.equal(await setupWord(view), 'Fable 5.2 High');
   assert.deepEqual(errors, []);
 });
 

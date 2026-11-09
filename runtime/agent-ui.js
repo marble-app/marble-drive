@@ -1289,7 +1289,7 @@
     // leads with; the name comes from the catalog too, so it moves with it.
     { id: 'codex-high', provider: 'codex', model: '', effort: 'high', name: 'Codex High', brand: 'codex' },
     { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus 5.5 High', brand: 'anthropic' },
-    { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
+    { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.2 High', brand: 'anthropic' },
   ];
   const EFFORT_WORD = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max', ultra: 'Ultra' };
   /** Every effort word stacked in one grid cell, only the current one lit.
@@ -1394,7 +1394,7 @@
     ['sonnet', 'Sonnet 5'],
     ['opus', 'Opus 5.5'],
     ['haiku', 'Haiku 4.5'],
-    ['fable', 'Fable 5.1'],
+    ['fable', 'Fable 5.2'],
   ];
 
   const providerLabel = (summary, labels) => {
