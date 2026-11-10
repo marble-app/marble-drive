@@ -53,7 +53,50 @@ test('scan counts files and documents, and skips what is left out', async () => 
   assert.equal(counts.files, 4); // 3 documents + the history line
   assert.equal(counts.documents, 3);
   assert.ok(counts.newest > 0);
-  assert.deepEqual(EXCLUDES, ['/.marble/agents/host.lock', '/.marble/usage/**', '/.marble/console/backups/**']);
+  assert.deepEqual(EXCLUDES, [
+    '/.marble/agents/host.lock', '/.marble/usage/**', '/.marble/console/backups/**',
+    'node_modules/**', '.venv/**', '__pycache__/**', '.pytest_cache/**',
+  ]);
+});
+
+test('scan leaves out folders a tool rebuilds, at any depth, and keeps .git', async () => {
+  const root = await fixture();
+  await put(root, 'Ai2/kb/.venv/lib/site.py', 'x');
+  await put(root, 'Ai2/kb/astaui/__pycache__/cli.cpython-312.pyc', 'x');
+  await put(root, 'Ai2/kb/.pytest_cache/v/cache/lastfailed', '{}');
+  await put(root, 'node_modules/left-pad/index.js', 'x');
+  await put(root, 'Ai2/.git/HEAD', 'ref: refs/heads/main\n');
+  await put(root, 'Ai2/kb/venv-notes.md', 'kept: only the folder name is left out');
+  await put(root, 'Ai2/kb/__pycache__.md', 'kept: a file, not a folder');
+  const { files, byPath } = await scan(root);
+  assert.equal(files, 7);
+  assert.deepEqual(Object.keys(byPath).filter((rel) => rel.startsWith('Ai2/')).sort(),
+    ['Ai2/.git/HEAD', 'Ai2/kb/__pycache__.md', 'Ai2/kb/venv-notes.md']);
+  // A file list from before this release named them: they are neither sent nor removed.
+  const listed = { ...byPath, 'Ai2/kb/.venv/lib/old.py': [1, 1], 'node_modules/x/y.js': [1, 1] };
+  assert.deepEqual(compare(byPath, listed), { differ: [], extra: [] });
+});
+
+test('a round trip leaves rebuilt folders on both sides alone', needsRclone, async () => {
+  const s = await settings();
+  const root = await fixture();
+  await put(root, 'proj/.venv/bin/python', 'x');
+  await put(root, 'proj/main.py', 'print(1)');
+  assert.equal((await up({ root, settings: s, epoch: 1 })).ok, true);
+  const other = await tmp('other');
+  await put(other, 'proj/node_modules/kept-here.js', 'mine');
+  const back = await down({ root: other, settings: s, trashRoot: await tmp('trash') });
+  assert.equal(back.matches, true);
+  const got = await tree(other);
+  assert.equal(got['proj/main.py'], 'print(1)');
+  assert.equal(got['proj/.venv/bin/python'], undefined);
+  assert.equal(got['proj/node_modules/kept-here.js'], 'mine');
+  // A full sync (no file list) leaves them out too.
+  const fresh = await tmp('fresh');
+  await rclone(['delete', 'hub:manifest.json'], await rcloneEnv(s));
+  const full = await down({ root: fresh, settings: s, trashRoot: await tmp('trash') });
+  assert.ok(full.full);
+  assert.equal((await tree(fresh))['proj/.venv/bin/python'], undefined);
 });
 
 test('looksWrong: no documents, or under half the files, is refused', () => {
