@@ -38,6 +38,7 @@ import { escapeHtml, html, json, readBody, readJson, send, sendKept, text } from
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
 import { createMoves } from './moves.js';
+import { insideShared, sharedFolders } from './share-files.js';
 import { shareRefusal } from './share-policy.js';
 import { RANK, createShares } from './shares.js';
 import { createPendingWrites } from './pending-writes.js';
@@ -2274,7 +2275,8 @@ export async function createDrive(config, { log = console, agentProviders = null
   // ------------------------------------------------------------------ helpers
 
   /** What a share link may ask for: its document's page, stream, presence and
-   *  (by level) ops; the runtime that page loads; the blobs that page names.
+   *  (by level) ops; the runtime that page loads; the blobs that page names;
+   *  the files in folders it names as going with it.
    *  Everything else belongs to the drive and is refused before any route
    *  runs, so a route added later is the owner's until it is listed here.
    *  `{ ok, grant }` with the grant for the document the request is about. */
@@ -2325,6 +2327,17 @@ export async function createDrive(config, { log = console, agentProviders = null
     if (route === '/ops' && grant && method === 'POST') {
       if (RANK[grant.role] < RANK.edit) return { error: 'This link can only read the page' };
       return { ok: true, grant };
+    }
+
+    // A file in a folder the page names as going with it (server/share-files.js).
+    if (route === '/drive/file' && method === 'GET') {
+      const file = named(url.searchParams.get('path') ?? '');
+      if (!file) return null;
+      for (const [path, { role }] of grants) {
+        if (role === 'drop') continue;
+        if (insideShared(file, sharedFolders(path, (await store.read(path)) ?? ''))) return { ok: true, grant: grantFor(path) };
+      }
+      return null;
     }
 
     if (route.startsWith('/blob/') && method === 'GET') {

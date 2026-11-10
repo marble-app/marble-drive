@@ -74,6 +74,9 @@ const BLOCKED_ATTRS = new Set([
   'data-marble-run', 'data-marble-scope', 'data-marble-on', 'data-marble-paused',
   // Identity is the file's to give (assignId), never an attribute to rewrite.
   'data-marble-id',
+  // Which folders beside the page its links may read (server/share-files.js):
+  // the owner's to grant, or a link could widen what it reads.
+  'data-marble-share-files',
 ]);
 const SAFE_SCHEMES = new Set(['http', 'https', 'mailto', 'tel']);
 const ATTR_NAME = /^[a-z_:][a-z0-9_:.-]*$/i;
