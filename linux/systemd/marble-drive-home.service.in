@@ -28,6 +28,9 @@ Environment="MARBLE_HUB_ENV=@HUB_ENV@"
 Environment="MARBLE_PROJECT_PREFIXES=/home/sprite/src=@SRC@,/Users/bryanmin/Development/3rd-year-projects=@SRC@"
 Environment="MARBLE_SERVE_ENV_FILE=@HOME@/.config/marble-drive/pc-@NAME@.env"
 Environment="MARBLE_SERVE_CRASH_DIR=@STATE@/home-@NAME@-crash"
+# Room past V8's ~2 GB default: a drive of thousands of documents holds them
+# in memory (tools/sprite/serve.sh).
+Environment="MARBLE_SERVE_HEAP_MB=4096"
 StandardOutput=append:@STATE@/home-@NAME@.log
 StandardError=append:@STATE@/home-@NAME@.log
 

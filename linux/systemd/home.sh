@@ -63,10 +63,10 @@ wait_health() {
 case "${1:-status}" in
   install|start) need_systemd && render && sc enable --quiet "$unit" && sc restart "$unit" && wait_health && warn_linger ;;
   # A restart waits for the old host to stop (TERM, up to 25 s), then starts
-  # the new: a new release is picked up through the current link.
-  restart)
-    need_systemd || exit 1
-    if [[ -f $unit_file ]]; then sc restart "$unit" && wait_health; else render && sc enable --quiet "$unit" && sc restart "$unit" && wait_health; fi ;;
+  # the new: a new release is picked up through the current link. The unit is
+  # rendered again first, so a change to its template reaches it with the
+  # release that brought it rather than only on the next install.
+  restart) need_systemd && render && sc enable --quiet "$unit" && sc restart "$unit" && wait_health ;;
   stop) need_systemd && sc stop "$unit" && echo "$name stopped (start: linux/systemd/home.sh start $name)" ;;
   status) echo "$unit $(sc is-active "$unit" 2>/dev/null) pid $(sc show -p MainPID --value "$unit" 2>/dev/null) port $port root $root"; echo "health $(health || echo 'no answer')" ;;
   logs) tail -f -n 80 "$log" ;;

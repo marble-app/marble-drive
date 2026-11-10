@@ -282,6 +282,11 @@ export function createFsStore({ root, historyMinInterval = null }) {
   // still taken every time and is what says so: a write through the host, an
   // agent's editor or a copy from Finder each move the change time.
   const facts = new Map();
+  // A match V8 hands back is a slice of the string it came from, and keeps all
+  // of it alive: a title held here held its whole document, twice its size on
+  // disk for a document past Latin-1 (most of them). On the PC that was 315 MB
+  // of a 1.2 GB idle heap (2026-11-10). So what is kept is a copy of its own.
+  const own = (text) => (typeof text === 'string' ? Buffer.from(text, 'utf8').toString('utf8') : text);
 
   async function factsOf(file, info) {
     const was = facts.get(file);
@@ -291,7 +296,7 @@ export function createFsStore({ root, historyMinInterval = null }) {
       facts.delete(file);
       return null;
     }
-    const next = { mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, size: info.size, title: titleOf(source, null), day: dayOf(source), nodes: nodesOf(source), icon: iconOf(source), favicons: isStudio(source) };
+    const next = { mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, size: info.size, title: own(titleOf(source, null)), day: own(dayOf(source)), nodes: nodesOf(source), icon: own(iconOf(source)), favicons: isStudio(source) };
     facts.set(file, next);
     return next;
   }
