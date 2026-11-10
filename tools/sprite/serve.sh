@@ -24,6 +24,11 @@
 set -uo pipefail
 
 NODE="${MARBLE_SERVE_NODE:-$(command -v node)}"
+# The most heap V8 may take, in MB, where the machine has room to spare (the
+# PC's unit sets it; a sprite has 8 GB and no swap, so it keeps V8's own ~2 GB).
+# The PC's drive ran out at 2 GB seven times in a week (2026-11-03..10).
+heap=()
+[[ -n "${MARBLE_SERVE_HEAP_MB:-}" ]] && heap=(--max-old-space-size="$MARBLE_SERVE_HEAP_MB")
 CRASH_DIR="${MARBLE_SERVE_CRASH_DIR:-$HOME/app/crash}"
 CRASH_LOG="$CRASH_DIR/crashes.log"
 # Waits between restarts: 1 s, doubling while the host keeps dying young, to
@@ -61,7 +66,7 @@ while :; do
   # node's --env-file never overrides what is already in the environment.
   env_file=()
   [[ -n "${MARBLE_SERVE_ENV_FILE:-}" ]] && env_file=(--env-file-if-exists="$MARBLE_SERVE_ENV_FILE")
-  "$NODE" ${env_file[@]+"${env_file[@]}"} --report-on-fatalerror --report-directory="$CRASH_DIR" bin/marble-drive.js "$mode" &
+  "$NODE" ${env_file[@]+"${env_file[@]}"} ${heap[@]+"${heap[@]}"} --report-on-fatalerror --report-directory="$CRASH_DIR" bin/marble-drive.js "$mode" &
   pid=$!
   # `wait` returns early when a signal lands; wait again until the host is gone.
   status=0

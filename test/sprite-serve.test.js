@@ -119,3 +119,18 @@ test('MARBLE_SERVE_ENV_FILE is handed to node, and nothing is when it is unset',
   without.child.kill('SIGTERM');
   await without.exited;
 });
+
+// The PC's unit gives V8 more heap than its ~2 GB default; a sprite (8 GB, no
+// swap) sets nothing and keeps the default.
+test('MARBLE_SERVE_HEAP_MB is handed to node as its heap limit, and nothing is when it is unset', async () => {
+  const roomy = await keeper({ env: { MARBLE_SERVE_HEAP_MB: '4096', MARBLE_SERVE_ENV_FILE: '' } });
+  assert.ok(await until(async () => (await roomy.lines('starts')).length >= 1));
+  assert.match((await roomy.lines('starts'))[0], /^--max-old-space-size=4096 --report-on-fatalerror /);
+  roomy.child.kill('SIGTERM');
+  await roomy.exited;
+  const plain = await keeper({ env: { MARBLE_SERVE_HEAP_MB: '', MARBLE_SERVE_ENV_FILE: '' } });
+  assert.ok(await until(async () => (await plain.lines('starts')).length >= 1));
+  assert.doesNotMatch((await plain.lines('starts'))[0], /max-old-space-size/);
+  plain.child.kill('SIGTERM');
+  await plain.exited;
+});
