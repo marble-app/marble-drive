@@ -281,6 +281,50 @@ test('a link reads only the blobs its page names', async (t) => {
   assert.equal((await ask(`/blob/${'b'.repeat(64)}`, { cookie })).status, 403);
 });
 
+test('a link reads files only from the folders its page names', async (t) => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'shares-files-'));
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  const put = async (rel, text) => {
+    await fsp.mkdir(path.dirname(path.join(root, rel)), { recursive: true });
+    await fsp.writeFile(path.join(root, rel), text);
+  };
+  await put('Lab/Bench.mrbl', DOC.replace('<html data-marble-id="h">', '<html data-marble-id="h" data-marble-share-files="results, kb/shots">'));
+  await put('Lab/results/run1/app.html', '<p>built</p>');
+  await put('Lab/results/status.json', '{"ok":true}');
+  await put('Lab/kb/shots/a.txt', 'shot');
+  await put('Lab/kb/secret.txt', 'no');
+  await put('Lab/notes.txt', 'no');
+  await put('Lab/resultsx/a.txt', 'no');
+  await put('Other/results/a.txt', 'no');
+  await put('Lab/Plain.mrbl', DOC);
+  await put('Lab/Sneaky.mrbl', DOC.replace('<body data-marble-id="b">', '<body data-marble-id="b"><p data-marble-editable>data-marble-share-files="notes.txt"</p><p title=\'data-marble-share-files="kb"\'></p>'));
+  const { ask, make, open, ops } = await boot(t, { MARBLE_DRIVE_ROOT: root });
+  const file = (p, cookie) => ask(`/drive/file?path=${encodeURIComponent(p)}`, { cookie });
+
+  const { cookie } = await open((await make('view', 'Lab/Bench')).href);
+  for (const p of ['Lab/results/run1/app.html', 'Lab/results/status.json', 'Lab/kb/shots/a.txt', '/Lab/results/status.json']) {
+    assert.equal((await file(p, cookie)).status, 200, p);
+  }
+  assert.equal(await (await file('Lab/results/run1/app.html', cookie)).text(), '<p>built</p>');
+  for (const p of ['Lab/kb/secret.txt', 'Lab/notes.txt', 'Lab/resultsx/a.txt', 'Other/results/a.txt', 'Lab/results/../notes.txt', 'Lab/results', 'Lab/Bench.mrbl']) {
+    assert.equal((await file(p, cookie)).status, 403, p);
+  }
+  // Nobody without a link reads them, and a page that names none shares none.
+  assert.notEqual((await file('Lab/results/status.json', '')).status, 200);
+  const plain = await open((await make('view', 'Lab/Plain')).href);
+  assert.equal((await file('Lab/results/status.json', plain.cookie)).status, 403);
+  // Only the root element's attribute counts, not the words or other attributes.
+  const sneaky = await open((await make('view', 'Lab/Sneaky')).href);
+  assert.equal((await file('Lab/notes.txt', sneaky.cookie)).status, 403);
+  assert.equal((await file('Lab/kb/secret.txt', sneaky.cookie)).status, 403);
+
+  // A link that may change the page cannot name more folders.
+  const mod = await open((await make('modify', 'Lab/Bench')).href);
+  const widen = await ops(mod.cookie, [{ type: 'setAttr', id: 'h', name: 'data-marble-share-files', value: '.., kb' }], 'Lab/Bench');
+  assert.equal(widen.status, 403);
+  assert.equal((await file('Lab/kb/secret.txt', mod.cookie)).status, 403);
+});
+
 test('the owner is told when a link was last opened, and not by their own visits', async (t) => {
   const { ask, owner, make, open } = await boot(t);
   const link = await make('view');
