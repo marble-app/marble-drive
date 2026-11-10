@@ -21,9 +21,23 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-export const EXCLUDES = ['/.marble/agents/host.lock', '/.marble/usage/**', '/.marble/console/backups/**'];
+// Folders a tool rebuilds, at any depth: a project's Python environment and
+// bytecode, and its packages. They are thousands of files no document reads
+// (a .venv in Ai2/AstaUI was 1.2k files, the PC, 2026-11-10), and every one
+// of them was walked each scan and sent to the hub. A drive moved home
+// rebuilds them (`uv sync`, `npm install`). A repository's .git is kept: on
+// another home a branch that was never pushed lives only there.
+export const REBUILT = ['node_modules', '.venv', '__pycache__', '.pytest_cache'];
+const rebuilt = new Set(REBUILT);
+export const EXCLUDES = [
+  '/.marble/agents/host.lock', '/.marble/usage/**', '/.marble/console/backups/**',
+  ...REBUILT.map((name) => `${name}/**`),
+];
+/** `rel` is a path in the drive; a folder's ends in '/'. */
+const inRebuilt = (rel) => rel.split('/').slice(0, -1).some((part) => rebuilt.has(part));
 const excluded = (rel) =>
-  rel === '.marble/agents/host.lock' || rel.startsWith('.marble/usage/') || rel.startsWith('.marble/console/backups/');
+  rel === '.marble/agents/host.lock' || rel.startsWith('.marble/usage/') || rel.startsWith('.marble/console/backups/')
+  || inRebuilt(rel);
 const filters = () => EXCLUDES.flatMap((pattern) => ['--exclude', pattern]);
 const stampOf = (date) => date.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 
