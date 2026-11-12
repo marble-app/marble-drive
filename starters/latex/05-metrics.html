@@ -231,6 +231,13 @@ window.TeX = window.TeX || {};
 
   // Longest first, so ffi is found before ff.
   const LIG_ORDER = ['ffi', 'ffl', 'ff', 'fi', 'fl'];
+  // The five codes WinAnsi leaves empty, given to the ligature glyphs the
+  // embedded faces carry (06 names them in the font's /Differences), so an
+  // "fi" is drawn as the one glyph TeX would have set.
+  const LIG_CODES = { ff: 0x81, fi: 0x8d, fl: 0x8f, ffi: 0x90, ffl: 0x9d };
+  const LIG_GLYPHS = { 0x81: 'f_f', 0x8d: 'f_i', 0x8f: 'f_l', 0x90: 'f_f_i', 0x9d: 'f_f_l' };
+  const drawsLigatures = (key) => !!(inLibertine && T.embed && T.embed[key] && LIB.ligs[key]
+    && !key.startsWith('tt') && key !== 'sy');
 
   // The kern table arrives grouped by amount, which is how it fits in thirty
   // kilobytes; it is wanted pair by pair, which is this.
@@ -271,11 +278,19 @@ window.TeX = window.TeX || {};
      *  be drawn in Times without the words running into each other. */
     arrays() {
       const out = {};
+      // 0x80–0x9F are WinAnsi's curly quotes, dashes and bullet, which are
+      // not the Unicode characters with those codes; a width read for the
+      // wrong character is a reader stepping a quote mark as a space.
+      const decode = {};
+      for (const [ch, code] of Object.entries(WINANSI)) decode[code] = ch;
       for (const key of Object.keys(FONTS)) {
         if (key === 'sy') continue;
         const row = [];
+        const ligs = drawsLigatures(key) ? LIB.ligs[key] : null;
         for (let code = 32; code <= 255; code += 1) {
-          row.push(Math.round(rawWidth(String.fromCharCode(code), key)));
+          const seq = ligs && LIG_GLYPHS[code] ? Object.keys(LIG_CODES).find((one) => LIG_CODES[one] === code) : null;
+          if (seq && ligs[seq] !== undefined) { row.push(Math.round(ligs[seq])); continue; }
+          row.push(Math.round(rawWidth(decode[code] || String.fromCharCode(code), key)));
         }
         out[key] = row;
       }
@@ -297,6 +312,39 @@ window.TeX = window.TeX || {};
       if (code >= 0xa0 && code <= 0xff) return code;
       if (WINANSI[ch] !== undefined) return WINANSI[ch];
       return null;
+    },
+
+    /** The codes to draw a run with: one a character, except where letters
+     *  make a ligature the face carries, which is one code for the lot. Each
+     *  code comes with the index of the last character it stands for. */
+    drawCodes(text, key) {
+      const out = [];
+      const ligs = drawsLigatures(key) ? LIB.ligs[key] : null;
+      let i = 0;
+      while (i < text.length) {
+        let done = false;
+        if (ligs) {
+          for (const seq of LIG_ORDER) {
+            if (ligs[seq] !== undefined && text.startsWith(seq, i)) {
+              out.push({ code: LIG_CODES[seq], last: i + seq.length - 1 });
+              i += seq.length;
+              done = true;
+              break;
+            }
+          }
+        }
+        if (done) continue;
+        const code = this.encode(text[i]);
+        out.push({ code: code === null ? 63 : code, last: i });
+        i += 1;
+      }
+      return out;
+    },
+
+    /** The /Differences that name the ligature glyphs, for a face that has them. */
+    ligatureDifferences(key) {
+      if (!drawsLigatures(key)) return '';
+      return Object.entries(LIG_GLYPHS).map(([code, name]) => `${code} /${name}`).join(' ');
     },
 
     /** Symbol's byte for a character, or null if Symbol has no such glyph. */
@@ -349,6 +397,41 @@ window.TeX = window.TeX || {};
         i += step;
       }
       return (sum / 1000) * size;
+    },
+
+    /** What has to be added after each character, in thousandths of the
+     *  size, for the glyphs a reader draws one by one to land where width()
+     *  measured them: the kern before the next letter, and the difference a
+     *  ligature makes, since the ligature glyphs themselves do not travel. */
+    adjustments(text, key) {
+      const adj = new Array(text.length).fill(0);
+      if (!inLibertine || key === 'sy' || !LIB.w[key]) return adj;
+      const ligs = LIB.ligs[key] || {};
+      const pairs = KERNS.get(key);
+      const glyphs = drawsLigatures(key);
+      let i = 0;
+      while (i < text.length) {
+        let step = 1;
+        for (const seq of LIG_ORDER) {
+          if (ligs[seq] !== undefined && text.startsWith(seq, i)) {
+            step = seq.length;
+            // Drawn as its own glyph, a ligature needs nothing; drawn as its
+            // letters, they are pulled together to the ligature's width.
+            if (!glyphs) {
+              let plain = 0;
+              for (let k = 0; k < step; k += 1) plain += rawWidth(text[i + k], key);
+              adj[i + step - 1] += ligs[seq] - plain;
+            }
+            break;
+          }
+        }
+        if (pairs && i + step < text.length) {
+          const kern = pairs.get(text[i + step - 1] + text[i + step]);
+          if (kern) adj[i + step - 1] += kern;
+        }
+        i += step;
+      }
+      return adj;
     },
 
     ascent: (key, size) => shapeOf(key).asc * size,

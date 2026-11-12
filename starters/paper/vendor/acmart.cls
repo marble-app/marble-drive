@@ -40,7 +40,7 @@
 
 \NeedsTeXFormat{LaTeX2e}
 \ProvidesClass{acmart}
-[2026/06/27 v2.19 Typesetting articles for the Association for Computing Machinery]
+[2026/11/01 v2.21 Typesetting articles for the Association for Computing Machinery]
 \def\@classname{acmart}
 \InputIfFileExists{acmart-preload-hook.tex}{%
   \ClassWarning{\@classname}{%
@@ -176,7 +176,12 @@
 \DeclareOptionX{language}{%
   \ifx\ACM@languages\@empty
   \gdef\ACM@languages{english}\fi
-  \g@addto@macro\ACM@languages{, #1}}
+  \g@addto@macro\ACM@languages{, #1}%
+  \def\@tempa{#1}%
+  \def\@tempb{spanish}%
+  \ifx\@tempb\@tempa\relax
+    \g@addto@macro\ACM@languages{, es-noquoting}%
+  \fi}
 \DeclareOptionX{draft}{\PassOptionsToClass{\CurrentOption}{amsart}}
 \DeclareOptionX{*}{\PassOptionsToClass{\CurrentOption}{amsart}}
 \ProcessOptionsX
@@ -185,6 +190,7 @@
 \newif\if@ACM@journal
 \newif\if@ACM@journal@bibstrip
 \newif\if@ACM@journal@bibstrip@or@tog
+\newif\if@ACM@addressesinfootnote
 \newif\if@ACM@sigchiamode
 \newif\if@ACM@engage
 \@ACM@engagefalse
@@ -253,6 +259,7 @@
 \if@ACM@journal
   \@ACM@journal@bibstriptrue
   \@ACM@journal@bibstrip@or@togtrue
+  \@ACM@addressesinfootnotetrue
 \else
  \@ACM@journal@bibstripfalse
 \fi
@@ -282,7 +289,7 @@
     \def\ACM@fontsize{10pt}%
   \or % acmengage
     \def\ACM@fontsize{10pt}%
-  \or % acmcp
+  \or % acmcp  
     \def\ACM@fontsize{9pt}%
   \fi
 \fi
@@ -402,7 +409,7 @@
   \renewcommand\keywordsname{Additional Key Words and Phrases}%
 \else
   \renewcommand\keywordsname{Keywords}%
-\fi
+\fi 
 \if@ACM@engage
    \renewcommand\abstractname{Synopsis}%
 \fi
@@ -414,7 +421,7 @@
         \renewcommand\keywordsname{Additional Key Words and Phrases}%
       \else
         \renewcommand\keywordsname{Keywords}%
-      \fi
+      \fi 
       \renewcommand\acksname{Acknowledgements}%
       \if@ACM@engage
          \renewcommand\abstractname{Synopsis}%
@@ -425,7 +432,7 @@
         \renewcommand\keywordsname{Mots Clés et Phrases Supplémentaires}%
       \else
         \renewcommand\keywordsname{Mots clés}%
-      \fi
+      \fi 
       \renewcommand\acksname{Remerciements}%
   }%
   \addto\captionsgerman{%
@@ -433,7 +440,7 @@
         \renewcommand\keywordsname{Zusätzliche Schlagwörter und Phrasen}%
       \else
         \renewcommand\keywordsname{Schlagwörter}%
-      \fi
+      \fi 
       \renewcommand\acksname{Danksagungen}%
   }%
   \addto\captionsspanish{%
@@ -441,7 +448,7 @@
         \renewcommand\keywordsname{Palabras y Frases Claves Adicionales}%
       \else
         \renewcommand\keywordsname{Palabras claves}%
-      \fi
+      \fi 
       \renewcommand\acksname{Expresiones de gratitud}%
   }%
 \fi
@@ -454,7 +461,7 @@
     unless are languages are defined. \MessageBreak
     Please choose the languages in \string\documentclass
     \MessageBreak
-    (e.g. \string\documentclass[languages={french, english}]{acmart}),
+    (e.g. \string\documentclass[languages={french, english}]{acmart}), 
     \MessageBreak
     or delete the command.}%
   \fi}
@@ -550,7 +557,7 @@
 \or % sigchi-a
   \urlstyle{sf}
 \or % acmengage
-\or % acmcp
+\or % acmcp  
 \fi
 \AtEndPreamble{%
   \if@ACM@urlbreakonhyphens
@@ -812,7 +819,6 @@
 \if@ACM@sigchiamode
   \renewcommand{\familydefault}{\sfdefault}
 \fi
-\RequirePackage{pifont}
 \newif\if@Description@present
 \@Description@presenttrue
 \newif\if@undescribed@images
@@ -913,19 +919,19 @@
 \IfDocumentMetadataT{%
   \RemoveFromHook{begindocument}[latex-lab-testphase-float]
   \socket_new_plug:nnn{tagsupport/parbox/before}{caption}
-  {
+  {   
     \tagpdfparaOn %restart para tagging
     \tl_if_empty:NTF\@current@float@struct
-    {
+    {     
       \tag_struct_begin:n{tag=Caption,firstkid}
     }
     {
       \tag_struct_begin:n{tag=Caption,parent=\@current@float@struct,firstkid}
-    }
+    } 
   }
   \socket_new_plug:nnn{tagsupport/parbox/after}{caption}
   {
-    \tag_struct_end:
+    \tag_struct_end:   
   }
   \l@addto@macro\caption@beginex@hook{%
     \tagpdfparaOff %leavevmode in parbox should not start paragraph structure
@@ -1527,7 +1533,8 @@
 }%
 \def\acmJournal#1{\setkeys{ACM}{acmJournal=#1}%
   \global\@ACM@journal@bibstriptrue
-  \global\@ACM@journal@bibstrip@or@togtrue}
+  \global\@ACM@journal@bibstrip@or@togtrue
+  \global\@ACM@addressesinfootnotetrue}
 \def\@journalCode@nr{0}
 \def\@journalName{}%
 \def\@journalNameShort{\@journalName}%
@@ -1542,6 +1549,10 @@
     \gdef\acmConference@shortname{#2}%
   \fi
   \global\@ACM@journal@bibstripfalse
+  \ifnum\ACM@format@nr=1\relax % acmsmall
+    \global\@ACM@journal@bibstrip@or@togfalse
+    \settopmatter{printfolios=false}%
+  \fi
   \ifx\@acmBooktitle\@empty\relax
     \acmBooktitle{Proceedings of \acmConference@name
       \ifx\acmConference@name\acmConference@shortname\else
@@ -1632,7 +1643,7 @@
   \def\position##1{\ignorespaces}%
   \def\institution##1{##1\ignorespaces}%
   \def\department{\@ifnextchar[{\@department}{\@department[]}}%
-  \def\@department[##1]##2{##2, \ignorespaces}%
+  \def\@department[##1]##2{, ##2 \ignorespaces}%
   \let\city\position
   \let\state\position
   \let\country\position
@@ -1658,7 +1669,11 @@
   \selectlanguage{#1}%
   {\@specialsection{\keywordsname}%
     \noindent#2\par}\egroup}
-\def\@titlenotes{}
+\def\@titlenotes{%
+  \if@ACM@corresponding@present
+   \footnotetext[1]{Corresponding author}%
+  \fi
+}
 \def\titlenote#1{%
   \g@addto@macro\@title{\footnotemark}%
   \if@ACM@anonymous
@@ -1684,12 +1699,20 @@
     \g@addto@macro\@authornotes{%
       \stepcounter{footnote}\footnotetext{#1}}%
   \fi}
+\newif\if@ACM@corresponding@present
+\@ACM@corresponding@presentfalse
 \newcommand\correspondingauthor{%
   \if@ACM@anonymous\else
-  \g@addto@macro\addresses{\@correspondingauthormark}%
+    \if@ACM@corresponding@present
+        \ClassError{\@classname}{You can have no more than one
+          corresponding author}
+    \fi
+    \@ACM@corresponding@presenttrue
+    \g@addto@macro\addresses{\@correspondingauthormark}%
+    
   \fi}
 \def\@correspondingauthormark{\g@addto@macro\@currentauthors{%
-    \advance\hfuzz by 5pt\relax\textsuperscript{\ding{41}}\relax}}
+    \advance\hfuzz by 5pt\relax\textsuperscript{*}\relax}}
 \newcommand\authornotemark[1][\relax]{%
   \if@ACM@anonymous\else
     \ifx#1\relax\relax\relax
@@ -1841,13 +1864,13 @@
   \relax % Research
      \colorlet{@ACM@Article@color}{ACMBlue}%
   \or % Review
-     \colorlet{@ACM@Article@color}{ACMOrange}%
+     \colorlet{@ACM@Article@color}{ACMOrange}%     
   \or % Discussion
-     \colorlet{@ACM@Article@color}{ACMGreen}%
+     \colorlet{@ACM@Article@color}{ACMGreen}%     
   \or % Invited
-     \colorlet{@ACM@Article@color}{ACMPurple}%
+     \colorlet{@ACM@Article@color}{ACMPurple}%     
   \or % Position
-     \colorlet{@ACM@Article@color}{ACMRed}%
+     \colorlet{@ACM@Article@color}{ACMRed}%     
   \fi
 }{%
  \ClassError{\@classname}{Article Type must be Research, Review,\MessageBreak
@@ -1991,12 +2014,12 @@
   Copyright held by the owner/author(s). Publication rights licensed to
   ACM\@.
   \or % licensedcagov
-  Copyright held by the owner/author(s).
+  Copyright held by the owner/author(s). 
   \or %licensedcagovmixed
   Copyright held by the owner/author(s). Publication rights licensed to
   ACM\@.
   \or % othergov
-  Copyright held by the owner/author(s).
+  Copyright held by the owner/author(s). 
   \or % licensedothergov
   Copyright held by the owner/author(s). Publication rights licensed to
   ACM\@.
@@ -2021,7 +2044,7 @@
    others than ACM must be honored. Abstracting with credit is
    permitted. To copy otherwise, or republish, to post on servers or
    to redistribute to lists, requires prior specific permission
-   and\hspace*{.5pt}/or
+   and\hspace*{.5pt}/or 
    a fee. Request permissions from permissions@acm.org.
   \or % acmlicensed
    Permission to make digital or hard copies of all or part of this
@@ -2033,7 +2056,7 @@
    is permitted. To copy otherwise, or republish, to post on servers
    or to redistribute to lists, requires prior specific permission
    and\hspace*{.5pt}/or a fee. Request permissions from
-   permissions@acm.org.
+   permissions@acm.org. 
   \or % rightsretained
    Permission to make digital or hard copies of all or part of this
    work for personal or classroom use is granted without fee provided
@@ -2041,21 +2064,21 @@
    advantage and that copies bear this notice and the full citation on
    the first page. Copyrights for third-party components of this work
    must be honored. For all other uses, contact the
-   owner\hspace*{.5pt}/author(s).
+   owner\hspace*{.5pt}/author(s). 
   \or % usgov
    This paper is authored by an employee(s) of the United States
    Government and is in the public domain. Non-exclusive copying or
    redistribution is allowed, provided that the article citation is
    given and the authors and agency are clearly identified as its
    source. Request permissions from
-   owner\hspace*{.5pt}/author(s).
+   owner\hspace*{.5pt}/author(s). 
   \or % usgovmixed
    ACM acknowledges that this contribution was authored or co-authored
    by an employee, contractor, or affiliate of the United States
    government. As such, the United States government retains a
    nonexclusive, royalty-free right to publish or reproduce this
    article, or to allow others to do so, for government purposes
-   only. Request permissions from owner\hspace*{.5pt}/author(s).
+   only. Request permissions from owner\hspace*{.5pt}/author(s). 
   \or % cagov
    This article was authored by employees of the Government of
    Canada. As such, the Canadian government retains all interest in
@@ -2069,7 +2092,7 @@
    owned by others than the Canadian Government must be honored. To
    copy otherwise, distribute, republish, or post, requires prior
    specific permission and/or a fee. Request permissions from
-   owner\hspace*{.5pt}/author(s).
+   owner\hspace*{.5pt}/author(s). 
   \or % cagovmixed
    ACM acknowledges that this contribution was co-authored by an
    affiliate of the national government of Canada. As such, the Crown
@@ -2081,7 +2104,7 @@
    page. Copyrights for components of this work owned by others than
    ACM must be honored. To copy otherwise, distribute, republish, or
    post, requires prior specific permission and/or a fee. Request
-   permissions from owner\hspace*{.5pt}/author(s).
+   permissions from owner\hspace*{.5pt}/author(s). 
   \or % licensedusgovmixed
    Publication rights licensed to ACM\@. ACM acknowledges that this
    contribution was authored or co-authored by an employee, contractor
@@ -2089,7 +2112,7 @@
    Government retains a nonexclusive, royalty-free right to publish or
    reproduce this article, or to allow others to do so, for Government
    purposes only. Request permissions from
-   owner\hspace*{.5pt}/author(s).
+   owner\hspace*{.5pt}/author(s). 
   \or % licensedcagov
    This article was authored by employees of the Government of
    Canada. As such, the Canadian government retains all interest in
@@ -2103,7 +2126,7 @@
    owned by others than the Canadian Government must be honored. To
    copy otherwise, distribute, republish, or post, requires prior
    specific permission and/or a fee. Request permissions from
-   owner\hspace*{.5pt}/author(s).
+   owner\hspace*{.5pt}/author(s). 
   \or % licensedcagovmixed
    Publication rights licensed to ACM. ACM acknowledges that this
    contribution was authored or co-authored by an employee, contractor
@@ -2111,21 +2134,21 @@
    Government retains a nonexclusive, royalty-free right to publish or
    reproduce this article, or to allow others to do so, for Government
    purposes only. Request permissions from
-   owner\hspace*{.5pt}/author(s).
+   owner\hspace*{.5pt}/author(s). 
   \or % othergov
    ACM acknowledges that this contribution was authored or co-authored
    by an employee, contractor or affiliate of a national
    government. As such, the Government retains a nonexclusive,
    royalty-free right to publish or reproduce this article, or to
    allow others to do so, for Government purposes only. Request
-   permissions from owner\hspace*{.5pt}/author(s).
+   permissions from owner\hspace*{.5pt}/author(s). 
   \or % licensedothergov
    Publication rights licensed to ACM\@. ACM acknowledges that this
    contribution was authored or co-authored by an employee, contractor
    or affiliate of a national government. As such, the Government
    retains a nonexclusive, royalty-free right to publish or reproduce
    this article, or to allow others to do so, for Government purposes
-   only. Request permissions from owner\hspace*{.5pt}/author(s).
+   only. Request permissions from owner\hspace*{.5pt}/author(s). 
  \or % iw3c2w3
    This paper is published under the Creative Commons Attribution~4.0
    International (CC-BY~4.0) license. Authors reserve their rights to
@@ -2141,7 +2164,7 @@
    \IfEq{\ACM@cc@type}{zero}{%
      \def\ACM@CC@Url{https://creativecommons.org/publicdomain/zero/1.0}}{%
   \edef\ACM@CC@Url{https://creativecommons.org/licenses/\ACM@cc@type/\ACM@cc@version}}%
-   \href{\ACM@CC@Url}{\includegraphics[height=5ex]{doclicense-CC-\ACM@cc@type-88x31}}\\
+   \href{\ACM@CC@Url}{\includegraphics[height=5ex,artifact]{doclicense-CC-\ACM@cc@type-88x31}}\\
    \href{\ACM@CC@Url}{%
    This work is licensed under a Creative Commons
    \IfEq{\ACM@cc@type}{zero}{CC0 1.0 Universal}{%
@@ -2195,13 +2218,14 @@
   \let\@footnotemark\@footnotemark@nolink
   \let\@footnotetext\@footnotetext@nolink
   \renewcommand\thefootnote{\@fnsymbol\c@footnote}%
+  \setcounter{footnote}{1}%
   \hsize=\textwidth
   \def\@makefnmark{\hbox{\@textsuperscript{\@thefnmark}}}%
   \@mktitle\if@ACM@sigchiamode\else\@mkauthors\fi\@mkteasers
   \@printtopmatter
   \if@ACM@sigchiamode\@mkauthors\fi
-  \setcounter{footnote}{0}%
   \def\@makefnmark{\hbox{\@textsuperscript{\normalfont\@thefnmark}}}%
+  \setcounter{footnote}{1}%
   \@titlenotes
   \@subtitlenotes
   \@authornotes
@@ -2215,7 +2239,7 @@
   \if@ACM@acmcp\else
     \ifx\@empty\@authorsaddresses\else
        \if@ACM@anonymous\else
-         \if@ACM@journal@bibstrip@or@tog
+         \if@ACM@addressesinfootnote
            \footnotetextauthorsaddresses{%
              \def\par{\let\par\@par}\parindent\z@\@setauthorsaddresses}%
          \fi
@@ -2242,7 +2266,7 @@
        \if@ACM@journal@bibstrip\else % Print the conference information
          \if@ACM@engage
             {\itshape \@acmBooktitle, \@acmYear.}\par
-         \else
+         \else 
          {\itshape \acmConference@shortname, \acmConference@venue}\par
          \fi
        \fi
@@ -2250,7 +2274,7 @@
     \if@printcopyright
       \copyright\ \@copyrightyear\ \@copyrightowner\\
     \else
-      \ifx\@copyrightyear\@empty\else
+      \ifx\@copyrightyear\@empty\else  
         \@copyrightyear.\
       \fi
     \fi
@@ -2286,7 +2310,7 @@
     \fi
     \fi
   \endgroup
-  \if@ACM@engage\@typesetengagemetadata\fi
+  \if@ACM@engage\@typesetengagemetadata\fi  
   \setcounter{footnote}{0}%
   \@mkabstract
   \ifx\@translatedabstracts\@empty\else
@@ -2334,7 +2358,7 @@
   \if@ACM@acmcp
     \set@ACM@acmcpbox
     \AtEndDocument{\end@ACM@color@frame}%
-    \@ACM@color@frame
+    \@ACM@color@frame  
   \fi
 }
 \newbox\@ACM@acmcpbox
@@ -2351,7 +2375,7 @@
       \@tempdima=\dimexpr\zposy{@ACM@acmcpbox@y}sp -
       \zposy{@ACM@acmcpframe@y}sp+0.3\FrameSep+
       \@ACM@acmcp@delta\relax
-      \ifdim\@tempdima>0pt\relax
+      \ifdim\@tempdima>0pt\relax         
          \vspace*{\@tempdima}%
          \protected@write\@auxout{}%
          {\string\global\@ACM@acmcp@delta=\the\@tempdima\relax}%
@@ -2443,7 +2467,7 @@
   \or % acmengage
     \twocolumn[\box\mktitle@bx]%
   \or % acmcp
-     \box\mktitle@bx\par
+     \box\mktitle@bx\par  
   \fi
 }
 \def\@mktitle{%
@@ -2562,10 +2586,10 @@
   #1}
 \def\streetaddress#1{\ClassWarning{\@classname}{ACM no longer collects
   authors' postal addresses.  I am ignoring your street
-  address}\unskip\ignorespaces}
+  address}\unskip\ignorespaces} 
 \def\postcode#1{\ClassWarning{\@classname}{ACM no longer collects
   authors' postal addresses.  I am ignoring your postal
-  code}\unskip\ignorespaces}
+  code}\unskip\ignorespaces} 
 \if@ACM@journal
   \def\position#1{\unskip\ignorespaces}
   \def\institution#1{\global\@ACM@instpresenttrue
@@ -2722,7 +2746,7 @@
   \def\and{\par}\normalbaselines
   \global\setbox\author@bx=\vtop{\if@ACM@sigchiamode\else\centering\fi
     \@authorfont\@currentauthors\par\@affiliationfont
-    \@currentaffiliation}\egroup
+    \@currentaffiliation\par}\egroup
   \box\author@bx\hspace{\author@bx@sep}%
   \gdef\@currentauthors{}%
   \gdef\@currentaffiliation{}}
@@ -2829,7 +2853,7 @@
   \bgroup
   \def\streetaddress##1{\ClassWarning{\@classname}{ACM no longer collects
   authors' postal addresses.  I am ignoring your street
-  address}\unskip\ignorespaces}%
+  address}\unskip\ignorespaces}% 
   \def\postcode##1{\ClassWarning{\@classname}{ACM no longer collects
   authors' postal addresses.  I am ignoring your postal
   code}\unskip\ignorespaces}%
@@ -3565,6 +3589,8 @@
        #1:#2%
     \fi
   \fi}
+\newcommand\showISBNx[1]{ISBN~#1.}
+\newcommand\showISBNxiii[1]{ISBN-13~#1.}
 \def\theindex{\@restonecoltrue\if@twocolumn\@restonecolfalse\fi
   \columnseprule\z@ \columnsep 35\p@
   \@indextitlestyle

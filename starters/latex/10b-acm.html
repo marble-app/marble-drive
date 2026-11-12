@@ -1,245 +1,472 @@
-
   // ------------------------------------------------------------------ acmart
   //
-  // The class an HCI paper is written in. A document class decides fewer things
-  // than its length suggests: how wide the columns are, what the front matter
-  // looks like, and where the copyright block hangs. Those are the three things
-  // below.
-  //
-  // `sigconf` is the proceedings format — CHI, UIST, CSCW and most of the SIGs
-  // publish through it — and `manuscript` is acmart's default, one column and
-  // the thing you actually write in. Switching between them is switching one
-  // option in \documentclass, which is why the room has a button for it.
+  // The class an HCI paper is written in. CHI and UIST publish through
+  // `sigconf`, two columns at nine points; CHI reviews in `manuscript`, one
+  // column with the lines numbered. Everything below is either read out of
+  // acmart.cls (2.21) or measured off the PDFs its own sample builds make,
+  // to the hundredth of a point, and the comments say which.
 
-  // The numbers below are acmart's own, read out of the class file rather than
-  // guessed at: the \geometry{} call for each format, and the \@titlefont,
-  // \@authorfont, \@secfont hooks it sets beside it. Where this engine cannot
-  // do what the class asks — Libertine, which is not one of the fourteen fonts
-  // a PDF reader is required to have — it does the nearest thing and says so.
-  //
-  // acmart loads amsart, and amsart declares its sizes outright rather than
-  // scaling them: at 9pt the ladder is 5/6, 6/7, 7/8, 8/10, 9/11, 10/12, 11/13,
-  // 12/14, 14/17, 17/20. Both halves matter. The first is how big the letters
-  // are; the second is \baselineskip, which is what puts the baselines on a
-  // grid — and a grid off by two tenths of a point is a line every fifty, which
-  // is a page every few pages.
-  //
-  // Each entry is [size, baselineskip] in points.
+  // PT (09) turns TeX points into PDF ones; every length acmart states is a
+  // TeX point and every number on this page ends up a PDF one.
+
+  // acmart loads amsart, and amsart declares its sizes rather than scaling
+  // them. Both halves matter: the first is how big the letters are, the
+  // second is \baselineskip, which is what puts the baselines on a grid.
+  // Each entry is [size, baselineskip] in TeX points.
   const AMS_LADDER = {
     9: {
       tiny: [5, 6], scriptsize: [6, 7], footnotesize: [7, 8], small: [8, 10],
-      normalsize: [9, 11], large: [10, 12], Large: [11, 13], LARGE: [12, 14],
-      huge: [14, 17], Huge: [17, 20],
+      normalsize: [9, 11], large: [10, 12], Large: [10.95, 13], LARGE: [12, 14],
+      huge: [14.4, 17], Huge: [17.28, 20],
     },
     10: {
-      tiny: [5, 6], scriptsize: [6, 7], footnotesize: [7, 8], small: [8, 10],
-      normalsize: [10, 12], large: [11, 13], Large: [12, 14], LARGE: [14, 17],
-      huge: [17, 20], Huge: [20, 24],
+      tiny: [5, 6], scriptsize: [7, 8], footnotesize: [8, 9.5], small: [9, 11],
+      normalsize: [10, 12], large: [10.95, 13], Large: [12, 14], LARGE: [14.4, 17],
+      huge: [17.28, 20], Huge: [20.74, 25],
     },
   };
 
   const ladder = (job) => AMS_LADDER[job.base] || AMS_LADDER[9];
 
-  /** Set a named size, and the leading that goes with it. */
+  /** Set a named size, and the leading that goes with it. `manuscript` is
+   *  \onehalfspacing, which stretches every baselineskip by a quarter. */
   function amsSize(job, name) {
     const step = ladder(job)[name];
     if (!step) return false;
-    job.font.size = step[0];
-    job.font.leading = step[1];
+    job.font.size = step[0] * PT;
+    job.font.leading = step[1] * PT * (job.lineStretch || 1);
     return true;
   }
 
   /** Just the size, for the places that want a number. */
-  const amsPoints = (job, name) => (ladder(job)[name] || [job.base])[0];
+  const amsPoints = (job, name) => (ladder(job)[name] || [job.base])[0] * PT;
 
-  const ACM_FORMATS = {
-    // sigconf: letter paper, columnsep 2pc, top 57pt, bottom 73pt, sides 54pt.
-    // The title is \Huge sans bold, the authors \LARGE serif — not bold, and
-    // not sans, because sigconf overrides the class default for both.
-    sigconf:    { cols: 2, base: 9, margin: 54, top: 57, bottom: 73, gap: 24, headings: 'serif' },
-    siggraph:   { cols: 2, base: 9, margin: 54, top: 57, bottom: 73, gap: 24, headings: 'sans' },
-    sigchi:     { cols: 2, base: 9, margin: 54, top: 66, bottom: 73, gap: 24, headings: 'sans' },
-    sigplan:    { cols: 2, base: 9, margin: 54, top: 72, bottom: 72, gap: 24, headings: 'serif' },
-    acmtog:     { cols: 2, base: 9, margin: 52, top: 52, bottom: 75, gap: 24, headings: 'sans' },
-    acmengage:  { cols: 2, base: 9, margin: 54, top: 57, bottom: 73, gap: 24, headings: 'serif' },
-    // One column. What a reviewer reads, and what a draft is easier to write in.
-    // manuscript takes geometry's own margins, which come out near an inch and
-    // a half on letter paper.
-    manuscript: { cols: 1, base: 10, margin: 90, top: 72, bottom: 72, gap: 0, headings: 'sans' },
-    acmsmall:   { cols: 1, base: 10, margin: 46, top: 58, bottom: 44, gap: 0, paper: [486, 720], headings: 'sans' },
-    acmlarge:   { cols: 1, base: 10, margin: 81, top: 78, bottom: 114, gap: 0, headings: 'sans' },
+  // The text block of each format, in PDF points from the top of the page:
+  // where it starts, how far down its last baseline may sit, where the
+  // running head and the foot stand. sigconf: \geometry{top=57pt, bottom=73pt,
+  // inner=outer=54pt, head=13pt, columnsep=2pc, includeheadfoot,
+  // heightrounded}, which comes to 57 lines a column, the first \topskip (9pt)
+  // under the top. manuscript is measured off acmart's manuscript sample: two-
+  // sided, so the block moves between left and right pages, 41 lines at one-
+  // and-a-half spacing.
+  const SIGCONF = {
+    cols: 2, base: 9, left: 54 * PT, width: 612 - 108 * PT, gap: 24 * PT,
+    top: 85 * PT, last: 710 * PT, topskip: 9 * PT, head: 67.6 * PT, foot: 722 * PT,
+    headings: 'serif', flush: true, folios: false,
   };
+  const ACM_FORMATS = {
+    sigconf: SIGCONF,
+    acmengage: SIGCONF,
+    siggraph: { ...SIGCONF, headings: 'serif' },
+    sigchi: { ...SIGCONF, top: 66 * PT, headings: 'sans' },
+    sigplan: { ...SIGCONF, top: 72 * PT, last: 720 * PT, headings: 'serif' },
+    manuscript: {
+      cols: 1, base: 9, oddLeft: 73.35, evenLeft: 110.15, width: 430.65,
+      top: 96.03, last: 653.0, topskip: 9 * PT, head: 77.81, foot: 664.9,
+      headings: 'sans', flush: false, folios: true, stretch: 1.25, journal: true,
+    },
+    acmsmall: {
+      cols: 1, base: 10, paper: [486, 720], left: 46 * PT, width: 486 - 92 * PT,
+      top: 86 * PT, last: 720 - 70 * PT, topskip: 10 * PT, head: 70 * PT, foot: 720 - 46 * PT,
+      headings: 'sans', flush: true, folios: true, journal: true,
+    },
+    acmlarge: {
+      cols: 1, base: 10, left: 81 * PT, width: 612 - 162 * PT,
+      top: 106 * PT, last: 792 - 140 * PT, topskip: 10 * PT, head: 90 * PT, foot: 792 - 114 * PT,
+      headings: 'sans', flush: true, folios: true, journal: true,
+    },
+    acmtog: {
+      cols: 2, base: 9, left: 52 * PT, width: 612 - 104 * PT, gap: 24 * PT,
+      top: 80 * PT, last: 792 - 100 * PT, topskip: 9 * PT, head: 64 * PT, foot: 792 - 75 * PT,
+      headings: 'sans', flush: true, folios: true, journal: true,
+    },
+  };
+
+  // The `screen` option's hyperref colours (ACMDarkBlue for URLs, ACMPurple
+  // for references and citations), from their CMYK definitions in the class.
+  const ACM_URL_COLOUR = '0 0.3318 0.79';
+  const ACM_LINK_COLOUR = '0.3825 0 0.85';
+  const urlColour = (job) => (job.acm && job.acm.screen ? ACM_URL_COLOUR : undefined);
 
   const CC_KINDS = {
-    by: 'Attribution 4.0 International',
-    'by-sa': 'Attribution-ShareAlike 4.0 International',
-    'by-nc': 'Attribution-NonCommercial 4.0 International',
-    'by-nd': 'Attribution-NoDerivatives 4.0 International',
-    'by-nc-sa': 'Attribution-NonCommercial-ShareAlike 4.0 International',
-    'by-nc-nd': 'Attribution-NonCommercial-NoDerivatives 4.0 International',
-    zero: 'CC0 1.0 Universal Public Domain Dedication',
+    by: 'Attribution', 'by-sa': 'Attribution-ShareAlike', 'by-nd': 'Attribution-NoDerivatives',
+    'by-nc': 'Attribution-NonCommercial', 'by-nc-sa': 'Attribution-NonCommercial-ShareAlike',
+    'by-nc-nd': 'Attribution-NonCommercial-NoDerivatives',
   };
 
-  const PERMISSION = 'Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.';
+  // \@copyrightpermission and \@copyrightowner, word for word, by mode.
+  const PERMIT = 'Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page.';
+  const ASK = 'To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.';
+  const PERMISSIONS = {
+    acmcopyright: `${PERMIT} Copyrights for components of this work owned by others than ACM must be honored. Abstracting with credit is permitted. ${ASK}`,
+    acmlicensed: `${PERMIT} Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. ${ASK}`,
+    rightsretained: `${PERMIT} Copyrights for third-party components of this work must be honored. For all other uses, contact the owner/author(s).`,
+    usgov: 'This paper is authored by an employee(s) of the United States Government and is in the public domain. Non-exclusive copying or redistribution is allowed, provided that the article citation is given and the authors and agency are clearly identified as its source. Request permissions from owner/author(s).',
+    usgovmixed: 'ACM acknowledges that this contribution was authored or co-authored by an employee, contractor, or affiliate of the United States government. As such, the United States government retains a nonexclusive, royalty-free right to publish or reproduce this article, or to allow others to do so, for government purposes only. Request permissions from owner/author(s).',
+    othergov: 'ACM acknowledges that this contribution was authored or co-authored by an employee, contractor or affiliate of a national government. As such, the Government retains a nonexclusive, royalty-free right to publish or reproduce this article, or to allow others to do so, for Government purposes only. Request permissions from owner/author(s).',
+    licensedothergov: 'Publication rights licensed to ACM. ACM acknowledges that this contribution was authored or co-authored by an employee, contractor or affiliate of a national government. As such, the Government retains a nonexclusive, royalty-free right to publish or reproduce this article, or to allow others to do so, for Government purposes only. Request permissions from owner/author(s).',
+  };
+  const OWNERS = {
+    acmcopyright: 'ACM.',
+    acmlicensed: 'Copyright held by the owner/author(s). Publication rights licensed to ACM.',
+    rightsretained: 'Copyright held by the owner/author(s).',
+    usgovmixed: 'Copyright held by the owner/author(s).',
+    cagov: 'Copyright Crown in Right of Canada.',
+    cagovmixed: 'Copyright held by the owner/author(s).',
+    licensedusgovmixed: 'Copyright held by the owner/author(s). Publication rights licensed to ACM.',
+    licensedcagov: 'Copyright held by the owner/author(s).',
+    licensedcagovmixed: 'Copyright held by the owner/author(s). Publication rights licensed to ACM.',
+    othergov: 'Copyright held by the owner/author(s).',
+    licensedothergov: 'Copyright held by the owner/author(s). Publication rights licensed to ACM.',
+    cc: 'Copyright held by the owner/author(s).',
+  };
+
+  /** \\ in the middle of a paragraph: the word being built ends first. */
+  function lineBreak(job) {
+    endWord(job);
+    job.nodes.push({ k: 'break', w: 0 });
+  }
 
   /** A sentence, with its spaces left as spaces. addText makes one word of
    *  everything it is handed — right for a name in a cell, wrong for prose,
    *  because a word cannot be broken across lines and a sentence must be. */
   const prose = (job, text) => inGroup(job, T.lex.tokenize(String(text)));
 
-  /** A character Times has no glyph for, set from Symbol, which has. */
+  /** A character the text face has no glyph for, set from Symbol, which has. */
   function symbol(job, ch, scale = 1) {
     addRun(job, ch, 'sy', job.font.size * scale);
   }
 
   function applyFormat(job, name) {
-    const format = ACM_FORMATS[name];
-    if (!format) return false;
+    const f = ACM_FORMATS[name];
+    if (!f) return false;
     job.format = name;
-    job.base = format.base;
-    job.font.size = format.base;
-    job.margin = format.margin;
-    job.marginTop = format.top;
-    job.marginBottom = format.bottom;
-    job.cols = format.cols;
-    job.colGap = format.gap;
-    job.headingFamily = format.headings === 'sans' ? 'sf' : 'rm';
-    if (format.paper) [job.W, job.H] = format.paper;
-    // Measure in the fonts the class asks for. What gets drawn is unchanged —
-    // Libertine does not travel with this file — but the line breaks are the
-    // ones a real build would make.
+    job.formatSpec = f;
+    job.base = f.base;
+    job.lineStretch = f.stretch || 1;
+    [job.W, job.H] = f.paper || [612, 792];
+    job.cols = f.cols;
+    job.colGap = f.cols > 1 ? f.gap : 0;
+    job.fixedTextWidth = f.width;
+    if (f.oddLeft !== undefined) {
+      job.oddLeft = f.oddLeft;
+      job.evenLeft = f.evenLeft;
+      job.left = f.oddLeft;
+      job.margin = f.oddLeft;
+    } else {
+      job.oddLeft = undefined;
+      job.evenLeft = undefined;
+      job.left = undefined;
+      job.margin = f.left;
+    }
+    job.marginTop = f.top;
+    job.marginBottom = job.H - f.last;
+    job.topskip = f.topskip;
+    // How TeX builds a page, which an acmart page has to be built the same
+    // way to come out the same: the last line's depth hangs below the block,
+    // skips sit between depth and height, a heading keeps its next two lines,
+    // and a full column is stretched to the bottom.
+    job.depthHangs = true;
+    job.texSkips = true;
+    job.klassKeeps = true;
+    job.flushBottom = !!f.flush;
+    job.noTopFloatsOnFirstPage = true;
+    job.folios = f.folios;
+    job.headingFamily = f.headings === 'sans' ? 'sf' : 'rm';
+    // Measure and draw in the fonts the class asks for.
     M().use('libertine');
-    job.font.leading = (ladder(job).normalsize || [job.base, job.base * 1.2])[1];
-    job.leadRatio = job.font.leading / job.base;
-    // \setlength\parindent{10\p@}, and it does not scale with the body size.
-    job.parIndent = 10;
-    // \def\footnoterule{... \hrule \@width 4pc ...}
-    job.noteRule = 48;
+    job.font.family = 'rm';
+    amsSize(job, 'normalsize');
+    job.leadRatio = job.font.leading / job.font.size;
+    // \setlength\parindent{10\p@}; \footnoterule is 4pc wide.
+    job.parIndent = 10 * PT;
+    job.noteRule = 48 * PT;
+    job.protrusion = true;
+    job.decorate = acmDecorate;
     layout(job);
     return true;
   }
 
   // --------------------------------------------------------------- the people
+  //
+  // acmart's authors come in groups. An \author starts one unless the author
+  // before it is still waiting for an \affiliation, so two people written one
+  // after the other and then given one address share a box. Inside a box the
+  // names come first, then the addresses and e-mails, in the order written.
 
-  const AFFIL_PARTS = ['position', 'department', 'institution', 'streetaddress',
-    'city', 'state', 'postcode', 'country'];
+  const FN_SYMBOLS = ['*', '†', '‡', '§', '¶', '||', '**', '††', '‡‡'];
+  const fnSymbol = (n) => FN_SYMBOLS[(Math.max(1, n) - 1) % FN_SYMBOLS.length];
 
-  /** An \affiliation, reduced to the lines acmart prints: what the place is
-   *  called, then where it is. The parts are read wherever they appear, because
-   *  a person writes them in whatever order they think of them. */
+  function authorsOf(job) {
+    if (!job.people) {
+      job.people = { groups: [], open: false, names: [], short: [], notes: [], titleNotes: [], corresponding: false, marks: 0 };
+    }
+    return job.people;
+  }
+
+  const lastGroup = (job) => { const p = authorsOf(job); return p.groups[p.groups.length - 1] || null; };
+  const lastAuthor = (job) => { const g = lastGroup(job); return g ? g.names[g.names.length - 1] : null; };
+
+  function addAuthor(job, tokens, short) {
+    const p = authorsOf(job);
+    if (!p.open) { p.groups.push({ names: [], parts: [] }); p.open = true; }
+    lastGroup(job).names.push({ tokens, marks: [] });
+    p.names.push(tokens);
+    p.short.push(short && T.lex.plain(short).trim() ? short : tokens);
+  }
+
+  const AFFIL_KEYS = ['position', 'department', 'institution', 'streetaddress', 'city', 'state', 'postcode', 'country'];
+
+  /** An \affiliation, as its parts in the order they were written. */
   function affiliation(job, tokens) {
     const reader = subReader(job, tokens);
-    const found = {};
+    const parts = [];
     for (;;) {
       const tok = reader.next();
       if (tok.t === 'eof') break;
-      if (tok.t === 'cs' && AFFIL_PARTS.includes(tok.v)) {
+      if (tok.t === 'cs' && AFFIL_KEYS.includes(tok.v)) {
         reader.optional();
-        const value = T.lex.plain(reader.group()).trim();
-        if (value) found[tok.v] = value;
+        const value = reader.group();
+        if (T.lex.plain(value).trim()) parts.push({ key: tok.v, tokens: value });
       }
     }
+    if (!parts.length && T.lex.plain(tokens).trim()) parts.push({ key: 'institution', tokens });
+    return parts;
+  }
+
+  /** The lines an affiliation prints in a sigconf box. A position, a
+   *  department and an institution each end their line; city, state and
+   *  country run on, a comma between each. Street and postcode are dropped:
+   *  "ACM no longer collects authors' postal addresses". */
+  function affilLines(parts) {
     const lines = [];
-    const who = [found.department, found.institution].filter(Boolean).join(', ');
-    if (who) lines.push(who);
-    const where = [found.city, found.state, found.country].filter(Boolean).join(', ');
-    if (where) lines.push(where);
-    if (!lines.length) {
-      const loose = T.lex.plain(tokens).trim();
-      if (loose) lines.push(loose);
+    let open = null;
+    for (const part of parts) {
+      if (part.key === 'streetaddress' || part.key === 'postcode') continue;
+      if (part.key === 'position' || part.key === 'department' || part.key === 'institution') {
+        lines.push([part.tokens]);
+        open = null;
+        continue;
+      }
+      if (!open) { open = [part.tokens]; lines.push(open); } else open.push(part.tokens);
     }
     return lines;
   }
 
-  const lastAuthor = (job) => job.authors[job.authors.length - 1] || null;
-
-  function addAuthor(job, tokens) {
-    job.authors.push({ name: tokens, affils: [], emails: [] });
+  /** A comma-separated run of token lists, set where the reader is. */
+  function joined(job, lists, sep = ',') {
+    lists.forEach((tokens, i) => {
+      if (i) { addText(job, sep); addGlue(job); }
+      inGroup(job, tokens);
+    });
   }
 
-  /** One author's cell: the name, the places, the address. Captured at the
-   *  cell's own measure so the grid can put them side by side. */
-  function authorCell(job, author, measure) {
+  /** The marks after a name: author notes, a shared note, the corresponding
+   *  author's asterisk. They are numbered when the title is set, because the
+   *  corresponding author's note is footnote 1 wherever in the list they are. */
+  function nameMarks(job, person) {
+    const p = authorsOf(job);
+    const first = p.corresponding ? 2 : 1;
+    const symbols = person.marks.map((mark) => {
+      if (mark.kind === 'corresponding') return '*';
+      if (mark.kind === 'explicit') return fnSymbol(mark.n);
+      return fnSymbol(first + p.titleNotes.length + mark.index);
+    });
+    if (!symbols.length) return;
+    const size = job.font.size;
+    addRun(job, symbols.join(','), fontKey(job), size * 0.7, { rise: size * 0.38 });
+  }
+
+  /** "Ben Trovato, G.K.M. Tobin, and Julius P. Kumquat", as \andify writes it. */
+  function andify(job, lists) {
+    if (lists.length === 2) {
+      inGroup(job, lists[0]);
+      addGlue(job); addText(job, 'and'); addGlue(job);
+      inGroup(job, lists[1]);
+      return;
+    }
+    lists.forEach((tokens, i) => {
+      if (i) {
+        addText(job, ',');
+        addGlue(job);
+        if (i === lists.length - 1) { addText(job, 'and'); addGlue(job); }
+      }
+      inGroup(job, tokens);
+    });
+  }
+
+  function anonymousName(job) {
+    const id = job.acm.submissionId;
+    return id ? `Anonymous Author(s)\\\\Submission Id: ${id}` : 'Anonymous Author(s)';
+  }
+
+  /** A name as the class sets it: a link to the author's ORCID when they
+   *  gave one, coloured when the paper is for the screen. */
+  function setName(job, person) {
+    if (person.orcid) {
+      const was = job.colour;
+      if (job.acm.screen) job.colour = ACM_URL_COLOUR;
+      for (const node of collect(job, person.tokens)) {
+        if (node.k === 'word') node.runs = node.runs.map((run) => ({ ...run, link: { url: person.orcid }, c: job.colour || run.c }));
+        if (node.k === 'word') { endWord(job); job.nodes.push(node); } else job.nodes.push(node);
+      }
+      job.colour = was;
+      return;
+    }
+    inGroup(job, person.tokens);
+  }
+
+  function setMail(job, text) {
+    addRun(job, text, fontKey(job), job.font.size, { link: { url: `mailto:${text}` }, c: urlColour(job) });
+  }
+
+  /** One sigconf author box: the names, \LARGE; then the addresses, \large. */
+  function authorBox(job, group, width) {
     const saved = save(job);
     const wasMeasure = job.measure;
-    job.measure = measure;
+    job.measure = width;
+    job.leftSkip = 0;
+    job.rightSkip = 0;
     job.align = 'center';
     job.parindent = false;
     const rows = capture(job, () => {
-      // \@authorfont for sigconf is \LARGE, with no weight and no family
-      // change: 12pt of the body face at a 9pt body.
       amsSize(job, 'LARGE');
-      inGroup(job, author.name);
-      endParagraph(job, { indent: 0 });
-      // \@affiliationfont is \large.
+      job.font.family = 'rm';
+      job.font.bold = false;
+      job.font.italic = false;
+      for (const person of group.names) {
+        setName(job, person);
+        nameMarks(job, person);
+        endParagraph(job, { indent: 0 });
+      }
       amsSize(job, 'large');
-      for (const lines of author.affils) {
-        for (const line of lines) {
-          prose(job, line);
+      for (const part of group.parts) {
+        if (part.kind === 'email') {
+          setMail(job, part.text);
+          endParagraph(job, { indent: 0 });
+          continue;
+        }
+        for (const line of affilLines(part.parts)) {
+          joined(job, line);
           endParagraph(job, { indent: 0 });
         }
-      }
-      for (const mail of author.emails) {
-        addRun(job, mail, fontKey(job), job.font.size, { link: { url: `mailto:${mail}` } });
-        endParagraph(job, { indent: 0 });
       }
     });
     job.measure = wasMeasure;
     restore(job, saved);
-    return stack(rows, job.base * 0.1);
+    return stackRows(rows);
   }
 
-  /** The authors, in rows across the full width. Each row is one row of the
-   *  page: the cells share a top, so they share a baseline. */
+  /** The groups that get set: one anonymous box when the paper is under
+   *  review, the authors as written otherwise. */
+  function shownGroups(job) {
+    if (job.acm.anonymous) {
+      return [{ names: [{ tokens: T.lex.tokenize(anonymousName(job)), marks: [] }], parts: [] }];
+    }
+    return authorsOf(job).groups;
+  }
+
+  /** sigconf's grid (\@mkauthors@iii): boxes of one width, three to a row
+   *  unless there are two, three or four of them, each row centred, a pica
+   *  between boxes and between rows. */
   function authorGrid(job) {
-    if (!job.authors.length) return;
-    const perRow = Math.max(1, Math.min(job.authors.length, job.acm.perRow || (job.cols === 2 ? 3 : 4)));
-    for (let at = 0; at < job.authors.length; at += perRow) {
-      const group = job.authors.slice(at, at + perRow);
-      const cell = job.measure / group.length;
-      const boxes = group.map((author) => authorCell(job, author, cell - job.base));
+    const groups = shownGroups(job);
+    if (!groups.length) return;
+    const sep = 12 * PT;
+    const count = groups.length;
+    const perRow = job.acm.perRow > 0 ? job.acm.perRow
+      : count <= 3 ? count : count === 4 ? 2 : 3;
+    const width = (job.textWidth - sep) / perRow - sep;
+    for (let at = 0; at < count; at += perRow) {
+      const row = groups.slice(at, at + perRow);
+      const boxes = row.map((group) => authorBox(job, group, width));
+      const line = row.length * width + (row.length - 1) * sep;
+      const start = (job.textWidth - line) / 2;
       const items = [];
       boxes.forEach((box, i) => {
-        for (const item of box.items) items.push({ ...item, x: item.x + i * cell + job.base * 0.5 });
+        for (const item of box.items) items.push({ ...item, x: item.x + start + i * (width + sep) });
       });
-      vspace(job, job.base * 1.1);
-      emitRow(job, {
-        items,
-        above: Math.max(0, ...boxes.map((box) => box.h)),
-        below: Math.max(0, ...boxes.map((box) => box.d)),
-        x: 0,
-      });
+      const above = Math.max(0, ...boxes.map((box) => box.h));
+      const below = Math.max(0, ...boxes.map((box) => box.d));
+      // The first row's names stand 28.2pt under the title's baseline, which
+      // is what \bigskip, \medskip and the title's own leading come to. The
+      // rows after it are \lineskip=1pc apart, depth to height.
+      if (at === 0) emitRow(job, { items, above, below, x: 0, fixedLeading: 28.23 });
+      else emitRow(job, { items, above, below, x: 0, fixedLeading: 0.01, lead: 11 * PT });
     }
   }
 
-  /** "Bryan Min, Nicolai Marquardt, and Haijun Xia" — the reference format
-   *  writes the names out the way they were typed, first name first. */
-  function authorNames(job) {
-    const names = job.authors.map((author) => T.lex.plain(author.name).trim()).filter(Boolean);
-    if (!names.length) return T.lex.plain(job.authorTokens || []).trim();
-    if (names.length === 1) return names[0];
-    if (names.length === 2) return `${names[0]} and ${names[1]}`;
-    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  /** The names as one line, the way the reference format writes them. */
+  function setAuthorNames(job) {
+    if (job.acm.anonymous) { prose(job, 'Anonymous Author(s)'); return; }
+    const names = authorsOf(job).names;
+    if (!names.length) { inGroup(job, job.authorTokens || []); return; }
+    andify(job, names);
   }
 
   // -------------------------------------------------------- the front matter
 
-  /** \@mkabstract sets the abstract's heading with \section*, so it is a
-   *  section heading and gets whatever the class says one looks like. */
-  function frontHeading(job, text) {
-    heading(job, 'section', true, T.lex.tokenize(text));
+  /** \ccsdesc, as acmart sets it: each general concept once, in bold, behind
+   *  a bullet; its specific concepts after an arrow, in bold for significance
+   *  500, italic for 300 and plain below that; a semicolon between them and a
+   *  full stop after the last. */
+  function concepts(job) {
+    const order = [];
+    const by = new Map();
+    for (const concept of job.ccs) {
+      const [general, ...rest] = concept.text.split('~').map((part) => part.trim());
+      if (!by.has(general)) { by.set(general, []); order.push(general); }
+      if (rest.length && rest[0]) by.get(general).push({ text: rest[0], weight: concept.weight });
+    }
+    let left = job.ccs.length;
+    order.forEach((general, g) => {
+      addText(job, '•');
+      addGlue(job, { nobreak: true });
+      const was = job.font.bold;
+      job.font.bold = true;
+      prose(job, general);
+      job.font.bold = was;
+      const specific = by.get(general);
+      if (!specific.length) {
+        left -= 1;
+        addText(job, g === order.length - 1 ? '.' : ';');
+        addGlue(job);
+        return;
+      }
+      addGlue(job);
+      symbol(job, '→', 0.9);
+      addGlue(job);
+      specific.forEach((one) => {
+        const saved = save(job);
+        if (one.weight > 499) job.font.bold = true;
+        else if (one.weight > 299) job.font.italic = true;
+        prose(job, one.text);
+        restore(job, saved);
+        left -= 1;
+        addText(job, left <= 0 ? '.' : ';');
+        addGlue(job);
+      });
+      left -= Math.max(0, 0);
+    });
   }
 
-  /** A run-in bold label and then a paragraph — how the class sets the CCS
-   *  concepts and the keywords. */
-  function labelled(job, label, fill) {
+  /** \@specialsection: a \section* in the conference formats, a run-in label
+   *  at \small in the journal ones (and manuscript). */
+  function special(job, title, fill) {
+    if (!job.formatSpec.journal) {
+      heading(job, 'section', true, T.lex.tokenize(title));
+      job.parindent = false;
+      fill();
+      endParagraph(job, { indent: 0 });
+      return;
+    }
+    endParagraph(job);
+    vspace(job, 6 * PT, { stretch: 2 * PT });
     const saved = save(job);
-    vspace(job, job.base * 0.7);
-    job.align = 'justify';
+    amsSize(job, 'small');
     job.parindent = false;
-    job.font.bold = true;
-    addText(job, `${label}:`);
-    job.font.bold = false;
+    job.align = 'justify';
+    prose(job, `${title}:`);
     addGlue(job);
     fill();
     endParagraph(job, { indent: 0 });
@@ -247,123 +474,283 @@
     job.parindent = false;
   }
 
-  function frontMatter(job) {
-    if (job.held.abstract) {
-      frontHeading(job, 'Abstract');
-      for (const row of job.held.abstract) emitRow(job, row);
-      job.parindent = false;
-    }
-    if (job.ccs.length) {
-      labelled(job, 'CCS Concepts', () => {
-        job.ccs.forEach((text, i) => {
-          if (i) { addText(job, ';'); addGlue(job); }
-          addText(job, '\u2022');
-          addGlue(job, { w: job.font.size * 0.3, nobreak: true });
-          // A tilde in a concept is the arrow between a field and a thing in
-          // it, and the arrow comes from Symbol because Times has no glyph.
-          const parts = text.split('~').map((part) => part.trim());
-          parts.forEach((part, p) => {
-            if (p) {
-              // Ordinary glue, not rigid: a line of concepts is a paragraph
-              // like any other, and one with nothing that can stretch puts all
-              // of the slack into the few spaces that can.
-              addGlue(job, { w: job.font.size * 0.28 });
-              symbol(job, '\u2192', 0.85);
-              addGlue(job, { w: job.font.size * 0.28 });
-            }
-            prose(job, part);
-          });
-        });
-        addText(job, '.');
-      });
-    }
-    if (job.keywordTokens) {
-      labelled(job, 'Keywords', () => { inGroup(job, job.keywordTokens); });
-    }
-  }
-
-  /** The block under the first column of the first page: what you may do with
-   *  the paper, and how to cite it. It is set before the column is filled,
-   *  because the column has to know how much room it does not have. */
-  function copyrightBlock(job) {
+  /** "ACM Reference Format:" and the citation under it, \small (\@mkbibcitation). */
+  function referenceFormat(job) {
     const acm = job.acm;
-    if (job.nonacm) return;
     const conference = acm.conference || {};
-    const rows = capture(job, () => {
-      const saved = save(job);
-      // The permission block is a footnote, so it is set at footnote size.
-      amsSize(job, 'footnotesize');
-      job.align = 'justify';
-      job.parindent = false;
-      job.leftSkip = 0;
-      job.rightSkip = 0;
-
-      if (acm.copyright === 'cc') {
-        const kind = CC_KINDS[acm.cctype || 'by'] || CC_KINDS.by;
-        prose(job, `This work is licensed under a Creative Commons ${kind} License.`);
-      } else if (acm.copyright === 'none') {
-        prose(job, 'This work is in the public domain.');
-      } else {
-        prose(job, PERMISSION);
-      }
-      endParagraph(job, { indent: 0 });
-
-      if (conference.name) {
-        vspace(job, job.base * 0.4);
-        job.font.italic = true;
-        prose(job, conference.short || conference.name);
-        job.font.italic = false;
-        addText(job, ',');
-        addGlue(job);
-        prose(job, [conference.date, conference.venue].filter(Boolean).join(', '));
-        endParagraph(job, { indent: 0 });
-      }
-
-      vspace(job, job.base * 0.5);
-      job.font.bold = true;
-      prose(job, 'ACM Reference Format:');
-      job.font.bold = false;
-      endParagraph(job, { indent: 0 });
-
-      const title = T.lex.plain(job.titleTokens || []).replace(/\s+/g, ' ').trim();
-      const year = acm.year || acm.copyrightYear || '';
-      const bits = [];
-      bits.push(authorNames(job));
-      if (year) bits.push(String(year));
-      if (title) bits.push(title.replace(/\.$/, ''));
-      prose(job, `${bits.join('. ')}.`);
+    endParagraph(job);
+    vspace(job, 6 * PT, { stretch: 2 * PT });
+    const saved = save(job);
+    amsSize(job, 'small');
+    job.parindent = false;
+    job.align = 'justify';
+    job.font.bold = true;
+    prose(job, 'ACM Reference Format:');
+    job.font.bold = false;
+    endParagraph(job, { indent: 0 });
+    // A heading would never be left at the foot of a column without the
+    // citation under it; neither is this one.
+    setAuthorNames(job);
+    addText(job, '.');
+    addGlue(job);
+    prose(job, `${acm.year || acm.copyrightYear || new Date().getFullYear()}.`);
+    addGlue(job);
+    inGroup(job, job.titleTokens || []);
+    if (job.subtitleTokens) { addText(job, ':'); addGlue(job); inGroup(job, job.subtitleTokens); }
+    addText(job, '.');
+    addGlue(job);
+    if (!job.nonacm) {
+      addText(job, 'In');
       addGlue(job);
-      if (acm.booktitle || conference.name) {
-        addText(job, 'In');
+      job.font.italic = true;
+      if (acm.booktitleTokens) inGroup(job, acm.booktitleTokens);
+      else if (conference.name) {
+        prose(job, 'Proceedings of');
         addGlue(job);
-        job.font.italic = true;
-        prose(job, acm.booktitle || conference.name);
-        job.font.italic = false;
-        addText(job, '.');
-        addGlue(job);
-      }
-      prose(job, 'ACM, New York, NY, USA');
-      if (job.previousPages) {
-        addText(job, `, ${job.previousPages} page${job.previousPages === 1 ? '' : 's'}`);
+        inGroup(job, conference.nameTokens);
+        if (conference.short) {
+          addGlue(job);
+          addText(job, '(');
+          inGroup(job, conference.shortTokens);
+          addText(job, ')');
+        }
       }
       addText(job, '.');
-      if (acm.doi) {
-        addGlue(job);
-        link(job, `https://doi.org/${acm.doi}`, null);
-      }
-      endParagraph(job, { indent: 0 });
-      restore(job, saved);
-    });
-
-    if (!rows.length) return;
-    const tall = T.type.blockHeight(rows);
-    const gap = job.base * 1.9;
-    job.bottomBlock = { page: Math.max(0, job.pageIndex), col: 0, rows, tall, gap, height: tall + gap };
+      job.font.italic = false;
+      addGlue(job);
+      prose(job, 'ACM, New York, NY, USA');
+      if (acm.article) prose(job, `, Article ${acm.article}`);
+      const pages = job.previousPages || 1;
+      prose(job, `, ${pages} ${pages === 1 ? 'page' : 'pages'}.`);
+    }
+    if (acm.doi) {
+      addGlue(job);
+      link(job, `https://doi.org/${acm.doi}`, null);
+    }
+    endParagraph(job, { indent: 0 });
+    restore(job, saved);
   }
 
-  /** The title block: full width, then the columns start under it. */
+  function frontMatter(job) {
+    const journal = job.formatSpec.journal;
+    if (job.held.abstract) {
+      if (!journal) heading(job, 'section', true, T.lex.tokenize('Abstract'));
+      else vspace(job, 12 * PT);
+      job.held.abstract.forEach((row) => emitRow(job, row));
+      job.parindent = false;
+    }
+    if (job.ccs.length && job.acm.printccs !== false) special(job, 'CCS Concepts', () => concepts(job));
+    if (job.keywordTokens) {
+      special(job, journal ? 'Additional Key Words and Phrases' : 'Keywords', () => inGroup(job, job.keywordTokens));
+    }
+    if (!job.nonacm || job.acm.printacmref === true) {
+      if (job.acm.printacmref !== false) referenceFormat(job);
+    }
+    // \@printendtopmatter: \par\bigskip, and the text starts.
+    endParagraph(job);
+    vspace(job, 12 * PT, { stretch: 4 * PT });
+    job.parindent = false;
+  }
+
+  // ------------------------------------------------- the foot of page one
+  //
+  // Three things share the bottom of the first column, each a footnote of its
+  // own kind with its own rule: the author notes under a 4pc rule, then (in
+  // the journal formats) the authors' addresses, then the rights block under a
+  // rule the width of the column. They are stacked from the bottom: the last
+  // line of the rights block sits on the last baseline of the column.
+
+  function captureFoot(job, fn) {
+    const saved = save(job);
+    const wasStretch = job.lineStretch;
+    job.lineStretch = 1;
+    amsSize(job, 'footnotesize');
+    job.align = 'justify';
+    job.parindent = false;
+    job.leftSkip = 0;
+    job.rightSkip = 0;
+    const wasMeasure = job.measure;
+    job.measure = job.colWidth;
+    const rows = capture(job, fn);
+    job.measure = wasMeasure;
+    job.lineStretch = wasStretch;
+    restore(job, saved);
+    return rows;
+  }
+
+  function noteRows(job) {
+    if (job.acm.anonymous) return [];
+    const p = authorsOf(job);
+    const notes = [];
+    if (p.corresponding) notes.push({ mark: '*', tokens: T.lex.tokenize('Corresponding author') });
+    const first = p.corresponding ? 2 : 1;
+    p.titleNotes.forEach((tokens, i) => notes.push({ mark: fnSymbol(first + i), tokens }));
+    p.notes.forEach((tokens, i) => notes.push({ mark: fnSymbol(first + p.titleNotes.length + i), tokens }));
+    if (!notes.length) return [];
+    return captureFoot(job, () => {
+      for (const note of notes) {
+        addRun(job, note.mark, 'rm', 5 * PT, { rise: 2.6 * PT });
+        inGroup(job, note.tokens);
+        endParagraph(job, { indent: 0 });
+      }
+    });
+  }
+
+  /** The authors' addresses, which the journal formats (and manuscript) print
+   *  at the foot of the first page: "Authors' Contact Information: …". */
+  function contactRows(job) {
+    if (job.acm.anonymous || !job.formatSpec.journal) return [];
+    const groups = authorsOf(job).groups;
+    if (!groups.length) return [];
+    return captureFoot(job, () => {
+      prose(job, 'Authors’ Contact Information:');
+      addGlue(job);
+      // Each person with what was written after their \author and before the
+      // next one: their e-mail, and an affiliation they share with the
+      // people before them.
+      groups.forEach((group, g) => {
+        if (g) { addText(job, ';'); addGlue(job); }
+        group.names.forEach((person, i) => {
+          if (i) { addText(job, ';'); addGlue(job); }
+          setName(job, person);
+          for (const part of group.parts.filter((one) => one.after === i)) {
+            if (part.kind === 'email') { addText(job, ','); addGlue(job); setMail(job, part.text); continue; }
+            for (const line of affilLines(part.parts)) { addText(job, ','); addGlue(job); joined(job, line); }
+          }
+        });
+      });
+      addText(job, '.');
+      endParagraph(job, { indent: 0 });
+    });
+  }
+
+  /** A CC badge (04f) as an image the PDF can carry. */
+  function ccBadge(kind) {
+    const found = window.TeX.badges && window.TeX.badges[kind];
+    if (!found) return null;
+    const bin = atob(found.b64);
+    const data = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) data[i] = bin.charCodeAt(i);
+    return { kind: 'jpeg', width: found.w, height: found.h, data, id: `CC${kind.replace(/-/g, '')}` };
+  }
+
+  /** The rights block (the \footnotetextcopyrightpermission in \maketitle). */
+  function rightsRows(job) {
+    const acm = job.acm;
+    const mode = acm.copyright || 'acmlicensed';
+    const conference = acm.conference || {};
+    if (job.nonacm && mode !== 'cc') return [];
+    const year = acm.copyrightYear || acm.year || String(new Date().getFullYear());
+    return captureFoot(job, () => {
+      const paragraph = () => { endParagraph(job, { indent: 0 }); vspace(job, 0.8 * PT); };
+      if (mode === 'cc') {
+        const kind = acm.cctype || 'by';
+        const version = acm.ccversion || '4.0';
+        const url = kind === 'zero'
+          ? 'https://creativecommons.org/publicdomain/zero/1.0'
+          : `https://creativecommons.org/licenses/${kind}/${version}`;
+        const badge = ccBadge(kind);
+        if (badge) {
+          // \includegraphics[height=5ex]: five x-heights of the footnote face.
+          const h = 5 * M().xHeight('rm', job.font.size);
+          const w = h * (badge.width / badge.height);
+          job.doc.image(badge.id, badge);
+          addBox(job, { w, h, d: 0, items: [{ k: 'i', x: 0, y: 0, w, h, img: badge.id }, { k: 'l', x: 0, y: 0, w, h, url }] });
+          lineBreak(job);
+        }
+        const name = kind === 'zero' ? 'CC0 1.0 Universal' : `${CC_KINDS[kind] || 'Attribution'} ${version === '4.0' ? '4.0 International' : '3.0 Unported'}`;
+        for (const node of collect(job, T.lex.tokenize(`This work is licensed under a Creative Commons ${name} License.`))) {
+          if (node.k === 'word') node.runs = node.runs.map((run) => ({ ...run, link: { url } }));
+          job.nodes.push(node);
+        }
+        paragraph();
+      } else if (!job.acm.authorversion && PERMISSIONS[mode]) {
+        prose(job, PERMISSIONS[mode]);
+        paragraph();
+      }
+      if (job.nonacm) return;
+      if (!job.formatSpec.journal && conference.name) {
+        job.font.italic = true;
+        if (conference.shortTokens) inGroup(job, conference.shortTokens);
+        else inGroup(job, conference.nameTokens);
+        if (conference.venueTokens) { addText(job, ','); addGlue(job); inGroup(job, conference.venueTokens); }
+        job.font.italic = false;
+        paragraph();
+      }
+      if (mode !== 'none' && mode !== 'usgov') {
+        prose(job, `© ${year} ${OWNERS[mode] || ''}`.trim());
+        lineBreak(job);
+      } else if (year) {
+        prose(job, `${year}.`);
+        lineBreak(job);
+      }
+      if (job.format === 'manuscript') {
+        prose(job, 'Manuscript submitted to ACM');
+      } else if (job.acm.authorversion) {
+        prose(job, 'This is the author’s version of the work. It is posted here for your personal use. Not for redistribution.');
+      } else {
+        if (acm.isbn) { prose(job, `ACM ISBN ${acm.isbn}`); lineBreak(job); }
+        if (acm.doi) link(job, `https://doi.org/${acm.doi}`, null);
+      }
+      endParagraph(job, { indent: 0 });
+    });
+  }
+
+  /** The stack, measured and drawn. A rule, 8.46pt down to the first
+   *  baseline of what it heads, and 12.5pt from the last baseline of one
+   *  block to the rule of the next — the spacing in acmart's own samples. */
+  function copyrightBlock(job) {
+    const blocks = [
+      { rows: noteRows(job), rule: 48 * PT },
+      { rows: contactRows(job), rule: job.colWidth },
+      { rows: rightsRows(job), rule: job.colWidth },
+    ].filter((block) => block.rows.length);
+    if (!blocks.length) return;
+    const RULE_TO_BASE = 8.46;
+    const BASE_TO_RULE = 12.5;
+    // Heights down to the last baseline: the last line's depth hangs below
+    // the block, the way the column's own last line does.
+    // A first line taller than a line of text (the CC badge) pushes the
+    // block's first baseline down rather than reaching up over the rule.
+    const firstDrop = (block) => Math.max(RULE_TO_BASE, block.rows[0].above + 2.6 * PT);
+    let total = 0;
+    blocks.forEach((block, b) => {
+      let prevDepth = 0;
+      let h = firstDrop(block);
+      block.rows.forEach((row, i) => {
+        if (i) h += stepFor(row, prevDepth, false);
+        prevDepth = row.below;
+      });
+      block.h = h;
+      total += h + (b ? BASE_TO_RULE : 0);
+    });
+    // \skip\footins: what keeps the last line of text off the first rule.
+    const gap = 9 * PT;
+    const draw = (left) => {
+      let rule = job.marginBottom + total;
+      blocks.forEach((block, b) => {
+        if (b) rule -= BASE_TO_RULE;
+        job.page.items.push({ k: 'r', x: left, y: rule, w: block.rule, h: 0.4 });
+        let y = rule - firstDrop(block);
+        let prevDepth = 0;
+        block.rows.forEach((row, i) => {
+          if (i) y -= stepFor(row, prevDepth, false);
+          for (const item of row.items) job.page.items.push({ ...item, x: item.x + left + (row.x || 0), y: item.y + y });
+          prevDepth = row.below;
+        });
+        rule = y;
+      });
+    };
+    job.bottomBlock = { page: Math.max(0, job.pageIndex), col: 0, height: total + gap, draw };
+  }
+
+  // ------------------------------------------------------------ the title
+
+  /** The sigconf title block, full width: the title (\Huge, sans, bold), the
+   *  author grid, the teaser; then the columns start under it. */
   function acmTitle(job) {
     endParagraph(job);
+    if (job.formatSpec.cols === 1) { manuscriptTitle(job); return; }
     const saved = save(job);
     const was = beginSpan(job);
     job.align = 'center';
@@ -371,98 +758,426 @@
     job.leftSkip = 0;
     job.rightSkip = 0;
 
-    // \@titlefont for sigconf is \Huge\sffamily\bfseries. Helvetica Bold is
-    // not Libertine Sans Bold, but it is sans and it is bold, which is what the
-    // page is telling you.
     amsSize(job, 'Huge');
     job.font.family = 'sf';
     job.font.bold = true;
-    inGroup(job, job.titleTokens || []);
-    endParagraph(job, { indent: 0 });
-    job.font.bold = false;
-    job.font.family = 'rm';
-
+    const title = capture(job, () => {
+      inGroup(job, job.titleTokens || []);
+      endParagraph(job, { indent: 0 });
+    });
+    // TeX takes the first line's height from its tallest glyph, and capitals
+    // in Biolinum Bold stand 0.64 of the size.
+    if (title.length) title[0].above = Math.min(title[0].above, job.font.size * 0.64);
+    title.forEach((row) => emitRow(job, row));
     if (job.subtitleTokens) {
-      vspace(job, job.base * 0.4);
-      amsSize(job, 'Large');
-      job.font.family = 'sf';
+      amsSize(job, 'LARGE');
+      job.font.bold = false;
       inGroup(job, job.subtitleTokens);
       endParagraph(job, { indent: 0 });
-      job.font.family = 'rm';
     }
+    job.font.bold = false;
+    job.font.family = 'rm';
+    amsSize(job, 'normalsize');
 
-    job.font.size = job.base;
     authorGrid(job);
 
     if (job.teaser) {
-      vspace(job, job.base * 1.4);
-      for (const row of job.teaser) emitRow(job, row);
+      // \par\bigskip under the authors, and the teaser under that.
+      vspace(job, 14.6);
+      job.teaser.forEach((row) => emitRow(job, row));
+      vspace(job, 6 * PT);
+    } else {
+      vspace(job, 12 * PT);
     }
-
     endSpan(job, was);
     restore(job, saved);
-    vspace(job, job.base * 1.2);
     job.parindent = false;
 
-    // The column has to know about the block under it before it is filled.
     copyrightBlock(job);
     frontMatter(job);
-    vspace(job, job.base * 0.6);
     job.titleDone = true;
     job.parindent = false;
   }
 
-  // ------------------------------------------------------- the ACM references
-  //
-  // ACM-Reference-Format, near enough to read as one: the authors as they are
-  // written, the year, the title, then where it appeared in italic, and the DOI
-  // as a link. Sorted alphabetically, which is what gives the numbers.
-
-  function acmReference(job, entry) {
-    const fields = entry.fields || {};
-    const part = (text, options = {}) => {
-      const was = { bold: job.font.bold, italic: job.font.italic };
-      job.font.bold = !!options.bold;
-      job.font.italic = !!options.italic;
-      prose(job, text);
-      job.font.bold = was.bold;
-      job.font.italic = was.italic;
-    };
-    const stop = () => { addText(job, '.'); addGlue(job); };
-
-    if (fields.author) { part(acmPeople(fields.author)); stop(); }
-    if (fields.year) { part(String(fields.year).replace(/[^\d]/g, '') || String(fields.year)); stop(); }
-    if (fields.title) { part(fields.title); stop(); }
-
-    const venue = fields.journal || fields.booktitle;
-    if (venue) {
-      if (fields.booktitle && !fields.journal) { addText(job, 'In'); addGlue(job); }
-      part(venue, { italic: true });
-      if (fields.volume) { addGlue(job); part(String(fields.volume), { bold: false }); }
-      if (fields.number) part(`, ${fields.number}`);
-      if (fields.pages) part(` (${fields.pages})`);
-      stop();
-    } else if (fields.pages) {
-      part(`Pages ${fields.pages}`);
-      stop();
+  /** manuscript's title block (\@mktitle@i, \@mkauthors@i): ragged right, the
+   *  title \LARGE sans bold, then a line per group of authors — the names in
+   *  capitals, then the institution and country. */
+  function manuscriptTitle(job) {
+    const saved = save(job);
+    job.align = 'left';
+    job.parindent = false;
+    amsSize(job, 'LARGE');
+    job.font.family = 'sf';
+    job.font.bold = true;
+    const title = capture(job, () => {
+      inGroup(job, job.titleTokens || []);
+      endParagraph(job, { indent: 0 });
+    });
+    if (title.length) title[0].above = Math.min(title[0].above, job.font.size * 0.62);
+    title.forEach((row) => emitRow(job, row));
+    if (job.subtitleTokens) {
+      job.font.bold = false;
+      inGroup(job, job.subtitleTokens);
+      endParagraph(job, { indent: 0 });
     }
+    job.font.bold = false;
+    vspace(job, 12.6);
+    for (const group of shownGroups(job)) {
+      amsSize(job, 'Large');
+      job.font.family = 'sf';
+      job.upper = true;
+      group.names.forEach((person, i) => {
+        if (i) {
+          job.upper = false;
+          addGlue(job);
+          job.font.family = 'rm';
+          amsSize(job, 'normalsize');
+          addText(job, group.names.length > 2 && i < group.names.length - 1 ? ',' : 'and');
+          addGlue(job);
+          amsSize(job, 'Large');
+          job.font.family = 'sf';
+          job.upper = true;
+        }
+        setName(job, person);
+        nameMarks(job, person);
+      });
+      job.upper = false;
+      job.font.family = 'rm';
+      amsSize(job, 'normalsize');
+      const places = group.parts.filter((part) => part.kind !== 'email');
+      for (const place of places) {
+        const inst = place.parts.filter((part) => part.key === 'institution' || part.key === 'country');
+        if (!inst.length) continue;
+        addText(job, ',');
+        addGlue(job);
+        joined(job, inst.map((part) => part.tokens));
+      }
+      amsSize(job, 'Large');
+      endParagraph(job, { indent: 0 });
+    }
+    restore(job, saved);
+    job.parindent = false;
+    copyrightBlock(job);
+    frontMatter(job);
+    job.titleDone = true;
+    job.parindent = false;
+  }
 
-    const where = [fields.publisher || fields.institution || fields.school, fields.address].filter(Boolean).join(', ');
-    if (where) { part(where); stop(); }
-    if (fields.note) { part(fields.note); stop(); }
-    if (fields.doi) {
-      link(job, `https://doi.org/${String(fields.doi).replace(/^https?:\/\/doi\.org\//, '')}`, null);
-    } else if (fields.url) {
-      link(job, fields.url, null);
+  // ------------------------------------------------------ heads and feet
+
+  /** One line of a running head, measured and placed. */
+  function headLine(job, tokens, { size, family = 'rm', align, y, colour }) {
+    const saved = save(job);
+    job.font.family = family;
+    job.font.bold = false;
+    job.font.italic = false;
+    job.font.size = size;
+    const nodes = collect(job, tokens);
+    restore(job, saved);
+    const box = pack(job, nodes);
+    const left = leftEdge(job);
+    const x = align === 'right' ? left + job.textWidth - box.w : align === 'center' ? left + (job.textWidth - box.w) / 2 : left;
+    for (const item of box.items) job.page.items.push({ ...item, x: item.x + x, y: y + item.y, c: colour || item.c });
+  }
+
+  const shortTitle = (job) => job.shortTitleTokens || job.titleTokens || [];
+  // Tokens to splice between others: tokenize ends every list with an end of
+  // file, and one of those in the middle stops the reading there.
+  const bits = (text) => T.lex.tokenize(text).filter((tok) => tok.t !== 'eof');
+
+  function shortAuthors(job) {
+    if (job.acm.anonymous) {
+      const id = job.acm.submissionId;
+      return T.lex.tokenize(id ? `Anon. Submission Id: ${id}` : 'Anon.');
+    }
+    const macro = job.macros.get('shortauthors');
+    if (macro && !macro.arity) return macro.body;
+    const names = authorsOf(job).short;
+    const out = [];
+    names.forEach((tokens, i) => {
+      if (i) out.push(...bits(i === names.length - 1 ? (names.length > 2 ? ', and ' : ' and ') : ', '));
+      out.push(...tokens);
+    });
+    return out;
+  }
+
+  function conferenceLine(job) {
+    const c = job.acm.conference;
+    if (!c) return [];
+    const out = [...(c.shortTokens || c.nameTokens || [])];
+    if (c.dateTokens) out.push(...bits(', '), ...c.dateTokens);
+    if (c.venueTokens) out.push(...bits(', '), ...c.venueTokens);
+    return out;
+  }
+
+  /** The line numbers review mode prints down the margin: red, \scriptsize,
+   *  every 11pt from 22pt under the head's baseline, counting on from the page
+   *  before. sigconf numbers both outer margins; manuscript only the left. */
+  function lineNumbers(job, x, align) {
+    const top = job.H - (job.formatSpec.head + 25.55);
+    const step = 11 * PT;
+    const height = (job.formatSpec.last - job.formatSpec.top);
+    const count = Math.ceil(height / step) + 1;
+    for (let i = 0; i < count; i += 1) {
+      job.acmLine = (job.acmLine || 0) + 1;
+      const text = String(job.acmLine);
+      const size = 6 * PT;
+      const w = M().width(text, 'rm', size);
+      job.page.items.push({ k: 't', x: align === 'right' ? x - w : x, y: top - i * step, f: 'rm', s: size, t: text, c: '1 0 0' });
     }
   }
 
-  /** "Bryan Min and Haijun Xia" — first name first, and an ampersand nowhere. */
-  function acmPeople(value) {
-    const names = value.split(/\s+and\s+/).map((one) => {
-      const parts = one.split(',').map((part) => part.trim());
-      return parts.length > 1 ? `${parts.slice(1).join(' ')} ${parts[0]}` : one.trim();
-    }).filter(Boolean);
-    if (names.length <= 2) return names.join(' and ');
-    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  /** Running heads, feet and line numbers, as acmart's page styles set them. */
+  function acmDecorate(job) {
+    const f = job.formatSpec;
+    const n = job.counters.page;
+    const first = job.pageIndex === 0;
+    const even = n % 2 === 0;
+    const headY = job.H - f.head;
+    const footY = job.H - f.foot;
+    const left = leftEdge(job);
+    const review = job.acm.review;
+    const folios = job.acm.printfolios !== undefined ? job.acm.printfolios : (f.folios || !!review);
+
+    if (f.journal && job.format === 'manuscript') {
+      const size = amsPoints(job, 'normalsize');
+      if (!first) {
+        if (even) {
+          if (folios) headLine(job, T.lex.tokenize(String(n)), { size, align: 'left', y: headY });
+          headLine(job, shortAuthors(job), { size, align: 'right', y: headY });
+        } else {
+          headLine(job, shortTitle(job), { size, align: 'left', y: headY });
+          if (folios) headLine(job, T.lex.tokenize(String(n)), { size, align: 'right', y: headY });
+        }
+      }
+      if (!job.nonacm) {
+        const foot = amsPoints(job, 'footnotesize');
+        if (first) {
+          headLine(job, T.lex.tokenize('Manuscript submitted to ACM'), { size: foot, align: 'left', y: footY });
+          if (folios) headLine(job, T.lex.tokenize(String(n)), { size: amsPoints(job, 'small'), align: 'right', y: footY });
+        } else {
+          headLine(job, T.lex.tokenize('Manuscript submitted to ACM'), { size: foot, align: even ? 'left' : 'right', y: footY });
+        }
+      }
+      if (review) lineNumbers(job, left - 26 * PT, 'left');
+      return;
+    }
+
+    // The proceedings formats: \sffamily\footnotesize, nothing on page one.
+    const size = amsPoints(job, 'footnotesize');
+    if (!first) {
+      const venue = job.nonacm ? [] : conferenceLine(job);
+      if (even) {
+        if (venue.length) headLine(job, venue, { size, family: 'sf', align: 'left', y: headY });
+        headLine(job, shortAuthors(job), { size, family: 'sf', align: 'right', y: headY });
+      } else {
+        headLine(job, shortTitle(job), { size, family: 'sf', align: 'left', y: headY });
+        if (venue.length) headLine(job, venue, { size, family: 'sf', align: 'right', y: headY });
+      }
+    }
+    if (folios) headLine(job, T.lex.tokenize(String(n)), { size, align: 'center', y: footY });
+    if (review) {
+      lineNumbers(job, left - 26 * PT, 'left');
+      lineNumbers(job, left + job.textWidth + 20 * PT, 'left');
+    }
+  }
+
+  // ------------------------------------------------------ the commands
+
+  /** The commands acmart adds or redefines. True when one was handled. */
+  function acmCommand(job, reader, name, tok) {
+    switch (name) {
+      case 'DocumentMetadata': reader.group(); return true;
+      case 'title': {
+        const short = reader.optional();
+        job.titleTokens = reader.group();
+        if (short && T.lex.plain(short).trim()) job.shortTitleTokens = short;
+        return true;
+      }
+      case 'subtitle': job.subtitleTokens = reader.group(); return true;
+      case 'author': {
+        const short = reader.optional();
+        addAuthor(job, reader.group(), short);
+        return true;
+      }
+      case 'affiliation': {
+        reader.optional();
+        const parts = affiliation(job, reader.group());
+        const group = lastGroup(job);
+        if (group && parts.length) group.parts.push({ kind: 'affil', parts, after: group.names.length - 1 });
+        authorsOf(job).open = false;
+        return true;
+      }
+      case 'email': {
+        reader.optional();
+        const text = T.lex.plain(reader.group()).trim();
+        const group = lastGroup(job);
+        if (group && text) group.parts.push({ kind: 'email', text, after: group.names.length - 1 });
+        return true;
+      }
+      case 'orcid': {
+        const id = T.lex.plain(reader.group()).trim();
+        const person = lastAuthor(job);
+        if (person && id) person.orcid = /^http/.test(id) ? id : `https://orcid.org/${id}`;
+        return true;
+      }
+      case 'additionalaffiliation': reader.group(); return true;
+      case 'authornote': {
+        const tokens = reader.group();
+        const p = authorsOf(job);
+        const person = lastAuthor(job);
+        if (person) person.marks.push({ kind: 'note', index: p.notes.length });
+        p.notes.push(tokens);
+        return true;
+      }
+      case 'authornotemark': {
+        const which = reader.optional();
+        const person = lastAuthor(job);
+        const n = Number(T.lex.plain(which || []).trim());
+        if (person) {
+          if (n) person.marks.push({ kind: 'explicit', n });
+          else person.marks.push({ kind: 'note', index: Math.max(0, authorsOf(job).notes.length - 1) });
+        }
+        return true;
+      }
+      case 'correspondingauthor': {
+        const person = lastAuthor(job);
+        if (person) person.marks.push({ kind: 'corresponding' });
+        authorsOf(job).corresponding = true;
+        return true;
+      }
+      case 'titlenote': case 'subtitlenote': authorsOf(job).titleNotes.push(reader.group()); return true;
+      case 'keywords': job.keywordTokens = reader.group(); return true;
+      case 'ccsdesc': {
+        const weight = Number(T.lex.plain(reader.optional() || []).trim()) || 100;
+        job.ccs.push({ weight, text: T.lex.plain(reader.group()).trim() });
+        return true;
+      }
+      case 'setcopyright': job.acm.copyright = T.lex.plain(reader.group()).trim(); return true;
+      case 'setcctype': {
+        const version = T.lex.plain(reader.optional() || []).trim();
+        if (version) job.acm.ccversion = version;
+        job.acm.cctype = T.lex.plain(reader.group()).trim();
+        return true;
+      }
+      case 'copyrightyear': job.acm.copyrightYear = T.lex.plain(reader.group()).trim(); return true;
+      case 'acmYear': job.acm.year = T.lex.plain(reader.group()).trim(); return true;
+      case 'acmDOI': job.acm.doi = T.lex.plain(reader.group()).trim(); return true;
+      case 'acmISBN': job.acm.isbn = T.lex.plain(reader.group()).trim(); return true;
+      case 'acmArticle': job.acm.article = T.lex.plain(reader.group()).trim(); return true;
+      case 'acmSubmissionID': job.acm.submissionId = T.lex.plain(reader.group()).trim(); return true;
+      case 'acmBooktitle': job.acm.booktitleTokens = reader.group(); return true;
+      case 'acmConference': {
+        const short = reader.optional();
+        const nameTokens = reader.group();
+        const dateTokens = reader.group();
+        const venueTokens = reader.group();
+        job.acm.conference = {
+          name: T.lex.plain(nameTokens).trim(),
+          short: short ? T.lex.plain(short).trim() : '',
+          nameTokens,
+          shortTokens: short && T.lex.plain(short).trim() ? short : null,
+          dateTokens: T.lex.plain(dateTokens).trim() ? dateTokens : null,
+          venueTokens: T.lex.plain(venueTokens).trim() ? venueTokens : null,
+        };
+        return true;
+      }
+      case 'nonacm': reader.optional(); job.nonacm = true; return true;
+      case 'settopmatter': {
+        const options = T.lex.plain(reader.group());
+        const perRow = /authorsperrow\s*=\s*(\d+)/.exec(options);
+        if (perRow) job.acm.perRow = Number(perRow[1]);
+        const flag = (key) => {
+          const m = new RegExp(`${key}\\s*(=\\s*(true|false))?(,|$)`).exec(options);
+          return m ? m[2] !== 'false' : undefined;
+        };
+        const folios = flag('printfolios');
+        if (folios !== undefined) { job.acm.printfolios = folios; job.folios = folios; }
+        const ccs = flag('printccs');
+        if (ccs !== undefined) job.acm.printccs = ccs;
+        const ref = flag('printacmref');
+        if (ref !== undefined) job.acm.printacmref = ref;
+        return true;
+      }
+      // Journal metadata and the old commands acmart still accepts and ignores.
+      case 'acmJournal': case 'acmVolume': case 'acmNumber': case 'acmArticleSeq':
+      case 'acmMonth': case 'acmPrice': case 'startPage': case 'terms':
+      case 'acmBadgeR': case 'acmBadgeL': case 'authorsaddresses': case 'thanks':
+        reader.optional(); reader.group(); return true;
+      case 'received': {
+        const stage = T.lex.plain(reader.optional() || []).trim();
+        const date = reader.group();
+        (job.acm.received = job.acm.received || []).push({ stage, date });
+        return true;
+      }
+      case 'anon': {
+        const replacement = reader.optional();
+        const text = reader.group();
+        if (job.acm.anonymous) {
+          const was = job.colour;
+          job.colour = '0.84 0.36 0.07';
+          inGroup(job, replacement || T.lex.tokenize('ANONYMIZED'));
+          job.colour = was;
+        } else inGroup(job, text);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** \documentclass options acmart understands beyond the format. */
+  function acmOption(job, option) {
+    if (applyFormat(job, option)) return true;
+    const [key, value] = option.split('=').map((part) => part.trim());
+    const on = value === undefined || value === 'true';
+    switch (key) {
+      case 'review': job.acm.review = on; return true;
+      case 'anonymous': job.acm.anonymous = on; return true;
+      case 'authorversion': job.acm.authorversion = on; return true;
+      case 'authordraft': job.acm.authordraft = on; job.acm.review = on; return true;
+      case 'nonacm': job.nonacm = on; return true;
+      case 'screen': job.acm.screen = on; return true;
+      case 'natbib': case 'timestamp': case 'balance': case 'pbalance':
+      case 'urlbreakonhyphens': case 'printacmref': case 'printccs': case 'printfolios':
+      case 'language': case 'acmthm': case 'manuscript':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /** "Received 20 February 2007; revised 12 March 2009; accepted 5 June 2009". */
+  function receivedLine(job) {
+    const list = job.acm.received;
+    if (!list || !list.length) return;
+    endParagraph(job);
+    vspace(job, 12 * PT);
+    const saved = save(job);
+    job.parindent = false;
+    list.forEach((entry, i) => {
+      if (i) { addText(job, ';'); addGlue(job); }
+      prose(job, i === 0 ? 'Received' : (entry.stage || 'revised'));
+      addGlue(job);
+      inGroup(job, entry.date);
+    });
+    endParagraph(job, { indent: 0 });
+    restore(job, saved);
+  }
+
+  /** Rows stacked baseline to baseline, the way TeX stacks lines in a box:
+   *  the first baseline at y = 0, each after it a baselineskip lower, or a
+   *  \lineskip under the one above when they would otherwise touch. */
+  function stackRows(rows) {
+    const items = [];
+    let y = 0;
+    let prevDepth = 0;
+    let width = 0;
+    rows.forEach((row, i) => {
+      if (i) y -= stepFor(row, prevDepth, false);
+      for (const item of row.items) items.push({ ...item, x: item.x + (row.x || 0), y: item.y + y });
+      width = Math.max(width, row.items.reduce((max, item) => Math.max(max, item.x + (item.w || 0)), 0));
+      prevDepth = row.below;
+    });
+    return { w: width, h: rows.length ? rows[0].above : 0, d: -y + prevDepth, items };
   }

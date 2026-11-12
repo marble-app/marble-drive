@@ -243,8 +243,8 @@ export const STARTERS = [
     blurb: 'A CHI or UIST submission, in two columns, with the folders a paper is written in.',
     // The same document as `latex`, with a project in it instead of a tour:
     // acmart's sigconf, a folder tree, a bibliography in ACM-Reference-Format,
-    // and a button in the bar that rewrites the class option when a draft
-    // needs to be one column instead of two.
+    // and a button in the bar that rewrites the class options for the three
+    // setups CHI and UIST ask for: camera-ready, UIST review, CHI review.
     parts: ['editable', 'history', 'status'],
     accent: '#8b5e3c',
     hint: 'A CHI submission with the sections I always write and my bibliography',

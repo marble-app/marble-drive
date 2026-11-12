@@ -67,6 +67,7 @@
       say(job, 'warning', 'Nothing is cited, so the bibliography is empty', job.line, job.file);
       return;
     }
+    if (job.klass === 'acm' || job.bibStyle === 'acm') { acmBibliography(job, entries); return; }
     heading(job, 'section', true, T.lex.tokenize('References'));
     const saved = save(job);
     const acm = job.bibStyle === 'acm';
@@ -137,6 +138,7 @@
     // acmart loads amsart, whose ladder is not the article one and whose
     // leadings are declared rather than derived.
     if (job.klass === 'acm' && amsSize(job, name)) return;
+    if (job.klass === 'acm' && acmCommand(job, reader, name, tok)) return;
     if (SIZES[name] !== undefined) {
       job.font.size = job.base * SIZES[name];
       job.font.leading = null;
@@ -151,8 +153,8 @@
         job.klass = /^acmart$/.test(job.docClass) ? 'acm' : 'article';
         // acmart's own default is manuscript; an option below may say otherwise.
         if (job.klass === 'acm') applyFormat(job, 'manuscript');
-        for (const option of options.split(',').map((o) => o.trim())) {
-          if (job.klass === 'acm' && applyFormat(job, option)) continue;
+        for (const option of options.split(',').map((o) => o.trim()).filter(Boolean)) {
+          if (job.klass === 'acm' && acmOption(job, option)) continue;
           const size = /^(\d+)pt$/.exec(option);
           if (size) { job.base = Number(size[1]); job.font.size = job.base; layout(job); continue; }
           if (PAPER[option]) {
@@ -175,6 +177,9 @@
         return;
       }
       case 'PassOptionsToPackage': { reader.group(); reader.group(); return; }
+      // The tagged-PDF preamble newer templates open with. It configures the
+      // PDF a real build writes; nothing in it is set on the page.
+      case 'DocumentMetadata': reader.group(); return;
       case 'AtBeginDocument': case 'AtEndPreamble': { job.atBegin.push(reader.group()); return; }
       case 'AtEndDocument': { reader.group(); return; }
       case 'geometry': applyGeometry(job, T.lex.plain(reader.group())); return;
@@ -348,9 +353,14 @@
           return;
         }
         const mark = itemMark(job);
+        // A label is set flush right in its box, a \labelsep short of the
+        // text; acmart's lists say how wide that is, an article's do not.
+        const at = list && list.labelSep !== undefined
+          ? -list.labelSep - M().width(mark, fontKey(job), job.font.size)
+          : -job.font.size * 1.7;
         addBox(job, {
           w: 0, h: job.font.size * 0.7, d: 0,
-          items: [{ k: 't', x: -job.font.size * 1.7, y: 0, f: fontKey(job), s: job.font.size, t: mark }],
+          items: [{ k: 't', x: at, y: 0, f: fontKey(job), s: job.font.size, t: mark }],
         });
         return;
       }
@@ -386,7 +396,19 @@
         return;
       }
       case 'pageref': reference(job, T.lex.plain(reader.group()), 'page'); return;
-      case 'cite': case 'citep': case 'citet': reader.optional(); cite(job, T.lex.plain(reader.group())); return;
+      case 'cite': case 'citep': case 'citet': case 'Citet': case 'citealp': case 'citenum':
+      case 'citeauthor': case 'Citeauthor': case 'citeyear': case 'citeyearpar': {
+        // natbib: one optional is a note after, two are a note before and after.
+        const first = reader.optional();
+        const second = reader.optional();
+        const keys = T.lex.plain(reader.group());
+        if (job.klass === 'acm' || job.bibStyle === 'acm') {
+          acmCite(job, name, keys, second ? first : null, second || first);
+        } else {
+          cite(job, keys);
+        }
+        return;
+      }
       case 'bibitem': {
         const hang = job.font.size * 2;
         endParagraph(job, { indent: 0, hanging: hang });
@@ -547,6 +569,7 @@
         return;
       case 'clearpage': case 'cleardoublepage':
         endParagraph(job);
+        flushFloats(job);
         if (job.page && !(job.firstOnPage && job.colIndex === 0)) startPage(job);
         return;
       case 'noindent': job.parindent = false; return;
@@ -631,18 +654,59 @@
 
       // ---- names and marks
       case 'today': addText(job, today()); return;
+      // \char'134 (octal), \char"5C (hex), \char92: one character by its code.
+      case 'char': {
+        let text = '';
+        const first = reader.peekRaw();
+        let base = 10;
+        if (first.t === 'char' && first.v === "'") { reader.raw(); base = 8; }
+        else if (first.t === 'char' && first.v === '"') { reader.raw(); base = 16; }
+        for (;;) {
+          const next = reader.peekRaw();
+          const digits = base === 16 ? /[0-9A-Fa-f]/ : base === 8 ? /[0-7]/ : /[0-9]/;
+          if (next.t !== 'char' || !digits.test(next.v)) break;
+          reader.raw();
+          text += next.v;
+        }
+        const code = parseInt(text, base);
+        if (Number.isFinite(code)) addText(job, String.fromCharCode(code));
+        return;
+      }
+      // \string\foo prints the control sequence's name, backslash and all.
+      case 'string': {
+        const next = reader.raw();
+        if (next.t === 'cs') addText(job, `\\${next.v}`);
+        else if (next.v !== undefined) addText(job, String(next.v));
+        return;
+      }
+      case 'it': job.font.italic = true; return;
+      case 'bf': job.font.bold = true; return;
+      case 'tt': job.font.family = 'tt'; return;
+      case 'rm': job.font.family = 'rm'; return;
+      case 'sf': job.font.family = 'sf'; return;
+      case 'sc': job.font.sc = true; return;
       case 'TeX': case 'LaTeX': case 'LaTeXe': {
         // The logos, drawn the way they are drawn: a raised small A, a dropped
         // E, and the letters around them at the size they were already.
+        // LaTeX's own kerns: L, back .36em, the A at script size hung from
+        // the top of a T, back .15em; T, back .1667em, E dropped half an ex,
+        // back .125em, X.
         const size = job.font.size;
         const key = fontKey(job);
+        const kern = (em) => addGlue(job, { w: em * size, stretch: 0, shrink: 0, nobreak: true });
+        const cap = 0.66 * size;
         if (name !== 'TeX') {
           addRun(job, 'L', key, size);
-          addRun(job, 'A', key, size * 0.7, { rise: size * 0.22 });
+          kern(-0.36);
+          addRun(job, 'A', key, size * 0.7, { rise: cap * 0.3 });
+          kern(-0.15);
         }
         addRun(job, 'T', key, size);
-        addRun(job, 'E', key, size, { rise: -size * 0.22 });
+        kern(-0.1667);
+        addRun(job, 'E', key, size, { rise: -0.5 * M().xHeight(key, size) });
+        kern(-0.125);
         addRun(job, 'X', key, size);
+        if (name === 'LaTeXe') { addRun(job, '2', key, size); addRun(job, '\u03b5', 'sy', size); }
         return;
       }
 
@@ -771,7 +835,10 @@
     job.file = project.main;
     job.groups = [];
 
-    T.metrics.use('base14');
+    // Measure in the faces that get drawn. Libertine travels with the file
+    // (04e), so an article is drawn in it too, and a page measured in Times
+    // but drawn in Libertine runs its words together.
+    T.metrics.use(window.TeX.embed ? 'libertine' : 'base14');
 
     const main = project.files.find((one) => one.name === project.main) || project.files[0];
     if (!main) throw new Error('there is no file to typeset');
@@ -779,6 +846,13 @@
     const reader = new T.lex.Reader(T.lex.tokenize(main.text, main.name), job.macros);
     process(job, reader);
     endParagraph(job);
+    // \end{document} stops the reading; what is set after it (the running
+    // heads of the last page, the received dates) is the class's, not the
+    // source's, and still has to be read.
+    job.finished = false;
+    if (job.klass === 'acm') receivedLine(job);
+    // Floats still waiting at \end{document} get columns of their own.
+    flushFloats(job);
     // A wide float that never reached the top of a page gets one of its own,
     // which is what a class does with a float it has run out of room for.
     if (job.wide.length) startPage(job);
