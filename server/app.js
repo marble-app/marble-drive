@@ -142,6 +142,9 @@ const RUNTIME = {
   // The Drive's extension to it. Everything a Drive needs that a single
   // document does not — see docs/CARRIER-DRIVE.md.
   'drive.js': () => path.join(REPO, 'runtime', 'drive.js'),
+  // Where each tab is looking is that tab's own: a view switched in one tab
+  // is saved, and moves no other tab (runtime/looks.js).
+  'looks.js': () => path.join(REPO, 'runtime', 'looks.js'),
   // Runs first on every page: lets a tab nobody is using close its streams,
   // so its sprite can sleep (server/streams.js).
   'tab-rest.js': () => path.join(REPO, 'runtime', 'tab-rest.js'),
@@ -565,7 +568,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       `<script src="${runtimeUrl('tab-rest.js')}" data-hidden-ms="${config.tabHiddenSeconds * 1000}" data-idle-ms="${config.tabIdleMinutes * 60_000}" data-marble-transient></script>\n` +
       `<script src="${runtimeUrl('marble.js')}" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
       `<script src="${runtimeUrl('drive.js')}" data-marble-transient></script>\n` +
-      `<script src="${runtimeUrl('affords.js')}" data-marble-transient></script>`;
+      `<script src="${runtimeUrl('affords.js')}" data-marble-transient></script>\n` +
+      `<script src="${runtimeUrl('looks.js')}" data-marble-transient></script>`;
     // Someone who came by a share link gets the page and nothing of the
     // drive around it: no shell, no agents, no console. share.js says what
     // their link lets them do, and keeps a read-only page read-only.
@@ -1042,7 +1046,9 @@ export async function createDrive(config, { log = console, agentProviders = null
         log.error(`[drive] op log append for ${docPath} failed: ${err.message}`);
       }
       // Who is working where, for presence only: conflicts are the versions' to decide.
-      if (!isUndo) sessionTouched.note(docPath, client, idsOfOps(ops));
+      // Looking is not working there: a view switched on <main> holds back no
+      // agent's edit inside it.
+      if (!isUndo) sessionTouched.note(docPath, client, idsOfOps(ops.filter((op) => !op?.look)));
       settle(source, next.source);
       return result;
     });
