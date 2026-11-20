@@ -195,53 +195,27 @@
   // files it: a step, an expand and a choose are looking unless they carry
   // data-marble-look="off" (a choose that records an answer), and a toggle is
   // looking only when it carries data-marble-look. Saying it by the control is
-  // also what makes a page whose affordances predate the flag work.
+  // also what makes a page whose affordances predate the flag work, and a page
+  // whose own script switches views without saying so is read by the name of
+  // the attribute it sets (data-view, data-tab, data-section …; runtime/looks.js).
   //
   // The owner's tab files a look like any change (the carrier ignores the
   // flag), so a link opens where the owner left it. This tab keeps it and sends
   // nothing: no level refuses it, nothing snaps back, and nobody else moves.
-  // It lasts as long as the tab; a reload opens where the file is.
+  // Nor does anyone else's looking move this tab (runtime/looks.js), and a
+  // reload opens where this tab was.
 
-  const LOOKS = [
-    ['data-marble-step', true],
-    ['data-marble-expand', true],
-    ['data-marble-choose', true],
-    ['data-marble-toggle', false],
-  ];
-  // The attribute a control sets (lib/affordances.js): `data-x:1:7` for a
-  // step, `data-x:on|off` for a toggle, `data-x` for a choose.
-  const nameOf = (control, kind) =>
-    kind === 'data-marble-expand' ? 'data-expanded' : (control.getAttribute(kind) || '').split(':')[0].trim();
-  const targetOf = (control) => {
-    const selector = control.getAttribute('data-marble-of');
-    try {
-      return selector ? control.closest(selector) : control;
-    } catch {
-      return null;
-    }
-  };
-
-  const looking = (op, flag) => {
-    if (flag === true) return true;
-    if (flag === false || op?.type !== 'setAttr') return false;
-    const target = window.marble?.byId(op.id);
-    if (!target) return false;
-    for (const [kind, byDefault] of LOOKS) {
-      for (const control of document.querySelectorAll(`[${kind}]`)) {
-        if (nameOf(control, kind) !== op.name || targetOf(control) !== target) continue;
-        const says = control.getAttribute('data-marble-look');
-        return says === null ? byDefault : says !== 'off';
-      }
-    }
-    return false;
-  };
+  // Which ops are looking is runtime/looks.js's to say, for every tab alike.
+  const looking = (op, flag) => Boolean(window.marbleLooks?.is(op, flag));
 
   // What this tab is looking at, as the attributes that say so. Whatever puts
   // the page back to the file (someone else's change, a refusal, an edit on
   // disk) is followed by these going back on, so the visitor stays put.
   const looks = new Map();
   const keep = (op) => {
-    if (op.type === 'setAttr') looks.set(`${op.id}\n${op.name}`, op);
+    if (op.type !== 'setAttr') return;
+    looks.set(`${op.id}\n${op.name}`, op);
+    window.marbleLooks?.keep(op);
   };
   const lookAgain = () => {
     for (const { id, name, value } of looks.values()) {
